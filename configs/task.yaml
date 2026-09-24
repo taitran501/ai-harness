@@ -1,0 +1,44 @@
+task:
+  platform: codabench
+  task_name: StereoQueerEval
+  name: StereoQueerEval
+  task_type: Multi-Task Text Classification
+  type: Multi-Task Text Classification
+  modality: text
+  primary_metric: Macro-F1 (CV)
+  direction: maximize
+  primary_metric_baseline: 0.6459
+  primary_metric_target: 0.85
+  metrics:
+  - id: subtask_a
+    name: Stereotype Detection
+    metric: Macro-F1
+    type: macro_f1
+    direction: maximize
+    baseline_score: 0.6962
+    target_score: 0.88
+    weight: 0.333
+    description: Binary stereotype detection (no vs yes) across EN, IT, NL
+  - id: subtask_b
+    name: Hate Speech Classification
+    metric: Macro-F1
+    type: macro_f1
+    direction: maximize
+    baseline_score: 0.5238
+    target_score: 0.8
+    weight: 0.333
+    description: 3-class classification (no vs yes_explicit vs yes_implicit)
+  - id: subtask_c
+    name: Target Type & Identity
+    metric: Macro-F1
+    type: macro_f1
+    direction: maximize
+    baseline_score: 0.7178
+    target_score: 0.85
+    weight: 0.334
+    description: Evaluated strictly on oracle_hate comments (hate_speech != no)
+  languages:
+  - EN
+  - IT
+  - NL
+  description: Cross-lingual analysis of YouTube comments conditioned on video metadata.

@@ -1,0 +1,14 @@
+# Base configuration for StereoQueerEval experiments
+paths:
+  data_dir: "dataset"
+  split_path: "splits/fold_assignments.tsv"
+  artifacts_dir: "artifacts"
+  leaderboard_path: "EXPERIMENTS.md"
+
+runtime:
+  seed: 42
+  languages:
+    - "EN"
+    - "IT"
+    - "NL"
+  n_splits: 5

@@ -1,0 +1,49 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Testing and caching
+.pytest_cache/
+.coverage
+htmlcov/
+tmp/
+.ipynb_checkpoints/
+
+# Node & Frontend dependencies
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
+*.local
+pnpm-debug.log*
+
+# Heavy model artifacts and weights
+*.pt
+*.bin
+*.safetensors
+*.onnx
+checkpoints/
+**/*.zip
+
+# Task-specific raw data & old artifacts
+dataset/
+splits/
+legacy/
+docs/specs/
+artifacts/baseline_v1/
+
+# Agent teamwork scratch runs
+.agents/teamwork/
+
+# OS & Environment
+Thumbs.db
+.DS_Store
+.env
+.env.*
+.gemini/

@@ -1,0 +1,48 @@
+paths:
+  data_dir: dataset
+  split_path: splits/fold_assignments.tsv
+  artifacts_dir: artifacts
+  leaderboard_path: EXPERIMENTS.md
+runtime:
+  seed: 42
+  languages:
+  - EN
+  - IT
+  - NL
+  n_splits: 5
+experiment:
+  id: exp001_baseline_tfidf
+  branch: baseline
+  parent_id: none
+  description: Five-fold grouped cross-validation using word and char n-gram TF-IDF
+    with balanced Logistic Regression.
+  date: '2026-09-23'
+  problem_addressed: Establish a competitive, fast, and reproducible sparse control
+    baseline across all three subtasks.
+  hypothesis: Word (1-2) and char (3-5) n-gram TF-IDF provides a solid lower bound
+    for Subtasks A and B, but will exhibit low Macro-F1 on rare Subtask C identity
+    labels due to lack of semantic generalization.
+  intervention: Canonical baseline reference implementation across comment, title_comment,
+    and full_context variants.
+model:
+  name: tfidf_logistic_regression
+  params:
+    c_param: 2.0
+    seed: 42
+data:
+  input_variants:
+  - comment
+  - title_comment
+  - full_context
+  folds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+resolved_runtime:
+  git_commit_hash: dd8043af5dd3cfb335350e47953edab90e467b87-dirty
+  timestamp: '2026-09-23T22:50:43.889236'
+  python_version: 3.11.9
+  pandas_version: 3.0.5
+  sklearn_version: 1.8.0

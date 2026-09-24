@@ -1,0 +1,27 @@
+[2026-09-23 23:09:52] [INFO] ============================================================
+[2026-09-23 23:09:52] [INFO] Starting Experiment: exp000_template
+[2026-09-23 23:09:52] [INFO] Config path: configs/exp000_template.yaml
+[2026-09-23 23:09:52] [INFO] ============================================================
+[2026-09-23 23:10:01] [INFO] Git commit hash: dd8043af5dd3cfb335350e47953edab90e467b87-dirty
+[2026-09-23 23:10:01] [INFO] Random seed: 42
+[2026-09-23 23:10:01] [INFO] Loading datasets from 'dataset'...
+[2026-09-23 23:10:02] [INFO] Loaded 7,627 total samples across languages.
+[2026-09-23 23:10:02] [INFO] Loading split assignments from 'splits/fold_assignments.tsv'...
+[2026-09-23 23:10:02] [WARNING] Debug mode enabled: sampling 50 instances per language.
+[2026-09-23 23:10:02] [INFO] Target folds: [0]
+[2026-09-23 23:10:02] [INFO] Input variants: ['comment']
+[2026-09-23 23:10:02] [INFO] Model architecture: tfidf_logistic_regression
+[2026-09-23 23:10:02] [INFO] 
+--- Processing Fold 0 ---
+[2026-09-23 23:10:02] [INFO] [EN] comment       (Fold 0) | A-F1: 0.8730 | B-F1: 0.2222 | C-Type: 0.2000 | C-Id: 0.0741
+[2026-09-23 23:10:03] [INFO] [IT] comment       (Fold 0) | A-F1: 0.6000 | B-F1: 0.0000 | C-Type: 0.1667 | C-Id: 0.0000
+[2026-09-23 23:10:03] [INFO] [NL] comment       (Fold 0) | A-F1: 0.4958 | B-F1: 0.5556 | C-Type: 0.4000 | C-Id: 0.0000
+[2026-09-23 23:10:03] [INFO] 
+Saving experiment artifacts...
+[2026-09-23 23:10:03] [INFO] Computing failure diagnostics & error slices...
+[2026-09-23 23:10:03] [INFO] Diagnostics written to: artifacts\exp000_template\DIAGNOSTICS.md
+[2026-09-23 23:10:03] [WARNING] Critical bottlenecks detected:
+[2026-09-23 23:10:03] [WARNING]   - Severe implicit hate speech miss rate: 60.0% of 'yes_implicit' misclassified as 'no'.
+[2026-09-23 23:10:03] [WARNING]   - Zero recall on rare identity classes: ['g', 'lgbtqia+', 'nb'].
+[2026-09-23 23:10:03] [INFO] Artifacts successfully written to: artifacts\exp000_template
+[2026-09-23 23:10:03] [INFO] Experiment run finished.

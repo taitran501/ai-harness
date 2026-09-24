@@ -1,0 +1,19 @@
+{
+  "audit_version": "1.0",
+  "status": "PASSED",
+  "timestamp": "2026-09-23 15:50:57 UTC",
+  "git_commit": "dd8043af5dd3cfb335350e47953edab90e467b87",
+  "candidate": {
+    "path": "artifacts\\exp001_baseline_tfidf\\oof_predictions.csv",
+    "sha256": "792236b2d99718ea8b6083097fae30b61c7c3be9fe581725f896b87af14ed16c",
+    "rows": 90
+  },
+  "baseline": {
+    "path": null,
+    "sha256": null
+  },
+  "verification": {
+    "differing_rows": -1,
+    "diff_by_column": {}
+  }
+}
