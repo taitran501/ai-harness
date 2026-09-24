@@ -14,8 +14,12 @@ import {
   ArrowDownRight,
   ChevronDown,
   ChevronUp,
+  Database,
+  Scale,
+  FileArchive,
+  ShieldCheck,
 } from 'lucide-react';
-import { TaskInfo, TaskMetricDef, TaskPreset } from '../types/experiment';
+import { TaskInfo, TaskMetricDef, TaskPreset, DataConfig, CompetitionRules, SubmissionSpec } from '../types/experiment';
 import { api } from '../services/api';
 
 interface TaskConfigModalProps {
@@ -23,6 +27,7 @@ interface TaskConfigModalProps {
   currentTask: TaskInfo | null;
   onClose: () => void;
   onSave: (updatedTask: TaskInfo) => Promise<void>;
+  initialTab?: 'task' | 'data' | 'rules' | 'submission';
 }
 
 const PLATFORMS = [
@@ -39,7 +44,15 @@ const MODALITIES = [
   { id: 'tabular', label: 'Tabular' },
   { id: 'vision', label: 'Vision / Image' },
   { id: 'audio', label: 'Audio / Speech' },
+  { id: 'time-series', label: 'Time-Series' },
   { id: 'multimodal', label: 'Multimodal' },
+];
+
+const SPLIT_STRATEGIES = [
+  { id: 'GroupKFold', name: 'GroupKFold', desc: 'Prevents leakage by keeping groups (e.g. video_id, patient_id) strictly in one fold' },
+  { id: 'StratifiedKFold', name: 'StratifiedKFold', desc: 'Preserves balanced percentage of samples for each target class' },
+  { id: 'KFold', name: 'Standard KFold', desc: 'Standard non-stratified random k-fold cross-validation' },
+  { id: 'TimeSeriesSplit', name: 'TimeSeriesSplit', desc: 'Strictly forward-rolling temporal validation without future leakage' },
 ];
 
 export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
@@ -47,8 +60,12 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   currentTask,
   onClose,
   onSave,
+  initialTab = 'task',
 }) => {
+  const [activeTab, setActiveTab] = useState<'task' | 'data' | 'rules' | 'submission'>(initialTab);
   const [presets, setPresets] = useState<TaskPreset[]>([]);
+
+  // Tab 1: Task & Objective
   const [platform, setPlatform] = useState<string>('codabench');
   const [name, setName] = useState<string>('');
   const [type, setType] = useState<string>('');
@@ -61,10 +78,42 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [expandedMetricIndices, setExpandedMetricIndices] = useState<Record<number, boolean>>({});
   const [languages, setLanguages] = useState<string>('');
   const [description, setDescription] = useState<string>('');
+
+  // Tab 2: Data & Split Strategy
+  const [trainPath, setTrainPath] = useState<string>('dataset/');
+  const [testPath, setTestPath] = useState<string>('dataset/test/');
+  const [sampleSubPath, setSampleSubPath] = useState<string>('submissions/sample_submission.csv');
+  const [splitStrategy, setSplitStrategy] = useState<string>('GroupKFold');
+  const [groupColumn, setGroupColumn] = useState<string>('yt_title');
+  const [nFolds, setNFolds] = useState<number>(5);
+  const [seed, setSeed] = useState<number>(42);
+  const [idColumn, setIdColumn] = useState<string>('id');
+  const [targetColumn, setTargetColumn] = useState<string>('target');
+  const [missingDataPolicy, setMissingDataPolicy] = useState<string>('drop_invalid_rows');
+
+  // Tab 3: Competition Rules & Constraints
+  const [allowLlm, setAllowLlm] = useState<boolean>(false);
+  const [allowApi, setAllowApi] = useState<boolean>(false);
+  const [allowExternalData, setAllowExternalData] = useState<boolean>(false);
+  const [allowPretrainedModels, setAllowPretrainedModels] = useState<boolean>(true);
+  const [maxParamsLimit, setMaxParamsLimit] = useState<string>('150000000');
+  const [maxGpuHours, setMaxGpuHours] = useState<string>('12');
+  const [dailySubmissionLimit, setDailySubmissionLimit] = useState<string>('5');
+  const [deadline, setDeadline] = useState<string>('');
+  const [teamPolicy, setTeamPolicy] = useState<string>('');
+  const [reproducibilityRequired, setReproducibilityRequired] = useState<boolean>(true);
+
+  // Tab 4: Submission & Audit Specification
+  const [submissionFileName, setSubmissionFileName] = useState<string>('submission.zip');
+  const [archiveFormat, setArchiveFormat] = useState<'zip' | 'csv' | 'tar.gz'>('zip');
+  const [minDiffPct, setMinDiffPct] = useState<string>('2.0');
+  const [maxKappa, setMaxKappa] = useState<string>('0.85');
+  const [minDisagreement, setMinDisagreement] = useState<string>('5.0');
+
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch presets once
+  // Fetch presets
   useEffect(() => {
     api
       .getTaskPresets()
@@ -74,7 +123,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       .catch((err) => console.warn('Could not load presets:', err));
   }, []);
 
-  // Initialize form with currentTask values
+  // Initialize form when currentTask changes
   useEffect(() => {
     if (currentTask) {
       setPlatform(currentTask.platform || 'codabench');
@@ -88,9 +137,48 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       setMetrics(currentTask.metrics || []);
       setLanguages((currentTask.languages || []).join(', '));
       setDescription(currentTask.description || '');
+
+      // Data Config
+      const d = currentTask.data_config || {};
+      setTrainPath(d.train_path || 'dataset/');
+      setTestPath(d.test_path || 'dataset/test/');
+      setSampleSubPath(d.sample_submission_path || 'submissions/sample_submission.csv');
+      setSplitStrategy(d.split_strategy || 'GroupKFold');
+      setGroupColumn(d.group_column || '');
+      setNFolds(d.n_folds || 5);
+      setSeed(d.seed || 42);
+      setIdColumn(d.id_column || 'id');
+      setTargetColumn(d.target_column || 'target');
+      setMissingDataPolicy(d.missing_data_policy || 'drop_invalid_rows');
+
+      // Rules
+      const r = currentTask.competition_rules || {};
+      setAllowLlm(!!r.allow_llm);
+      setAllowApi(!!r.allow_api);
+      setAllowExternalData(!!r.allow_external_data);
+      setAllowPretrainedModels(r.allow_pretrained_models !== false);
+      setMaxParamsLimit(r.max_params_limit ? String(r.max_params_limit) : '150000000');
+      setMaxGpuHours(r.max_gpu_hours ? String(r.max_gpu_hours) : '12');
+      setDailySubmissionLimit(r.daily_submission_limit ? String(r.daily_submission_limit) : '5');
+      setDeadline(r.deadline || '');
+      setTeamPolicy(r.team_policy || '');
+      setReproducibilityRequired(r.reproducibility_required !== false);
+
+      // Submission Spec
+      const s = currentTask.submission_spec || {};
+      setSubmissionFileName(s.file_name || 'submission.zip');
+      setArchiveFormat(s.archive_format || 'zip');
+      setMinDiffPct(s.min_diff_pct !== undefined ? String(s.min_diff_pct) : '2.0');
+      setMaxKappa(s.max_kappa !== undefined ? String(s.max_kappa) : '0.85');
+      setMinDisagreement(s.min_disagreement !== undefined ? String(s.min_disagreement) : '5.0');
+
       setError(null);
     }
   }, [currentTask, isOpen]);
+
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
 
   if (!isOpen) return null;
 
@@ -106,6 +194,34 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
     setMetrics(preset.metrics || []);
     setLanguages((preset.languages || []).join(', '));
     setDescription(preset.description || '');
+
+    if (preset.data_config) {
+      setTrainPath(preset.data_config.train_path || 'dataset/');
+      setTestPath(preset.data_config.test_path || 'dataset/test/');
+      setSplitStrategy(preset.data_config.split_strategy || 'KFold');
+      setGroupColumn(preset.data_config.group_column || '');
+      setNFolds(preset.data_config.n_folds || 5);
+      setSeed(preset.data_config.seed || 42);
+      setIdColumn(preset.data_config.id_column || 'id');
+      setTargetColumn(preset.data_config.target_column || 'target');
+    }
+
+    if (preset.competition_rules) {
+      setAllowLlm(!!preset.competition_rules.allow_llm);
+      setAllowApi(!!preset.competition_rules.allow_api);
+      setAllowExternalData(!!preset.competition_rules.allow_external_data);
+      setAllowPretrainedModels(preset.competition_rules.allow_pretrained_models !== false);
+      setMaxParamsLimit(preset.competition_rules.max_params_limit ? String(preset.competition_rules.max_params_limit) : '');
+      setDailySubmissionLimit(preset.competition_rules.daily_submission_limit ? String(preset.competition_rules.daily_submission_limit) : '5');
+      setDeadline(preset.competition_rules.deadline || '');
+    }
+
+    if (preset.submission_spec) {
+      setSubmissionFileName(preset.submission_spec.file_name || 'submission.csv');
+      setArchiveFormat(preset.submission_spec.archive_format || 'csv');
+      setMinDiffPct(preset.submission_spec.min_diff_pct !== undefined ? String(preset.submission_spec.min_diff_pct) : '2.0');
+      setMaxKappa(preset.submission_spec.max_kappa !== undefined ? String(preset.submission_spec.max_kappa) : '0.85');
+    }
   };
 
   const handleAddMetric = () => {
@@ -118,36 +234,36 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
         metric: primaryMetric.split(' ')[0] || 'Score',
         type: 'macro_f1',
         direction: direction,
-        baseline_score: undefined,
-        target_score: undefined,
         weight: 1.0,
+        baseline_score: 0.0,
+        target_score: 0.0,
+        description: '',
       },
     ]);
-    setExpandedMetricIndices((prev) => ({ ...prev, [metrics.length]: true }));
+    setExpandedMetricIndices({ ...expandedMetricIndices, [metrics.length]: true });
   };
 
-  const toggleExpandMetric = (index: number) => {
-    setExpandedMetricIndices((prev) => ({ ...prev, [index]: !prev[index] }));
-  };
-
-  const handleUpdateMetric = (index: number, field: keyof TaskMetricDef, val: any) => {
-    const updated = [...metrics];
-    updated[index] = { ...updated[index], [field]: val };
-    setMetrics(updated);
+  const handleUpdateMetric = (index: number, updated: Partial<TaskMetricDef>) => {
+    const newMetrics = [...metrics];
+    newMetrics[index] = { ...newMetrics[index], ...updated };
+    setMetrics(newMetrics);
   };
 
   const handleRemoveMetric = (index: number) => {
-    setMetrics(metrics.filter((_, idx) => idx !== index));
+    setMetrics(metrics.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const toggleMetricExpand = (index: number) => {
+    setExpandedMetricIndices((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('Please provide a task or competition name.');
-      return;
-    }
-    if (!primaryMetric.trim()) {
-      setError('Please specify a primary evaluation metric.');
       return;
     }
 
@@ -157,484 +273,739 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
     const langList = languages
       .split(',')
       .map((l) => l.trim())
-      .filter(Boolean);
+      .filter((l) => l.length > 0);
 
-    const payload: TaskInfo = {
+    const updatedTask: TaskInfo = {
       platform,
-      name: name.trim(),
       task_name: name.trim(),
-      type: type.trim() || 'Supervised Learning',
+      name: name.trim(),
       task_type: type.trim() || 'Supervised Learning',
+      type: type.trim() || 'Supervised Learning',
       modality,
-      primary_metric: primaryMetric.trim(),
+      primary_metric: primaryMetric.trim() || 'Score (CV)',
       direction,
       primary_metric_baseline: primaryBaseline ? parseFloat(primaryBaseline) : undefined,
       primary_metric_target: primaryTarget ? parseFloat(primaryTarget) : undefined,
       metrics,
       languages: langList,
       description: description.trim(),
+      data_config: {
+        train_path: trainPath.trim(),
+        test_path: testPath.trim(),
+        sample_submission_path: sampleSubPath.trim(),
+        split_strategy: splitStrategy,
+        group_column: groupColumn.trim() || undefined,
+        n_folds: Number(nFolds) || 5,
+        seed: Number(seed) || 42,
+        id_column: idColumn.trim() || 'id',
+        target_column: targetColumn.trim() || 'target',
+        missing_data_policy: missingDataPolicy.trim(),
+      },
+      competition_rules: {
+        allow_llm: allowLlm,
+        allow_api: allowApi,
+        allow_external_data: allowExternalData,
+        allow_pretrained_models: allowPretrainedModels,
+        max_params_limit: maxParamsLimit ? parseInt(maxParamsLimit, 10) : undefined,
+        max_gpu_hours: maxGpuHours ? parseFloat(maxGpuHours) : undefined,
+        daily_submission_limit: dailySubmissionLimit ? parseInt(dailySubmissionLimit, 10) : 5,
+        deadline: deadline.trim() || undefined,
+        team_policy: teamPolicy.trim() || undefined,
+        reproducibility_required: reproducibilityRequired,
+      },
+      submission_spec: {
+        file_name: submissionFileName.trim(),
+        archive_format: archiveFormat,
+        min_diff_pct: minDiffPct ? parseFloat(minDiffPct) : 2.0,
+        max_kappa: maxKappa ? parseFloat(maxKappa) : 0.85,
+        min_disagreement: minDisagreement ? parseFloat(minDisagreement) : 5.0,
+      },
     };
 
     try {
-      await api.updateTaskInfo(payload);
-      await onSave(payload);
+      await onSave(updatedTask);
       onClose();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to save task configuration.');
+      setError(err.message || 'Failed to save competition setup.');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden my-8 flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="p-5 border-b border-slate-800 flex items-start justify-between bg-slate-950/80">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
-                <Sliders className="w-4 h-4" />
-              </div>
-              <h2 className="text-base font-bold text-white tracking-tight">
-                Task & Competition Setup Wizard
-              </h2>
-              <span className="text-[10px] bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full font-mono">
-                Task-Agnostic
-              </span>
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+        {/* Top Header */}
+        <div className="px-5 py-3.5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/60">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-7 h-7 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
+              <Sliders className="w-3.5 h-3.5" />
             </div>
-            <p className="text-xs text-slate-400">
-              Configure target platform, evaluation criteria, and subtasks to adapt the harness to any new task.
-            </p>
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                <span>Competition & Benchmark Setup</span>
+                {name && <span className="text-xs text-zinc-400 font-normal">• {name}</span>}
+              </h2>
+              <p className="text-[11px] text-zinc-500">
+                Configure task objectives, cross-validation data splits, competition rules, and audit gates
+              </p>
+            </div>
           </div>
-
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition"
+            className="text-zinc-500 hover:text-zinc-300 p-1 rounded-md hover:bg-zinc-800 transition"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* 4-Tab Navigation */}
+        <div className="px-5 pt-2 pb-0 border-b border-zinc-800 bg-zinc-950/40 flex space-x-1">
+          <button
+            onClick={() => setActiveTab('task')}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
+              activeTab === 'task'
+                ? 'border-zinc-200 text-zinc-100'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Award className="w-3.5 h-3.5" />
+            <span>1. Objective & Metrics</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('data')}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
+              activeTab === 'data'
+                ? 'border-zinc-200 text-zinc-100'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>2. Data & Validation Strategy</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('rules')}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
+              activeTab === 'rules'
+                ? 'border-zinc-200 text-zinc-100'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Scale className="w-3.5 h-3.5" />
+            <span>3. Rules & Constraints</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('submission')}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
+              activeTab === 'submission'
+                ? 'border-zinc-200 text-zinc-100'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <FileArchive className="w-3.5 h-3.5" />
+            <span>4. Submission & Audit Standards</span>
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar text-xs">
+        <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-5 space-y-4">
           {error && (
-            <div className="bg-rose-950/40 border border-rose-800/60 p-3 rounded-lg text-rose-300">
+            <div className="p-3 bg-red-950/40 border border-red-800/80 rounded-lg text-xs text-red-300">
               {error}
             </div>
           )}
 
-          {/* Quick Presets Bar */}
-          {presets.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-slate-400 font-semibold text-[11px] uppercase tracking-wider">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>1-Click Presets for Newbies:</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {presets.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => handleApplyPreset(p)}
-                    className="bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-indigo-500/50 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition active:scale-95 shadow-sm"
+          {/* TAB 1: Task & Objective */}
+          {activeTab === 'task' && (
+            <div className="space-y-4">
+              {/* Presets Bar */}
+              {presets.length > 0 && (
+                <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+                  <label className="block text-[11px] font-semibold text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Quick Competition Presets (1-Click Fill All Tabs)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {presets.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => handleApplyPreset(p)}
+                        className="px-2.5 py-1 text-xs bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-zinc-100 rounded border border-zinc-800 transition"
+                      >
+                        {p.preset_name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Platform & Modality */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Competition Platform</label>
+                  <select
+                    value={platform}
+                    onChange={(e) => setPlatform(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                   >
-                    {p.preset_name}
+                    {PLATFORMS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.badge})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Problem Modality</label>
+                  <select
+                    value={modality}
+                    onChange={(e) => setModality(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                  >
+                    {MODALITIES.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Task Name & Type */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Task / Competition Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. StereoQueerEval, House Prices, Titanic"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Task Category / Type</label>
+                  <input
+                    type="text"
+                    value={type}
+                    onChange={(e) => setType(e.target.value)}
+                    placeholder="e.g. Multi-Task Text Classification, Tabular Regression"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                  />
+                </div>
+              </div>
+
+              {/* Primary Metric & Goal Scores */}
+              <div className="p-3.5 bg-zinc-950/70 border border-zinc-800/80 rounded-lg space-y-3">
+                <div className="text-xs font-semibold text-zinc-200">Primary Benchmark Metric & Target</div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div className="md:col-span-2">
+                    <label className="block text-[11px] text-zinc-400 mb-1">Primary Metric Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={primaryMetric}
+                      onChange={(e) => setPrimaryMetric(e.target.value)}
+                      placeholder="e.g. Macro-F1 (CV), ROC-AUC (CV), RMSE"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Direction</label>
+                    <select
+                      value={direction}
+                      onChange={(e) => setDirection(e.target.value as 'maximize' | 'minimize')}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                    >
+                      <option value="maximize">Maximize (F1, AUC, Acc)</option>
+                      <option value="minimize">Minimize (RMSE, Loss)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Baseline Score Floor</label>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      value={primaryBaseline}
+                      onChange={(e) => setPrimaryBaseline(e.target.value)}
+                      placeholder="e.g. 0.6459"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Target Goal Score</label>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      value={primaryTarget}
+                      onChange={(e) => setPrimaryTarget(e.target.value)}
+                      placeholder="e.g. 0.8500"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-emerald-400 focus:outline-none focus:border-zinc-700"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Languages (Comma separated)</label>
+                    <input
+                      type="text"
+                      value={languages}
+                      onChange={(e) => setLanguages(e.target.value)}
+                      placeholder="e.g. EN, IT, NL (optional)"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Subtasks / Criteria List */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-zinc-200">
+                    Subtask Metrics & Evaluation Criteria ({metrics.length})
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAddMetric}
+                    className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 px-2 py-0.5 rounded transition"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Add Subtask</span>
                   </button>
+                </div>
+
+                {metrics.map((m, idx) => (
+                  <div key={idx} className="p-3 bg-zinc-950 border border-zinc-800/80 rounded-lg space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={m.name}
+                        onChange={(e) => handleUpdateMetric(idx, { name: e.target.value })}
+                        placeholder="Subtask Name"
+                        className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200"
+                      />
+                      <input
+                        type="text"
+                        value={m.id}
+                        onChange={(e) => handleUpdateMetric(idx, { id: e.target.value })}
+                        placeholder="metric_id"
+                        className="w-28 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs font-mono text-zinc-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleMetricExpand(idx)}
+                        className="px-2 py-1 text-[11px] bg-zinc-900 text-zinc-400 hover:text-zinc-200 rounded border border-zinc-800"
+                      >
+                        {expandedMetricIndices[idx] ? 'Less ▲' : 'Details ▼'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMetric(idx)}
+                        className="p-1 text-zinc-500 hover:text-red-400 rounded"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {expandedMetricIndices[idx] && (
+                      <div className="pt-2 border-t border-zinc-800 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                        <div>
+                          <label className="block text-zinc-500 mb-0.5">Evaluation Metric</label>
+                          <input
+                            type="text"
+                            value={m.metric}
+                            onChange={(e) => handleUpdateMetric(idx, { metric: e.target.value })}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 text-zinc-300"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-zinc-500 mb-0.5">Baseline Score</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={m.baseline_score ?? ''}
+                            onChange={(e) => handleUpdateMetric(idx, { baseline_score: parseFloat(e.target.value) || 0 })}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 font-mono text-zinc-300"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-zinc-500 mb-0.5">Target Goal</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={m.target_score ?? ''}
+                            onChange={(e) => handleUpdateMetric(idx, { target_score: parseFloat(e.target.value) || 0 })}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 font-mono text-emerald-400"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-zinc-500 mb-0.5">Weight (0-1.0)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={m.weight ?? 1.0}
+                            onChange={(e) => handleUpdateMetric(idx, { weight: parseFloat(e.target.value) || 0 })}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 text-zinc-300"
+                          />
+                        </div>
+                        <div className="col-span-2 md:col-span-4">
+                          <label className="block text-zinc-500 mb-0.5">Description & Special Rules</label>
+                          <input
+                            type="text"
+                            value={m.description ?? ''}
+                            onChange={(e) => handleUpdateMetric(idx, { description: e.target.value })}
+                            placeholder="e.g. Evaluated strictly on hateful comments (oracle_hate)"
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 text-zinc-300"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Section 1: Platform Selection */}
-          <div className="space-y-2 border-t border-slate-800/80 pt-4">
-            <label className="block text-slate-300 font-semibold">
-              1. Competition / Host Platform
-            </label>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {PLATFORMS.map((plat) => {
-                const isSelected = platform === plat.id;
-                return (
-                  <button
-                    key={plat.id}
-                    type="button"
-                    onClick={() => setPlatform(plat.id)}
-                    className={`flex flex-col items-start p-2.5 rounded-xl border text-left transition ${
-                      isSelected
-                        ? 'bg-indigo-950/40 border-indigo-500 ring-1 ring-indigo-500/40 shadow-sm'
-                        : 'bg-slate-950 hover:bg-slate-800/60 border-slate-800 text-slate-400'
-                    }`}
+          {/* TAB 2: Data & Validation Strategy */}
+          {activeTab === 'data' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Cross-Validation Split Scheme</label>
+                  <select
+                    value={splitStrategy}
+                    onChange={(e) => setSplitStrategy(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                   >
-                    <div className="flex items-center justify-between w-full">
-                      <span className={`font-semibold text-xs ${isSelected ? 'text-white' : 'text-slate-200'}`}>
-                        {plat.name}
-                      </span>
-                      {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400" />}
-                    </div>
-                    <span className="text-[10px] text-slate-500 mt-0.5">{plat.badge}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                    {SPLIT_STRATEGIES.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.desc})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          {/* Section 2: Task Basics & Modality */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-800/80 pt-4">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Task / Competition Name
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. StereoQueerEval or House Prices"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1 flex items-center gap-1.5">
+                    <span>Anti-Leakage Group Column</span>
+                    <span className="text-[10px] text-amber-400 font-mono">(Crucial for GroupKFold)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={groupColumn}
+                    onChange={(e) => setGroupColumn(e.target.value)}
+                    placeholder="e.g. video_id, yt_title, patient_id, group_id"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
+                  />
+                </div>
+              </div>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Problem Type
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. Multi-Task Text Classification or Regression"
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Number of Folds (k)</label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={20}
+                    value={nFolds}
+                    onChange={(e) => setNFolds(parseInt(e.target.value, 10) || 5)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Data Modality
-              </label>
-              <select
-                value={modality}
-                onChange={(e) => setModality(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
-              >
-                {MODALITIES.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Fixed Random Seed</label>
+                  <input
+                    type="number"
+                    value={seed}
+                    onChange={(e) => setSeed(parseInt(e.target.value, 10) || 42)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">
-                Languages (if NLP, optional)
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. EN, IT, NL (leave blank if tabular/vision)"
-                value={languages}
-                onChange={(e) => setLanguages(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-          </div>
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">ID Column Name</label>
+                  <input
+                    type="text"
+                    value={idColumn}
+                    onChange={(e) => setIdColumn(e.target.value)}
+                    placeholder="e.g. id, StereoQueerEval_id"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                  />
+                </div>
 
-          {/* Section 3: Primary Optimization Metric */}
-          <div className="border-t border-slate-800/80 pt-4 space-y-3">
-            <label className="block text-slate-300 font-semibold">
-              2. Primary Evaluation Metric & Direction
-            </label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-400 text-[11px] mb-1">Metric Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Macro-F1 (CV), RMSE (CV), ROC-AUC (CV)"
-                  value={primaryMetric}
-                  onChange={(e) => setPrimaryMetric(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-                />
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Target Column(s)</label>
+                  <input
+                    type="text"
+                    value={targetColumn}
+                    onChange={(e) => setTargetColumn(e.target.value)}
+                    placeholder="e.g. target, SalePrice"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Training Data Path</label>
+                  <input
+                    type="text"
+                    value={trainPath}
+                    onChange={(e) => setTrainPath(e.target.value)}
+                    placeholder="e.g. dataset/train.csv or dataset/"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Test Data Path</label>
+                  <input
+                    type="text"
+                    value={testPath}
+                    onChange={(e) => setTestPath(e.target.value)}
+                    placeholder="e.g. dataset/test.csv"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-slate-400 text-[11px] mb-1">Optimization Direction</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDirection('maximize')}
-                    className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border font-medium transition ${
-                      direction === 'maximize'
-                        ? 'bg-emerald-950/40 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <ArrowUpRight className="w-3.5 h-3.5" />
-                    <span>Maximize ↗</span>
-                  </button>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Missing Data Handling Policy</label>
+                <input
+                  type="text"
+                  value={missingDataPolicy}
+                  onChange={(e) => setMissingDataPolicy(e.target.value)}
+                  placeholder="e.g. impute_median_categorical_missing, drop_invalid_rows"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100"
+                />
+              </div>
+            </div>
+          )}
 
-                  <button
-                    type="button"
-                    onClick={() => setDirection('minimize')}
-                    className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border font-medium transition ${
-                      direction === 'minimize'
-                        ? 'bg-amber-950/40 border-amber-500 text-amber-300 ring-1 ring-amber-500/40'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <ArrowDownRight className="w-3.5 h-3.5" />
-                    <span>Minimize ↘</span>
-                  </button>
+          {/* TAB 3: Competition Rules & Constraints */}
+          {activeTab === 'rules' && (
+            <div className="space-y-4">
+              <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
+                <div className="text-xs font-semibold text-zinc-200">Permitted Technologies & External Sources</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <label className="flex items-center gap-2 text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={allowLlm}
+                      onChange={(e) => setAllowLlm(e.target.checked)}
+                      className="rounded bg-zinc-900 border-zinc-700"
+                    />
+                    <span>Allow LLM / Generative Models & Prompting</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={allowApi}
+                      onChange={(e) => setAllowApi(e.target.checked)}
+                      className="rounded bg-zinc-900 border-zinc-700"
+                    />
+                    <span>Allow Proprietary Closed APIs (OpenAI / Anthropic)</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={allowExternalData}
+                      onChange={(e) => setAllowExternalData(e.target.checked)}
+                      className="rounded bg-zinc-900 border-zinc-700"
+                    />
+                    <span>Allow External Datasets (Must register in grounding)</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={allowPretrainedModels}
+                      onChange={(e) => setAllowPretrainedModels(e.target.checked)}
+                      className="rounded bg-zinc-900 border-zinc-700"
+                    />
+                    <span>Allow Open Pretrained Weights (HuggingFace / timm)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Max Parameter Ceiling</label>
+                  <input
+                    type="number"
+                    value={maxParamsLimit}
+                    onChange={(e) => setMaxParamsLimit(e.target.value)}
+                    placeholder="e.g. 150000000"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                  />
+                  <span className="text-[10px] text-zinc-500">Limits GPU memory footprint</span>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Max GPU Runtime (Hours)</label>
+                  <input
+                    type="number"
+                    value={maxGpuHours}
+                    onChange={(e) => setMaxGpuHours(e.target.value)}
+                    placeholder="e.g. 9 or 12"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                  />
+                  <span className="text-[10px] text-zinc-500">Modal/Kaggle kernel cutoff</span>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Daily Submission Quota</label>
+                  <input
+                    type="number"
+                    value={dailySubmissionLimit}
+                    onChange={(e) => setDailySubmissionLimit(e.target.value)}
+                    placeholder="e.g. 5"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                  />
+                  <span className="text-[10px] text-zinc-500">Allowed submissions per day</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Competition Deadline (UTC)</label>
+                  <input
+                    type="text"
+                    value={deadline}
+                    onChange={(e) => setDeadline(e.target.value)}
+                    placeholder="e.g. 2027-01-15T23:59:59Z"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Team & Collaboration Policy</label>
+                  <input
+                    type="text"
+                    value={teamPolicy}
+                    onChange={(e) => setTeamPolicy(e.target.value)}
+                    placeholder="e.g. Max 4 members, no private sharing"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-100"
+                  />
                 </div>
               </div>
             </div>
+          )}
 
-            {/* Baseline & Target Goal Scores */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-              <div>
-                <label className="block text-slate-400 text-[11px] mb-1">Primary Metric Baseline (Reference)</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  placeholder="e.g. 0.6500"
-                  value={primaryBaseline}
-                  onChange={(e) => setPrimaryBaseline(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-none focus:border-indigo-500"
-                />
+          {/* TAB 4: Submission & Audit Standards */}
+          {activeTab === 'submission' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Official Submission File Name</label>
+                  <input
+                    type="text"
+                    value={submissionFileName}
+                    onChange={(e) => setSubmissionFileName(e.target.value)}
+                    placeholder="e.g. submission.csv or submission.zip"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Archive Packaging Format</label>
+                  <select
+                    value={archiveFormat}
+                    onChange={(e) => setArchiveFormat(e.target.value as 'zip' | 'csv' | 'tar.gz')}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                  >
+                    <option value="zip">ZIP Compressed Archive (.zip)</option>
+                    <option value="csv">Raw Delimited CSV (.csv)</option>
+                    <option value="tar.gz">Tarball (.tar.gz)</option>
+                  </select>
+                </div>
               </div>
-              <div>
-                <label className="block text-slate-400 text-[11px] mb-1">Primary Metric Target / Goal Score</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  placeholder="e.g. 0.8500"
-                  value={primaryTarget}
-                  onChange={(e) => setPrimaryTarget(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-200 font-mono text-xs focus:outline-none focus:border-indigo-500"
-                />
+
+              <div className="p-3.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
+                <div className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>SWE-Agent Deterministic Audit Gate Parameters</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">MMES Threshold (% rows)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={minDiffPct}
+                      onChange={(e) => setMinDiffPct(e.target.value)}
+                      placeholder="2.0"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                    />
+                    <span className="text-[10px] text-zinc-500">Minimum row delta vs baseline</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Ensemble Max Cohen's Kappa</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={maxKappa}
+                      onChange={(e) => setMaxKappa(e.target.value)}
+                      placeholder="0.85"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                    />
+                    <span className="text-[10px] text-zinc-500">Blocks identical pseudo-ensembles</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Min Disagreement Rate (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={minDisagreement}
+                      onChange={(e) => setMinDisagreement(e.target.value)}
+                      placeholder="5.0"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
+                    />
+                    <span className="text-[10px] text-zinc-500">Ensures distinct prediction patterns</span>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Section 4: Subtasks & Multi-Target Evaluation */}
-          <div className="border-t border-slate-800/80 pt-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="block text-slate-300 font-semibold">
-                  3. Subtasks & Expandable Criteria
-                </label>
-                <p className="text-[11px] text-slate-400">
-                  Expand each subtask to configure calculation functions, per-metric direction, baseline & target goals, and composite weights.
-                </p>
-              </div>
+          {/* Footer Action Buttons */}
+          <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition"
+            >
+              Cancel
+            </button>
 
-              <button
-                type="button"
-                onClick={handleAddMetric}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-[11px] font-medium transition active:scale-95"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Add Subtask</span>
-              </button>
-            </div>
-
-            {metrics.length === 0 ? (
-              <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-center text-slate-500 text-[11px]">
-                No subtasks defined. The harness will focus exclusively on the primary metric ({primaryMetric}).
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {metrics.map((m, idx) => {
-                  const isExpanded = !!expandedMetricIndices[idx];
-
-                  return (
-                    <div
-                      key={idx}
-                      className="bg-slate-950 rounded-lg border border-slate-800 overflow-hidden"
-                    >
-                      {/* Compact Header Row */}
-                      <div className="grid grid-cols-12 gap-2 items-center p-2.5">
-                        <div className="col-span-3">
-                          <input
-                            type="text"
-                            placeholder="ID (e.g. subtask_a)"
-                            value={m.id}
-                            onChange={(e) => handleUpdateMetric(idx, 'id', e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-indigo-500"
-                          />
-                        </div>
-                        <div className="col-span-4">
-                          <input
-                            type="text"
-                            placeholder="Display Name (e.g. Hate Speech)"
-                            value={m.name}
-                            onChange={(e) => handleUpdateMetric(idx, 'name', e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 text-[11px] focus:outline-none focus:border-indigo-500"
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <input
-                            type="text"
-                            placeholder="Metric (e.g. F1)"
-                            value={m.metric}
-                            onChange={(e) => handleUpdateMetric(idx, 'metric', e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 text-[11px] font-mono focus:outline-none focus:border-indigo-500"
-                          />
-                        </div>
-                        <div className="col-span-2 flex items-center justify-end">
-                          <button
-                            type="button"
-                            onClick={() => toggleExpandMetric(idx)}
-                            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition ${
-                              isExpanded
-                                ? 'bg-indigo-900/60 text-indigo-300 border border-indigo-700/50'
-                                : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-                            }`}
-                            title="Expand full score configuration"
-                          >
-                            <span>Score Details</span>
-                            {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                          </button>
-                        </div>
-                        <div className="col-span-1 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveMetric(idx)}
-                            className="text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-slate-900 transition"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Expandable Score Configuration Panel */}
-                      {isExpanded && (
-                        <div className="p-3 bg-slate-900/70 border-t border-slate-800/80 space-y-2.5 text-xs">
-                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-                            <div>
-                              <label className="block text-slate-400 text-[10px] mb-0.5">Evaluation Type</label>
-                              <select
-                                value={m.type || 'macro_f1'}
-                                onChange={(e) => handleUpdateMetric(idx, 'type', e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-[11px] focus:outline-none focus:border-indigo-500"
-                              >
-                                <option value="macro_f1">Macro-F1</option>
-                                <option value="weighted_f1">Weighted-F1</option>
-                                <option value="micro_f1">Micro-F1</option>
-                                <option value="roc_auc">ROC-AUC</option>
-                                <option value="accuracy">Accuracy</option>
-                                <option value="logloss">LogLoss</option>
-                                <option value="rmse">RMSE</option>
-                                <option value="mae">MAE</option>
-                                <option value="r2">R-Squared</option>
-                                <option value="top1_acc">Top-1 Accuracy</option>
-                                <option value="top5_acc">Top-5 Accuracy</option>
-                                <option value="custom">Custom Score</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-slate-400 text-[10px] mb-0.5">Direction</label>
-                              <select
-                                value={m.direction || 'maximize'}
-                                onChange={(e) => handleUpdateMetric(idx, 'direction', e.target.value as 'maximize' | 'minimize')}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-[11px] focus:outline-none focus:border-indigo-500"
-                              >
-                                <option value="maximize">Maximize ↗ (Higher is better)</option>
-                                <option value="minimize">Minimize ↘ (Lower is better)</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-slate-400 text-[10px] mb-0.5">Baseline Score</label>
-                              <input
-                                type="number"
-                                step="0.0001"
-                                placeholder="e.g. 0.6000"
-                                value={m.baseline_score !== undefined ? m.baseline_score : ''}
-                                onChange={(e) => handleUpdateMetric(idx, 'baseline_score', e.target.value ? parseFloat(e.target.value) : undefined)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-slate-400 text-[10px] mb-0.5">Target / Goal Score</label>
-                              <input
-                                type="number"
-                                step="0.0001"
-                                placeholder="e.g. 0.8000"
-                                value={m.target_score !== undefined ? m.target_score : ''}
-                                onChange={(e) => handleUpdateMetric(idx, 'target_score', e.target.value ? parseFloat(e.target.value) : undefined)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            <div>
-                              <label className="block text-slate-400 text-[10px] mb-0.5">Composite Weight (0.0 - 1.0)</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                placeholder="e.g. 0.33"
-                                value={m.weight !== undefined ? m.weight : ''}
-                                onChange={(e) => handleUpdateMetric(idx, 'weight', e.target.value ? parseFloat(e.target.value) : undefined)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono text-[11px] focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-
-                            <div className="sm:col-span-2">
-                              <label className="block text-slate-400 text-[10px] mb-0.5">Criteria Description / Evaluation Filter</label>
-                              <input
-                                type="text"
-                                placeholder="e.g. Evaluated only on comments where hate_speech != 'no'"
-                                value={m.description || ''}
-                                onChange={(e) => handleUpdateMetric(idx, 'description', e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-[11px] focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Section 5: Description */}
-          <div className="border-t border-slate-800/80 pt-4 space-y-1">
-            <label className="block text-slate-300 font-semibold mb-1">
-              Task Context & Notes
-            </label>
-            <textarea
-              rows={2}
-              placeholder="Brief summary of the benchmark, evaluation caveats, or data distribution..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-slate-200 focus:outline-none focus:border-indigo-500"
-            />
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow transition disabled:opacity-50"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>{saving ? 'Saving & Injecting Skill...' : 'Save & Sync Agent Skill'}</span>
+            </button>
           </div>
         </form>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-950/80">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition text-xs"
-          >
-            Cancel
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={saving}
-            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold rounded-lg transition shadow-lg shadow-indigo-600/30 text-xs disabled:opacity-50 flex items-center gap-1.5"
-          >
-            {saving ? 'Saving...' : 'Save & Apply Task Configuration'}
-          </button>
-        </div>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crown, RefreshCw, Layers, Sliders } from 'lucide-react';
+import { Crown, RefreshCw, Layers, Sliders, ShieldCheck } from 'lucide-react';
 import { SystemStatus, TaskInfo } from '../types/experiment';
 
 interface HeaderProps {
@@ -7,9 +7,10 @@ interface HeaderProps {
   taskInfo: TaskInfo | null;
   onRefresh: () => Promise<void>;
   onOpenTaskConfig?: () => void;
+  onOpenReadinessModal?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ status, taskInfo, onRefresh, onOpenTaskConfig }) => {
+export const Header: React.FC<HeaderProps> = ({ status, taskInfo, onRefresh, onOpenTaskConfig, onOpenReadinessModal }) => {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -65,6 +66,17 @@ export const Header: React.FC<HeaderProps> = ({ status, taskInfo, onRefresh, onO
           </div>
         )}
 
+        {onOpenReadinessModal && (
+          <button
+            onClick={onOpenReadinessModal}
+            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-md border border-emerald-500/30 text-xs font-medium transition"
+            title="Evaluate 8 Competition Readiness Dimensions"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Readiness</span>
+          </button>
+        )}
+
         {onOpenTaskConfig && (
           <button
             onClick={onOpenTaskConfig}
@@ -72,7 +84,7 @@ export const Header: React.FC<HeaderProps> = ({ status, taskInfo, onRefresh, onO
             title="Configure task platform, metrics, and subtasks"
           >
             <Sliders className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Configure</span>
+            <span>Setup</span>
           </button>
         )}
 

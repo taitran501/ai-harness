@@ -140,6 +140,51 @@ export interface TaskMetricDef {
   description?: string;
 }
 
+export interface DataConfig {
+  train_path?: string;
+  test_path?: string;
+  sample_submission_path?: string;
+  split_strategy?: 'GroupKFold' | 'StratifiedKFold' | 'KFold' | 'TimeSeriesSplit' | string;
+  group_column?: string;
+  n_folds?: number;
+  seed?: number;
+  id_column?: string;
+  target_column?: string;
+  missing_data_policy?: string;
+  external_data_policy?: string;
+}
+
+export interface CompetitionRules {
+  allow_llm?: boolean;
+  allow_api?: boolean;
+  allow_external_data?: boolean;
+  allow_pretrained_models?: boolean;
+  max_params_limit?: number;
+  max_gpu_hours?: number;
+  daily_submission_limit?: number;
+  deadline?: string;
+  team_policy?: string;
+  reproducibility_required?: boolean;
+}
+
+export interface SubmissionSpec {
+  file_name?: string;
+  archive_format?: 'zip' | 'csv' | 'tar.gz';
+  required_columns?: string[];
+  min_diff_pct?: number; // MMES floor, default 2.0%
+  max_kappa?: number; // Ensemble diversity ceiling, default 0.85
+  min_disagreement?: number; // Ensemble disagreement floor, default 5.0%
+}
+
+export interface CompetitionPillarCheck {
+  id: string;
+  title: string;
+  status: 'passed' | 'warning' | 'pending';
+  summary: string;
+  details: string;
+  tabKey?: 'task' | 'data' | 'rules' | 'submission';
+}
+
 export interface TaskInfo {
   platform?: string;
   name?: string;
@@ -156,6 +201,9 @@ export interface TaskInfo {
   subtasks?: TaskMetricDef[];
   languages?: string[];
   description?: string;
+  data_config?: DataConfig;
+  competition_rules?: CompetitionRules;
+  submission_spec?: SubmissionSpec;
 }
 
 export interface TaskPreset {
@@ -173,6 +221,9 @@ export interface TaskPreset {
   metrics: TaskMetricDef[];
   languages: string[];
   description: string;
+  data_config?: DataConfig;
+  competition_rules?: CompetitionRules;
+  submission_spec?: SubmissionSpec;
 }
 
 export interface CloudPreflightResult {

@@ -9,6 +9,7 @@ import { SubmissionsTab } from './components/SubmissionsTab';
 import { PrimingCenter } from './components/PrimingCenter';
 import { TaskConfigModal } from './components/TaskConfigModal';
 import { CloudRunnerHub } from './components/CloudRunnerHub';
+import { CompetitionReadinessModal } from './components/CompetitionReadinessModal';
 import {
   TreeGraphResponse,
   ExperimentSummary,
@@ -31,6 +32,8 @@ export const App: React.FC = () => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeDetail, setSelectedNodeDetail] = useState<NodeDetail | null>(null);
   const [isTaskConfigOpen, setIsTaskConfigOpen] = useState(false);
+  const [taskConfigTab, setTaskConfigTab] = useState<'task' | 'data' | 'rules' | 'submission'>('task');
+  const [isReadinessOpen, setIsReadinessOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
@@ -94,7 +97,11 @@ export const App: React.FC = () => {
         status={status}
         taskInfo={taskInfo}
         onRefresh={handleSyncArtifacts}
-        onOpenTaskConfig={() => setIsTaskConfigOpen(true)}
+        onOpenTaskConfig={() => {
+          setTaskConfigTab('task');
+          setIsTaskConfigOpen(true);
+        }}
+        onOpenReadinessModal={() => setIsReadinessOpen(true)}
       />
 
       <main className="flex-1 w-full px-5 py-3 space-y-3 flex flex-col">
@@ -229,11 +236,25 @@ export const App: React.FC = () => {
       {/* Task Configuration Modal */}
       <TaskConfigModal
         isOpen={isTaskConfigOpen}
+        initialTab={taskConfigTab}
         currentTask={taskInfo}
         onClose={() => setIsTaskConfigOpen(false)}
         onSave={async (updatedTask) => {
           setTaskInfo(updatedTask);
           await loadData();
+        }}
+      />
+
+      {/* Competition Readiness Assessment Modal */}
+      <CompetitionReadinessModal
+        isOpen={isReadinessOpen}
+        onClose={() => setIsReadinessOpen(false)}
+        taskInfo={taskInfo}
+        status={status}
+        submissions={submissions}
+        onOpenTaskConfig={(tab) => {
+          setTaskConfigTab(tab || 'task');
+          setIsTaskConfigOpen(true);
         }}
       />
     </div>

@@ -155,6 +155,47 @@ def generate_skill_content(task: Dict[str, Any]) -> str:
             m_desc = m.get("description", "-")
             lines.append(f"| **{m_name}** (`{m_id}`) | `{m_metric}` | `{m_dir}` | `{m_base}` | `{m_target}` | `{m_weight}` | {m_desc} |")
 
+    # Data & Validation Strategy
+    data_cfg = task.get("data_config", {})
+    if data_cfg:
+        lines.extend([
+            "",
+            "### Data & Cross-Validation Strategy:",
+            f"- **Validation Scheme**: `{data_cfg.get('split_strategy', 'KFold')}` ({data_cfg.get('n_folds', 5)} folds, seed {data_cfg.get('seed', 42)})",
+            f"- **Anti-Leakage Group Column**: `{data_cfg.get('group_column', 'None (Standard split)')}`",
+            f"- **Dataset Paths**: Train: `{data_cfg.get('train_path', 'dataset/')}` | Test: `{data_cfg.get('test_path', 'dataset/test/')}`",
+            f"- **Key Columns**: ID: `{data_cfg.get('id_column', 'id')}` | Target: `{data_cfg.get('target_column', 'target')}`",
+        ])
+
+    # Competition Constraints & Rules
+    comp_rules = task.get("competition_rules", {})
+    if comp_rules:
+        max_p = comp_rules.get("max_params_limit")
+        p_str = f"{max_p / 1e6:.0f}M parameters" if max_p else "No limit"
+        lines.extend([
+            "",
+            "### Competition Rules & Constraints:",
+            f"- **Allowed LLM / API**: `{'Yes' if comp_rules.get('allow_llm') else 'No (Local/Open models only)'}`",
+            f"- **External Data**: `{'Allowed' if comp_rules.get('allow_external_data') else 'Forbidden'}`",
+            f"- **Pretrained Weights**: `{'Allowed' if comp_rules.get('allow_pretrained_models', True) else 'Forbidden'}`",
+            f"- **Parameter Ceiling**: `{p_str}`",
+            f"- **Daily Submission Quota**: `{comp_rules.get('daily_submission_limit', 'Unlimited')} submissions / day`",
+        ])
+        if comp_rules.get("deadline"):
+            lines.append(f"- **Competition Deadline**: `{comp_rules['deadline']}`")
+
+    # Submission Specification
+    sub_spec = task.get("submission_spec", {})
+    if sub_spec:
+        lines.extend([
+            "",
+            "### Submission & Audit Specification:",
+            f"- **File Name / Format**: `{sub_spec.get('file_name', 'submission.csv')}` (`{sub_spec.get('archive_format', 'csv')}`)",
+            f"- **MMES Effect Size Threshold**: `>= {sub_spec.get('min_diff_pct', 2.0)}%` of validation rows",
+            f"- **Ensemble Diversity Ceiling**: Cohen's Kappa `kappa <= {sub_spec.get('max_kappa', 0.85)}`",
+            f"- **Ensemble Disagreement Floor**: `>= {sub_spec.get('min_disagreement', 5.0)}%`",
+        ])
+
     lines.extend([
         "",
         "---",

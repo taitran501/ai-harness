@@ -42,3 +42,38 @@ task:
   - IT
   - NL
   description: Cross-lingual analysis of YouTube comments conditioned on video metadata.
+  data_config:
+    train_path: dataset/
+    test_path: dataset/test/
+    sample_submission_path: submissions/sample_submission.csv
+    split_strategy: GroupKFold
+    group_column: yt_title
+    n_folds: 5
+    seed: 42
+    id_column: StereoQueerEval_id
+    target_column: stereotype,hate_speech,target_type,target_identities
+    missing_data_policy: drop_invalid_rows
+    external_data_policy: forbidden_unregistered
+  competition_rules:
+    allow_llm: false
+    allow_api: false
+    allow_external_data: false
+    allow_pretrained_models: true
+    max_params_limit: 150000000
+    max_gpu_hours: 12
+    daily_submission_limit: 5
+    deadline: '2027-01-15T23:59:59Z'
+    team_policy: Max 4 members
+    reproducibility_required: true
+  submission_spec:
+    file_name: submission.zip
+    archive_format: zip
+    required_columns:
+    - StereoQueerEval_id
+    - stereotype
+    - hate_speech
+    - target_type
+    - target_identities
+    min_diff_pct: 2.0
+    max_kappa: 0.85
+    min_disagreement: 5.0

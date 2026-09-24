@@ -28,6 +28,26 @@ auditing predictions, or registering verified submissions for **StereoQueerEval*
 | **Hate Speech Classification** (`subtask_b`) | `Macro-F1` | `maximize` | `0.5238` | `0.8` | `0.333` | 3-class classification (no vs yes_explicit vs yes_implicit) |
 | **Target Type & Identity** (`subtask_c`) | `Macro-F1` | `maximize` | `0.7178` | `0.85` | `0.334` | Evaluated strictly on oracle_hate comments (hate_speech != no) |
 
+### Data & Cross-Validation Strategy:
+- **Validation Scheme**: `GroupKFold` (5 folds, seed 42)
+- **Anti-Leakage Group Column**: `yt_title`
+- **Dataset Paths**: Train: `dataset/` | Test: `dataset/test/`
+- **Key Columns**: ID: `StereoQueerEval_id` | Target: `stereotype,hate_speech,target_type,target_identities`
+
+### Competition Rules & Constraints:
+- **Allowed LLM / API**: `No (Local/Open models only)`
+- **External Data**: `Forbidden`
+- **Pretrained Weights**: `Allowed`
+- **Parameter Ceiling**: `150M parameters`
+- **Daily Submission Quota**: `5 submissions / day`
+- **Competition Deadline**: `2027-01-15T23:59:59Z`
+
+### Submission & Audit Specification:
+- **File Name / Format**: `submission.zip` (`zip`)
+- **MMES Effect Size Threshold**: `>= 2.0%` of validation rows
+- **Ensemble Diversity Ceiling**: Cohen's Kappa `kappa <= 0.85`
+- **Ensemble Disagreement Floor**: `>= 5.0%`
+
 ---
 
 ## 2. Core Operational Rules (Enforced & Immutable)
