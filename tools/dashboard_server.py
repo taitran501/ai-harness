@@ -83,6 +83,109 @@ def get_next_experiment_id(branch: str = "feat", descriptor: str = "run") -> Dic
     }
 
 
+DEFAULT_STRATEGY_CARDS = [
+    {
+        "id": "feat_video_title",
+        "branch": "feat",
+        "badge": "Feature Engineering",
+        "title": "Video Title Context Injection",
+        "problem_addressed": "Baseline TF-IDF on raw comments misses topical cues needed for implicit hate speech.",
+        "hypothesis": "Prepending YouTube video title (yt_title) to comment text provides topical context, boosting Subtask B implicit hate Macro-F1 by +0.03.",
+        "intervention": "Prepend yt_title to raw comment text before vectorization: '[TITLE] ' + yt_title + ' [COMMENT] ' + text.",
+        "approach_type": "ml",
+        "model_family": "linear",
+        "model_name": "logistic_regression",
+        "descriptor": "video_title_ctx",
+        "rationale": "YouTube comments frequently reference video topics implicitly. Injecting yt_title bridges the lexical knowledge gap.",
+        "target_tasks": ["Subtask A (Stereotype)", "Subtask B (Hate Speech)"],
+        "estimated_delta": "+0.02 - 0.03 Macro-F1",
+        "uncertainty_level": "low",
+        "source_type": "verified_baseline",
+        "source_id": "sklearn_tfidf_with_context",
+        "model_params": {
+            "C": 1.0,
+            "max_iter": 1000,
+            "ngram_range": [1, 2],
+            "max_features": 25000,
+        },
+    },
+    {
+        "id": "model_xlmr_base",
+        "branch": "model",
+        "badge": "Multilingual LM",
+        "title": "Multilingual Transformer (XLM-RoBERTa)",
+        "problem_addressed": "Classical n-grams cannot capture semantic nuances and transfer learning across EN, IT, and NL comments.",
+        "hypothesis": "Fine-tuning xlm-roberta-base with shared multilingual representations will outperform bag-of-words by +0.05 Macro-F1 across non-English splits.",
+        "intervention": "Replace TF-IDF + LogisticRegression backbone with fine-tuned xlm-roberta-base with pooled classification heads.",
+        "approach_type": "dl",
+        "model_family": "transformer",
+        "model_name": "xlm-roberta-base",
+        "descriptor": "xlmr_multilingual",
+        "rationale": "Cross-lingual pretraining transfers toxic lexical knowledge learned in English directly to low-resource Italian and Dutch subsets.",
+        "target_tasks": ["All Subtasks (A, B, C)"],
+        "estimated_delta": "+0.04 - 0.06 Macro-F1",
+        "uncertainty_level": "medium",
+        "source_type": "huggingface_hub",
+        "source_id": "FacebookAI/xlm-roberta-base",
+        "model_params": {
+            "learning_rate": 2e-5,
+            "batch_size": 16,
+            "epochs": 3,
+            "warmup_ratio": 0.1,
+            "weight_decay": 0.01,
+        },
+    },
+    {
+        "id": "loss_focal_identities",
+        "branch": "loss",
+        "badge": "Class Imbalance",
+        "title": "Class-Balanced Focal Loss for Subtask C",
+        "problem_addressed": "Extreme class imbalance in Subtask C target identities ('a', 'i', 'nb' have <20 positive samples), resulting in near-zero recall.",
+        "hypothesis": "Replacing standard Binary Cross-Entropy with Focal Loss (gamma=2.0, alpha=0.25) will penalize easy negatives and boost rare identity Macro-F1 by +0.04.",
+        "intervention": "Switch Subtask C identity loss objective from BCE to SigmoidFocalLoss(gamma=2.0, alpha=0.25).",
+        "approach_type": "dl",
+        "model_family": "transformer",
+        "model_name": "xlm-roberta-base",
+        "descriptor": "focal_rare_identities",
+        "rationale": "Focal Loss dynamically scales cross-entropy down for easy negatives, focusing gradients squarely on hard rare minority classes.",
+        "target_tasks": ["Subtask C (Identities: l, g, b, t, q, i, a, nb)"],
+        "estimated_delta": "+0.03 - 0.05 Identity F1",
+        "uncertainty_level": "medium",
+        "source_type": "verified_literature",
+        "source_id": "lin2017focal",
+        "model_params": {
+            "gamma": 2.0,
+            "alpha": 0.25,
+            "loss_type": "focal",
+        },
+    },
+    {
+        "id": "ens_threshold_opt",
+        "branch": "ens",
+        "badge": "Post-Processing",
+        "title": "Language-Specific Threshold Optimization",
+        "problem_addressed": "Static 0.5 decision thresholds are suboptimal because label priors and classifier calibration diverge significantly across EN, IT, and NL.",
+        "hypothesis": "Optimizing decision thresholds per language on out-of-fold validation probabilities via Nelder-Mead will yield +0.015 Macro-F1 with zero extra training cost.",
+        "intervention": "Apply harness/tuning_engine.py ThresholdOptimizer per language split on out-of-fold validation logits.",
+        "approach_type": "ml",
+        "model_family": "ensemble",
+        "model_name": "threshold_optimizer",
+        "descriptor": "threshold_tuning_per_lang",
+        "rationale": "Threshold search shifts the precision-recall trade-off to maximize Macro-F1 directly on validation folds without retraining.",
+        "target_tasks": ["Subtask A", "Subtask B", "Subtask C"],
+        "estimated_delta": "+0.01 - 0.02 Macro-F1",
+        "uncertainty_level": "low",
+        "source_type": "verified_baseline",
+        "source_id": "harness.tuning_engine",
+        "model_params": {
+            "method": "nelder-mead",
+            "metric": "macro_f1",
+            "per_language": True,
+        },
+    },
+]
+
+
 def list_available_tasks() -> List[Dict[str, Any]]:
     """List all available competition tasks from configs/tasks/ and mark the active one."""
     tasks_dir = PROJECT_ROOT / "configs" / "tasks"
@@ -722,6 +825,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(EnvironmentDetector.get_full_status())
         elif path == "/api/configs":
             self.handle_api_configs()
+        elif path == "/api/strategy_cards":
+            self.handle_api_strategy_cards()
         elif path == "/api/config":
             self.handle_api_get_config(parsed_url.query)
         elif path == "/api/cloud/preflight":
@@ -836,6 +941,18 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length).decode("utf-8")
                 data = json.loads(body)
                 self.handle_api_modal_token(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/environment/modal/launch_auth":
+            try:
+                res = EnvironmentDetector.launch_modal_auth()
+                self.send_json(res)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/environment/kaggle/launch_auth":
+            try:
+                res = EnvironmentDetector.launch_kaggle_auth()
+                self.send_json(res)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/environment/kaggle/profile":
@@ -1228,6 +1345,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     cfg_files.append(f"configs/{f.name}")
         self.send_json({"configs": cfg_files})
 
+    def handle_api_strategy_cards(self) -> None:
+        self.send_json({"strategies": DEFAULT_STRATEGY_CARDS})
+
     def handle_api_get_config(self, query: str) -> None:
         params = urllib.parse.parse_qs(query)
         cfg_path = params.get("path", [""])[0].strip()
@@ -1314,8 +1434,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         model_family = data.get("model_family", "transformer" if approach_type == "dl" else "linear")
 
         if not exp_id:
-            self.send_json({"error": "exp_id is required."}, status=400)
-            return
+            desc = data.get("descriptor") or data.get("branch") or "target"
+            next_info = get_next_experiment_id(branch, desc)
+            exp_id = next_info["next_id"]
 
         if not exp_id.startswith("exp"):
             exp_id = f"exp_{exp_id}"

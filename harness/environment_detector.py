@@ -107,9 +107,45 @@ class EnvironmentDetector:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    def set_modal_token(token_id: str, token_secret: str, profile_name: Optional[str] = None) -> Dict[str, Any]:
-        """Set or update Modal credentials."""
+    def parse_modal_token_input(raw_text: str) -> Tuple[Optional[str], Optional[str]]:
+        """Parse raw user input or copy-pasted CLI command to extract token_id and token_secret."""
+        if not raw_text:
+            return None, None
+        token_id = None
+        token_secret = None
+
+        m_id = re.search(r"\b(ak-[a-zA-Z0-9_-]+)\b", raw_text)
+        if m_id:
+            token_id = m_id.group(1)
+
+        m_sec = re.search(r"\b(as-[a-zA-Z0-9_-]+)\b", raw_text)
+        if m_sec:
+            token_secret = m_sec.group(1)
+
+        return token_id, token_secret
+
+    @classmethod
+    def set_modal_token(
+        cls,
+        token_id: str,
+        token_secret: Optional[str] = None,
+        profile_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Set or update Modal credentials with smart parsing."""
         try:
+            # If user pasted combined string into token_id or secret is empty
+            if not token_secret or "ak-" in token_id and "as-" in token_id:
+                extracted_id, extracted_sec = cls.parse_modal_token_input(f"{token_id} {token_secret or ''}")
+                if extracted_id and extracted_sec:
+                    token_id = extracted_id
+                    token_secret = extracted_sec
+
+            if not token_id or not token_secret:
+                return {
+                    "success": False,
+                    "error": "Could not identify valid ak-... token ID and as-... token secret.",
+                }
+
             cmd = ["modal", "token", "set", "--token-id", token_id, "--token-secret", token_secret]
             if profile_name:
                 cmd.extend(["--profile", profile_name])
@@ -120,6 +156,40 @@ class EnvironmentDetector:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def launch_modal_auth() -> Dict[str, Any]:
+        """Open Modal token management web page in browser."""
+        auth_url = "https://modal.com/settings/tokens"
+        opened = False
+        try:
+            import webbrowser
+            opened = webbrowser.open(auth_url)
+        except Exception:
+            pass
+        return {
+            "success": True,
+            "opened_browser": opened,
+            "auth_url": auth_url,
+            "message": "Opened Modal tokens page (https://modal.com/settings/tokens) in your browser.",
+        }
+
+    @staticmethod
+    def launch_kaggle_auth() -> Dict[str, Any]:
+        """Open Kaggle Account settings web page in browser."""
+        auth_url = "https://www.kaggle.com/settings"
+        opened = False
+        try:
+            import webbrowser
+            opened = webbrowser.open(auth_url)
+        except Exception:
+            pass
+        return {
+            "success": True,
+            "opened_browser": opened,
+            "auth_url": auth_url,
+            "message": "Opened Kaggle Account settings (https://www.kaggle.com/settings) in your browser.",
+        }
 
     @staticmethod
     def detect_kaggle() -> Dict[str, Any]:

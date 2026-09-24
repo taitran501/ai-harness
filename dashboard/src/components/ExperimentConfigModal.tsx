@@ -7,16 +7,23 @@ import {
   AlertTriangle,
   Copy,
   Check,
-  Plus,
-  Play,
   RotateCcw,
   Sparkles,
   GitBranch,
   ShieldCheck,
   FileText,
+  Zap,
+  Target,
+  Compass,
+  ArrowRight,
+  Eye,
+  EyeOff,
+  Layers,
+  Cpu,
+  TrendingUp,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { CloudPreflightResult, ExperimentSummary } from '../types/experiment';
+import { CloudPreflightResult, ExperimentSummary, StrategyCard } from '../types/experiment';
 
 interface ExperimentConfigModalProps {
   initialConfigPath?: string;
@@ -26,6 +33,108 @@ interface ExperimentConfigModalProps {
   onConfigSaved?: (savedPath: string) => void;
 }
 
+const FALLBACK_STRATEGIES: StrategyCard[] = [
+  {
+    id: 'feat_video_title',
+    branch: 'feat',
+    badge: 'Feature Engineering',
+    title: 'Video Title Context Injection',
+    problem_addressed: 'Baseline TF-IDF on raw comments misses topical cues needed for implicit hate speech.',
+    hypothesis: 'Prepending YouTube video title (yt_title) to comment text provides topical context, boosting Subtask B implicit hate Macro-F1 by +0.03.',
+    intervention: "Prepend yt_title to raw comment text before vectorization: '[TITLE] ' + yt_title + ' [COMMENT] ' + text.",
+    approach_type: 'ml',
+    model_family: 'linear',
+    model_name: 'logistic_regression',
+    descriptor: 'video_title_ctx',
+    rationale: 'YouTube comments frequently reference video topics implicitly. Injecting yt_title bridges the lexical knowledge gap.',
+    target_tasks: ['Subtask A (Stereotype)', 'Subtask B (Hate Speech)'],
+    estimated_delta: '+0.02 - 0.03 Macro-F1',
+    uncertainty_level: 'low',
+    source_type: 'verified_baseline',
+    source_id: 'sklearn_tfidf_with_context',
+    model_params: {
+      C: 1.0,
+      max_iter: 1000,
+      ngram_range: [1, 2],
+      max_features: 25000,
+    },
+  },
+  {
+    id: 'model_xlmr_base',
+    branch: 'model',
+    badge: 'Multilingual LM',
+    title: 'Multilingual Transformer (XLM-RoBERTa)',
+    problem_addressed: 'Classical n-grams cannot capture semantic nuances and transfer learning across EN, IT, and NL comments.',
+    hypothesis: 'Fine-tuning xlm-roberta-base with shared multilingual representations will outperform bag-of-words by +0.05 Macro-F1 across non-English splits.',
+    intervention: 'Replace TF-IDF + LogisticRegression backbone with fine-tuned xlm-roberta-base with pooled classification heads.',
+    approach_type: 'dl',
+    model_family: 'transformer',
+    model_name: 'xlm-roberta-base',
+    descriptor: 'xlmr_multilingual',
+    rationale: 'Cross-lingual pretraining transfers toxic lexical knowledge learned in English directly to low-resource Italian and Dutch subsets.',
+    target_tasks: ['All Subtasks (A, B, C)'],
+    estimated_delta: '+0.04 - 0.06 Macro-F1',
+    uncertainty_level: 'medium',
+    source_type: 'huggingface_hub',
+    source_id: 'FacebookAI/xlm-roberta-base',
+    model_params: {
+      learning_rate: 2e-5,
+      batch_size: 16,
+      epochs: 3,
+      warmup_ratio: 0.1,
+      weight_decay: 0.01,
+    },
+  },
+  {
+    id: 'loss_focal_identities',
+    branch: 'loss',
+    badge: 'Class Imbalance',
+    title: 'Class-Balanced Focal Loss for Subtask C',
+    problem_addressed: "Extreme class imbalance in Subtask C target identities ('a', 'i', 'nb' have <20 positive samples), resulting in near-zero recall.",
+    hypothesis: 'Replacing standard Binary Cross-Entropy with Focal Loss (gamma=2.0, alpha=0.25) will penalize easy negatives and boost rare identity Macro-F1 by +0.04.',
+    intervention: 'Switch Subtask C identity loss objective from BCE to SigmoidFocalLoss(gamma=2.0, alpha=0.25).',
+    approach_type: 'dl',
+    model_family: 'transformer',
+    model_name: 'xlm-roberta-base',
+    descriptor: 'focal_rare_identities',
+    rationale: 'Focal Loss dynamically scales cross-entropy down for easy negatives, focusing gradients squarely on hard rare minority classes.',
+    target_tasks: ['Subtask C (Identities: l, g, b, t, q, i, a, nb)'],
+    estimated_delta: '+0.03 - 0.05 Identity F1',
+    uncertainty_level: 'medium',
+    source_type: 'verified_literature',
+    source_id: 'lin2017focal',
+    model_params: {
+      gamma: 2.0,
+      alpha: 0.25,
+      loss_type: 'focal',
+    },
+  },
+  {
+    id: 'ens_threshold_opt',
+    branch: 'ens',
+    badge: 'Post-Processing',
+    title: 'Language-Specific Threshold Optimization',
+    problem_addressed: 'Static 0.5 decision thresholds are suboptimal because label priors and classifier calibration diverge significantly across EN, IT, and NL.',
+    hypothesis: 'Optimizing decision thresholds per language on out-of-fold validation probabilities via Nelder-Mead will yield +0.015 Macro-F1 with zero extra training cost.',
+    intervention: 'Apply harness/tuning_engine.py ThresholdOptimizer per language split on out-of-fold validation logits.',
+    approach_type: 'ml',
+    model_family: 'ensemble',
+    model_name: 'threshold_optimizer',
+    descriptor: 'threshold_tuning_per_lang',
+    rationale: 'Threshold search shifts the precision-recall trade-off to maximize Macro-F1 directly on validation folds without retraining.',
+    target_tasks: ['Subtask A', 'Subtask B', 'Subtask C'],
+    estimated_delta: '+0.01 - 0.02 Macro-F1',
+    uncertainty_level: 'low',
+    source_type: 'verified_baseline',
+    source_id: 'harness.tuning_engine',
+    model_params: {
+      method: 'nelder-mead',
+      metric: 'macro_f1',
+      per_language: true,
+    },
+  },
+];
+
 export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   initialConfigPath,
   initialParentId,
@@ -33,58 +142,60 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   onClose,
   onConfigSaved,
 }) => {
-  const [activeTab, setActiveTab] = useState<'editor' | 'create'>('editor');
+  // Determine reigning champion
+  const bestExp =
+    experiments.find((e) => e.is_best) ||
+    (experiments.length > 0
+      ? [...experiments].sort((a, b) => (b.score || 0) - (a.score || 0))[0]
+      : null);
+  const defaultParentId = initialParentId || bestExp?.id || 'exp001_baseline_tfidf';
+
+  // Primary navigation: Default to 'strategies' unless initialConfigPath was explicitly opened
+  const [activeTab, setActiveTab] = useState<'strategies' | 'editor'>(
+    initialConfigPath ? 'editor' : 'strategies'
+  );
+
+  // Strategy & Agent State
+  const [selectedParentId, setSelectedParentId] = useState<string>(defaultParentId);
+  const [strategyCards, setStrategyCards] = useState<StrategyCard[]>(FALLBACK_STRATEGIES);
+  const [selectedIde, setSelectedIde] = useState<'antigravity' | 'codex'>('antigravity');
+  const [generatingCardId, setGeneratingCardId] = useState<string | null>(null);
+  const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+  const [previewPromptContent, setPreviewPromptContent] = useState<{ title: string; prompt: string } | null>(null);
+  const [spawnSuccessMessage, setSpawnSuccessMessage] = useState<string | null>(null);
+
+  // Editor State
   const [configs, setConfigs] = useState<string[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<string>(
     initialConfigPath || 'configs/exp001_tfidf_baseline.yaml'
   );
-
-  // Editor state
   const [yamlContent, setYamlContent] = useState<string>('');
   const [initialContent, setInitialContent] = useState<string>('');
   const [loadingConfig, setLoadingConfig] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [copied, setCopied] = useState<boolean>(false);
+  const [copiedYaml, setCopiedYaml] = useState<boolean>(false);
 
   // Preflight state
   const [runningPreflight, setRunningPreflight] = useState<boolean>(false);
   const [preflightResult, setPreflightResult] = useState<CloudPreflightResult | null>(null);
 
-  // Create form state
-  const [newExpId, setNewExpId] = useState<string>('exp002_feat_run');
-  const [autoAssigningId, setAutoAssigningId] = useState<boolean>(false);
-  const [newParentId, setNewParentId] = useState<string>(initialParentId || 'exp001_baseline_tfidf');
-  const [newBranch, setNewBranch] = useState<string>('feat');
-  const [newProblem, setNewProblem] = useState<string>('Lack of topical context for comment-level hate classification.');
-  const [newHypothesis, setNewHypothesis] = useState<string>('Concatenating yt_title with comment improves semantic context and Macro-F1 by +0.02.');
-  const [newIntervention, setNewIntervention] = useState<string>('Prepend title metadata to raw comment text before vectorization.');
-  const [newApproachType, setNewApproachType] = useState<string>('ml');
-  const [newModelFamily, setNewModelFamily] = useState<string>('linear');
-  const [creating, setCreating] = useState<boolean>(false);
-
-  const fetchNextId = async (branchName: string, desc: string = 'run') => {
-    setAutoAssigningId(true);
-    try {
-      const res = await api.getNextExpId(branchName, desc);
-      if (res && res.next_id) {
-        setNewExpId(res.next_id);
-      }
-    } catch (err) {
-      console.warn('Could not auto-fetch next experiment ID:', err);
-    } finally {
-      setAutoAssigningId(false);
-    }
-  };
-
+  // Load strategy cards from server
   useEffect(() => {
-    if (activeTab === 'create') {
-      fetchNextId(newBranch);
-    }
-  }, [activeTab]);
+    api
+      .getStrategyCards()
+      .then((res) => {
+        if (res.strategies && res.strategies.length > 0) {
+          setStrategyCards(res.strategies);
+        }
+      })
+      .catch((err) => {
+        console.warn('Using fallback strategy cards:', err);
+      });
+  }, []);
 
-  // Load list of available configs
+  // Load configs list
   const loadConfigsList = async () => {
     try {
       const res = await api.getConfigs();
@@ -149,7 +260,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
     setRunningPreflight(true);
     setErrorMessage(null);
     try {
-      // First save if dirty
       if (yamlContent !== initialContent) {
         await api.saveConfig(selectedConfig, yamlContent);
         setInitialContent(yamlContent);
@@ -164,62 +274,200 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
     }
   };
 
-  // Handle creating a new config
-  const handleCreateNew = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCreating(true);
+  // Handle 1-Click Spawning of Strategy Card
+  const handleSpawnStrategy = async (card: StrategyCard) => {
+    setGeneratingCardId(card.id);
     setErrorMessage(null);
+    setSpawnSuccessMessage(null);
 
     try {
+      const nextInfo = await api.getNextExpId(card.branch, card.descriptor);
+      const nextId = nextInfo.next_id;
+
       const res = await api.createConfig({
-        exp_id: newExpId.trim(),
-        parent_id: newParentId.trim(),
-        branch: newBranch,
-        hypothesis: newHypothesis.trim(),
-        intervention: newIntervention.trim(),
-        problem_addressed: newProblem.trim(),
-        approach_type: newApproachType,
-        model_family: newModelFamily,
+        exp_id: nextId,
+        descriptor: card.descriptor,
+        parent_id: selectedParentId,
+        branch: card.branch,
+        hypothesis: card.hypothesis,
+        intervention: card.intervention,
+        problem_addressed: card.problem_addressed,
+        approach_type: card.approach_type,
+        model_family: card.model_family,
+        model_name: card.model_name,
+        model_params: card.model_params,
+        source_type: card.source_type,
+        source_id: card.source_id,
+        uncertainty_level: card.uncertainty_level,
       });
 
       await loadConfigsList();
       setSelectedConfig(res.path);
-      setActiveTab('editor');
+      setSpawnSuccessMessage(`Created target configuration: ${res.path} (Parent: ${selectedParentId})`);
       if (onConfigSaved) onConfigSaved(res.path);
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || 'Failed to create new experiment configuration.');
+      setErrorMessage(err.message || `Failed to spawn strategy: ${card.title}`);
     } finally {
-      setCreating(false);
+      setGeneratingCardId(null);
     }
   };
 
-  const handleCopy = () => {
+  // Build prompt for intent or strategy
+  const buildAgentPrompt = (type: 'iterate' | 'explore' | 'card', card?: StrategyCard): string => {
+    const parentNode = experiments.find((e) => e.id === selectedParentId);
+    const parentScore = parentNode?.score ? parentNode.score.toFixed(4) : 'baseline';
+
+    if (type === 'iterate') {
+      return selectedIde === 'antigravity'
+        ? `# ANTIGRAVITY ITERATION DIRECTIVE: OPTIMIZE BOTTLENECK ON ${selectedParentId}
+
+> Target Baseline: **${selectedParentId}** (Macro-F1: ${parentScore})
+> Operating Contract: Strictly adhere to AGENTS.md.
+> Rule Invariant: Single Atomic Intervention (Control vs Treatment).
+
+## MANDATORY STEPS:
+1. **Failure Mode Analysis**: Inspect \`artifacts/${selectedParentId}/run.log\` and diagnostics. Identify whether the primary error is implicit hate speech (Subtask B) or rare identities (Subtask C).
+2. **Formulate Target Config**: Create \`configs/exp<NNN>_<branch>_<descriptor>.yaml\` declaring:
+   - \`parent_id: "${selectedParentId}"\`
+   - Single atomic intervention addressing the diagnosed bottleneck.
+   - Grounding citation from local knowledge base or Hugging Face Hub.
+3. **Execute Smoke Test**:
+   \`\`\`powershell
+   python train.py --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0
+   \`\`\`
+4. **Run Full 5-Fold Cross-Validation**: Execute full CV and record artifacts.
+5. **Deterministic Audit Gate**: Validate that validation delta achieves MMES >= 2.0% without regression.`
+        : `# OPENAI CODEX CLI DIRECTIVE: ITERATE & ADDRESS FAILURE MODES
+
+- Parent Baseline: \`${selectedParentId}\` (Macro-F1: ${parentScore})
+- Repository Rules: Follow \`AGENTS.md\`. Raw data in \`dataset/\` is read-only.
+- Task: Implement ONE atomic modification to improve over \`${selectedParentId}\`.
+- Action:
+  1. Inspect \`artifacts/${selectedParentId}/\` to diagnose errors.
+  2. Create a new config in \`configs/\` specifying the intervention.
+  3. Run smoke test on Fold 0, then full 5-fold cross-validation.
+  4. Summarize validation metrics and verify MMES >= 2.0% row delta.`;
+    }
+
+    if (type === 'explore') {
+      return selectedIde === 'antigravity'
+        ? `# ANTIGRAVITY DIRECTIVE: PARADIGM SHIFT & BRANCH EXPLORATION
+
+> Current Record: **${selectedParentId}** (Macro-F1: ${parentScore})
+> Objective: Explore an un-sampled model family per AIDE UCB tree search.
+
+## SCIENTIFIC EXPLORATION PROTOCOL:
+1. **Epistemic Grounding**: Do not guess hyperparameters. Retrieve verified model architectures (e.g. \`xlm-roberta-base\` or \`microsoft/mdeberta-v3-base\`) that support multilingual text (EN, IT, NL).
+2. **Declare Experiment Config**: Create \`configs/exp<NNN>_model_<backbone>.yaml\` specifying \`grounding:\` and \`assumption_register:\`.
+3. **Pre-flight & Verification Probe**: Run pre-flight check:
+   \`\`\`powershell
+   python harness/cloud_inspector.py --config configs/exp<NNN>_model_<backbone>.yaml
+   \`\`\`
+4. **Execute Cross-Validation**: Run full training, log fold-by-fold results, and update \`EXPERIMENTS.md\`.`
+        : `# OPENAI CODEX CLI DIRECTIVE: ARCHITECTURE PARADIGM SHIFT
+
+- Parent Baseline: \`${selectedParentId}\`
+- Goal: Shift from linear baseline to deep learning transformer / distinct model family.
+- Protocol:
+  1. Create \`configs/exp<NNN>_model_<name>.yaml\` with explicit model backbone.
+  2. Implement necessary model loader or pipeline in \`src/\`.
+  3. Run smoke test on Fold 0: \`python train.py --config configs/exp<NNN>_...yaml --debug --fold 0\`.
+  4. Run full CV and output evaluation metrics.`;
+    }
+
+    // Card-specific prompt
+    if (card) {
+      return `# DIRECTIVE: IMPLEMENT RESEARCH STRATEGY [${card.title.toUpperCase()}]
+
+> Target IDE: **${selectedIde === 'antigravity' ? 'Antigravity IDE' : 'OpenAI Codex CLI'}**
+> Strategy Branch: \`${card.branch}\` | Model Family: \`${card.model_family}\` (${card.model_name})
+> Parent Experiment: \`${selectedParentId}\` (Score: ${parentScore})
+> Estimated Gain: ${card.estimated_delta}
+
+## SCIENTIFIC SPECIFICATION:
+- **Problem Addressed**: ${card.problem_addressed}
+- **Scientific Hypothesis**: ${card.hypothesis}
+- **Controlled Intervention**: ${card.intervention}
+- **Rationale**: ${card.rationale}
+
+## EXECUTION SEQUENCE:
+1. Create or inspect config \`configs/exp<NNN>_${card.descriptor}.yaml\` with \`parent_id: "${selectedParentId}"\`.
+2. Implement the controlled intervention in \`harness/\` or \`src/\`.
+3. Run smoke test verification:
+   \`\`\`powershell
+   python train.py --config configs/exp<NNN>_${card.descriptor}.yaml --debug --fold 0
+   \`\`\`
+4. Execute full 5-fold cross-validation and verify generated artifacts in \`artifacts/\`.`;
+    }
+
+    return '';
+  };
+
+  const handleCopyPrompt = (type: 'iterate' | 'explore' | 'card', card?: StrategyCard) => {
+    const prompt = buildAgentPrompt(type, card);
+    navigator.clipboard.writeText(prompt);
+    const key = card ? card.id : type;
+    setCopiedPromptId(key);
+    setTimeout(() => setCopiedPromptId(null), 2500);
+  };
+
+  const handlePreviewPrompt = (type: 'iterate' | 'explore' | 'card', card?: StrategyCard) => {
+    const prompt = buildAgentPrompt(type, card);
+    const title = card
+      ? `Strategy Prompt: ${card.title}`
+      : type === 'iterate'
+      ? 'Iterate & Bottleneck Prompt'
+      : 'Explore Paradigm Prompt';
+
+    if (previewPromptContent?.title === title) {
+      setPreviewPromptContent(null);
+    } else {
+      setPreviewPromptContent({ title, prompt });
+    }
+  };
+
+  const handleCopyYaml = () => {
     navigator.clipboard.writeText(yamlContent);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedYaml(true);
+    setTimeout(() => setCopiedYaml(false), 2000);
   };
 
   const isDirty = yamlContent !== initialContent;
 
+  const getBranchBadgeStyle = (branch: string) => {
+    switch (branch) {
+      case 'feat':
+        return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30';
+      case 'model':
+        return 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+      case 'loss':
+        return 'bg-rose-500/10 text-rose-400 border-rose-500/30';
+      case 'ens':
+        return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+      default:
+        return 'bg-zinc-800 text-zinc-300 border-zinc-700';
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/70">
           <div className="flex items-center space-x-2.5">
-            <div className="w-7 h-7 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
-              <FileCode className="w-3.5 h-3.5" />
+            <div className="w-8 h-8 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
+              <Sparkles className="w-4 h-4 text-amber-400" />
             </div>
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <span>Target Experiment Configuration</span>
+                <span>Experiment Targets & Strategy Hub</span>
                 <span className="text-[11px] font-mono text-zinc-400 font-normal">
-                  • {selectedConfig}
+                  • 1-Click Strategy Catalog & Agent Spawner
                 </span>
               </h2>
               <p className="text-[11px] text-zinc-500">
-                Inspect, edit hyperparameters, or create new experiment targets for local & cloud runs
+                Spawn vetted research targets with 1-click or generate prompt directives for Antigravity & Codex
               </p>
             </div>
           </div>
@@ -235,6 +483,21 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
         <div className="px-5 pt-2 pb-0 border-b border-zinc-800 bg-zinc-950/40 flex items-center justify-between">
           <div className="flex space-x-1">
             <button
+              onClick={() => setActiveTab('strategies')}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
+                activeTab === 'strategies'
+                  ? 'border-amber-400 text-amber-300'
+                  : 'border-transparent text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Kho Chiến Lược 1-Click & Nhờ AI</span>
+              <span className="ml-1 text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.2 rounded font-mono">
+                Guided
+              </span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('editor')}
               className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
                 activeTab === 'editor'
@@ -242,30 +505,18 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   : 'border-transparent text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Target Config Editor</span>
+              <FileCode className="w-3.5 h-3.5" />
+              <span>Kiểm Tra & Soạn Thảo YAML</span>
               {isDirty && (
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
               )}
             </button>
-
-            <button
-              onClick={() => setActiveTab('create')}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
-                activeTab === 'create'
-                  ? 'border-zinc-200 text-zinc-100'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Spawn New Experiment Target</span>
-            </button>
           </div>
 
-          {/* Config Quick Picker in Editor Mode */}
+          {/* Quick Config Picker if in Editor */}
           {activeTab === 'editor' && (
             <div className="flex items-center gap-2 pb-2">
-              <label className="text-[11px] text-zinc-500">Select File:</label>
+              <label className="text-[11px] text-zinc-500">File:</label>
               <select
                 value={selectedConfig}
                 onChange={(e) => setSelectedConfig(e.target.value)}
@@ -281,28 +532,380 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
           )}
         </div>
 
-        {/* Status / Alerts */}
+        {/* Global Notifications */}
         {errorMessage && (
-          <div className="mx-5 mt-4 p-3 bg-red-950/40 border border-red-800/80 rounded-lg text-xs text-red-300 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-            <span>{errorMessage}</span>
+          <div className="mx-5 mt-3 p-3 bg-red-950/40 border border-red-800/80 rounded-lg text-xs text-red-300 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+            <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-red-200 text-xs">
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {spawnSuccessMessage && (
+          <div className="mx-5 mt-3 p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-lg text-xs text-emerald-300 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <span>{spawnSuccessMessage}</span>
+            </div>
+            <button
+              onClick={() => {
+                setActiveTab('editor');
+                setSpawnSuccessMessage(null);
+              }}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 rounded border border-emerald-700 transition"
+            >
+              <span>Xem & Kiểm Tra YAML</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
           </div>
         )}
 
         {saveSuccess && (
-          <div className="mx-5 mt-4 p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
+          <div className="mx-5 mt-3 p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
             <span>Target configuration successfully saved to disk.</span>
           </div>
         )}
 
-        {/* Tab 1: Editor */}
+        {/* TAB 1: Strategy Catalog & Agent Spawner */}
+        {activeTab === 'strategies' && (
+          <div className="flex-1 overflow-y-auto p-5 space-y-6">
+            {/* Top Lineage Bar: Parent Model & Target IDE */}
+            <div className="p-4 bg-zinc-950/80 rounded-xl border border-zinc-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-700 flex items-center justify-center text-zinc-300 flex-shrink-0">
+                  <GitBranch className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-zinc-200">Parent Baseline Model:</span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.2 rounded font-mono">
+                      Reigning Champion Auto-Detected
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <select
+                      value={selectedParentId}
+                      onChange={(e) => setSelectedParentId(e.target.value)}
+                      className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs rounded-md px-3 py-1 font-mono focus:outline-none focus:border-zinc-500"
+                    >
+                      <option value="exp001_baseline_tfidf">exp001_baseline_tfidf (Root TF-IDF Baseline)</option>
+                      {experiments.map((exp) => (
+                        <option key={exp.id} value={exp.id}>
+                          {exp.id} ({exp.branch}, score: {exp.score ? exp.score.toFixed(4) : 'N/A'}{exp.is_best ? ' 🏆' : ''})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11px] text-zinc-500">
+                      Mọi thí nghiệm mới sẽ so sánh trực tiếp với Parent này.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* IDE Selector */}
+              <div className="flex items-center gap-2 self-end md:self-auto bg-zinc-900/90 p-1 rounded-lg border border-zinc-800">
+                <span className="text-[11px] text-zinc-400 px-2 font-medium">Prompt IDE:</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIde('antigravity')}
+                  className={`px-2.5 py-1 text-xs rounded font-medium transition ${
+                    selectedIde === 'antigravity'
+                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Antigravity
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIde('codex')}
+                  className={`px-2.5 py-1 text-xs rounded font-medium transition ${
+                    selectedIde === 'codex'
+                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  OpenAI Codex
+                </button>
+              </div>
+            </div>
+
+            {/* SECTION 1: Nhờ AI Agent Tự Thiết Kế Target */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Nhờ AI Agent Tự Thiết Kế & Thực Thi Target Tiếp Theo</span>
+                  </h3>
+                  <p className="text-[11px] text-zinc-400">
+                    Không cần gõ tay giả thuyết hay YAML. Chọn mục tiêu bên dưới để lấy ngay Prompt đã inject sẵn chẩn đoán lỗi của repo.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {/* Intent Card 1: Iterate / Tối ưu lỗi hiện tại */}
+                <div className="p-4 bg-zinc-950/60 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                          <Target className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-xs font-semibold text-zinc-200">
+                          Tối Ưu & Khắc Phục Lỗi Hiện Tại (Iterate)
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded text-zinc-400">
+                        Atomic Patch
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      AI Agent đọc log lỗi và chẩn đoán của <code className="text-zinc-300 font-mono">{selectedParentId}</code> (ví dụ: implicit hate speech, nhãn hiếm). Đảm bảo giữ nguyên các thành phần khác.
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-zinc-900 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handlePreviewPrompt('iterate')}
+                      className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition"
+                    >
+                      {previewPromptContent?.title.includes('Iterate') ? (
+                        <>
+                          <EyeOff className="w-3 h-3" />
+                          <span>Ẩn Preview</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3 h-3" />
+                          <span>Xem Prompt</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPrompt('iterate')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-md border border-zinc-700 transition"
+                    >
+                      {copiedPromptId === 'iterate' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-300">Đã Copy Prompt!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>Copy Prompt Giao Agent</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Intent Card 2: Explore / Khám phá kiến trúc mới */}
+                <div className="p-4 bg-zinc-950/60 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                          <Compass className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-xs font-semibold text-zinc-200">
+                          Khám Phá Nhánh & Kiến Trúc Mới (Explore)
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded">
+                        UCB Tree Search
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      AI Agent chuyển đổi sang một họ mô hình mới hoàn toàn (Multilingual Transformer / Multi-Task Learning) dựa trên thuật toán UCB, kèm bằng chứng grounding.
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-zinc-900 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handlePreviewPrompt('explore')}
+                      className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition"
+                    >
+                      {previewPromptContent?.title.includes('Explore') ? (
+                        <>
+                          <EyeOff className="w-3 h-3" />
+                          <span>Ẩn Preview</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3 h-3" />
+                          <span>Xem Prompt</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPrompt('explore')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-md border border-zinc-700 transition"
+                    >
+                      {copiedPromptId === 'explore' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-300">Đã Copy Prompt!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>Copy Prompt Giao Agent</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Collapsible Prompt Preview */}
+              {previewPromptContent && (
+                <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-zinc-300 font-mono">
+                      {previewPromptContent.title} ({selectedIde})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewPromptContent(null)}
+                      className="text-zinc-500 hover:text-zinc-300 text-xs"
+                    >
+                      Đóng Preview
+                    </button>
+                  </div>
+                  <pre className="text-[11px] font-mono bg-zinc-900 p-3 rounded-lg border border-zinc-800 text-zinc-300 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                    {previewPromptContent.prompt}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            {/* SECTION 2: Kho Thẻ Chiến Lược Khoa Học Có Sẵn (Strategy Cards) */}
+            <div className="space-y-3 pt-2 border-t border-zinc-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Kho Thẻ Chiến Lược Nghiên Cứu 1-Click (Strategy Catalog)</span>
+                  </h3>
+                  <p className="text-[11px] text-zinc-400">
+                    Các phương án khoa học đã thẩm định theo chuẩn AGENTS.md. Bấm 1-click để sinh file config chuẩn hoặc copy prompt giao việc.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {strategyCards.map((card) => {
+                  const isGenerating = generatingCardId === card.id;
+                  const isCopied = copiedPromptId === card.id;
+
+                  return (
+                    <div
+                      key={card.id}
+                      className="p-4 bg-zinc-950/70 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3.5 shadow-sm"
+                    >
+                      <div className="space-y-2">
+                        {/* Header Badge & Delta */}
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border font-semibold ${getBranchBadgeStyle(
+                              card.branch
+                            )}`}
+                          >
+                            {card.badge || card.branch}
+                          </span>
+                          <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3" />
+                            <span>{card.estimated_delta}</span>
+                          </span>
+                        </div>
+
+                        {/* Title */}
+                        <h4 className="text-xs font-bold text-zinc-100">{card.title}</h4>
+
+                        {/* Problem & Rationale */}
+                        <p className="text-[11px] text-zinc-400 leading-relaxed">
+                          {card.rationale || card.problem_addressed}
+                        </p>
+
+                        {/* Metadata Pills */}
+                        <div className="flex flex-wrap gap-1.5 pt-1 text-[10px] font-mono text-zinc-400">
+                          <span className="bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded flex items-center gap-1">
+                            <Cpu className="w-2.5 h-2.5 text-zinc-500" />
+                            <span>{card.model_family} ({card.model_name})</span>
+                          </span>
+                          {card.target_tasks && (
+                            <span className="bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded text-zinc-400">
+                              Targets: {card.target_tasks.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="pt-2.5 border-t border-zinc-900 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPrompt('card', card)}
+                          className="flex items-center gap-1 px-2.5 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 rounded border border-zinc-800 transition"
+                        >
+                          {isCopied ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-300">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-zinc-400" />
+                              <span>Copy Prompt</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isGenerating}
+                          onClick={() => handleSpawnStrategy(card)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded-md transition shadow-sm disabled:opacity-50"
+                        >
+                          {isGenerating ? (
+                            <span>Đang tạo Config...</span>
+                          ) : (
+                            <>
+                              <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                              <span>Tạo Config Ngay (1-Click)</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: YAML Editor & Preflight Inspector */}
         {activeTab === 'editor' && (
           <div className="flex-1 overflow-hidden flex flex-col p-5 space-y-3">
             {/* Top Toolbar */}
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
-                <span className="text-zinc-400">File:</span>
+                <span className="text-zinc-400">Config:</span>
                 <span className="font-mono text-zinc-200 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">
                   {selectedConfig}
                 </span>
@@ -316,11 +919,11 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleCopy}
+                  onClick={handleCopyYaml}
                   className="flex items-center gap-1 px-2.5 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700 transition"
                 >
-                  {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  <span>{copied ? 'Copied' : 'Copy YAML'}</span>
+                  {copiedYaml ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedYaml ? 'Copied' : 'Copy YAML'}</span>
                 </button>
 
                 {isDirty && (
@@ -409,171 +1012,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               </div>
             )}
           </div>
-        )}
-
-        {/* Tab 2: Spawn New Experiment Target */}
-        {activeTab === 'create' && (
-          <form onSubmit={handleCreateNew} className="flex-1 overflow-y-auto p-5 space-y-4">
-            <div className="p-3.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-1">
-              <div className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>Hypothesis-First Rule (AGENTS.md Contract)</span>
-              </div>
-              <p className="text-[11px] text-zinc-400">
-                Every new experiment config requires a defined parent, an atomic hypothesis, a single controlled intervention, and grounding verification.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">
-                  Parent Experiment
-                </label>
-                <select
-                  value={newParentId}
-                  onChange={(e) => setNewParentId(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
-                >
-                  <option value="none">none (Root Baseline)</option>
-                  {experiments.map((exp) => (
-                    <option key={exp.id} value={exp.id}>
-                      {exp.id} ({exp.branch}, score: {exp.score.toFixed(4)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">
-                  Branch Taxonomy
-                </label>
-                <select
-                  value={newBranch}
-                  onChange={(e) => {
-                    const b = e.target.value;
-                    setNewBranch(b);
-                    fetchNextId(b);
-                  }}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
-                >
-                  <option value="feat">feat — Features & Contexts</option>
-                  <option value="model">model — Architecture & Pretrained Weights</option>
-                  <option value="loss">loss — Loss Objectives & Weights</option>
-                  <option value="mtl">mtl — Multi-Task & Routing</option>
-                  <option value="ens">ens — Ensembling & Blending</option>
-                  <option value="baseline">baseline — Control Benchmarks</option>
-                </select>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-medium text-zinc-400">
-                    New Experiment ID
-                  </label>
-                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded">
-                    {autoAssigningId ? 'Resolving ID...' : 'Auto-Incremented (Next)'}
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  required
-                  value={newExpId}
-                  onChange={(e) => setNewExpId(e.target.value)}
-                  placeholder="e.g. exp002_feat_run"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">
-                Problem Addressed (Failure Mode in Parent)
-              </label>
-              <input
-                type="text"
-                required
-                value={newProblem}
-                onChange={(e) => setNewProblem(e.target.value)}
-                placeholder="e.g. High false positive rate on implicit hate speech due to missing video context."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">
-                Scientific Hypothesis
-              </label>
-              <textarea
-                required
-                rows={2}
-                value={newHypothesis}
-                onChange={(e) => setNewHypothesis(e.target.value)}
-                placeholder="e.g. Incorporating video title metadata will boost Subtask B implicit hate F1 by +0.03."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">
-                Controlled Intervention (Control vs Treatment)
-              </label>
-              <input
-                type="text"
-                required
-                value={newIntervention}
-                onChange={(e) => setNewIntervention(e.target.value)}
-                placeholder="e.g. Prepend yt_title to comment text before n-gram tokenization."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Approach Type</label>
-                <select
-                  value={newApproachType}
-                  onChange={(e) => setNewApproachType(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
-                >
-                  <option value="ml">Classical ML (Linear / Tree / Scikit-learn)</option>
-                  <option value="dl">Deep Learning (Transformers / PyTorch)</option>
-                  <option value="hybrid">Hybrid (Ensemble / Stacking)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Model Family</label>
-                <select
-                  value={newModelFamily}
-                  onChange={(e) => setNewModelFamily(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
-                >
-                  <option value="linear">linear (Logistic Regression / SVM)</option>
-                  <option value="transformer">transformer (DeBERTa / XLM-R / BERT)</option>
-                  <option value="tree">tree (LightGBM / XGBoost / CatBoost)</option>
-                  <option value="ensemble">ensemble (Weighted Blend / Stacking)</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end gap-2 border-t border-zinc-800">
-              <button
-                type="button"
-                onClick={() => setActiveTab('editor')}
-                className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={creating}
-                className="flex items-center gap-1.5 px-4 py-1.5 text-xs bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded-md transition disabled:opacity-50"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>{creating ? 'Creating Config...' : 'Create Target Config File'}</span>
-              </button>
-            </div>
-          </form>
         )}
       </div>
     </div>
