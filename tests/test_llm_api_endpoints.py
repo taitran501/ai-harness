@@ -82,6 +82,54 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             res = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(res["success"])
 
+    def test_get_llm_hf_models(self):
+        url = f"http://localhost:{self.port}/api/llm/hf_models?search=qwen&limit=5"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+            self.assertIn("models", data)
+            self.assertIsInstance(data["models"], list)
+
+    def test_get_llm_unsloth_models(self):
+        url = f"http://localhost:{self.port}/api/llm/unsloth_models?limit=10"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+            self.assertIn("models", data)
+            self.assertIsInstance(data["models"], list)
+
+    def test_get_llm_provider_models(self):
+        url = f"http://localhost:{self.port}/api/llm/provider_models?provider=gemini"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(data["provider"], "gemini")
+            self.assertIn("models", data)
+            self.assertIsInstance(data["models"], list)
+            self.assertGreater(len(data["models"]), 0)
+
+    def test_post_llm_generate_unsloth_script(self):
+        url = f"http://localhost:{self.port}/api/llm/generate_unsloth_script"
+        payload = {
+            "model_name": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+            "lora_r": 16,
+            "lora_alpha": 32,
+            "save_to_disk": False,
+        }
+        data_bytes = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data_bytes, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            res = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(res["success"])
+            self.assertIn("FastLanguageModel", res["script_code"])
+            self.assertIn("unsloth", res["script_code"])
+            self.assertIn("SFTTrainer", res["script_code"])
+
 
 if __name__ == "__main__":
     unittest.main()
+

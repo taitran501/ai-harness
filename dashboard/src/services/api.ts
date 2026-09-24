@@ -16,6 +16,10 @@ import {
   LLMTestPromptResponse,
   LLMPeftGenerateRequest,
   LLMPeftGenerateResponse,
+  HFModelInfo,
+  UnslothModelInfo,
+  ProviderModelInfo,
+  LLMUnslothGenerateRequest,
 } from '../types/experiment';
 
 const API_BASE = '/api';
@@ -456,6 +460,49 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(err.error || `Failed to save API key: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async getHFModels(params?: {
+    search?: string;
+    pipeline?: string;
+    author?: string;
+    limit?: number;
+    sort?: string;
+  }): Promise<{ models: HFModelInfo[] }> {
+    const query = new URLSearchParams();
+    if (params?.search) query.append('search', params.search);
+    if (params?.pipeline) query.append('pipeline', params.pipeline);
+    if (params?.author) query.append('author', params.author);
+    if (params?.limit) query.append('limit', params.limit.toString());
+    if (params?.sort) query.append('sort', params.sort);
+    const res = await fetch(`${API_BASE}/llm/hf_models?${query.toString()}`);
+    if (!res.ok) throw new Error(`Failed to fetch Hugging Face models: ${res.statusText}`);
+    return res.json();
+  },
+
+  async getUnslothModels(limit = 50): Promise<{ models: UnslothModelInfo[] }> {
+    const res = await fetch(`${API_BASE}/llm/unsloth_models?limit=${limit}`);
+    if (!res.ok) throw new Error(`Failed to fetch Unsloth models: ${res.statusText}`);
+    return res.json();
+  },
+
+  async getProviderModels(provider: string): Promise<{ provider: string; models: ProviderModelInfo[] }> {
+    const res = await fetch(`${API_BASE}/llm/provider_models?provider=${encodeURIComponent(provider)}`);
+    if (!res.ok) throw new Error(`Failed to fetch provider models: ${res.statusText}`);
+    return res.json();
+  },
+
+  async generateUnslothScript(payload: LLMUnslothGenerateRequest): Promise<LLMPeftGenerateResponse> {
+    const res = await fetch(`${API_BASE}/llm/generate_unsloth_script`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Unsloth script generation failed: ${res.statusText}`);
     }
     return res.json();
   },

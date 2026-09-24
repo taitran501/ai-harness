@@ -460,4 +460,51 @@ export interface LLMPeftGenerateResponse {
   error?: string;
 }
 
+export interface HFModelInfo {
+  id: string;
+  name: string;
+  author?: string | null;
+  downloads: number;
+  likes: number;
+  pipeline_tag?: string;
+  last_modified?: string;
+  is_unsloth: boolean;
+}
+
+export interface UnslothModelInfo extends HFModelInfo {
+  family: string;
+  is_bnb_4bit: boolean;
+  is_gguf: boolean;
+  is_instruct: boolean;
+  recommended_for_lora: boolean;
+}
+
+export interface ProviderModelInfo {
+  id: string;
+  name: string;
+  context_length?: number;
+  description?: string;
+  is_live: boolean;
+  size_bytes?: number;
+}
+
+export interface LLMUnslothGenerateRequest {
+  model_name: string;
+  train_path?: string;
+  output_dir?: string;
+  text_column?: string;
+  target_column?: string;
+  max_seq_length?: number;
+  lora_r?: number;
+  lora_alpha?: number;
+  lora_dropout?: number;
+  target_modules?: string;
+  num_train_epochs?: number;
+  batch_size?: number;
+  gradient_accumulation_steps?: number;
+  learning_rate?: number;
+  save_to_disk?: boolean;
+}
+
+
 

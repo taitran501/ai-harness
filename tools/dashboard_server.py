@@ -738,6 +738,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_llm_providers()
         elif path == "/api/llm/sample_data":
             self.handle_api_llm_sample_data()
+        elif path == "/api/llm/hf_models":
+            self.handle_api_llm_hf_models(parsed_url.query)
+        elif path == "/api/llm/unsloth_models":
+            self.handle_api_llm_unsloth_models(parsed_url.query)
+        elif path == "/api/llm/provider_models":
+            self.handle_api_llm_provider_models(parsed_url.query)
         else:
             # Fallback to serving static frontend
             super().do_GET()
@@ -950,6 +956,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length).decode("utf-8")
                 data = json.loads(body)
                 self.handle_api_llm_generate_peft(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/llm/generate_unsloth_script":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_llm_generate_unsloth(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/environment/llm/key":
@@ -1765,6 +1779,98 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(res)
         except Exception as e:
             self.send_json({"error": str(e)}, status=400)
+
+    def handle_api_llm_hf_models(self, query_str: str) -> None:
+        try:
+            params = urllib.parse.parse_qs(query_str)
+            search = params.get("search", [""])[0]
+            pipeline = params.get("pipeline", [None])[0]
+            author = params.get("author", [None])[0]
+            sort = params.get("sort", ["downloads"])[0]
+            limit = int(params.get("limit", [20])[0])
+            models = LLMEngine.fetch_hf_models(
+                query=search,
+                pipeline_tag=pipeline,
+                author=author,
+                limit=limit,
+                sort=sort,
+            )
+            self.send_json({"models": models, "count": len(models)})
+        except Exception as e:
+            self.send_json({"error": str(e), "models": []}, status=500)
+
+    def handle_api_llm_unsloth_models(self, query_str: str) -> None:
+        try:
+            params = urllib.parse.parse_qs(query_str)
+            limit = int(params.get("limit", [50])[0])
+            models = LLMEngine.fetch_unsloth_models(limit=limit)
+            self.send_json({"models": models, "count": len(models)})
+        except Exception as e:
+            self.send_json({"error": str(e), "models": []}, status=500)
+
+    def handle_api_llm_provider_models(self, query_str: str) -> None:
+        try:
+            params = urllib.parse.parse_qs(query_str)
+            provider = params.get("provider", [""])[0]
+            api_key = params.get("api_key", [None])[0]
+            if not provider:
+                self.send_json({"error": "provider is required"}, status=400)
+                return
+            models = LLMEngine.fetch_provider_live_models(provider=provider, api_key=api_key)
+            self.send_json({"provider": provider, "models": models, "count": len(models)})
+        except Exception as e:
+            self.send_json({"error": str(e), "models": []}, status=500)
+
+    def handle_api_llm_generate_unsloth(self, data: Dict[str, Any]) -> None:
+        try:
+            model_name = data.get("model_name", "unsloth/Qwen2.5-7B-Instruct-bnb-4bit")
+            train_path = data.get("train_path", "dataset/train.csv")
+            output_dir = data.get("output_dir", "artifacts/exp_unsloth_lora")
+            text_column = data.get("text_column", "text")
+            target_column = data.get("target_column", "target")
+            max_seq_length = int(data.get("max_seq_length", 2048))
+            lora_r = int(data.get("lora_r", 16))
+            lora_alpha = int(data.get("lora_alpha", 32))
+            lora_dropout = float(data.get("lora_dropout", 0.0))
+            num_train_epochs = int(data.get("num_train_epochs", 3))
+            batch_size = int(data.get("batch_size", 4))
+            gradient_accumulation_steps = int(data.get("gradient_accumulation_steps", 4))
+            learning_rate = float(data.get("learning_rate", 2e-4))
+
+            script_code = LLMEngine.generate_unsloth_script(
+                model_name=model_name,
+                train_path=train_path,
+                output_dir=output_dir,
+                text_column=text_column,
+                target_column=target_column,
+                max_seq_length=max_seq_length,
+                lora_r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                num_train_epochs=num_train_epochs,
+                batch_size=batch_size,
+                gradient_accumulation_steps=gradient_accumulation_steps,
+                learning_rate=learning_rate,
+            )
+
+            save_to_disk = data.get("save_to_disk", False)
+            saved_path = None
+            if save_to_disk:
+                scripts_dir = PROJECT_ROOT / "scripts" / "llm"
+                scripts_dir.mkdir(parents=True, exist_ok=True)
+                clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", model_name.split("/")[-1].lower())
+                saved_file = scripts_dir / f"train_unsloth_{clean_name}.py"
+                saved_file.write_text(script_code, encoding="utf-8")
+                saved_path = str(saved_file.relative_to(PROJECT_ROOT)).replace("\\", "/")
+
+            self.send_json({
+                "success": True,
+                "script_code": script_code,
+                "saved_path": saved_path,
+            })
+        except Exception as e:
+            self.send_json({"error": str(e), "success": False}, status=400)
+
 
 
 def run_server(port: int = 8080) -> None:
