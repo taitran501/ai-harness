@@ -13,6 +13,7 @@ import {
   Shield,
   Layers,
   ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 import { EnvironmentStatus } from '../types/experiment';
 import { api } from '../services/api';
@@ -48,6 +49,13 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
   const [kaggleKey, setKaggleKey] = useState('');
   const [savingKaggle, setSavingKaggle] = useState(false);
   const [kaggleSuccessMsg, setKaggleSuccessMsg] = useState<string | null>(null);
+
+  // LLM Key action
+  const [showLLMKeyForm, setShowLLMKeyForm] = useState(false);
+  const [selectedLLMKeyName, setSelectedLLMKeyName] = useState('GEMINI_API_KEY');
+  const [llmKeyValue, setLLMKeyValue] = useState('');
+  const [savingLLMKey, setSavingLLMKey] = useState(false);
+  const [llmKeySuccessMsg, setLLMKeySuccessMsg] = useState<string | null>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -137,6 +145,30 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
       setError(err.message || 'Error saving Kaggle credentials.');
     } finally {
       setSavingKaggle(false);
+    }
+  };
+
+  const handleSaveLLMKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLLMKeyName || !llmKeyValue.trim()) return;
+    setSavingLLMKey(true);
+    setLLMKeySuccessMsg(null);
+    try {
+      const res = await api.saveLLMKey(selectedLLMKeyName, llmKeyValue.trim());
+      if (res.success) {
+        setLLMKeySuccessMsg(`Key '${selectedLLMKeyName}' saved!`);
+        setLLMKeyValue('');
+        await fetchStatus();
+        onStatusChanged?.();
+        setTimeout(() => {
+          setShowLLMKeyForm(false);
+          setLLMKeySuccessMsg(null);
+        }, 2000);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to save LLM key.');
+    } finally {
+      setSavingLLMKey(false);
     }
   };
 
@@ -432,6 +464,99 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* 4. LLM API Providers & Local Daemons */}
+          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-purple-400" />
+                <span className="font-semibold text-zinc-200">LLM API Providers & Local Daemons</span>
+              </div>
+              <button
+                onClick={() => setShowLLMKeyForm(!showLLMKeyForm)}
+                className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-purple-300 rounded text-xs font-medium transition flex items-center gap-1.5"
+              >
+                <Key className="w-3 h-3 text-purple-400" />
+                <span>{showLLMKeyForm ? 'Cancel' : 'Set API Key'}</span>
+              </button>
+            </div>
+
+            {showLLMKeyForm && (
+              <form onSubmit={handleSaveLLMKey} className="p-3 bg-zinc-950/80 border border-zinc-800 rounded-lg space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-zinc-400 font-mono">Provider Key</label>
+                    <select
+                      value={selectedLLMKeyName}
+                      onChange={(e) => setSelectedLLMKeyName(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono"
+                    >
+                      <option value="GEMINI_API_KEY">GEMINI_API_KEY (Google Gemini)</option>
+                      <option value="OPENAI_API_KEY">OPENAI_API_KEY (OpenAI)</option>
+                      <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY (Anthropic Claude)</option>
+                      <option value="DEEPSEEK_API_KEY">DEEPSEEK_API_KEY (DeepSeek)</option>
+                      <option value="GROQ_API_KEY">GROQ_API_KEY (Groq LPU)</option>
+                      <option value="OPENROUTER_API_KEY">OPENROUTER_API_KEY (OpenRouter)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 font-mono">Key Secret</label>
+                    <input
+                      type="password"
+                      value={llmKeyValue}
+                      onChange={(e) => setLLMKeyValue(e.target.value)}
+                      placeholder="Paste API secret..."
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  {llmKeySuccessMsg ? (
+                    <span className="text-xs text-emerald-400 font-medium">{llmKeySuccessMsg}</span>
+                  ) : (
+                    <span className="text-[10px] text-zinc-500">Key will be saved to .env</span>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={savingLLMKey || !llmKeyValue.trim()}
+                    className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold"
+                  >
+                    {savingLLMKey ? 'Saving...' : 'Save API Key'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Providers Status Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
+              {envStatus?.llm?.providers ? (
+                Object.entries(envStatus.llm.providers).map(([pName, pInfo]) => (
+                  <div key={pName} className="p-2 bg-zinc-950/60 border border-zinc-800/60 rounded-lg space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-300 font-medium capitalize">{pName}</span>
+                      {pInfo.configured || pInfo.reachable ? (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      ) : (
+                        <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                      )}
+                    </div>
+                    <div className="text-[10px] text-zinc-500 truncate">
+                      {pInfo.is_local
+                        ? pInfo.reachable
+                          ? 'Daemon Live'
+                          : 'Not Running'
+                        : pInfo.configured
+                        ? pInfo.masked_key || 'Configured'
+                        : 'No Key'}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="col-span-4 text-xs text-zinc-500 italic">No LLM provider status loaded.</div>
+              )}
             </div>
           </div>
         </div>

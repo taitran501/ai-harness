@@ -1,4 +1,4 @@
-export type ApproachType = 'ml' | 'dl' | 'hybrid';
+export type ApproachType = 'ml' | 'dl' | 'llm' | 'hybrid';
 export type BranchType = 'baseline' | 'feat' | 'model' | 'loss' | 'mtl' | 'ens' | string;
 export type NodeStatus = 'COMPLETED' | 'BUGGY' | 'PRUNED' | 'RUNNING' | string;
 
@@ -112,6 +112,8 @@ export interface UCBRecommendation {
 
 export interface PromptTemplateInfo {
   id: string;
+  ide?: string;
+  intent?: string;
   name: string;
   badge: string;
   description: string;
@@ -328,6 +330,17 @@ export interface EnvironmentStatus {
     driver_version: string | null;
     cuda_available: boolean;
   };
+  llm?: {
+    providers: Record<string, {
+      configured: boolean;
+      env_var: string | null;
+      masked_key: string | null;
+      is_local: boolean;
+      endpoint: string | null;
+      reachable: boolean;
+    }>;
+    total_configured: number;
+  };
 }
 
 export interface CloudJob {
@@ -368,4 +381,83 @@ export interface NextExpIdResponse {
   descriptor: string;
   suggested_file: string;
 }
+
+export interface LLMProviderInfo {
+  id: string;
+  name: string;
+  models: string[];
+  default_model: string;
+  has_key: boolean;
+  is_reachable: boolean;
+  env_key_name: string | null;
+  is_local: boolean;
+}
+
+export interface LLMSampleDataResponse {
+  columns: string[];
+  rows: Record<string, any>[];
+  total_samples: number;
+  source_file: string | null;
+}
+
+export interface LLMTestPromptRequest {
+  provider: string;
+  model: string;
+  system_prompt: string;
+  user_prompt_template: string;
+  input_row: Record<string, any>;
+  api_key?: string;
+  base_url?: string;
+  temperature?: number;
+  max_tokens?: number;
+  use_cot?: boolean;
+  few_shot_examples?: Array<{ input: string; output: string; explanation?: string }>;
+  valid_classes?: string[];
+}
+
+export interface LLMTestPromptResponse {
+  success: boolean;
+  provider: string;
+  model: string;
+  effective_system_prompt: string;
+  effective_user_prompt: string;
+  raw_text: string;
+  extracted: {
+    parsed_label: string;
+    reasoning?: string;
+    raw_text: string;
+    is_valid: boolean;
+  };
+  latency_ms: number;
+  usage: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
+  error?: string;
+}
+
+export interface LLMPeftGenerateRequest {
+  model_name: string;
+  train_path?: string;
+  output_dir?: string;
+  text_column?: string;
+  target_column?: string;
+  lora_r?: number;
+  lora_alpha?: number;
+  lora_dropout?: number;
+  target_modules?: string;
+  num_train_epochs?: number;
+  batch_size?: number;
+  gradient_accumulation_steps?: number;
+  learning_rate?: number;
+  save_to_disk?: boolean;
+}
+
+export interface LLMPeftGenerateResponse {
+  success: boolean;
+  script_code: string;
+  saved_path?: string | null;
+  error?: string;
+}
+
 

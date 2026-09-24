@@ -83,6 +83,10 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("antigravity", template_ids)
         self.assertIn("aide", template_ids)
         self.assertIn("minimal", template_ids)
+        self.assertIn("antigravity_attach", template_ids)
+        self.assertIn("antigravity_iterate", template_ids)
+        self.assertIn("codex_attach", template_ids)
+        self.assertIn("codex_iterate", template_ids)
 
     def test_api_priming_prompt_codex(self):
         """Endpoint /api/priming_prompt?template=codex should return OpenAI Codex CLI format."""
@@ -92,6 +96,28 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("# SYSTEM DIRECTIVE: OPENAI CODEX", prompt)
         self.assertIn("Codex CLI", prompt)
         self.assertIn("EXECUTION LOOP", prompt)
+
+    def test_api_priming_prompt_dual_ide_dual_intent(self):
+        """Endpoint /api/priming_prompt should support ide and intent query parameters."""
+        # Antigravity Attach
+        data_ag_attach = self.fetch_json("/api/priming_prompt?ide=antigravity&intent=attach")
+        self.assertIn("ANTIGRAVITY INITIAL TASK SETUP & ATTACH", data_ag_attach["prompt"])
+        self.assertIn("MANDATORY INITIAL SETUP SEQUENCE", data_ag_attach["prompt"])
+
+        # Antigravity Iterate
+        data_ag_iter = self.fetch_json("/api/priming_prompt?ide=antigravity&intent=iterate")
+        self.assertIn("MISSION DIRECTIVE & RUNTIME CONTEXT INJECTION", data_ag_iter["prompt"])
+        self.assertIn("Mandatory Agent Acknowledgment Step", data_ag_iter["prompt"])
+
+        # Codex Attach
+        data_cx_attach = self.fetch_json("/api/priming_prompt?ide=codex&intent=attach")
+        self.assertIn("OPENAI CODEX INITIAL PIPELINE SETUP & ATTACH", data_cx_attach["prompt"])
+        self.assertIn("INITIALIZATION SEQUENCE", data_cx_attach["prompt"])
+
+        # Codex Iterate
+        data_cx_iter = self.fetch_json("/api/priming_prompt?ide=codex&intent=iterate")
+        self.assertIn("OPENAI CODEX / AUTONOMOUS ML ENGINEER", data_cx_iter["prompt"])
+        self.assertIn("EXECUTION LOOP", data_cx_iter["prompt"])
 
     def test_api_status(self):
         """Endpoint /api/status should return health status and champion metrics."""

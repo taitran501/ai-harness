@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GitBranch, Table, Cpu, Layers, Crown, Award, Cloud } from 'lucide-react';
+import { GitBranch, Table, Cpu, Layers, Crown, Award, Cloud, Sparkles } from 'lucide-react';
 import { api } from './services/api';
 import { Header } from './components/Header';
 import { TreeCanvas } from './components/TreeCanvas';
@@ -9,6 +9,7 @@ import { SubmissionsTab } from './components/SubmissionsTab';
 import { PrimingCenter } from './components/PrimingCenter';
 import { TaskConfigModal } from './components/TaskConfigModal';
 import { CloudRunnerHub } from './components/CloudRunnerHub';
+import { LLMStudio } from './components/LLMStudio';
 import { CompetitionReadinessModal } from './components/CompetitionReadinessModal';
 import { ExperimentConfigModal } from './components/ExperimentConfigModal';
 import { CloudEnvironmentModal } from './components/CloudEnvironmentModal';
@@ -23,7 +24,7 @@ import {
 } from './types/experiment';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'tree' | 'experiments' | 'submissions' | 'cloud' | 'priming'>('tree');
+  const [activeTab, setActiveTab] = useState<'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('tree');
   const [graphData, setGraphData] = useState<TreeGraphResponse>({ nodes: [], edges: [], best_id: null });
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionEntry[]>([]);
@@ -181,6 +182,18 @@ export const App: React.FC = () => {
             </button>
 
             <button
+              onClick={() => setActiveTab('llm')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                activeTab === 'llm'
+                  ? 'bg-zinc-800 text-purple-300 shadow-sm border border-purple-800/40'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span>LLM Studio</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('priming')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'priming'
@@ -241,7 +254,16 @@ export const App: React.FC = () => {
           />
         )}
 
-        {/* Tab 5: Priming Prompt Center */}
+        {/* Tab 5: LLM Studio & Playground */}
+        {activeTab === 'llm' && (
+          <LLMStudio
+            taskInfo={taskInfo}
+            onRefreshSolutionTree={loadData}
+            onOpenConfigModal={(actionOrPath, parentId) => handleOpenConfigModal(actionOrPath, parentId)}
+          />
+        )}
+
+        {/* Tab 6: Priming Prompt Center */}
         {activeTab === 'priming' && (
           <PrimingCenter initialPrompt={primingPrompt} taskInfo={taskInfo} />
         )}

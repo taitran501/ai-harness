@@ -134,8 +134,24 @@ class TreeJournal:
             branch = exp_info.get("branch", "baseline")
             hypothesis = exp_info.get("hypothesis", "")
             intervention = exp_info.get("intervention", "")
-            approach_type = task_info.get("approach_type") or ("dl" if "deberta" in exp_id.lower() or "xlm" in exp_id.lower() else "ml")
-            model_family = task_info.get("model_family") or ("transformer" if approach_type == "dl" else "linear")
+            approach_type = task_info.get("approach_type")
+            if not approach_type:
+                lower_id = exp_id.lower()
+                if any(k in lower_id for k in ["llm", "gemini", "gpt", "claude", "deepseek", "qwen", "llama", "qlora", "peft", "fewshot", "cot"]):
+                    approach_type = "llm"
+                elif "deberta" in lower_id or "xlm" in lower_id or "roberta" in lower_id or "bert" in lower_id:
+                    approach_type = "dl"
+                else:
+                    approach_type = "ml"
+
+            model_family = task_info.get("model_family")
+            if not model_family:
+                if approach_type == "llm":
+                    model_family = "llm_peft" if "qlora" in exp_id.lower() or "peft" in exp_id.lower() else "llm_api"
+                elif approach_type == "dl":
+                    model_family = "transformer"
+                else:
+                    model_family = "linear"
             primary_metric_name = task_info.get("primary_metric", "macro_f1")
             direction = task_info.get("direction", "maximize")
 

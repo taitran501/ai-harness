@@ -16,6 +16,7 @@ import json
 import os
 import re
 import socketserver
+import subprocess
 import sys
 import urllib.parse
 from dataclasses import asdict
@@ -33,9 +34,10 @@ from harness.submission_manager import SubmissionManager
 from harness.cloud_inspector import CloudPreflightInspector
 from harness.templates.kaggle_template import KaggleKernelManager
 from harness.templates.modal_template import generate_modal_script
-from harness.skill_injector import inject_skill_file
 from harness.environment_detector import EnvironmentDetector
 from harness.cloud_job_runner import CloudJobManager, CloudJob
+from harness.llm_engine import LLMEngine, LLMConfig
+from harness.skill_injector import inject_skill_file
 
 
 def get_next_experiment_id(branch: str = "feat", descriptor: str = "run") -> Dict[str, Any]:
@@ -511,8 +513,83 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     rec_parent = rec.get("parent_id") or best_id
     rec_branch = rec.get("branch") or "feat"
 
-    if template_id == "codex":
-        # Industry-standard OpenAI Codex / Coding Agent system prompt
+    # Normalize template_id / aliases
+    tid = template_id.lower().strip()
+    if tid in ("antigravity", "antigravity_iterate"):
+        tid = "antigravity_iterate"
+    elif tid in ("codex", "codex_iterate"):
+        tid = "codex_iterate"
+    elif tid in ("antigravity_attach", "attach_antigravity"):
+        tid = "antigravity_attach"
+    elif tid in ("codex_attach", "attach_codex"):
+        tid = "codex_attach"
+    elif tid == "aide":
+        tid = "antigravity_iterate"
+    elif tid == "minimal":
+        tid = "codex_iterate"
+
+    data_config = task.get("data_config", {})
+    split_strategy = data_config.get("split_strategy", "GroupKFold")
+    group_col = data_config.get("group_column", "video_key")
+    train_path = data_config.get("train_path", "dataset/")
+
+    if tid == "antigravity_attach":
+        prompt_lines = [
+            f"# SYSTEM DIRECTIVE: ANTIGRAVITY INITIAL TASK SETUP & ATTACH",
+            "",
+            "> [!IMPORTANT]",
+            f"> Benchmark Task: **{task_name}** | Type: **{task_type}** ({task_modality}) | Target Metric: **{primary_metric} ({direction})**",
+            "> You are Antigravity, attaching to a fresh workspace or competition repo. Your objective is to ingest the problem, verify data contracts, and establish a rock-solid, leakage-free baseline.",
+            "",
+            "## 1. REPOSITORY ORIENTATION & CONTRACTS",
+            f"- **Dataset Path**: `{train_path}`",
+            f"- **Validation Scheme**: `{split_strategy}` on `{group_col}` (Zero data leakage tolerated).",
+            f"- **Task Specification**: Inspect `configs/task.yaml` and `harness/task_spec.py` for target columns, subtasks, and conditional if-else routing.",
+            "- **Scientific Protocol**: Strictly adhere to `AGENTS.md`. Folders inside `artifacts/` are permanent records.",
+            "",
+            "## 2. ACTIVE TASK METRICS & CONSTRAINTS",
+            f"- **Primary Metric**: `{primary_metric}` ({direction})",
+            f"- **Target Score Goal**: `{task.get('primary_metric_target', 0.85)}`",
+            f"- **Rule Invariants**: Fixed random seed (`seed: 42`), precomputed canonical splits, immutable experiments.",
+            "",
+            "## 3. MANDATORY INITIAL SETUP SEQUENCE",
+            "Follow these sequential steps to initialize the competition harness:",
+            "1. **Explore Data & Audit Splits**: Inspect `dataset/` schemas, check for label imbalances, and verify split integrity with `harness/data_strategy.py`.",
+            "2. **Declare Baseline Configuration**: Create `configs/exp001_baseline_<name>.yaml` declaring the foundational control model with explicit `grounding:` and `assumption_register:` blocks.",
+            "3. **Execute Smoke Test Probe**: Verify execution on Fold 0 with minimal samples:",
+            "   ```powershell",
+            "   python train.py --config configs/exp001_baseline_<name>.yaml --debug --fold 0",
+            "   ```",
+            "4. **Run Full 5-Fold Cross-Validation**: Execute full cross-validation and verify generated artifacts (`metrics.json`, `oof_predictions.csv`, `EXPERIMENT_CARD.md`):",
+            "   ```powershell",
+            "   python train.py --config configs/exp001_baseline_<name>.yaml",
+            "   ```",
+            "5. **Register Champion Baseline**: Ensure the result is recorded in `EXPERIMENTS.md` and registered in `TreeJournal`.",
+            "",
+            "## 4. AGENT ACKNOWLEDGMENT GATE",
+            "Before writing code, acknowledge in chat: (1) Target task and metric, (2) Splitting strategy & leakage prevention, (3) Baseline model architecture family.",
+        ]
+    elif tid == "codex_attach":
+        prompt_lines = [
+            f"# SYSTEM DIRECTIVE: OPENAI CODEX INITIAL PIPELINE SETUP & ATTACH",
+            "",
+            "> [!IMPORTANT]",
+            f"> Target Benchmark: **{task_name}** | Type: **{task_type}** | Primary Target: **{primary_metric} ({direction})**",
+            "> You are OpenAI Codex CLI operating in autonomous ML engineer mode. Setup the baseline and verify pipeline integrity.",
+            "",
+            "## 1. REPOSITORY INVARIANTS & HARD RULES",
+            "1. **Operating Contract**: Strictly obey `AGENTS.md`. Never edit `dataset/` directly. Never overwrite completed `artifacts/`.",
+            f"2. **Data Strategy**: Validation is `{split_strategy}` on `{group_col}`. Random comment-level splitting is forbidden due to group leakage.",
+            "3. **Deterministic Audit Gate**: All candidate submissions must pass `tools/audit_gate.py` with MMES >= 2.0% row delta.",
+            "",
+            "## 2. INITIALIZATION SEQUENCE (PLAN -> CODE -> SMOKE TEST -> FULL CV)",
+            "1. **Inspect Repo**: Read `configs/task.yaml`, `harness/task_spec.py`, and `harness/data_strategy.py`.",
+            "2. **Formulate exp001 Baseline**: Create `configs/exp001_baseline_<name>.yaml` with valid `grounding:` and `assumption_register:` blocks.",
+            "3. **Run Smoke Test**: Execute `python train.py --config configs/exp001_baseline_<name>.yaml --debug --fold 0`.",
+            "4. **Run Full Cross-Validation**: Execute `python train.py --config configs/exp001_baseline_<name>.yaml`.",
+            "5. **Verify Receipts**: Confirm `artifacts/exp001_.../metrics.json` and `EXPERIMENT_CARD.md` exist.",
+        ]
+    elif tid == "codex_iterate":
         prompt_lines = [
             f"# SYSTEM DIRECTIVE: OPENAI CODEX / AUTONOMOUS ML ENGINEER",
             "",
@@ -546,40 +623,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "3. **Validate**: Execute CV validation: `python train.py --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0` (smoke test first), then full CV.",
             "4. **Output Format**: Provide a concise summary, git diff, and resulting validation scores.",
         ]
-    elif template_id == "aide":
-        prompt_lines = [
-            f"# AIDE AUTONOMOUS ML SOLUTION TREE SEARCH PRIMING",
-            "",
-            f"You are navigating the Solution Tree for **{task_name}**.",
-            f"Objective: {direction.capitalize()} `{primary_metric}` across cross-validation folds.",
-            "",
-            "## 1. Current Frontier State",
-            f"- Champion Node: `{best_id}` (Score: `{best_score}`)",
-            f"- UCB Exploration Target: Branch `{rec_branch}` on parent `{rec_parent}`",
-            f"- Search Guideline: {rec.get('guideline')}",
-            "",
-            "## 2. Empirical Failure Slices",
-            *diagnostics_notes,
-            "",
-            "## 3. Operational Rules",
-            "1. Register atomic hypothesis declaring expected quantitative delta.",
-            "2. Execute cross-validation on precomputed canonical folds without data leakage.",
-            "3. Verify effect size MMES >= 2.0% before packaging submission.",
-        ]
-    elif template_id == "minimal":
-        prompt_lines = [
-            f"# DIRECT ML EXECUTION: {task_name.upper()}",
-            f"- Task: {task_type} | Target: {primary_metric} ({direction})",
-            f"- Baseline Champion: {best_id} ({best_score})",
-            f"- Next Branch Target: {rec_branch} (Parent: {rec_parent})",
-            "",
-            "## Instructions",
-            "1. Plan 1 atomic intervention addressing diagnosed bottlenecks.",
-            "2. Create configs/exp<NNN>_<branch>_<name>.yaml with explicit grounding block.",
-            "3. Run: python train.py --config configs/exp<NNN>_<branch>_<name>.yaml --debug --fold 0",
-            "4. Verify CV scores and ensure row delta MMES >= 2.0%.",
-        ]
-    else:  # Antigravity default
+    else:  # antigravity_iterate (default)
         prompt_lines = [
             "# MISSION DIRECTIVE & RUNTIME CONTEXT INJECTION",
             "",
@@ -690,6 +734,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_cloud_logs_stream(parsed_url.query)
         elif path == "/api/sync":
             self.handle_api_sync()
+        elif path == "/api/llm/providers":
+            self.handle_api_llm_providers()
+        elif path == "/api/llm/sample_data":
+            self.handle_api_llm_sample_data()
         else:
             # Fallback to serving static frontend
             super().do_GET()
@@ -888,6 +936,30 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.handle_api_create_config(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/llm/test_prompt":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_llm_test_prompt(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/llm/generate_peft_script":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_llm_generate_peft(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/environment/llm/key":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_llm_save_key(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
         else:
             self.send_response(404)
             self.end_headers()
@@ -1012,35 +1084,83 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({
             "templates": [
                 {
-                    "id": "codex",
-                    "name": "OpenAI Codex CLI",
-                    "badge": "Recommended",
-                    "description": "Standard coding agent system instructions for OpenAI Codex & autonomous coding CLI agents following AGENTS.md conventions.",
+                    "id": "antigravity_attach",
+                    "ide": "antigravity",
+                    "intent": "attach",
+                    "name": "Antigravity — Setup & Attach",
+                    "badge": "Setup",
+                    "description": "Initial session prompt: Ingest task specification, verify split integrity, and establish foundational baseline.",
                 },
                 {
+                    "id": "antigravity_iterate",
+                    "ide": "antigravity",
+                    "intent": "iterate",
+                    "name": "Antigravity — Continue Iteration",
+                    "badge": "New Chat",
+                    "description": "Context injection for active iterations: Reigning champion, UCB tree recommendation, diagnosed bottlenecks, and 4-step Alignment Gate.",
+                },
+                {
+                    "id": "codex_attach",
+                    "ide": "codex",
+                    "intent": "attach",
+                    "name": "OpenAI Codex — Setup & Attach",
+                    "badge": "CLI Setup",
+                    "description": "Terminal instructions for Codex CLI: Inspect repository rules, verify canonical data splits, and execute baseline smoke test.",
+                },
+                {
+                    "id": "codex_iterate",
+                    "ide": "codex",
+                    "intent": "iterate",
+                    "name": "OpenAI Codex — Continue Iteration",
+                    "badge": "CLI Iteration",
+                    "description": "Autonomous ML engineering loop: Single atomic changes, anti-pseudo-ensemble verification, MMES audit check, and Git diff reporting.",
+                },
+                # Backward-compatibility aliases
+                {
                     "id": "antigravity",
-                    "name": "Antigravity Research Agent",
-                    "badge": "Alignment Gate",
-                    "description": "Scientific context injection enforcing 4-step Acknowledgment Gate and UCB search exploration.",
+                    "ide": "antigravity",
+                    "intent": "iterate",
+                    "name": "Antigravity Agent (Default)",
+                    "badge": "Active",
+                    "description": "Alias for Antigravity Continue Iteration prompt.",
+                },
+                {
+                    "id": "codex",
+                    "ide": "codex",
+                    "intent": "iterate",
+                    "name": "OpenAI Codex CLI (Default)",
+                    "badge": "Active",
+                    "description": "Alias for Codex Continue Iteration prompt.",
                 },
                 {
                     "id": "aide",
-                    "name": "AIDE ML Solution Tree",
-                    "badge": "Tree Search",
-                    "description": "Tailored for iterative MCTS/UCB tree expansion, hypothesis tracking, and MMES audit.",
+                    "ide": "antigravity",
+                    "intent": "iterate",
+                    "name": "AIDE ML Solution Tree (Legacy)",
+                    "badge": "Legacy",
+                    "description": "Legacy alias routed to Antigravity iteration prompt.",
                 },
                 {
                     "id": "minimal",
-                    "name": "Minimal Direct Patch",
-                    "badge": "Fast Probe",
-                    "description": "High-density concise prompt for quick debugging, smoke testing, and single-variable probing.",
+                    "ide": "codex",
+                    "intent": "iterate",
+                    "name": "Minimal Direct Patch (Legacy)",
+                    "badge": "Legacy",
+                    "description": "Legacy alias routed to Codex iteration prompt.",
                 },
             ]
         })
 
     def handle_api_priming_prompt(self, query: str = "") -> None:
         params = urllib.parse.parse_qs(query)
-        template_id = params.get("template", ["antigravity"])[0]
+        ide = params.get("ide", [None])[0]
+        intent = params.get("intent", [None])[0]
+
+        if ide and intent:
+            template_id = f"{ide.strip().lower()}_{intent.strip().lower()}"
+        else:
+            template_id = params.get("template", ["antigravity"])[0]
+
         journal = TreeJournal()
         res = generate_prompt_by_template(journal, template_id=template_id)
         self.send_json(res)
@@ -1209,8 +1329,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "model_family": model_family,
             },
             "grounding": {
-                "source_type": data.get("source_type", "verified_baseline" if branch == "baseline" else "huggingface_hub"),
-                "source_id": data.get("source_id", "microsoft/mdeberta-v3-base" if approach_type == "dl" else "sklearn_tfidf_canonical"),
+                "source_type": data.get("source_type", "huggingface_hub" if approach_type == "dl" else ("api_provider" if approach_type == "llm" else "verified_baseline")),
+                "source_id": data.get("source_id", "gemini-2.0-flash" if approach_type == "llm" else ("microsoft/mdeberta-v3-base" if approach_type == "dl" else "sklearn_tfidf_canonical")),
                 "retrieval_summary": data.get("retrieval_summary", f"Model verified for {task_cfg.get('name', 'task')} requirements."),
                 "verified_via": data.get("verified_via", "local_registry"),
             },
@@ -1224,8 +1344,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "uncertainty_level": data.get("uncertainty_level", "low"),
             },
             "model": {
-                "name": data.get("model_name", "mdeberta_v3" if approach_type == "dl" else "logistic_regression"),
+                "name": data.get("model_name", "gemini-2.0-flash" if approach_type == "llm" else ("mdeberta_v3" if approach_type == "dl" else "logistic_regression")),
+                "provider": data.get("provider", "gemini") if approach_type == "llm" else None,
                 "params": data.get("model_params", {
+                    "temperature": 0.0,
+                    "max_tokens": 512,
+                    "use_cot": False,
+                } if approach_type == "llm" else {
                     "seed": 42,
                     "learning_rate": 2e-5 if approach_type == "dl" else 1.0,
                     "batch_size": 16 if approach_type == "dl" else 64,
@@ -1477,6 +1602,169 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "stderr": proc.stderr,
             "receipt": receipt,
         })
+
+    def handle_api_llm_providers(self) -> None:
+        try:
+            providers = LLMEngine.list_providers()
+            self.send_json({"providers": providers})
+        except Exception as e:
+            self.send_json({"error": str(e)}, status=500)
+
+    def handle_api_llm_sample_data(self) -> None:
+        try:
+            task_cfg = load_task_config()
+            train_path_str = task_cfg.get("data_config", {}).get("train_path", "dataset/")
+            train_dir = PROJECT_ROOT / train_path_str
+
+            columns = []
+            rows = []
+
+            sample_file = None
+            if train_dir.is_file():
+                sample_file = train_dir
+            elif train_dir.is_dir():
+                for ext in ["*.tsv", "*.csv", "*.parquet", "*.jsonl"]:
+                    matches = list(train_dir.glob(ext))
+                    if matches:
+                        sample_file = sorted(matches)[0]
+                        break
+
+            if sample_file and sample_file.exists():
+                try:
+                    import pandas as pd
+                    sep = "\t" if sample_file.suffix == ".tsv" else ","
+                    df = pd.read_csv(sample_file, sep=sep, nrows=5)
+                    columns = [str(c) for c in df.columns]
+                    rows = df.fillna("").to_dict(orient="records")
+                except Exception:
+                    pass
+
+            if not columns:
+                columns = [inp.get("name", "text") for inp in task_cfg.get("inputs", [])] or ["text"]
+                rows = [{"text": "Sample text comment demonstrating LLM prompt extraction and classification."}]
+
+            self.send_json({
+                "columns": columns,
+                "rows": rows,
+                "total_samples": len(rows),
+                "source_file": str(sample_file.relative_to(PROJECT_ROOT)).replace("\\", "/") if sample_file else None,
+            })
+        except Exception as e:
+            self.send_json({"error": str(e)}, status=500)
+
+    def handle_api_llm_test_prompt(self, data: Dict[str, Any]) -> None:
+        try:
+            provider = data.get("provider", "gemini")
+            model_name = data.get("model", "gemini-2.0-flash")
+            system_prompt = data.get("system_prompt", "")
+            user_prompt_template = data.get("user_prompt_template", "{text}")
+            row_data = data.get("input_row", {})
+            api_key = data.get("api_key")
+            base_url = data.get("base_url")
+            temperature = float(data.get("temperature", 0.0))
+            max_tokens = int(data.get("max_tokens", 512))
+            use_cot = bool(data.get("use_cot", False))
+            few_shots = data.get("few_shot_examples", [])
+            valid_classes = data.get("valid_classes", [])
+
+            eff_sys, formatted_user = LLMEngine.format_prompt(
+                template=user_prompt_template,
+                row_data=row_data,
+                system_prompt=system_prompt,
+                few_shots=few_shots,
+                use_cot=use_cot,
+                valid_classes=valid_classes,
+            )
+
+            resp = LLMEngine.generate_completion(
+                provider=provider,
+                model_name=model_name,
+                system_prompt=eff_sys,
+                user_prompt=formatted_user,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                api_key=api_key,
+                base_url=base_url,
+            )
+
+            raw_text = resp.get("text", "")
+            extracted = LLMEngine.extract_prediction(raw_text, valid_classes=valid_classes)
+
+            self.send_json({
+                "success": True,
+                "provider": provider,
+                "model": model_name,
+                "effective_system_prompt": eff_sys,
+                "effective_user_prompt": formatted_user,
+                "raw_text": raw_text,
+                "extracted": extracted,
+                "latency_ms": resp.get("latency_ms", 0),
+                "usage": resp.get("usage", {}),
+            })
+        except Exception as e:
+            self.send_json({"error": str(e), "success": False}, status=400)
+
+    def handle_api_llm_generate_peft(self, data: Dict[str, Any]) -> None:
+        try:
+            model_name = data.get("model_name", "Qwen/Qwen2.5-7B-Instruct")
+            train_path = data.get("train_path", "dataset/train.csv")
+            output_dir = data.get("output_dir", "artifacts/exp_qlora")
+            text_column = data.get("text_column", "text")
+            target_column = data.get("target_column", "target")
+            lora_r = int(data.get("lora_r", 16))
+            lora_alpha = int(data.get("lora_alpha", 32))
+            lora_dropout = float(data.get("lora_dropout", 0.05))
+            target_modules = data.get("target_modules", "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj")
+            num_train_epochs = int(data.get("num_train_epochs", 3))
+            batch_size = int(data.get("batch_size", 4))
+            gradient_accumulation_steps = int(data.get("gradient_accumulation_steps", 4))
+            learning_rate = float(data.get("learning_rate", 2e-4))
+
+            script_code = LLMEngine.generate_qlora_script(
+                model_name=model_name,
+                train_path=train_path,
+                output_dir=output_dir,
+                text_column=text_column,
+                target_column=target_column,
+                lora_r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                target_modules=target_modules,
+                num_train_epochs=num_train_epochs,
+                batch_size=batch_size,
+                gradient_accumulation_steps=gradient_accumulation_steps,
+                learning_rate=learning_rate,
+            )
+
+            save_to_disk = data.get("save_to_disk", False)
+            saved_path = None
+            if save_to_disk:
+                scripts_dir = PROJECT_ROOT / "scripts" / "llm"
+                scripts_dir.mkdir(parents=True, exist_ok=True)
+                clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", model_name.split("/")[-1].lower())
+                saved_file = scripts_dir / f"train_qlora_{clean_name}.py"
+                saved_file.write_text(script_code, encoding="utf-8")
+                saved_path = str(saved_file.relative_to(PROJECT_ROOT)).replace("\\", "/")
+
+            self.send_json({
+                "success": True,
+                "script_code": script_code,
+                "saved_path": saved_path,
+            })
+        except Exception as e:
+            self.send_json({"error": str(e), "success": False}, status=400)
+
+    def handle_api_llm_save_key(self, data: Dict[str, Any]) -> None:
+        try:
+            key_name = data.get("key_name")
+            key_value = data.get("key_value", "")
+            if not key_name:
+                self.send_json({"error": "key_name is required."}, status=400)
+                return
+            res = EnvironmentDetector.save_llm_api_key(key_name, key_value)
+            self.send_json(res)
+        except Exception as e:
+            self.send_json({"error": str(e)}, status=400)
 
 
 def run_server(port: int = 8080) -> None:

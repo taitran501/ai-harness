@@ -18,6 +18,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
 
 class EnvironmentDetector:
     """Detects and manages environments and accounts across Modal, Kaggle, Docker, and GPU."""
@@ -304,6 +307,82 @@ class EnvironmentDetector:
 
         return result
 
+    @staticmethod
+    def detect_llm_status() -> Dict[str, Any]:
+        """Detect LLM API keys and local inference endpoints."""
+        keys = {}
+        for k in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY"]:
+            val = os.environ.get(k)
+            if not val:
+                # check .env
+                env_file = PROJECT_ROOT / ".env"
+                if env_file.exists():
+                    for line in env_file.read_text(encoding="utf-8").splitlines():
+                        if line.strip().startswith(f"{k}="):
+                            val = line.strip().split("=", 1)[1].strip("\"' ")
+                            break
+            keys[k] = {
+                "set": bool(val),
+                "preview": f"{val[:6]}...{val[-4:]}" if val and len(val) > 10 else ("***" if val else None),
+            }
+
+        ollama_active = False
+        try:
+            import urllib.request
+            req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "ML-Harness"})
+            with urllib.request.urlopen(req, timeout=0.5) as r:
+                ollama_active = r.status < 500
+        except Exception:
+            pass
+
+        vllm_active = False
+        try:
+            import urllib.request
+            req = urllib.request.Request("http://localhost:8000/v1/models", headers={"User-Agent": "ML-Harness"})
+            with urllib.request.urlopen(req, timeout=0.5) as r:
+                vllm_active = r.status < 500
+        except Exception:
+            pass
+
+        active_count = sum(1 for v in keys.values() if v["set"])
+        if ollama_active:
+            active_count += 1
+        if vllm_active:
+            active_count += 1
+
+        return {
+            "keys": keys,
+            "ollama_active": ollama_active,
+            "vllm_active": vllm_active,
+            "active_providers_count": active_count,
+        }
+
+    @staticmethod
+    def save_llm_api_key(key_name: str, key_value: str) -> Dict[str, Any]:
+        """Save API key to environment and persist into .env file."""
+        clean_key = key_value.strip()
+        os.environ[key_name] = clean_key
+        env_file = PROJECT_ROOT / ".env"
+        lines = []
+        if env_file.exists():
+            lines = env_file.read_text(encoding="utf-8").splitlines()
+
+        found = False
+        new_lines = []
+        for line in lines:
+            if line.strip().startswith(f"{key_name}="):
+                new_lines.append(f"{key_name}={clean_key}")
+                found = True
+            else:
+                new_lines.append(line)
+
+        if not found:
+            new_lines.append(f"{key_name}={clean_key}")
+
+        env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        preview = f"{clean_key[:6]}...{clean_key[-4:]}" if len(clean_key) > 10 else "***"
+        return {"success": True, "key_name": key_name, "preview": preview}
+
     @classmethod
     def get_full_status(cls) -> Dict[str, Any]:
         """Aggregate full environment and hardware status."""
@@ -312,4 +391,6 @@ class EnvironmentDetector:
             "kaggle": cls.detect_kaggle(),
             "docker": cls.detect_docker(),
             "gpu": cls.detect_gpu(),
+            "llm": cls.detect_llm_status(),
         }
+
