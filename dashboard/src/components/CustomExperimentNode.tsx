@@ -1,6 +1,6 @@
 import React, { memo, useEffect } from 'react';
 import { Handle, Position, NodeProps, Node, useUpdateNodeInternals } from '@xyflow/react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Sparkles } from 'lucide-react';
 import { GraphNode } from '../types/experiment';
 
 export type ExperimentNodeType = Node<GraphNode & Record<string, any>, 'experimentNode'>;
@@ -72,6 +72,9 @@ export const CustomExperimentNode = memo(({ id, data, selected }: NodeProps<Expe
           >
             {data?.branch || 'exp'}
           </span>
+          {data?.approach_type === 'llm' && (
+            <Sparkles className="w-2.5 h-2.5 text-purple-400 shrink-0" />
+          )}
           {data?.model_family && (
             <span
               className="text-[10px] font-mono text-slate-400 truncate leading-none min-w-0"

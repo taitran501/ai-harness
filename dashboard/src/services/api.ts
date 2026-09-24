@@ -153,6 +153,19 @@ export const api = {
     return res.json();
   },
 
+  async createExperimentConfig(data: any): Promise<{ success: boolean; path: string; parsed: any }> {
+    const res = await fetch(`${API_BASE}/config/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to create config: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
   async getConfig(
     path?: string,
     expId?: string
