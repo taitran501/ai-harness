@@ -223,4 +223,166 @@ export const api = {
     }
     return res.json();
   },
+
+  async getNextExpId(branch?: string, descriptor?: string): Promise<import('../types/experiment').NextExpIdResponse> {
+    const params = new URLSearchParams();
+    if (branch) params.append('branch', branch);
+    if (descriptor) params.append('descriptor', descriptor);
+    const res = await fetch(`${API_BASE}/next_exp_id?${params.toString()}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to fetch next experiment ID: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async getEnvironmentStatus(): Promise<import('../types/experiment').EnvironmentStatus> {
+    const res = await fetch(`${API_BASE}/environment/status`);
+    if (!res.ok) throw new Error(`Failed to fetch environment status: ${res.statusText}`);
+    return res.json();
+  },
+
+  async activateModalProfile(profile: string): Promise<{ success: boolean; profile: string; output?: string; error?: string }> {
+    const res = await fetch(`${API_BASE}/environment/modal/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to activate modal profile: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async setModalToken(tokenId: string, tokenSecret: string, profile?: string): Promise<{ success: boolean; output?: string; error?: string }> {
+    const res = await fetch(`${API_BASE}/environment/modal/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token_id: tokenId, token_secret: tokenSecret, profile }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to set modal token: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async switchKaggleProfile(username: string, key: string, profileName?: string): Promise<{ success: boolean; username: string; profile_name: string }> {
+    const res = await fetch(`${API_BASE}/environment/kaggle/profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, key, profile_name: profileName }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to switch kaggle profile: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async getTasks(): Promise<{ tasks: import('../types/experiment').TaskSummary[] }> {
+    const res = await fetch(`${API_BASE}/tasks`);
+    if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.statusText}`);
+    return res.json();
+  },
+
+  async switchTask(taskId: string): Promise<{ success: boolean; task_id: string; active_task: any }> {
+    const res = await fetch(`${API_BASE}/tasks/switch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to switch task: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async createNewTask(taskSpec: any): Promise<{ success: boolean; task_id: string; task: any }> {
+    const res = await fetch(`${API_BASE}/tasks/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: taskSpec }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to create new task: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async runCloudJob(payload: {
+    backend: 'modal' | 'kaggle' | 'local';
+    config_path: string;
+    gpu?: string;
+    auto_audit?: boolean;
+    auto_sync?: boolean;
+    baseline_csv?: string | null;
+  }): Promise<{ success: boolean; job: import('../types/experiment').CloudJob }> {
+    const res = await fetch(`${API_BASE}/cloud/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to launch cloud job: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async stopCloudJob(jobId: string): Promise<{ success: boolean; status?: string; error?: string }> {
+    const res = await fetch(`${API_BASE}/cloud/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: jobId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to stop job: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async getCloudJob(jobId: string): Promise<{ job: import('../types/experiment').CloudJob }> {
+    const res = await fetch(`${API_BASE}/cloud/job?job_id=${encodeURIComponent(jobId)}`);
+    if (!res.ok) throw new Error(`Failed to fetch cloud job: ${res.statusText}`);
+    return res.json();
+  },
+
+  async getCloudJobs(): Promise<{ jobs: import('../types/experiment').CloudJob[] }> {
+    const res = await fetch(`${API_BASE}/cloud/jobs`);
+    if (!res.ok) throw new Error(`Failed to list cloud jobs: ${res.statusText}`);
+    return res.json();
+  },
+
+  async runCloudAudit(
+    expId?: string,
+    candidateCsv?: string,
+    baselineCsv?: string
+  ): Promise<{
+    success: boolean;
+    passed: boolean;
+    stdout: string;
+    stderr: string;
+    receipt: Record<string, any> | null;
+  }> {
+    const res = await fetch(`${API_BASE}/cloud/audit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        exp_id: expId,
+        candidate_csv: candidateCsv,
+        baseline_csv: baselineCsv,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Audit execution failed: ${res.statusText}`);
+    }
+    return res.json();
+  },
 };
+

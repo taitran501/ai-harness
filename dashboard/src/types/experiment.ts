@@ -294,3 +294,78 @@ export interface SubmissionEntry {
   notes: string;
   divergence_warning: boolean;
 }
+
+export interface EnvironmentStatus {
+  modal: {
+    installed: boolean;
+    executable: string | null;
+    profiles: string[];
+    active_profile: string | null;
+    has_credentials: boolean;
+    error: string | null;
+  };
+  kaggle: {
+    installed: boolean;
+    executable: string | null;
+    authenticated: boolean;
+    username: string | null;
+    config_dir: string;
+    profiles: { name: string; username: string; is_active: boolean }[];
+    error: string | null;
+  };
+  docker: {
+    installed: boolean;
+    executable: string | null;
+    running: boolean;
+    version: string | null;
+    error: string | null;
+  };
+  gpu: {
+    detected: boolean;
+    gpu_name: string | null;
+    memory_total_mb: number | null;
+    memory_free_mb: number | null;
+    driver_version: string | null;
+    cuda_available: boolean;
+  };
+}
+
+export interface CloudJob {
+  job_id: string;
+  backend: 'modal' | 'kaggle' | 'local';
+  config_path: string;
+  exp_id: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  return_code: number | null;
+  started_at: number;
+  ended_at: number | null;
+  log_file: string;
+  pid: number | null;
+  auto_audit: boolean;
+  auto_sync: boolean;
+  baseline_csv: string | null;
+  audit_passed: boolean | null;
+  audit_receipt: Record<string, any> | null;
+  error_message: string | null;
+}
+
+export interface TaskSummary {
+  id: string;
+  name: string;
+  platform: string;
+  type: string;
+  modality: string;
+  primary_metric: string;
+  direction: string;
+  file_path: string;
+  is_active: boolean;
+}
+
+export interface NextExpIdResponse {
+  next_id: string;
+  next_number: number;
+  branch: string;
+  descriptor: string;
+  suggested_file: string;
+}
+

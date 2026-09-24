@@ -53,7 +53,8 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   const [preflightResult, setPreflightResult] = useState<CloudPreflightResult | null>(null);
 
   // Create form state
-  const [newExpId, setNewExpId] = useState<string>('exp002_feat_title_context');
+  const [newExpId, setNewExpId] = useState<string>('exp002_feat_run');
+  const [autoAssigningId, setAutoAssigningId] = useState<boolean>(false);
   const [newParentId, setNewParentId] = useState<string>(initialParentId || 'exp001_baseline_tfidf');
   const [newBranch, setNewBranch] = useState<string>('feat');
   const [newProblem, setNewProblem] = useState<string>('Lack of topical context for comment-level hate classification.');
@@ -62,6 +63,26 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   const [newApproachType, setNewApproachType] = useState<string>('ml');
   const [newModelFamily, setNewModelFamily] = useState<string>('linear');
   const [creating, setCreating] = useState<boolean>(false);
+
+  const fetchNextId = async (branchName: string, desc: string = 'run') => {
+    setAutoAssigningId(true);
+    try {
+      const res = await api.getNextExpId(branchName, desc);
+      if (res && res.next_id) {
+        setNewExpId(res.next_id);
+      }
+    } catch (err) {
+      console.warn('Could not auto-fetch next experiment ID:', err);
+    } finally {
+      setAutoAssigningId(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'create') {
+      fetchNextId(newBranch);
+    }
+  }, [activeTab]);
 
   // Load list of available configs
   const loadConfigsList = async () => {
@@ -429,8 +450,9 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                 <select
                   value={newBranch}
                   onChange={(e) => {
-                    setNewBranch(e.target.value);
-                    setNewExpId(`exp002_${e.target.value}_intervention`);
+                    const b = e.target.value;
+                    setNewBranch(b);
+                    fetchNextId(b);
                   }}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                 >
@@ -444,15 +466,20 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">
-                  New Experiment ID
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-zinc-400">
+                    New Experiment ID
+                  </label>
+                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded">
+                    {autoAssigningId ? 'Resolving ID...' : 'Auto-Incremented (Next)'}
+                  </span>
+                </div>
                 <input
                   type="text"
                   required
                   value={newExpId}
                   onChange={(e) => setNewExpId(e.target.value)}
-                  placeholder="e.g. exp002_feat_title_context"
+                  placeholder="e.g. exp002_feat_run"
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
                 />
               </div>

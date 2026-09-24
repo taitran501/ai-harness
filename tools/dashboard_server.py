@@ -34,6 +34,170 @@ from harness.cloud_inspector import CloudPreflightInspector
 from harness.templates.kaggle_template import KaggleKernelManager
 from harness.templates.modal_template import generate_modal_script
 from harness.skill_injector import inject_skill_file
+from harness.environment_detector import EnvironmentDetector
+from harness.cloud_job_runner import CloudJobManager, CloudJob
+
+
+def get_next_experiment_id(branch: str = "feat", descriptor: str = "run") -> Dict[str, Any]:
+    """Find the next consecutive experiment ID by scanning configs/ and artifacts/."""
+    exp_numbers: List[int] = []
+
+    # 1. Scan configs directory
+    configs_dir = PROJECT_ROOT / "configs"
+    if configs_dir.exists():
+        for cfg in configs_dir.glob("*.yaml"):
+            m = re.search(r"exp(\d+)", cfg.name, re.IGNORECASE)
+            if m:
+                exp_numbers.append(int(m.group(1)))
+            try:
+                content = cfg.read_text(encoding="utf-8")
+                m2 = re.search(r'id:\s*["\']?exp(\d+)', content, re.IGNORECASE)
+                if m2:
+                    exp_numbers.append(int(m2.group(1)))
+            except Exception:
+                pass
+
+    # 2. Scan artifacts directory
+    art_dir = PROJECT_ROOT / "artifacts"
+    if art_dir.exists():
+        for exp_folder in art_dir.iterdir():
+            if exp_folder.is_dir():
+                m = re.search(r"exp(\d+)", exp_folder.name, re.IGNORECASE)
+                if m:
+                    exp_numbers.append(int(m.group(1)))
+
+    next_num = max(exp_numbers, default=0) + 1
+    clean_desc = re.sub(r"[^a-zA-Z0-9_]+", "_", (descriptor or "run").strip()).strip("_").lower() or "run"
+    clean_branch = (branch or "feat").strip().lower()
+    next_id = f"exp{next_num:03d}_{clean_branch}_{clean_desc}"
+    suggested_file = f"configs/{next_id}.yaml"
+
+    return {
+        "next_id": next_id,
+        "next_number": next_num,
+        "branch": clean_branch,
+        "descriptor": clean_desc,
+        "suggested_file": suggested_file,
+    }
+
+
+def list_available_tasks() -> List[Dict[str, Any]]:
+    """List all available competition tasks from configs/tasks/ and mark the active one."""
+    tasks_dir = PROJECT_ROOT / "configs" / "tasks"
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+
+    active_task = load_task_config()
+    active_id = active_task.get("id") or active_task.get("task_name") or active_task.get("name", "general")
+
+    results = []
+    found_ids = set()
+
+    # 1. Scan configs/tasks/*.yaml
+    for t_file in sorted(tasks_dir.glob("*.yaml")):
+        try:
+            with open(t_file, "r", encoding="utf-8") as f:
+                d = yaml.safe_load(f) or {}
+                t_spec = d.get("task", d)
+                tid = t_spec.get("id", t_file.stem)
+                found_ids.add(tid)
+                results.append({
+                    "id": tid,
+                    "name": t_spec.get("task_name") or t_spec.get("name", tid),
+                    "platform": t_spec.get("platform", "generic"),
+                    "type": t_spec.get("task_type") or t_spec.get("type", "Predictive Modeling"),
+                    "modality": t_spec.get("modality", "generic"),
+                    "primary_metric": t_spec.get("primary_metric", "Score"),
+                    "direction": t_spec.get("direction", "maximize"),
+                    "file_path": str(t_file.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                    "is_active": (tid == active_id or t_spec.get("name") == active_task.get("name")),
+                })
+        except Exception:
+            pass
+
+    # 2. If configs/tasks was empty or missing active task, add active task
+    if not results or not any(r["is_active"] for r in results):
+        results.insert(0, {
+            "id": active_id,
+            "name": active_task.get("task_name") or active_task.get("name", "Active Task"),
+            "platform": active_task.get("platform", "codabench"),
+            "type": active_task.get("task_type") or active_task.get("type", "Multi-Task Text Classification"),
+            "modality": active_task.get("modality", "text"),
+            "primary_metric": active_task.get("primary_metric", "Macro-F1"),
+            "direction": active_task.get("direction", "maximize"),
+            "file_path": "configs/task.yaml",
+            "is_active": True,
+        })
+
+    return results
+
+
+def switch_task(task_id: str) -> Dict[str, Any]:
+    """Switch active project/competition task and re-inject skills and sync DAG."""
+    tasks_dir = PROJECT_ROOT / "configs" / "tasks"
+    target_file = tasks_dir / f"{task_id}.yaml"
+
+    task_data = None
+    if target_file.exists():
+        with open(target_file, "r", encoding="utf-8") as f:
+            d = yaml.safe_load(f) or {}
+            task_data = d.get("task", d)
+    else:
+        # Check presets
+        for p in TASK_PRESETS:
+            if p.get("id") == task_id or p.get("name") == task_id:
+                task_data = p
+                break
+
+    if not task_data:
+        raise ValueError(f"Task specification '{task_id}' not found.")
+
+    # Save to configs/task.yaml
+    save_task_config(task_data)
+
+    # Auto-inject skill
+    try:
+        inject_skill_file(task_config=task_data)
+    except Exception as e:
+        print(f"⚠️ Warning: Auto-injecting skill on switch failed: {e}")
+
+    # Re-sync TreeJournal
+    journal = TreeJournal()
+    journal.sync_from_artifacts()
+
+    return {
+        "success": True,
+        "task_id": task_id,
+        "active_task": load_task_config(),
+    }
+
+
+def create_and_activate_task(task_spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new task specification in configs/tasks/ and activate it."""
+    task_name = task_spec.get("task_name") or task_spec.get("name", "custom_task")
+    task_id = task_spec.get("id") or re.sub(r"[^a-zA-Z0-9_]+", "_", task_name.lower()).strip("_")
+    task_spec["id"] = task_id
+
+    tasks_dir = PROJECT_ROOT / "configs" / "tasks"
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+    task_file = tasks_dir / f"{task_id}.yaml"
+
+    with open(task_file, "w", encoding="utf-8") as f:
+        yaml.dump({"task": task_spec}, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    # Also activate in configs/task.yaml
+    save_task_config(task_spec)
+
+    # Inject skill
+    try:
+        inject_skill_file(task_config=task_spec)
+    except Exception as e:
+        print(f"⚠️ Warning: Auto-injecting skill on task creation failed: {e}")
+
+    return {
+        "success": True,
+        "task_id": task_id,
+        "task": load_task_config(),
+    }
 
 
 def load_task_config() -> Dict[str, Any]:
@@ -50,6 +214,7 @@ def load_task_config() -> Dict[str, Any]:
             pass
 
     return {
+        "id": "general",
         "platform": "codabench",
         "name": "General ML/DL Benchmark",
         "type": "Predictive Modeling",
@@ -503,14 +668,26 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_submissions()
         elif path == "/api/task_info":
             self.handle_api_task_info()
+        elif path == "/api/tasks":
+            self.send_json({"tasks": list_available_tasks()})
         elif path == "/api/task_presets":
             self.send_json({"presets": TASK_PRESETS})
+        elif path == "/api/next_exp_id":
+            self.handle_api_next_exp_id(parsed_url.query)
+        elif path == "/api/environment/status":
+            self.send_json(EnvironmentDetector.get_full_status())
         elif path == "/api/configs":
             self.handle_api_configs()
         elif path == "/api/config":
             self.handle_api_get_config(parsed_url.query)
         elif path == "/api/cloud/preflight":
             self.handle_api_cloud_preflight(parsed_url.query)
+        elif path == "/api/cloud/job":
+            self.handle_api_cloud_get_job(parsed_url.query)
+        elif path == "/api/cloud/jobs":
+            self.send_json({"jobs": CloudJobManager().list_jobs()})
+        elif path == "/api/cloud/logs/stream":
+            self.handle_api_cloud_logs_stream(parsed_url.query)
         elif path == "/api/sync":
             self.handle_api_sync()
         else:
@@ -573,6 +750,70 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception as skill_err:
                     print(f"⚠️ Warning: Auto-injecting skill failed: {skill_err}")
                 self.send_json({"success": True, "task": load_task_config(), "skill_injected": True})
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/tasks/switch":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_switch_task(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/tasks/create":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_create_task(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/environment/modal/activate":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_modal_activate(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/environment/modal/token":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_modal_token(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/environment/kaggle/profile":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_kaggle_profile(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/cloud/run":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_cloud_run(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/cloud/stop":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_cloud_stop(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/cloud/audit":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_cloud_audit(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/skill/inject":
@@ -834,6 +1075,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "direction": task.get("direction", "maximize"),
             "primary_metric_baseline": task.get("primary_metric_baseline"),
             "primary_metric_target": task.get("primary_metric_target"),
+            "inputs": task.get("inputs", []),
+            "subtasks": task.get("subtasks", task.get("metrics", [])),
             "metrics": task.get("metrics", []),
             "languages": task.get("languages", []),
             "description": task.get("description", ""),
@@ -1084,20 +1327,170 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "total_nodes": len(journal.nodes),
         })
 
+    def handle_api_next_exp_id(self, query_str: str) -> None:
+        query = urllib.parse.parse_qs(query_str)
+        branch = query.get("branch", ["feat"])[0]
+        descriptor = query.get("descriptor", ["run"])[0]
+        res = get_next_experiment_id(branch=branch, descriptor=descriptor)
+        self.send_json(res)
+
+    def handle_api_switch_task(self, data: Dict[str, Any]) -> None:
+        task_id = data.get("task_id")
+        if not task_id:
+            self.send_json({"error": "task_id is required."}, status=400)
+            return
+        res = switch_task(task_id)
+        self.send_json(res)
+
+    def handle_api_create_task(self, data: Dict[str, Any]) -> None:
+        task_spec = data.get("task", data)
+        res = create_and_activate_task(task_spec)
+        self.send_json(res)
+
+    def handle_api_modal_activate(self, data: Dict[str, Any]) -> None:
+        profile = data.get("profile")
+        if not profile:
+            self.send_json({"error": "profile is required."}, status=400)
+            return
+        res = EnvironmentDetector.activate_modal_profile(profile)
+        self.send_json(res)
+
+    def handle_api_modal_token(self, data: Dict[str, Any]) -> None:
+        t_id = data.get("token_id")
+        t_sec = data.get("token_secret")
+        p_name = data.get("profile")
+        if not t_id or not t_sec:
+            self.send_json({"error": "token_id and token_secret are required."}, status=400)
+            return
+        res = EnvironmentDetector.set_modal_token(t_id, t_sec, p_name)
+        self.send_json(res)
+
+    def handle_api_kaggle_profile(self, data: Dict[str, Any]) -> None:
+        user = data.get("username")
+        key = data.get("key")
+        p_name = data.get("profile_name")
+        if not user or not key:
+            self.send_json({"error": "username and key are required."}, status=400)
+            return
+        res = EnvironmentDetector.switch_kaggle_profile(user, key, p_name)
+        self.send_json(res)
+
+    def handle_api_cloud_run(self, data: Dict[str, Any]) -> None:
+        backend = data.get("backend", "modal")
+        config_path = data.get("config_path")
+        if not config_path:
+            self.send_json({"error": "config_path is required."}, status=400)
+            return
+
+        gpu = data.get("gpu", "A10G")
+        auto_audit = bool(data.get("auto_audit", True))
+        auto_sync = bool(data.get("auto_sync", True))
+        baseline_csv = data.get("baseline_csv")
+
+        manager = CloudJobManager()
+        job = manager.start_job(
+            backend=backend,
+            config_path=config_path,
+            gpu=gpu,
+            auto_audit=auto_audit,
+            auto_sync=auto_sync,
+            baseline_csv=baseline_csv,
+        )
+        self.send_json({"success": True, "job": job.to_dict()})
+
+    def handle_api_cloud_stop(self, data: Dict[str, Any]) -> None:
+        job_id = data.get("job_id")
+        if not job_id:
+            self.send_json({"error": "job_id is required."}, status=400)
+            return
+        res = CloudJobManager().stop_job(job_id)
+        status_code = 200 if res.get("success") else 400
+        self.send_json(res, status=status_code)
+
+    def handle_api_cloud_get_job(self, query_str: str) -> None:
+        query = urllib.parse.parse_qs(query_str)
+        job_id = query.get("job_id", [None])[0]
+        if not job_id:
+            self.send_json({"error": "Missing job_id parameter"}, status=400)
+            return
+        job = CloudJobManager().get_job(job_id)
+        if not job:
+            self.send_json({"error": f"Job '{job_id}' not found."}, status=404)
+            return
+        self.send_json({"job": job})
+
+    def handle_api_cloud_logs_stream(self, query_str: str) -> None:
+        query = urllib.parse.parse_qs(query_str)
+        job_id = query.get("job_id", [None])[0]
+        if not job_id:
+            self.send_json({"error": "Missing job_id parameter"}, status=400)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        manager = CloudJobManager()
+        for chunk in manager.stream_logs(job_id):
+            try:
+                self.wfile.write(chunk.encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                break
+
+    def handle_api_cloud_audit(self, data: Dict[str, Any]) -> None:
+        exp_id = data.get("exp_id")
+        candidate_csv = data.get("candidate_csv")
+        if not candidate_csv and exp_id:
+            candidate_csv = str(PROJECT_ROOT / "artifacts" / exp_id / "oof_predictions.csv")
+
+        if not candidate_csv or not Path(candidate_csv).exists():
+            self.send_json({"error": f"Candidate predictions not found: '{candidate_csv}'"}, status=400)
+            return
+
+        baseline_csv = data.get("baseline_csv")
+        if not baseline_csv:
+            best = TreeJournal().get_best_node()
+            if best and (PROJECT_ROOT / "artifacts" / best.id / "oof_predictions.csv").exists():
+                baseline_csv = str(PROJECT_ROOT / "artifacts" / best.id / "oof_predictions.csv")
+
+        cmd = [sys.executable, str(PROJECT_ROOT / "tools" / "audit_gate.py"), "--candidate", candidate_csv]
+        if baseline_csv and Path(baseline_csv).exists():
+            cmd.extend(["--baseline", baseline_csv])
+
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        receipt = None
+        receipt_path = PROJECT_ROOT / "AUDIT_RECEIPT.json"
+        if receipt_path.exists():
+            try:
+                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        self.send_json({
+            "success": proc.returncode == 0,
+            "passed": proc.returncode == 0,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "receipt": receipt,
+        })
+
 
 def run_server(port: int = 8080) -> None:
     web_dir = Path(__file__).resolve().parent / "web"
     web_dir.mkdir(parents=True, exist_ok=True)
 
     handler = DashboardHandler
-    # Allow port reuse
     socketserver.TCPServer.allow_reuse_address = True
 
     current_port = port
     max_retries = 5
     for attempt in range(max_retries):
         try:
-            with socketserver.TCPServer(("", current_port), handler) as httpd:
+            with socketserver.ThreadingTCPServer(("", current_port), handler) as httpd:
                 print(f"=" * 65)
                 print(f"🚀 ML/DL Experiment Dashboard & Priming Server Active")
                 print(f"📡 Web URL:  http://localhost:{current_port}")

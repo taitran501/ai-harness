@@ -11,6 +11,7 @@ import { TaskConfigModal } from './components/TaskConfigModal';
 import { CloudRunnerHub } from './components/CloudRunnerHub';
 import { CompetitionReadinessModal } from './components/CompetitionReadinessModal';
 import { ExperimentConfigModal } from './components/ExperimentConfigModal';
+import { CloudEnvironmentModal } from './components/CloudEnvironmentModal';
 import {
   TreeGraphResponse,
   ExperimentSummary,
@@ -36,6 +37,7 @@ export const App: React.FC = () => {
   const [taskConfigTab, setTaskConfigTab] = useState<'task' | 'data' | 'rules' | 'submission'>('task');
   const [isReadinessOpen, setIsReadinessOpen] = useState(false);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [isEnvModalOpen, setIsEnvModalOpen] = useState(false);
   const [configModalTarget, setConfigModalTarget] = useState<string | undefined>(undefined);
   const [configModalParentId, setConfigModalParentId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
@@ -118,6 +120,7 @@ export const App: React.FC = () => {
         }}
         onOpenReadinessModal={() => setIsReadinessOpen(true)}
         onOpenConfigModal={() => handleOpenConfigModal()}
+        onOpenEnvironmentModal={() => setIsEnvModalOpen(true)}
       />
 
       <main className="flex-1 w-full px-5 py-3 space-y-3 flex flex-col">
@@ -291,6 +294,13 @@ export const App: React.FC = () => {
           }}
         />
       )}
+
+      {/* Cloud & Hardware Environment Modal */}
+      <CloudEnvironmentModal
+        isOpen={isEnvModalOpen}
+        onClose={() => setIsEnvModalOpen(false)}
+        onStatusChanged={loadData}
+      />
     </div>
   );
 };

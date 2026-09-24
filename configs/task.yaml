@@ -9,11 +9,34 @@ task:
   direction: maximize
   primary_metric_baseline: 0.6459
   primary_metric_target: 0.85
-  metrics:
+  inputs:
+  - name: comment
+    type: text
+    source_columns:
+    - yt_comment
+  - name: title_comment
+    type: text_template
+    source_columns:
+    - yt_title
+    - yt_comment
+    template: '[TITLE] {yt_title} [COMMENT] {yt_comment}'
+  - name: full_context
+    type: text_template
+    source_columns:
+    - yt_title
+    - yt_description
+    - yt_comment
+    template: '[TITLE] {yt_title} [DESCRIPTION] {yt_description} [COMMENT] {yt_comment}'
+  subtasks:
   - id: subtask_a
     name: Stereotype Detection
     metric: Macro-F1
     type: macro_f1
+    task_type: binary_classification
+    column: stereotype
+    classes:
+    - 'no'
+    - 'yes'
     direction: maximize
     baseline_score: 0.6962
     target_score: 0.88
@@ -23,20 +46,145 @@ task:
     name: Hate Speech Classification
     metric: Macro-F1
     type: macro_f1
+    task_type: multiclass_classification
+    column: hate_speech
+    classes:
+    - 'no'
+    - yes_explicit
+    - yes_implicit
     direction: maximize
     baseline_score: 0.5238
     target_score: 0.8
     weight: 0.333
     description: 3-class classification (no vs yes_explicit vs yes_implicit)
-  - id: subtask_c
-    name: Target Type & Identity
+  - id: subtask_c_type
+    name: Target Type
     metric: Macro-F1
     type: macro_f1
+    task_type: binary_classification
+    column: target_type
+    classes:
+    - individual
+    - group
     direction: maximize
     baseline_score: 0.7178
     target_score: 0.85
-    weight: 0.334
+    weight: 0.167
     description: Evaluated strictly on oracle_hate comments (hate_speech != no)
+    condition:
+      parent_target: subtask_b
+      operator: not_in
+      values:
+      - 'no'
+      fallback_value: none
+      eval_condition_only: true
+  - id: subtask_c_identity
+    name: Target Identities
+    metric: Macro-F1
+    type: macro_f1
+    task_type: multilabel_classification
+    column_prefix: identity_
+    labels:
+    - l
+    - g
+    - b
+    - t
+    - q
+    - i
+    - a
+    - lgbtqia+
+    - nb
+    direction: maximize
+    baseline_score: 0.2408
+    target_score: 0.85
+    weight: 0.167
+    description: Multi-label classification across 9 identity codes
+    condition:
+      parent_target: subtask_b
+      operator: not_in
+      values:
+      - 'no'
+      fallback_value: 0
+      eval_condition_only: true
+  metrics:
+  - id: subtask_a
+    name: Stereotype Detection
+    metric: Macro-F1
+    type: macro_f1
+    task_type: binary_classification
+    column: stereotype
+    classes:
+    - 'no'
+    - 'yes'
+    direction: maximize
+    baseline_score: 0.6962
+    target_score: 0.88
+    weight: 0.333
+    description: Binary stereotype detection (no vs yes) across EN, IT, NL
+  - id: subtask_b
+    name: Hate Speech Classification
+    metric: Macro-F1
+    type: macro_f1
+    task_type: multiclass_classification
+    column: hate_speech
+    classes:
+    - 'no'
+    - yes_explicit
+    - yes_implicit
+    direction: maximize
+    baseline_score: 0.5238
+    target_score: 0.8
+    weight: 0.333
+    description: 3-class classification (no vs yes_explicit vs yes_implicit)
+  - id: subtask_c_type
+    name: Target Type
+    metric: Macro-F1
+    type: macro_f1
+    task_type: binary_classification
+    column: target_type
+    classes:
+    - individual
+    - group
+    direction: maximize
+    baseline_score: 0.7178
+    target_score: 0.85
+    weight: 0.167
+    description: Evaluated strictly on oracle_hate comments (hate_speech != no)
+    condition:
+      parent_target: subtask_b
+      operator: not_in
+      values:
+      - 'no'
+      fallback_value: none
+      eval_condition_only: true
+  - id: subtask_c_identity
+    name: Target Identities
+    metric: Macro-F1
+    type: macro_f1
+    task_type: multilabel_classification
+    column_prefix: identity_
+    labels:
+    - l
+    - g
+    - b
+    - t
+    - q
+    - i
+    - a
+    - lgbtqia+
+    - nb
+    direction: maximize
+    baseline_score: 0.2408
+    target_score: 0.85
+    weight: 0.167
+    description: Multi-label classification across 9 identity codes
+    condition:
+      parent_target: subtask_b
+      operator: not_in
+      values:
+      - 'no'
+      fallback_value: 0
+      eval_condition_only: true
   languages:
   - EN
   - IT
