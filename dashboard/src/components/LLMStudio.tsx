@@ -38,6 +38,180 @@ import {
   ProviderModelInfo,
 } from '../types/experiment';
 
+const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
+  {
+    id: 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit',
+    name: 'Qwen2.5-7B-Instruct-bnb-4bit',
+    downloads: 640000,
+    likes: 1950,
+    family: 'Qwen',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/DeepSeek-R1-Distill-Qwen-14B-bnb-4bit',
+    name: 'DeepSeek-R1-Distill-Qwen-14B-bnb-4bit',
+    downloads: 580000,
+    likes: 2200,
+    family: 'DeepSeek',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/Llama-3.3-70B-Instruct-bnb-4bit',
+    name: 'Llama-3.3-70B-Instruct-bnb-4bit',
+    downloads: 410000,
+    likes: 1600,
+    family: 'Llama',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit',
+    name: 'Meta-Llama-3.1-8B-Instruct-bnb-4bit',
+    downloads: 820000,
+    likes: 2800,
+    family: 'Llama',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/DeepSeek-R1-Distill-Llama-8B-bnb-4bit',
+    name: 'DeepSeek-R1-Distill-Llama-8B-bnb-4bit',
+    downloads: 490000,
+    likes: 1750,
+    family: 'DeepSeek',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/Qwen2.5-14B-Instruct-bnb-4bit',
+    name: 'Qwen2.5-14B-Instruct-bnb-4bit',
+    downloads: 380000,
+    likes: 1400,
+    family: 'Qwen',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/mistral-7b-instruct-v0.3-bnb-4bit',
+    name: 'mistral-7b-instruct-v0.3-bnb-4bit',
+    downloads: 290000,
+    likes: 980,
+    family: 'Mistral',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/gemma-2-9b-it-bnb-4bit',
+    name: 'gemma-2-9b-it-bnb-4bit',
+    downloads: 260000,
+    likes: 870,
+    family: 'Gemma',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/Phi-3.5-mini-instruct-bnb-4bit',
+    name: 'Phi-3.5-mini-instruct-bnb-4bit',
+    downloads: 195000,
+    likes: 720,
+    family: 'Phi',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+  {
+    id: 'unsloth/Qwen2.5-Coder-7B-Instruct-bnb-4bit',
+    name: 'Qwen2.5-Coder-7B-Instruct-bnb-4bit',
+    downloads: 310000,
+    likes: 1100,
+    family: 'Qwen',
+    is_bnb_4bit: true,
+    is_gguf: false,
+    is_instruct: true,
+    recommended_for_lora: true,
+    is_unsloth: true,
+  },
+];
+
+const FALLBACK_HF_MODELS: HFModelInfo[] = [
+  {
+    id: 'Qwen/Qwen2.5-7B-Instruct',
+    name: 'Qwen2.5-7B-Instruct',
+    downloads: 2400000,
+    likes: 3600,
+    pipeline_tag: 'text-generation',
+    is_unsloth: false,
+  },
+  {
+    id: 'meta-llama/Llama-3.3-70B-Instruct',
+    name: 'Llama-3.3-70B-Instruct',
+    downloads: 1820000,
+    likes: 4400,
+    pipeline_tag: 'text-generation',
+    is_unsloth: false,
+  },
+  {
+    id: 'deepseek-ai/DeepSeek-R1-Distill-Qwen-14B',
+    name: 'DeepSeek-R1-Distill-Qwen-14B',
+    downloads: 2600000,
+    likes: 6100,
+    pipeline_tag: 'text-generation',
+    is_unsloth: false,
+  },
+  {
+    id: 'microsoft/phi-4',
+    name: 'phi-4',
+    downloads: 1250000,
+    likes: 2900,
+    pipeline_tag: 'text-generation',
+    is_unsloth: false,
+  },
+  {
+    id: 'FacebookAI/xlm-roberta-base',
+    name: 'xlm-roberta-base',
+    downloads: 5200000,
+    likes: 1950,
+    pipeline_tag: 'fill-mask',
+    is_unsloth: false,
+  },
+  {
+    id: 'microsoft/deberta-v3-large',
+    name: 'deberta-v3-large',
+    downloads: 3400000,
+    likes: 1800,
+    pipeline_tag: 'fill-mask',
+    is_unsloth: false,
+  },
+];
+
 interface LLMStudioProps {
   taskInfo: TaskInfo | null;
   onRefreshSolutionTree?: () => void;
@@ -112,14 +286,14 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
   const [peftResult, setPeftResult] = useState<LLMPeftGenerateResponse | null>(null);
   const [copiedScript, setCopiedScript] = useState(false);
 
-  // Unsloth Live Models list
-  const [unslothModels, setUnslothModels] = useState<UnslothModelInfo[]>([]);
+  // Unsloth Live Models list (initialized with curated models)
+  const [unslothModels, setUnslothModels] = useState<UnslothModelInfo[]>(FALLBACK_UNSLOTH_MODELS);
   const [loadingUnslothModels, setLoadingUnslothModels] = useState(false);
   const [unslothFamilyFilter, setUnslothFamilyFilter] = useState<string>('All');
 
-  // Hugging Face Live Hub Search
+  // Hugging Face Live Hub Search (initialized with curated models)
   const [hfSearchQuery, setHfSearchQuery] = useState('');
-  const [hfModels, setHfModels] = useState<HFModelInfo[]>([]);
+  const [hfModels, setHfModels] = useState<HFModelInfo[]>(FALLBACK_HF_MODELS);
   const [loadingHfModels, setLoadingHfModels] = useState(false);
   const [hfSortFilter, setHfSortFilter] = useState<'downloads' | 'trendingScore' | 'likes'>('downloads');
 
@@ -166,7 +340,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     setLoadingUnslothModels(true);
     try {
       const res = await api.getUnslothModels(50);
-      setUnslothModels(res.models);
+      if (res.models && res.models.length > 0) {
+        setUnslothModels(res.models);
+      }
     } catch (err) {
       console.warn('Failed to load Unsloth models from HF Hub:', err);
     } finally {
@@ -174,17 +350,20 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     }
   };
 
-  // Search Hugging Face Hub
+  // Search Hugging Face Hub (do not restrict pipeline tag when user searches specifically)
   const searchHfHub = async (query = '', sort = hfSortFilter) => {
     setLoadingHfModels(true);
     try {
+      const trimmedQuery = query.trim();
       const res = await api.getHFModels({
-        search: query,
-        pipeline: 'text-generation',
+        search: trimmedQuery,
+        pipeline: trimmedQuery ? undefined : 'text-generation',
         sort,
-        limit: 15,
+        limit: 20,
       });
-      setHfModels(res.models);
+      if (res.models && res.models.length > 0) {
+        setHfModels(res.models);
+      }
     } catch (err) {
       console.warn('Failed to search Hugging Face Hub:', err);
     } finally {
