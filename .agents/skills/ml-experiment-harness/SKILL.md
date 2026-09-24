@@ -6,7 +6,7 @@ description: Manages ML experiments for StereoQueerEval on Codabench via AIDE tr
 # ML Experiment Harness Skill — StereoQueerEval
 
 > **Active Benchmark**: **StereoQueerEval** | **Platform**: Codabench | **Modality**: Natural Language Processing (NLP)
-> **Objective**: Maximize `Macro-F1 (CV)` across cross-validation folds.
+> **Objective**: Maximize `Macro-F1` across cross-validation folds.
 
 Use this skill whenever planning model architectures, engineering features, formulating hypotheses,
 auditing predictions, or registering verified submissions for **StereoQueerEval**.
@@ -16,7 +16,7 @@ auditing predictions, or registering verified submissions for **StereoQueerEval*
 ## 1. Benchmark Specification & Score Objectives
 
 - **Task Type**: `Multi-Task Text Classification`
-- **Primary Target Metric**: `Macro-F1 (CV)` (Optimization Direction: `maximize`)
+- **Primary Target Metric**: `Macro-F1` (Optimization Direction: `maximize`)
 - **Baseline Reference Score**: `0.6459`
 - **Target Goal Score**: `0.85`
 - **Target Languages**: EN, IT, NL

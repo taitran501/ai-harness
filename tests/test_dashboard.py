@@ -11,6 +11,8 @@ from tools.dashboard_server import DashboardHandler, generate_priming_prompt
 from harness.tree_journal import Node, TreeJournal
 import socketserver
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 class DashboardTests(unittest.TestCase):
     @classmethod
@@ -104,7 +106,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("task_name", data)
         self.assertIn("task_type", data)
         self.assertIn("primary_metric", data)
-        self.assertEqual(data["primary_metric"], "Macro-F1 (CV)")
+        self.assertEqual(data["primary_metric"], "Macro-F1")
         self.assertIn("platform", data)
 
     def test_api_task_presets(self):
@@ -219,6 +221,35 @@ class DashboardTests(unittest.TestCase):
             content = response.read().decode("utf-8")
             self.assertIn("<title>ML/DL Experimentation Harness", content)
             self.assertTrue('<div id="root"></div>' in content or 'vis-network' in content)
+
+    def test_api_config_get(self):
+        """GET /api/config should retrieve and parse target experiment config."""
+        data = self.fetch_json("/api/config?path=configs/exp001_tfidf_baseline.yaml")
+        self.assertIn("content", data)
+        self.assertIn("parsed", data)
+        self.assertEqual(data["parsed"]["experiment"]["id"], "exp001_baseline_tfidf")
+
+    def test_api_config_create_and_save(self):
+        """POST /api/config/create should generate valid experiment config on disk."""
+        url = f"http://127.0.0.1:{self.port}/api/config/create"
+        payload = json.dumps({
+            "exp_id": "exp999_test_dummy",
+            "parent_id": "exp001_baseline_tfidf",
+            "branch": "feat",
+            "hypothesis": "Test feature intervention hypothesis",
+            "intervention": "Test controlled intervention",
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode())
+            self.assertTrue(data.get("success"))
+            self.assertIn("configs/exp999_test_dummy.yaml", data.get("path"))
+
+        # Clean up created test config
+        test_cfg = PROJECT_ROOT / "configs" / "exp999_test_dummy.yaml"
+        if test_cfg.exists():
+            test_cfg.unlink()
 
 
 if __name__ == "__main__":

@@ -21,11 +21,13 @@ import { api } from '../services/api';
 interface CloudRunnerHubProps {
   taskInfo?: TaskInfo | null;
   onRefreshSolutionTree: () => Promise<void>;
+  onOpenConfigModal?: (pathOrAction?: string) => void;
 }
 
 export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
   taskInfo,
   onRefreshSolutionTree,
+  onOpenConfigModal,
 }) => {
   const [platform, setPlatform] = useState<'modal' | 'kaggle'>('modal');
   const [configs, setConfigs] = useState<string[]>([]);
@@ -298,7 +300,26 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
             </div>
 
             <div>
-              <label className="block text-[10px] text-zinc-400 mb-0.5">Target Experiment Config</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] text-zinc-400">Target Experiment Config</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenConfigModal?.(selectedConfig)}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 font-medium underline"
+                  >
+                    Edit Config
+                  </button>
+                  <span className="text-zinc-600">•</span>
+                  <button
+                    type="button"
+                    onClick={() => onOpenConfigModal?.('create')}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 font-medium"
+                  >
+                    + New Target
+                  </button>
+                </div>
+              </div>
               <select
                 value={selectedConfig}
                 onChange={(e) => setSelectedConfig(e.target.value)}

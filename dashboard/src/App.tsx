@@ -10,6 +10,7 @@ import { PrimingCenter } from './components/PrimingCenter';
 import { TaskConfigModal } from './components/TaskConfigModal';
 import { CloudRunnerHub } from './components/CloudRunnerHub';
 import { CompetitionReadinessModal } from './components/CompetitionReadinessModal';
+import { ExperimentConfigModal } from './components/ExperimentConfigModal';
 import {
   TreeGraphResponse,
   ExperimentSummary,
@@ -34,6 +35,9 @@ export const App: React.FC = () => {
   const [isTaskConfigOpen, setIsTaskConfigOpen] = useState(false);
   const [taskConfigTab, setTaskConfigTab] = useState<'task' | 'data' | 'rules' | 'submission'>('task');
   const [isReadinessOpen, setIsReadinessOpen] = useState(false);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [configModalTarget, setConfigModalTarget] = useState<string | undefined>(undefined);
+  const [configModalParentId, setConfigModalParentId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
@@ -91,6 +95,17 @@ export const App: React.FC = () => {
     setSelectedNodeDetail(null);
   };
 
+  const handleOpenConfigModal = (targetPathOrAction?: string, parentId?: string) => {
+    if (targetPathOrAction === 'create') {
+      setConfigModalTarget(undefined);
+      setConfigModalParentId(parentId || status?.best_node || undefined);
+    } else {
+      setConfigModalTarget(targetPathOrAction);
+      setConfigModalParentId(parentId);
+    }
+    setIsConfigModalOpen(true);
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans">
       <Header
@@ -102,6 +117,7 @@ export const App: React.FC = () => {
           setIsTaskConfigOpen(true);
         }}
         onOpenReadinessModal={() => setIsReadinessOpen(true)}
+        onOpenConfigModal={() => handleOpenConfigModal()}
       />
 
       <main className="flex-1 w-full px-5 py-3 space-y-3 flex flex-col">
@@ -215,7 +231,11 @@ export const App: React.FC = () => {
 
         {/* Tab 4: Cloud Runners Hub */}
         {activeTab === 'cloud' && (
-          <CloudRunnerHub taskInfo={taskInfo} onRefreshSolutionTree={loadData} />
+          <CloudRunnerHub
+            taskInfo={taskInfo}
+            onRefreshSolutionTree={loadData}
+            onOpenConfigModal={(actionOrPath) => handleOpenConfigModal(actionOrPath)}
+          />
         )}
 
         {/* Tab 5: Priming Prompt Center */}
@@ -230,6 +250,7 @@ export const App: React.FC = () => {
           node={selectedNodeDetail}
           taskInfo={taskInfo}
           onClose={handleCloseInspector}
+          onOpenConfigModal={(actionOrPath, parentId) => handleOpenConfigModal(actionOrPath, parentId)}
         />
       )}
 
@@ -257,6 +278,19 @@ export const App: React.FC = () => {
           setIsTaskConfigOpen(true);
         }}
       />
+
+      {/* Target Experiment Configuration Modal */}
+      {isConfigModalOpen && (
+        <ExperimentConfigModal
+          initialConfigPath={configModalTarget}
+          initialParentId={configModalParentId}
+          experiments={experiments}
+          onClose={() => setIsConfigModalOpen(false)}
+          onConfigSaved={async () => {
+            await loadData();
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -142,6 +142,59 @@ export const api = {
     return res.json();
   },
 
+  async getConfig(
+    path?: string,
+    expId?: string
+  ): Promise<{ path: string; content: string; parsed: any }> {
+    const params = new URLSearchParams();
+    if (path) params.append('path', path);
+    if (expId) params.append('exp_id', expId);
+    const res = await fetch(`${API_BASE}/config?${params.toString()}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to fetch config: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async saveConfig(
+    path: string,
+    content: string
+  ): Promise<{ success: boolean; path: string; parsed: any }> {
+    const res = await fetch(`${API_BASE}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to save config: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async createConfig(payload: {
+    exp_id: string;
+    parent_id?: string;
+    branch?: string;
+    hypothesis?: string;
+    intervention?: string;
+    problem_addressed?: string;
+    approach_type?: string;
+    model_family?: string;
+  }): Promise<{ success: boolean; path: string; content: string; parsed: any }> {
+    const res = await fetch(`${API_BASE}/config/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to create config: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
   async generateCloudRunner(payload: {
     backend: 'modal' | 'kaggle';
     config_path: string;

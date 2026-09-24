@@ -91,6 +91,10 @@ export interface NodeDetail {
       verification_probe?: string;
     };
   } | null;
+  config?: {
+    path: string;
+    content: string;
+  } | null;
 }
 
 export interface UCBRecommendation {

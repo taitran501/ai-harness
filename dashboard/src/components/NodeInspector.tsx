@@ -18,10 +18,16 @@ interface NodeInspectorProps {
   node: NodeDetail | null;
   taskInfo?: TaskInfo | null;
   onClose: () => void;
+  onOpenConfigModal?: (pathOrAction?: string, parentId?: string) => void;
 }
 
-export const NodeInspector: React.FC<NodeInspectorProps> = ({ node, taskInfo, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'metrics' | 'hypothesis' | 'diagnostics' | 'grounding' | 'raw'>('metrics');
+export const NodeInspector: React.FC<NodeInspectorProps> = ({
+  node,
+  taskInfo,
+  onClose,
+  onOpenConfigModal,
+}) => {
+  const [activeTab, setActiveTab] = useState<'metrics' | 'hypothesis' | 'diagnostics' | 'grounding' | 'config' | 'raw'>('metrics');
 
   if (!node) return null;
 
@@ -181,6 +187,16 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ node, taskInfo, on
           }`}
         >
           Grounding
+        </button>
+        <button
+          onClick={() => setActiveTab('config')}
+          className={`py-3 px-3 font-medium border-b-2 whitespace-nowrap transition ${
+            activeTab === 'config'
+              ? 'border-indigo-500 text-indigo-400 font-semibold'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          Target Config
         </button>
         <button
           onClick={() => setActiveTab('raw')}
@@ -392,7 +408,58 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({ node, taskInfo, on
           </div>
         )}
 
-        {/* Tab 5: Raw JSON */}
+        {/* Tab 5: Target Config */}
+        {activeTab === 'config' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-semibold text-slate-200">Experiment Target Configuration</span>
+                {node.config?.path && (
+                  <p className="text-[11px] font-mono text-indigo-400 mt-0.5">{node.config.path}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenConfigModal?.(node.config?.path, node.id)}
+                  className="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded transition"
+                >
+                  Edit in Target Editor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenConfigModal?.('create', node.id)}
+                  className="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 font-medium rounded border border-slate-700 transition"
+                >
+                  + Fork Child Target
+                </button>
+              </div>
+            </div>
+
+            {node.config?.content ? (
+              <pre className="p-4 bg-slate-950 rounded-xl border border-slate-800 font-mono text-[11px] text-slate-200 overflow-x-auto max-h-[500px] leading-relaxed">
+                {node.config.content}
+              </pre>
+            ) : (
+              <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 text-center space-y-2">
+                <FileCode className="w-8 h-8 text-slate-600 mx-auto" />
+                <h4 className="text-slate-300 font-semibold">No Standalone YAML Config Stored</h4>
+                <p className="text-slate-400 font-sans">
+                  This node ran under inherited baseline or artifact config. You can spawn a new target config extending this experiment.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onOpenConfigModal?.('create', node.id)}
+                  className="mt-2 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium transition"
+                >
+                  Spawn New Experiment Config from Node
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 6: Raw JSON */}
         {activeTab === 'raw' && (
           <div className="space-y-2">
             <pre className="p-4 bg-slate-950 rounded-xl border border-slate-800 font-mono text-[11px] text-slate-300 overflow-x-auto max-h-[500px]">

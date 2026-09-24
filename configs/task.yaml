@@ -5,7 +5,7 @@ task:
   task_type: Multi-Task Text Classification
   type: Multi-Task Text Classification
   modality: text
-  primary_metric: Macro-F1 (CV)
+  primary_metric: Macro-F1
   direction: maximize
   primary_metric_baseline: 0.6459
   primary_metric_target: 0.85

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { TaskInfo, TaskMetricDef, TaskPreset, DataConfig, CompetitionRules, SubmissionSpec } from '../types/experiment';
 import { api } from '../services/api';
+import { ML_METRICS_CATALOG, getMetricById, getSuggestedDirection } from '../constants/metrics';
 
 interface TaskConfigModalProps {
   isOpen: boolean;
@@ -130,7 +131,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       setName(currentTask.name || currentTask.task_name || '');
       setType(currentTask.type || currentTask.task_type || '');
       setModality(currentTask.modality || 'text');
-      setPrimaryMetric(currentTask.primary_metric || 'Score (CV)');
+      setPrimaryMetric(currentTask.primary_metric ? currentTask.primary_metric.replace(/\s*\(CV\)/i, '') : 'Macro-F1');
       setDirection(currentTask.direction || 'maximize');
       setPrimaryBaseline(currentTask.primary_metric_baseline !== undefined ? String(currentTask.primary_metric_baseline) : '');
       setPrimaryTarget(currentTask.primary_metric_target !== undefined ? String(currentTask.primary_metric_target) : '');
@@ -187,7 +188,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
     setName(preset.name);
     setType(preset.type);
     setModality(preset.modality || 'text');
-    setPrimaryMetric(preset.primary_metric);
+    setPrimaryMetric(preset.primary_metric ? preset.primary_metric.replace(/\s*\(CV\)/i, '') : 'Macro-F1');
     setDirection(preset.direction);
     setPrimaryBaseline(preset.primary_metric_baseline !== undefined ? String(preset.primary_metric_baseline) : '');
     setPrimaryTarget(preset.primary_metric_target !== undefined ? String(preset.primary_metric_target) : '');
@@ -505,29 +506,104 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
 
               {/* Primary Metric & Goal Scores */}
               <div className="p-3.5 bg-zinc-950/70 border border-zinc-800/80 rounded-lg space-y-3">
-                <div className="text-xs font-semibold text-zinc-200">Primary Benchmark Metric & Target</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-zinc-200">
+                    Primary Benchmark Metric & Target
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono">
+                    Standard ML Catalog + Custom Support
+                  </span>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <div className="md:col-span-2">
-                    <label className="block text-[11px] text-zinc-400 mb-1">Primary Metric Name</label>
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">
+                      Pick Standard ML Metric
+                    </label>
+                    <select
+                      value={ML_METRICS_CATALOG.some((m) => m.id === primaryMetric) ? primaryMetric : '__custom__'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val !== '__custom__') {
+                          setPrimaryMetric(val);
+                          setDirection(getSuggestedDirection(val));
+                        }
+                      }}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                    >
+                      <optgroup label="Classification">
+                        {ML_METRICS_CATALOG.filter((m) => m.category === 'Classification').map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id} — {m.name.slice(0, 32)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Regression">
+                        {ML_METRICS_CATALOG.filter((m) => m.category === 'Regression').map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id} — {m.name.slice(0, 32)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Ranking & RecSys">
+                        {ML_METRICS_CATALOG.filter((m) => m.category === 'Ranking').map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id} — {m.name.slice(0, 32)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="NLP & Generation">
+                        {ML_METRICS_CATALOG.filter((m) => m.category === 'NLP').map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id} — {m.name.slice(0, 32)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Computer Vision">
+                        {ML_METRICS_CATALOG.filter((m) => m.category === 'Vision').map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id} — {m.name.slice(0, 32)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Clustering">
+                        {ML_METRICS_CATALOG.filter((m) => m.category === 'Clustering').map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id} — {m.name.slice(0, 32)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <option value="__custom__">Custom / Type Freely...</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-zinc-400 mb-1">
+                      Active Metric Name
+                    </label>
                     <input
                       type="text"
                       required
                       value={primaryMetric}
-                      onChange={(e) => setPrimaryMetric(e.target.value)}
-                      placeholder="e.g. Macro-F1 (CV), ROC-AUC (CV), RMSE"
-                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPrimaryMetric(val);
+                        setDirection(getSuggestedDirection(val));
+                      }}
+                      placeholder="e.g. Macro-F1, ROC-AUC, RMSE, NDCG@10"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Direction</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Optimization Direction</label>
                     <select
                       value={direction}
                       onChange={(e) => setDirection(e.target.value as 'maximize' | 'minimize')}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                     >
-                      <option value="maximize">Maximize (F1, AUC, Acc)</option>
-                      <option value="minimize">Minimize (RMSE, Loss)</option>
+                      <option value="maximize">Maximize (F1, AUC, Acc, R²)</option>
+                      <option value="minimize">Minimize (RMSE, Loss, Error)</option>
                     </select>
                   </div>
 
@@ -623,12 +699,41 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       <div className="pt-2 border-t border-zinc-800 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
                         <div>
                           <label className="block text-zinc-500 mb-0.5">Evaluation Metric</label>
-                          <input
-                            type="text"
-                            value={m.metric}
-                            onChange={(e) => handleUpdateMetric(idx, { metric: e.target.value })}
-                            className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 text-zinc-300"
-                          />
+                          <div className="space-y-1">
+                            <select
+                              value={ML_METRICS_CATALOG.some((c) => c.id === m.metric) ? m.metric : '__custom__'}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val !== '__custom__') {
+                                  handleUpdateMetric(idx, {
+                                    metric: val,
+                                    direction: getSuggestedDirection(val),
+                                  });
+                                }
+                              }}
+                              className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-0.5 text-[11px] text-zinc-200"
+                            >
+                              <option value="__custom__">Custom / Type Below...</option>
+                              {ML_METRICS_CATALOG.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.id} ({c.category})
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={m.metric}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                handleUpdateMetric(idx, {
+                                  metric: val,
+                                  direction: getSuggestedDirection(val),
+                                });
+                              }}
+                              placeholder="Metric Name"
+                              className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 text-zinc-300 font-mono text-[11px]"
+                            />
+                          </div>
                         </div>
                         <div>
                           <label className="block text-zinc-500 mb-0.5">Baseline Score</label>

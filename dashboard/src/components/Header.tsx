@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crown, RefreshCw, Layers, Sliders, ShieldCheck } from 'lucide-react';
+import { Crown, RefreshCw, Layers, Sliders, ShieldCheck, FileCode } from 'lucide-react';
 import { SystemStatus, TaskInfo } from '../types/experiment';
 
 interface HeaderProps {
@@ -8,9 +8,17 @@ interface HeaderProps {
   onRefresh: () => Promise<void>;
   onOpenTaskConfig?: () => void;
   onOpenReadinessModal?: () => void;
+  onOpenConfigModal?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ status, taskInfo, onRefresh, onOpenTaskConfig, onOpenReadinessModal }) => {
+export const Header: React.FC<HeaderProps> = ({
+  status,
+  taskInfo,
+  onRefresh,
+  onOpenTaskConfig,
+  onOpenReadinessModal,
+  onOpenConfigModal,
+}) => {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -85,6 +93,17 @@ export const Header: React.FC<HeaderProps> = ({ status, taskInfo, onRefresh, onO
           >
             <Sliders className="w-3.5 h-3.5 text-zinc-400" />
             <span>Setup</span>
+          </button>
+        )}
+
+        {onOpenConfigModal && (
+          <button
+            onClick={onOpenConfigModal}
+            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
+            title="Inspect, edit, or create target experiment YAML configuration"
+          >
+            <FileCode className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Target Config</span>
           </button>
         )}
 

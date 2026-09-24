@@ -10,6 +10,7 @@ Zero-dependency standard library Python HTTP server providing:
 from __future__ import annotations
 
 import argparse
+import datetime
 import http.server
 import json
 import os
@@ -20,6 +21,8 @@ import urllib.parse
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import yaml
 
 # Ensure project root in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -51,7 +54,7 @@ def load_task_config() -> Dict[str, Any]:
         "name": "General ML/DL Benchmark",
         "type": "Predictive Modeling",
         "modality": "generic",
-        "primary_metric": "Score (CV)",
+        "primary_metric": "Score",
         "direction": "maximize",
         "metrics": [],
         "languages": [],
@@ -62,7 +65,6 @@ def load_task_config() -> Dict[str, Any]:
 def save_task_config(task_data: Dict[str, Any]) -> None:
     """Save updated task specification to configs/task.yaml."""
     task_file = PROJECT_ROOT / "configs" / "task.yaml"
-    import yaml
     task_file.parent.mkdir(parents=True, exist_ok=True)
     content = {"task": task_data}
     with open(task_file, "w", encoding="utf-8") as f:
@@ -77,7 +79,7 @@ TASK_PRESETS: List[Dict[str, Any]] = [
         "name": "StereoQueerEval",
         "type": "Multi-Task Text Classification",
         "modality": "text",
-        "primary_metric": "Macro-F1 (CV)",
+        "primary_metric": "Macro-F1",
         "direction": "maximize",
         "primary_metric_baseline": 0.6459,
         "primary_metric_target": 0.85,
@@ -124,7 +126,7 @@ TASK_PRESETS: List[Dict[str, Any]] = [
         "name": "House Prices Regression",
         "type": "Tabular Regression",
         "modality": "tabular",
-        "primary_metric": "RMSE (CV)",
+        "primary_metric": "RMSE",
         "direction": "minimize",
         "primary_metric_baseline": 0.145,
         "primary_metric_target": 0.110,
@@ -170,7 +172,7 @@ TASK_PRESETS: List[Dict[str, Any]] = [
         "name": "Binary Classification Benchmark",
         "type": "Tabular Binary Classification",
         "modality": "tabular",
-        "primary_metric": "ROC-AUC (CV)",
+        "primary_metric": "ROC-AUC",
         "direction": "maximize",
         "primary_metric_baseline": 0.812,
         "primary_metric_target": 0.880,
@@ -216,7 +218,7 @@ TASK_PRESETS: List[Dict[str, Any]] = [
         "name": "Vision Classification Benchmark",
         "type": "Image Classification",
         "modality": "vision",
-        "primary_metric": "Top-1 Accuracy (CV)",
+        "primary_metric": "Top-1-Accuracy",
         "direction": "maximize",
         "primary_metric_baseline": 0.840,
         "primary_metric_target": 0.920,
@@ -262,7 +264,7 @@ TASK_PRESETS: List[Dict[str, Any]] = [
         "name": "Custom Experimentation Benchmark",
         "type": "Supervised Learning",
         "modality": "generic",
-        "primary_metric": "Score (CV)",
+        "primary_metric": "Score",
         "direction": "maximize",
         "primary_metric_baseline": 0.700,
         "primary_metric_target": 0.850,
@@ -317,7 +319,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     task_name = task.get("name", "ML/DL Task")
     task_type = task.get("type", "Machine Learning Task")
     task_modality = task.get("modality", "generic")
-    primary_metric = task.get("primary_metric", "Macro-F1 (CV)")
+    primary_metric = task.get("primary_metric", "Macro-F1")
     direction = task.get("direction", "maximize")
 
     # Dynamic diagnostics extraction
@@ -505,6 +507,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"presets": TASK_PRESETS})
         elif path == "/api/configs":
             self.handle_api_configs()
+        elif path == "/api/config":
+            self.handle_api_get_config(parsed_url.query)
         elif path == "/api/cloud/preflight":
             self.handle_api_cloud_preflight(parsed_url.query)
         elif path == "/api/sync":
@@ -627,6 +631,22 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.handle_api_cloud_generate(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/config":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_save_config(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/config/create":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_create_config(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
         else:
             self.send_response(404)
             self.end_headers()
@@ -688,6 +708,31 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 pass
 
+        # Attempt to load target experiment config
+        config_data = None
+        cand_files = [
+            PROJECT_ROOT / "configs" / f"{node.id}.yaml",
+            PROJECT_ROOT / "artifacts" / node.id / "run_config.yaml",
+        ]
+        configs_dir = PROJECT_ROOT / "configs"
+        if configs_dir.exists():
+            prefix = node.id.split("_")[0]
+            for cfg in configs_dir.glob(f"{prefix}*.yaml"):
+                if cfg not in cand_files:
+                    cand_files.append(cfg)
+
+        for cand in cand_files:
+            if cand.exists():
+                try:
+                    raw_txt = cand.read_text(encoding="utf-8")
+                    config_data = {
+                        "path": str(cand.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                        "content": raw_txt,
+                    }
+                    break
+                except Exception:
+                    pass
+
         details = {
             "id": node.id,
             "parent_id": node.parent_id,
@@ -705,6 +750,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "metrics": node.metrics,
             "diagnostics_summary": node.diagnostics_summary,
             "grounding_receipt": grounding_data,
+            "config": config_data,
         }
         self.send_json(details)
 
@@ -784,7 +830,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "task_type": task.get("task_type") or task.get("type", "Predictive Modeling"),
             "type": task.get("type", "Predictive Modeling"),
             "modality": task.get("modality", "generic"),
-            "primary_metric": task.get("primary_metric", "Score (CV)"),
+            "primary_metric": task.get("primary_metric", "Score"),
             "direction": task.get("direction", "maximize"),
             "primary_metric_baseline": task.get("primary_metric_baseline"),
             "primary_metric_target": task.get("primary_metric_target"),
@@ -804,6 +850,167 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 if f.name != "task.yaml":
                     cfg_files.append(f"configs/{f.name}")
         self.send_json({"configs": cfg_files})
+
+    def handle_api_get_config(self, query: str) -> None:
+        params = urllib.parse.parse_qs(query)
+        cfg_path = params.get("path", [""])[0].strip()
+        exp_id = params.get("exp_id", [""])[0].strip()
+
+        target_file = None
+        if cfg_path:
+            norm_path = (PROJECT_ROOT / cfg_path).resolve()
+            if (PROJECT_ROOT in norm_path.parents or norm_path == PROJECT_ROOT) and norm_path.exists():
+                target_file = norm_path
+        elif exp_id:
+            for cand in [
+                PROJECT_ROOT / "configs" / f"{exp_id}.yaml",
+                PROJECT_ROOT / "artifacts" / exp_id / "run_config.yaml",
+            ]:
+                if cand.exists():
+                    target_file = cand
+                    break
+            if not target_file:
+                prefix = exp_id.split("_")[0]
+                configs_dir = PROJECT_ROOT / "configs"
+                if configs_dir.exists():
+                    for cand in configs_dir.glob(f"{prefix}*.yaml"):
+                        target_file = cand
+                        break
+
+        if not target_file or not target_file.exists():
+            self.send_json({"error": f"Config not found for path='{cfg_path}' exp_id='{exp_id}'"}, status=404)
+            return
+
+        try:
+            content = target_file.read_text(encoding="utf-8")
+            parsed = yaml.safe_load(content) or {}
+            self.send_json({
+                "path": str(target_file.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                "content": content,
+                "parsed": parsed,
+            })
+        except Exception as e:
+            self.send_json({"error": f"Failed to read/parse config: {e}"}, status=400)
+
+    def handle_api_save_config(self, data: Dict[str, Any]) -> None:
+        raw_path = data.get("path", "").strip()
+        content = data.get("content", "")
+
+        if not raw_path:
+            self.send_json({"error": "Field 'path' is required."}, status=400)
+            return
+
+        if not (raw_path.endswith(".yaml") or raw_path.endswith(".yml")):
+            self.send_json({"error": "Config path must end with .yaml or .yml."}, status=400)
+            return
+
+        dest = (PROJECT_ROOT / raw_path).resolve()
+        if PROJECT_ROOT not in dest.parents:
+            self.send_json({"error": "Path traversal prohibited."}, status=403)
+            return
+
+        try:
+            parsed = yaml.safe_load(content)
+            if not isinstance(parsed, dict):
+                raise ValueError("YAML content must be an object/mapping.")
+        except Exception as yaml_err:
+            self.send_json({"error": f"Invalid YAML syntax: {yaml_err}"}, status=400)
+            return
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+
+        self.send_json({
+            "success": True,
+            "path": str(dest.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            "parsed": parsed,
+        })
+
+    def handle_api_create_config(self, data: Dict[str, Any]) -> None:
+        exp_id = data.get("exp_id", "").strip()
+        parent_id = data.get("parent_id", "exp001_baseline_tfidf").strip()
+        branch = data.get("branch", "feat").strip()
+        hypothesis = data.get("hypothesis", "").strip()
+        intervention = data.get("intervention", "").strip()
+        problem = data.get("problem_addressed", "").strip()
+        approach_type = data.get("approach_type", "dl" if branch in ("model", "loss") else "ml")
+        model_family = data.get("model_family", "transformer" if approach_type == "dl" else "linear")
+
+        if not exp_id:
+            self.send_json({"error": "exp_id is required."}, status=400)
+            return
+
+        if not exp_id.startswith("exp"):
+            exp_id = f"exp_{exp_id}"
+
+        filename = f"{exp_id}.yaml" if not exp_id.endswith(".yaml") else exp_id
+        dest = PROJECT_ROOT / "configs" / filename
+
+        task_cfg = load_task_config()
+        new_cfg = {
+            "experiment": {
+                "id": exp_id.replace(".yaml", ""),
+                "branch": branch,
+                "parent_id": parent_id,
+                "date": datetime.date.today().isoformat(),
+                "problem_addressed": problem or f"Optimization targeting branch '{branch}'.",
+                "hypothesis": hypothesis or f"Hypothesis for {exp_id} on {branch} branch.",
+                "intervention": intervention or f"Controlled intervention for {exp_id}.",
+            },
+            "task": {
+                "name": task_cfg.get("name", "StereoQueerEval"),
+                "type": task_cfg.get("type", "Multi-Task Text Classification"),
+                "primary_metric": task_cfg.get("primary_metric", "Macro-F1"),
+                "direction": task_cfg.get("direction", "maximize"),
+                "approach_type": approach_type,
+                "model_family": model_family,
+            },
+            "grounding": {
+                "source_type": data.get("source_type", "verified_baseline" if branch == "baseline" else "huggingface_hub"),
+                "source_id": data.get("source_id", "microsoft/mdeberta-v3-base" if approach_type == "dl" else "sklearn_tfidf_canonical"),
+                "retrieval_summary": data.get("retrieval_summary", f"Model verified for {task_cfg.get('name', 'task')} requirements."),
+                "verified_via": data.get("verified_via", "local_registry"),
+            },
+            "assumption_register": {
+                "known_facts": [
+                    f"Baseline established under parent {parent_id}.",
+                ],
+                "assumptions": [
+                    hypothesis or f"Branch {branch} yields measurable metric improvement.",
+                ],
+                "uncertainty_level": data.get("uncertainty_level", "low"),
+            },
+            "model": {
+                "name": data.get("model_name", "mdeberta_v3" if approach_type == "dl" else "logistic_regression"),
+                "params": data.get("model_params", {
+                    "seed": 42,
+                    "learning_rate": 2e-5 if approach_type == "dl" else 1.0,
+                    "batch_size": 16 if approach_type == "dl" else 64,
+                    "epochs": 3 if approach_type == "dl" else 1,
+                }),
+            },
+            "data": {
+                "train_path": task_cfg.get("data_config", {}).get("train_path", "dataset/"),
+                "test_path": task_cfg.get("data_config", {}).get("test_path", "dataset/test/"),
+                "folds": [0, 1, 2, 3, 4],
+            },
+            "training": {
+                "seed": 42,
+                "folds": [0, 1, 2, 3, 4],
+                "debug": False,
+            },
+        }
+
+        yaml_content = yaml.dump(new_cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(yaml_content, encoding="utf-8")
+
+        self.send_json({
+            "success": True,
+            "path": f"configs/{dest.name}",
+            "content": yaml_content,
+            "parsed": new_cfg,
+        })
 
     def handle_api_cloud_preflight(self, query: str) -> None:
         params = urllib.parse.parse_qs(query)
