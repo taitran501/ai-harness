@@ -30,6 +30,7 @@ from harness.submission_manager import SubmissionManager
 from harness.cloud_inspector import CloudPreflightInspector
 from harness.templates.kaggle_template import KaggleKernelManager
 from harness.templates.modal_template import generate_modal_script
+from harness.skill_injector import inject_skill_file
 
 
 def load_task_config() -> Dict[str, Any]:
@@ -417,7 +418,22 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length).decode("utf-8")
                 data = json.loads(body)
                 save_task_config(data)
-                self.send_json({"success": True, "task": load_task_config()})
+                # Auto-inject updated agent skill for this task
+                try:
+                    inject_skill_file(task_config=data)
+                except Exception as skill_err:
+                    print(f"⚠️ Warning: Auto-injecting skill failed: {skill_err}")
+                self.send_json({"success": True, "task": load_task_config(), "skill_injected": True})
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/skill/inject":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else "{}"
+                data = json.loads(body) if body else {}
+                task_cfg = data if data else load_task_config()
+                p = inject_skill_file(task_config=task_cfg)
+                self.send_json({"success": True, "skill_path": str(p.relative_to(PROJECT_ROOT))})
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/submissions/register":

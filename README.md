@@ -164,6 +164,25 @@ Supported priming templates:
 - **`aide`**: MCTS/UCB tree exploration and atomic hypothesis formulation.
 - **`minimal`**: Compact prompt for rapid debugging and single-variable probing.
 
+### Dynamic Competition Skill Injection
+
+The AI Agent skill (`.agents/skills/ml-experiment-harness/SKILL.md`) dynamically adapts to any competition or benchmark (Kaggle, Codabench, DrivenData):
+
+```bash
+# Inject skill directly from active task config
+python tools/inject_skill.py --config configs/task.yaml
+
+# Or inject from built-in competition presets
+python tools/inject_skill.py --preset kaggle_tabular_regression
+python tools/inject_skill.py --preset kaggle_binary_classification
+python tools/inject_skill.py --preset vision_multiclass
+
+# Or sync via journal CLI
+python tools/journal_tool.py --inject-skill
+```
+
+When updating task settings or presets in the Web Dashboard, the skill is automatically re-generated and injected in real time.
+
 ---
 
 ## License

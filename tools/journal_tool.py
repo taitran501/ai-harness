@@ -51,6 +51,11 @@ def main() -> None:
         help="Show current top-performing model under parameter constraints",
     )
     parser.add_argument(
+        "--inject-skill",
+        action="store_true",
+        help="Dynamically generate/inject task-specific agent skill into .agents/skills/",
+    )
+    parser.add_argument(
         "--journal-path",
         type=str,
         default="artifacts/journal.json",
@@ -58,6 +63,13 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if args.inject_skill:
+        from harness.skill_injector import inject_skill_file
+        dest = inject_skill_file()
+        print(f"✔ Successfully injected dynamic agent skill into: {dest}")
+        return
+
     journal = TreeJournal(storage_path=args.journal_path)
 
     if args.node:

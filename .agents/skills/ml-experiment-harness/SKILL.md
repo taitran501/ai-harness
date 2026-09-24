@@ -1,111 +1,122 @@
 ---
 name: ml-experiment-harness
-description: Manages ML experiments via AIDE tree search, enforces SWE-agent deterministic audit gate, and mandates Epistemic Grounding & Assumption Registers for SemEval-2027.
+description: Manages ML experiments for StereoQueerEval on Codabench via AIDE tree search, enforces SWE-agent deterministic audit gate, and mandates Epistemic Grounding & Assumption Registers.
 ---
 
-# ML Experiment Harness Skill
+# ML Experiment Harness Skill — StereoQueerEval
 
-Use this skill whenever working on machine learning experiments, planning next interventions,
-analyzing past runs (A1..A50), formulating hypotheses, or preparing competition submissions for StereoQueerEval.
+> **Active Benchmark**: **StereoQueerEval** | **Platform**: Codabench | **Modality**: Natural Language Processing (NLP)
+> **Objective**: Maximize `Macro-F1 (CV)` across cross-validation folds.
 
-## Core Operational Rules
+Use this skill whenever planning model architectures, engineering features, formulating hypotheses,
+auditing predictions, or registering verified submissions for **StereoQueerEval**.
 
-### 1. The Context Protection Rule (Anti-Context Saturation)
-- **NEVER** attempt to read all 50 `artifacts/exp*/` folders or raw log files into context.
-- **ALWAYS** query the solution tree via CLI:
+---
+
+## 1. Benchmark Specification & Score Objectives
+
+- **Task Type**: `Multi-Task Text Classification`
+- **Primary Target Metric**: `Macro-F1 (CV)` (Optimization Direction: `maximize`)
+- **Baseline Reference Score**: `0.6459`
+- **Target Goal Score**: `0.85`
+- **Target Languages**: EN, IT, NL
+
+### Evaluation Criteria & Subtask Breakdown:
+| Criteria / Subtask | Metric | Direction | Baseline | Target | Weight | Description |
+|---|---|---|---|---|---|---|
+| **Stereotype Detection** (`subtask_a`) | `Macro-F1` | `maximize` | `0.6962` | `0.88` | `0.333` | Binary stereotype detection (no vs yes) across EN, IT, NL |
+| **Hate Speech Classification** (`subtask_b`) | `Macro-F1` | `maximize` | `0.5238` | `0.8` | `0.333` | 3-class classification (no vs yes_explicit vs yes_implicit) |
+| **Target Type & Identity** (`subtask_c`) | `Macro-F1` | `maximize` | `0.7178` | `0.85` | `0.334` | Evaluated strictly on oracle_hate comments (hate_speech != no) |
+
+---
+
+## 2. Core Operational Rules (Enforced & Immutable)
+
+### 2.1 The Context Protection Rule (Anti-Context Saturation)
+- **NEVER** attempt to dump raw fold logs or entire `artifacts/` directories into prompt context.
+- **ALWAYS** query the solution tree CLI for compressed state:
   ```powershell
   python tools/journal_tool.py --summary
   ```
-- To inspect a specific experiment in depth:
+- To inspect a specific node or parent in depth:
   ```powershell
   python tools/journal_tool.py --node <exp_id>
   ```
 
-### 2. The Anti-Pivot & Branch Exploration Rule
-- When asked "what should we do next?", **DO NOT** guess, do superficial EDA, or arbitrarily recommend abandoning a subtask.
-- Run the AIDE-guided UCB tree search:
+### 2.2 The Anti-Pivot & Branch Exploration Rule (AIDE UCB Tree Search)
+- **DO NOT** make speculative guesses or pivot arbitrarily without mathematical justification.
+- Query the optimal branch recommendation according to Upper Confidence Bound (UCB):
   ```powershell
-  python tools/journal_tool.py --recommend --max-params 150000000
+  python tools/journal_tool.py --recommend
   ```
-- Base your recommendation strictly on the output branch, parent node, and UCB potential score.
-- Ensure every new experiment has **EXACTLY ONE ATOMIC INTERVENTION** (Control vs Treatment).
+- Ensure every experiment implements **EXACTLY ONE ATOMIC INTERVENTION** (Control vs Treatment).
 
-### 3. The Epistemic Grounding & Assumption Register Protocol (Anti-Outdated Knowledge)
-- **NEVER** rely on stale parametric memory or propose classical defaults (e.g. Random Forest, naive ensembling, arbitrary hyperparameter tweaks) as "safe guesses".
-- **MANDATORY RETRIEVAL**: Before formulating a new hypothesis or config:
-  1. Inspect `docs/KNOWLEDGE_BASE.md` for verified modern backbones (e.g. `microsoft/mdeberta-v3-base`, `FacebookAI/xlm-roberta-base`) and loss functions (Focal Loss, Class-Balanced Loss).
-  2. If proposing a technique outside the knowledge base, execute external retrieval first via `search_web` or `read_url_content`.
-- **MANDATORY CONFIG SCHEMA**: Every experiment config must include:
-  ```yaml
-  grounding:
-    source_type: "huggingface_hub" # huggingface_hub | arxiv | paperswithcode | empirical_journal
-    source_id: "microsoft/mdeberta-v3-base"
-    retrieval_summary: "Detailed rationale citing multilingual tokenization for EN/IT/NL and past hate speech benchmark results."
-    verified_via: "huggingface_hub"
-
-  assumption_register:
-    known_facts:
-      - "Baseline exp001 scored 0.62 Subtask A Macro-F1 but 0.00 on rare identities 'a' and 'i'."
-    assumptions:
-      - "Disentangled attention will capture subtle derogatory nuances better than bag-of-words."
-    uncertainty_level: "low" # low | medium | high
-    verification_probe: "Run --debug --fold 0 smoke test first" # Required if uncertainty_level is high
-  ```
-- **PRE-FLIGHT VALIDATION**:
-  Run the Grounding Gate CLI before training:
+### 2.3 Epistemic Grounding & Assumption Register Protocol (Anti-Hallucination)
+- **MANDATORY RETRIEVAL**: Before formulating a new model configuration for Natural Language Processing (NLP):
+  1. Inspect `docs/KNOWLEDGE_BASE.md` for verified backbones:
+     - `microsoft/deberta-v3-base (English / General SOTA encoder)`
+     - `microsoft/mdeberta-v3-base (Multilingual cross-lingual transfer)`
+     - `FacebookAI/xlm-roberta-base (Robust multilingual tokenization)`
+     - `answerdotai/ModernBERT-base (Fast, long-context 8k modern encoder)`
+  2. Inspect domain-verified loss functions: Focal Loss (gamma=2.0), Class-Balanced BCE, Asymmetric Loss.
+  3. Technique requirements: Pay careful attention to token lengths, special metadata tags, and multilingual subwords.
+  4. If proposing an unlisted technique, perform external retrieval (`search_web`, Hugging Face Hub, ArXiv) first.
+- **MANDATORY CONFIG SCHEMA**: Declare explicit `grounding:` and `assumption_register:` blocks in `configs/exp<NNN>.yaml`.
+- **PRE-FLIGHT VALIDATION GATE**: Validate config before launching training:
   ```powershell
   python harness/grounding_gate.py --config configs/<exp_config>.yaml
   ```
-  If this gate fails, `train.py` will physically refuse to run.
 
-### 4. The Diagnostic-First Exploration Rule
-- Before proposing any new intervention or writing configs:
-  1. Inspect `artifacts/<parent_id>/DIAGNOSTICS.md`.
-  2. Identify the specific bottleneck (e.g., Subtask B implicit hate miss rate, rare identity zero-recall).
-  3. Base the new hypothesis strictly on resolving that diagnosed bottleneck.
+### 2.4 Diagnostic-First Exploration Rule
+- Before writing any config, inspect `artifacts/<parent_id>/DIAGNOSTICS.md`.
+- Declare a `problem_addressed` that directly targets a documented failure slice or confusion mode.
 - **Strictly DO NOT pseudo-ensemble** models of the same family or merge previous versions mechanically.
 
-### 5. The Physical & Statistical Audit Gate Protocol (Anti-Hallucination)
-- You **CANNOT** manually create `submission.zip` or claim a submission is ready by natural language alone.
-- You **MUST** run the physical audit gate comparing against the baseline:
+### 2.5 SWE-Agent Physical & Statistical Audit Gate
+- Submissions and candidate predictions CANNOT be approved by natural language alone.
+- All submission archives MUST be generated through `tools/audit_gate.py`:
   ```powershell
   python tools/audit_gate.py --candidate <candidate_pred_csv> --baseline <baseline_pred_csv> --output-zip submission.zip
   ```
-- If the candidate changes less than **2.0% of validation rows** (MMES floor), the gate will reject it as random noise.
-- If submitting an ensemble, you MUST provide constituent models:
-  ```powershell
-  python tools/audit_gate.py --candidate <ens_csv> --baseline <base_csv> --ensemble-components model1.csv model2.csv
-  ```
-  The gate will physically reject pseudo-ensembles with Cohen's Kappa $\kappa > 0.85$.
-- You can ONLY present the submission to the user if:
-  1. The audit gate returns `PASSED` (exit code 0).
-  2. `AUDIT_RECEIPT.json` is generated on disk with documented effect size and statistical metrics.
-  3. You report the exact differing sample count directly from the receipt.
+- **Minimum Meaningful Effect Size (MMES >= 2.0%)**: Candidates differing by < 2% of validation samples are physically rejected.
+- **Ensemble Diversity Check**: Constituent models must satisfy **Cohen's Kappa ($\kappa \le 0.85$)** and **Disagreement Rate ($\ge 5.0\%$)**.
 
-### 6. Submission Management & Score Tracking Protocol
-- All verified packages MUST be registered and tracked in `submissions/`:
+### 2.6 Submission Management & Divergence Tracking
+- Register all verified packages permanently:
   ```powershell
   python tools/submission_tool.py register --exp-id <id> --candidate <cand_csv> --baseline <base_csv>
   ```
-- View registered packages, Local CV vs Leaderboard scores:
+- List registered submissions and comparison against local CV:
   ```powershell
   python tools/submission_tool.py list
   ```
-- When competition organizers release evaluation scores, record them immediately:
+- Record official competition scores when released:
   ```powershell
-  python tools/submission_tool.py record-score --sub-id <sub_id> --macro-a <F1> --macro-b <F1> --macro-c-type <F1>
+  python tools/submission_tool.py record-score --sub-id <sub_id> --score <val>
   ```
-- If $\Delta (\text{LB} - \text{CV}) < -0.05$, the system triggers a **Divergence Warning ⚠️**.
+- If $\Delta (\text{LB} - \text{CV}) < -0.05$, the system triggers a **Divergence Warning ⚠️** requiring CV leak diagnostics.
 
-### 7. Hard Constraints Pre-Flight Check & Cloud Offloading
-Before running any heavy training:
-- Verify that `max_params_limit` is respected.
-- Ensure `splits/fold_assignments.tsv` is strictly used (no random splitting).
-- Run pre-flight inspection before cloud dispatch:
+### 2.7 Cloud Execution & GPU Offloading (Modal.com & Kaggle CLI)
+- Run local pre-flight checks before remote dispatch:
   ```powershell
-  python harness/cloud_inspector.py --config <config_path>
+  python harness/cloud_inspector.py --config configs/<exp_config>.yaml
   ```
-- Offload to cloud GPU if training Transformer backbones (XLM-R, DeBERTa):
+- Dispatch remote training:
   ```powershell
-  python harness/cloud_runner.py --backend modal --config <config_path> --auto-submit
+  # For Modal:
+  python harness/cloud_runner.py --backend modal --config configs/<exp_config>.yaml --auto-submit
+  # For Kaggle:
+  python harness/cloud_runner.py --backend kaggle --config configs/<exp_config>.yaml
   ```
+
+---
+
+## 3. Standard Operating Procedure (SOP) for New Experiments
+
+1. **Consult Central Memory**: Run `python tools/journal_tool.py --recommend` to identify parent node and target branch.
+2. **Inspect Parent Diagnostics**: Check `artifacts/<parent_id>/DIAGNOSTICS.md` to pinpoint specific bottlenecks.
+3. **Draft Grounded Config**: Create `configs/exp<NNN>_<branch>_<descriptor>.yaml` declaring hypothesis, grounding, and assumptions.
+4. **Execute Verification Smoke Test**: Run single-fold probe `python train.py --config configs/<exp_config>.yaml --debug --fold 0`.
+5. **Execute Full Cross-Validation**: Run full training `python train.py --config configs/<exp_config>.yaml`.
+6. **Verify Artifacts & Audit Gate**: Confirm `metrics.json`, `summary.md`, `oof_predictions.csv`, and run `tools/audit_gate.py`.
+7. **Update Central Memory**: Verify solution tree sync via `python tools/journal_tool.py --summary`.
