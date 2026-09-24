@@ -55,6 +55,33 @@ class TestLLMEngine(unittest.TestCase):
         self.assertIn("SFTTrainer", script)
         self.assertIn("Qwen/Qwen2.5-7B-Instruct", script)
 
+    def test_generate_unsloth_script(self):
+        script = LLMEngine.generate_unsloth_script(
+            model_name="unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+            train_path="dataset/train.csv",
+            lora_r=16,
+            lora_alpha=32,
+        )
+        self.assertIn("FastLanguageModel", script)
+        self.assertIn("unsloth", script)
+        self.assertIn("SFTTrainer", script)
+        self.assertIn("unsloth/Qwen2.5-7B-Instruct-bnb-4bit", script)
+        self.assertIn("is_bfloat16_supported", script)
+
+    def test_fetch_provider_live_models_fallback(self):
+        models = LLMEngine.fetch_provider_live_models("gemini")
+        self.assertIsInstance(models, list)
+        self.assertGreater(len(models), 0)
+        self.assertIn("id", models[0])
+
+    def test_fetch_unsloth_models_structure(self):
+        models = LLMEngine.fetch_unsloth_models(limit=5)
+        self.assertIsInstance(models, list)
+        if models:
+            self.assertIn("id", models[0])
+            self.assertIn("family", models[0])
+
 
 if __name__ == "__main__":
     unittest.main()
+
