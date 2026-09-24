@@ -361,7 +361,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
           className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-lg border border-zinc-800 text-xs font-medium transition"
         >
           <Sliders className="w-3.5 h-3.5 text-zinc-400" />
-          <span>Multi-Account Settings</span>
+          <span>Account Settings</span>
         </button>
       </div>
 
@@ -370,7 +370,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
         <div>
           <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
             <Cloud className="w-4 h-4 text-zinc-400" />
-            <span>1-Click Execution & Cloud Runner Hub</span>
+            <span>Cloud Runner Hub</span>
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
             Launch GPU experiments to Modal.com, Kaggle Kernels, or Local Hardware with real-time log streaming and automated audit gate.

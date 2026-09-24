@@ -20,6 +20,7 @@ import {
   UnslothModelInfo,
   ProviderModelInfo,
   LLMUnslothGenerateRequest,
+  StrategyCard,
 } from '../types/experiment';
 
 const API_BASE = '/api';
@@ -201,8 +202,15 @@ export const api = {
     return res.json();
   },
 
+  async getStrategyCards(): Promise<{ strategies: StrategyCard[] }> {
+    const res = await fetch(`${API_BASE}/strategy_cards`);
+    if (!res.ok) throw new Error(`Failed to fetch strategy cards: ${res.statusText}`);
+    return res.json();
+  },
+
   async createConfig(payload: {
-    exp_id: string;
+    exp_id?: string;
+    descriptor?: string;
     parent_id?: string;
     branch?: string;
     hypothesis?: string;
@@ -210,6 +218,12 @@ export const api = {
     problem_addressed?: string;
     approach_type?: string;
     model_family?: string;
+    model_name?: string;
+    model_params?: Record<string, any>;
+    source_type?: string;
+    source_id?: string;
+    retrieval_summary?: string;
+    uncertainty_level?: string;
   }): Promise<{ success: boolean; path: string; content: string; parsed: any }> {
     const res = await fetch(`${API_BASE}/config/create`, {
       method: 'POST',
@@ -305,6 +319,30 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(err.error || `Failed to switch kaggle profile: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async launchModalAuth(): Promise<{ success: boolean; auth_url: string; message: string }> {
+    const res = await fetch(`${API_BASE}/environment/modal/launch_auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to launch Modal authorization: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async launchKaggleAuth(): Promise<{ success: boolean; auth_url: string; message: string }> {
+    const res = await fetch(`${API_BASE}/environment/kaggle/launch_auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to launch Kaggle authorization: ${res.statusText}`);
     }
     return res.json();
   },

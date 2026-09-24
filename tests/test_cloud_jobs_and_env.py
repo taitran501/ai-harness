@@ -79,6 +79,22 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         jobs_list = manager.list_jobs(limit=5)
         self.assertTrue(len(jobs_list) >= 1)
 
+    def test_modal_and_kaggle_auth_helpers(self):
+        # 1. Parse token inputs
+        raw_cmd = "modal token set --token-id ak-1234567890abcdef --token-secret as-abcdef1234567890"
+        t_id, t_sec = EnvironmentDetector.parse_modal_token_input(raw_cmd)
+        self.assertEqual(t_id, "ak-1234567890abcdef")
+        self.assertEqual(t_sec, "as-abcdef1234567890")
+
+        # 2. Launch auth returns valid URL structure
+        m_res = EnvironmentDetector.launch_modal_auth()
+        self.assertTrue(m_res["success"])
+        self.assertIn("modal.com/settings/tokens", m_res["auth_url"])
+
+        k_res = EnvironmentDetector.launch_kaggle_auth()
+        self.assertTrue(k_res["success"])
+        self.assertIn("kaggle.com/settings", k_res["auth_url"])
+
 
 if __name__ == "__main__":
     unittest.main()

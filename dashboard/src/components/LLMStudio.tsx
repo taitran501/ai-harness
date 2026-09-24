@@ -443,9 +443,6 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base font-bold text-zinc-100">LLM & Unsloth Fine-Tuning Studio</h1>
-              <span className="px-2 py-0.5 text-[10px] font-mono bg-purple-950/60 border border-purple-700/50 text-purple-300 rounded-full">
-                Live HuggingFace API • 🦥 Unsloth Fast LoRA • Multi-Provider
-              </span>
             </div>
             <p className="text-xs text-zinc-400">
               Live model discovery from Hugging Face Hub, official Unsloth 4-bit checkpoints, and multi-provider APIs.

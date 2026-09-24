@@ -14,6 +14,8 @@ import {
   Layers,
   ChevronRight,
   Sparkles,
+  ExternalLink,
+  Upload,
 } from 'lucide-react';
 import { EnvironmentStatus } from '../types/experiment';
 import { api } from '../services/api';
@@ -98,15 +100,43 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
     }
   };
 
+  const handleLaunchModalAuth = async () => {
+    window.open('https://modal.com/settings/tokens', '_blank');
+    try {
+      await api.launchModalAuth();
+    } catch (_) {}
+  };
+
+  const handleLaunchKaggleAuth = async () => {
+    window.open('https://www.kaggle.com/settings', '_blank');
+    try {
+      await api.launchKaggleAuth();
+    } catch (_) {}
+  };
+
   const handleSaveModalToken = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!modalTokenId || !modalTokenSecret) return;
-    setSavingModalToken(true);
     setError(null);
+    let id = modalTokenId.trim();
+    let secret = modalTokenSecret.trim();
+
+    // Smart regex parsing if user pasted entire command or combined text into ID
+    const akMatch = id.match(/ak-[a-zA-Z0-9_-]+/);
+    const asMatch = id.match(/as-[a-zA-Z0-9_-]+/) || secret.match(/as-[a-zA-Z0-9_-]+/);
+    if (akMatch && asMatch) {
+      id = akMatch[0];
+      secret = asMatch[0];
+    }
+
+    if (!id || !secret) {
+      setError('Please provide both token ID (ak-...) and token secret (as-...).');
+      return;
+    }
+    setSavingModalToken(true);
     try {
-      const res = await api.setModalToken(modalTokenId, modalTokenSecret);
+      const res = await api.setModalToken(id, secret);
       if (res.success) {
-        setModalSuccessMsg('Modal token updated successfully.');
+        setModalSuccessMsg('Modal token updated and authenticated successfully.');
         setShowModalTokenForm(false);
         setModalTokenId('');
         setModalTokenSecret('');
@@ -121,6 +151,40 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
     } finally {
       setSavingModalToken(false);
     }
+  };
+
+  const handleKaggleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed = JSON.parse(content);
+        const username = parsed.username || parsed.user;
+        const key = parsed.key;
+        if (!username || !key) {
+          setError('Invalid kaggle.json: "username" and "key" properties are required.');
+          return;
+        }
+        setSavingKaggle(true);
+        const res = await api.switchKaggleProfile(username, key);
+        if (res.success) {
+          setKaggleSuccessMsg(`Kaggle authenticated for '${res.username}' via 1-click kaggle.json!`);
+          await fetchStatus();
+          onStatusChanged?.();
+          setTimeout(() => setKaggleSuccessMsg(null), 3500);
+        } else {
+          setError('Failed to apply Kaggle credentials from file.');
+        }
+      } catch (err: any) {
+        setError(`Failed to read kaggle.json: ${err.message}`);
+      } finally {
+        setSavingKaggle(false);
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleSaveKaggleCreds = async (e: React.FormEvent) => {
@@ -187,12 +251,9 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                 <span>Hardware & Cloud Environment</span>
-                <span className="text-[10px] font-mono uppercase bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-700">
-                  Multi-Account Manager
-                </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Live status detection and multi-profile switcher for Modal.com, Kaggle CLI, Docker, and local GPU.
+                Live status and account configuration for Modal.com, Kaggle, Docker, and local GPU.
               </p>
             </div>
           </div>
@@ -232,7 +293,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
         <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar text-xs">
           {/* 1. Modal.com Environment */}
           <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2.5">
               <div className="flex items-center gap-2">
                 <Cloud className="w-4 h-4 text-sky-400" />
                 <span className="font-semibold text-zinc-100">Modal.com Serverless GPU</span>
@@ -245,32 +306,55 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                     Not Installed
                   </span>
                 )}
+                {envStatus?.modal.active_profile && (
+                  <span className="text-[10px] font-mono text-zinc-400">
+                    Active: <strong className="text-sky-300 font-semibold">{envStatus.modal.active_profile}</strong>
+                  </span>
+                )}
               </div>
-              <button
-                onClick={() => setShowModalTokenForm(!showModalTokenForm)}
-                className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 font-mono"
-              >
-                <Key className="w-3 h-3" />
-                <span>{showModalTokenForm ? 'Cancel Token Setup' : 'Set Token'}</span>
-              </button>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleLaunchModalAuth}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 border border-sky-800/40 rounded-lg text-xs font-medium transition"
+                  title="Open Modal token creation page in browser"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Authorize on Modal.com</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowModalTokenForm(!showModalTokenForm)}
+                  className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 font-mono px-2 py-1 bg-zinc-900 hover:bg-zinc-800 rounded-lg border border-zinc-800 transition"
+                >
+                  <Key className="w-3 h-3" />
+                  <span>{showModalTokenForm ? 'Close' : 'Paste Token'}</span>
+                </button>
+              </div>
             </div>
 
             {/* Modal Token Form */}
             {showModalTokenForm && (
               <form onSubmit={handleSaveModalToken} className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg space-y-2">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="text-[11px] text-zinc-400">
+                  Paste Token ID + Secret, or the full command from Modal (e.g.{' '}
+                  <code className="text-sky-300 font-mono text-[10px]">modal token set --token-id ak-... --token-secret as-...</code>):
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-zinc-400 font-mono">Token ID (ak-...)</label>
+                    <label className="text-[10px] text-zinc-400 font-mono">Token ID / Command</label>
                     <input
                       type="text"
                       value={modalTokenId}
                       onChange={(e) => setModalTokenId(e.target.value)}
-                      placeholder="ak-..."
+                      placeholder="ak-... or modal token set ..."
                       className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-zinc-700"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-400 font-mono">Token Secret (as-...)</label>
+                    <label className="text-[10px] text-zinc-400 font-mono">Token Secret (optional if pasted in left box)</label>
                     <input
                       type="password"
                       value={modalTokenSecret}
@@ -282,7 +366,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                 </div>
                 <button
                   type="submit"
-                  disabled={savingModalToken || !modalTokenId || !modalTokenSecret}
+                  disabled={savingModalToken || !modalTokenId.trim()}
                   className="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-semibold"
                 >
                   {savingModalToken ? 'Saving Token...' : 'Save & Authenticate'}
@@ -292,11 +376,8 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
 
             {/* Profile List & Switcher */}
             <div>
-              <div className="text-[11px] text-zinc-400 mb-2 flex items-center justify-between">
-                <span>Configured Modal Accounts (1-Click Switch):</span>
-                <span className="font-mono text-zinc-500">
-                  Active: <strong className="text-sky-300 font-semibold">{envStatus?.modal.active_profile || 'None'}</strong>
-                </span>
+              <div className="text-[11px] text-zinc-400 mb-2">
+                <span>Configured Accounts:</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {envStatus?.modal.profiles && envStatus.modal.profiles.length > 0 ? (
@@ -333,7 +414,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   })
                 ) : (
                   <p className="text-[11px] text-zinc-500 italic col-span-2">
-                    No Modal profiles configured. Run `modal setup` or enter tokens above.
+                    No Modal profiles configured. Click "Authorize on Modal.com" above to generate a token or run `modal setup` in terminal.
                   </p>
                 )}
               </div>
@@ -342,7 +423,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
 
           {/* 2. Kaggle CLI Environment */}
           <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2.5">
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-cyan-400" />
                 <span className="font-semibold text-zinc-100">Kaggle CLI & Kernels</span>
@@ -356,13 +437,41 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   </span>
                 )}
               </div>
-              <button
-                onClick={() => setShowKaggleForm(!showKaggleForm)}
-                className="text-[11px] text-zinc-400 hover:text-zinc-200 flex items-center gap-1 font-mono"
-              >
-                <Key className="w-3 h-3" />
-                <span>{showKaggleForm ? 'Cancel' : 'Change Kaggle Key'}</span>
-              </button>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                {/* 1-Click Upload kaggle.json */}
+                <label className="flex items-center gap-1.5 px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold cursor-pointer transition shadow-sm">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload kaggle.json</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleKaggleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+
+                {/* Direct Link to Kaggle Settings */}
+                <button
+                  type="button"
+                  onClick={handleLaunchKaggleAuth}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-lg border border-zinc-800 text-xs font-medium transition"
+                  title="Open Kaggle Account Settings to create/download token"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Get Token on Kaggle</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowKaggleForm(!showKaggleForm)}
+                  className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 font-mono px-2 py-1 bg-zinc-900 hover:bg-zinc-800 rounded-lg border border-zinc-800 transition"
+                >
+                  <Key className="w-3 h-3" />
+                  <span>{showKaggleForm ? 'Close' : 'Manual Key'}</span>
+                </button>
+              </div>
             </div>
 
             {/* Kaggle Key Form */}

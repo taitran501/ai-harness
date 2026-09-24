@@ -506,5 +506,26 @@ export interface LLMUnslothGenerateRequest {
   save_to_disk?: boolean;
 }
 
+export interface StrategyCard {
+  id: string;
+  branch: BranchType;
+  badge: string;
+  title: string;
+  problem_addressed: string;
+  hypothesis: string;
+  intervention: string;
+  approach_type: ApproachType;
+  model_family: string;
+  model_name: string;
+  descriptor: string;
+  rationale: string;
+  target_tasks: string[];
+  estimated_delta: string;
+  uncertainty_level?: string;
+  source_type?: string;
+  source_id?: string;
+  model_params?: Record<string, any>;
+}
+
 
 
