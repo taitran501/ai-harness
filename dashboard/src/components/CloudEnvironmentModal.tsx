@@ -251,12 +251,9 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                 <span>Hardware & Cloud Environment</span>
-                <span className="text-[10px] font-mono uppercase bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-700">
-                  Multi-Account Manager
-                </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Live status detection and multi-profile switcher for Modal.com, Kaggle CLI, Docker, and local GPU.
+                Live status and account configuration for Modal.com, Kaggle, Docker, and local GPU.
               </p>
             </div>
           </div>
