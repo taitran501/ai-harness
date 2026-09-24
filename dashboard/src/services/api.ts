@@ -10,6 +10,12 @@ import {
   TaskPreset,
   TreeGraphResponse,
   UCBRecommendation,
+  LLMProviderInfo,
+  LLMSampleDataResponse,
+  LLMTestPromptRequest,
+  LLMTestPromptResponse,
+  LLMPeftGenerateRequest,
+  LLMPeftGenerateResponse,
 } from '../types/experiment';
 
 const API_BASE = '/api';
@@ -46,8 +52,13 @@ export const api = {
     return res.json();
   },
 
-  async getPrimingPrompt(templateId?: string): Promise<PrimingPromptResponse> {
-    const query = templateId ? `?template=${encodeURIComponent(templateId)}` : '';
+  async getPrimingPrompt(templateIdOrIde?: string, intent?: string): Promise<PrimingPromptResponse> {
+    let query = '';
+    if (intent && templateIdOrIde) {
+      query = `?ide=${encodeURIComponent(templateIdOrIde)}&intent=${encodeURIComponent(intent)}`;
+    } else if (templateIdOrIde) {
+      query = `?template=${encodeURIComponent(templateIdOrIde)}`;
+    }
     const res = await fetch(`${API_BASE}/priming_prompt${query}`);
     if (!res.ok) throw new Error(`Failed to fetch priming prompt: ${res.statusText}`);
     return res.json();
@@ -384,5 +395,57 @@ export const api = {
     }
     return res.json();
   },
+
+  async getLLMProviders(): Promise<{ providers: LLMProviderInfo[] }> {
+    const res = await fetch(`${API_BASE}/llm/providers`);
+    if (!res.ok) throw new Error(`Failed to fetch LLM providers: ${res.statusText}`);
+    return res.json();
+  },
+
+  async getLLMSampleData(): Promise<LLMSampleDataResponse> {
+    const res = await fetch(`${API_BASE}/llm/sample_data`);
+    if (!res.ok) throw new Error(`Failed to fetch sample data: ${res.statusText}`);
+    return res.json();
+  },
+
+  async testLLMPrompt(payload: LLMTestPromptRequest): Promise<LLMTestPromptResponse> {
+    const res = await fetch(`${API_BASE}/llm/test_prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `LLM test prompt failed: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async generateLLMPeftScript(payload: LLMPeftGenerateRequest): Promise<LLMPeftGenerateResponse> {
+    const res = await fetch(`${API_BASE}/llm/generate_peft_script`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `PEFT script generation failed: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
+  async saveLLMKey(keyName: string, keyValue: string): Promise<{ success: boolean; key_name: string }> {
+    const res = await fetch(`${API_BASE}/environment/llm/key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key_name: keyName, key_value: keyValue }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to save API key: ${res.statusText}`);
+    }
+    return res.json();
+  },
 };
+
 
