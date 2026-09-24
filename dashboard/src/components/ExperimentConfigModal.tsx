@@ -491,7 +491,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               }`}
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Kho Chiến Lược 1-Click & Nhờ AI</span>
+              <span>1-Click Strategies & AI Agent</span>
               <span className="ml-1 text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.2 rounded font-mono">
                 Guided
               </span>
@@ -506,7 +506,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               }`}
             >
               <FileCode className="w-3.5 h-3.5" />
-              <span>Kiểm Tra & Soạn Thảo YAML</span>
+              <span>Inspect & Edit YAML</span>
               {isDirty && (
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
               )}
@@ -558,7 +558,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               }}
               className="flex items-center gap-1 px-2.5 py-1 text-xs bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 rounded border border-emerald-700 transition"
             >
-              <span>Xem & Kiểm Tra YAML</span>
+              <span>View & Inspect YAML</span>
               <ArrowRight className="w-3 h-3" />
             </button>
           </div>
@@ -601,7 +601,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       ))}
                     </select>
                     <span className="text-[11px] text-zinc-500">
-                      Mọi thí nghiệm mới sẽ so sánh trực tiếp với Parent này.
+                      All candidate runs will benchmark directly against this Parent baseline.
                     </span>
                   </div>
                 </div>
@@ -635,22 +635,22 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               </div>
             </div>
 
-            {/* SECTION 1: Nhờ AI Agent Tự Thiết Kế Target */}
+            {/* SECTION 1: Delegate Target Design to AI Agent */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                     <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Nhờ AI Agent Tự Thiết Kế & Thực Thi Target Tiếp Theo</span>
+                    <span>Delegate Next Target Design to AI Agent</span>
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    Không cần gõ tay giả thuyết hay YAML. Chọn mục tiêu bên dưới để lấy ngay Prompt đã inject sẵn chẩn đoán lỗi của repo.
+                    No manual YAML editing required. Select a directive below to generate an epistemic prompt injected with repository diagnostics.
                   </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {/* Intent Card 1: Iterate / Tối ưu lỗi hiện tại */}
+                {/* Intent Card 1: Iterate / Optimize diagnosed bottleneck */}
                 <div className="p-4 bg-zinc-950/60 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3">
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
@@ -659,7 +659,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                           <Target className="w-3.5 h-3.5" />
                         </div>
                         <span className="text-xs font-semibold text-zinc-200">
-                          Tối Ưu & Khắc Phục Lỗi Hiện Tại (Iterate)
+                          Iterate & Fix Diagnosed Failure Modes
                         </span>
                       </div>
                       <span className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded text-zinc-400">
@@ -667,7 +667,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">
-                      AI Agent đọc log lỗi và chẩn đoán của <code className="text-zinc-300 font-mono">{selectedParentId}</code> (ví dụ: implicit hate speech, nhãn hiếm). Đảm bảo giữ nguyên các thành phần khác.
+                      AI Agent analyzes failure modes and diagnostic logs of <code className="text-zinc-300 font-mono">{selectedParentId}</code> (e.g. implicit hate speech, rare identities) to apply a single atomic patch.
                     </p>
                   </div>
 
@@ -680,12 +680,12 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {previewPromptContent?.title.includes('Iterate') ? (
                         <>
                           <EyeOff className="w-3 h-3" />
-                          <span>Ẩn Preview</span>
+                          <span>Hide Preview</span>
                         </>
                       ) : (
                         <>
                           <Eye className="w-3 h-3" />
-                          <span>Xem Prompt</span>
+                          <span>Preview Directive</span>
                         </>
                       )}
                     </button>
@@ -698,19 +698,19 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {copiedPromptId === 'iterate' ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-300">Đã Copy Prompt!</span>
+                          <span className="text-emerald-300">Directive Copied!</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5 text-zinc-400" />
-                          <span>Copy Prompt Giao Agent</span>
+                          <span>Copy Agent Directive</span>
                         </>
                       )}
                     </button>
                   </div>
                 </div>
 
-                {/* Intent Card 2: Explore / Khám phá kiến trúc mới */}
+                {/* Intent Card 2: Explore / Novel architecture paradigm */}
                 <div className="p-4 bg-zinc-950/60 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3">
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
@@ -719,7 +719,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                           <Compass className="w-3.5 h-3.5" />
                         </div>
                         <span className="text-xs font-semibold text-zinc-200">
-                          Khám Phá Nhánh & Kiến Trúc Mới (Explore)
+                          Explore Novel Architecture & Paradigm
                         </span>
                       </div>
                       <span className="text-[10px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded">
@@ -727,7 +727,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">
-                      AI Agent chuyển đổi sang một họ mô hình mới hoàn toàn (Multilingual Transformer / Multi-Task Learning) dựa trên thuật toán UCB, kèm bằng chứng grounding.
+                      AI Agent explores a completely new model family (Multilingual Transformer / Multi-Task Learning) guided by UCB tree search with epistemic grounding.
                     </p>
                   </div>
 
@@ -740,12 +740,12 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {previewPromptContent?.title.includes('Explore') ? (
                         <>
                           <EyeOff className="w-3 h-3" />
-                          <span>Ẩn Preview</span>
+                          <span>Hide Preview</span>
                         </>
                       ) : (
                         <>
                           <Eye className="w-3 h-3" />
-                          <span>Xem Prompt</span>
+                          <span>Preview Directive</span>
                         </>
                       )}
                     </button>
@@ -758,12 +758,12 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {copiedPromptId === 'explore' ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-300">Đã Copy Prompt!</span>
+                          <span className="text-emerald-300">Directive Copied!</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5 text-zinc-400" />
-                          <span>Copy Prompt Giao Agent</span>
+                          <span>Copy Agent Directive</span>
                         </>
                       )}
                     </button>
@@ -783,7 +783,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       onClick={() => setPreviewPromptContent(null)}
                       className="text-zinc-500 hover:text-zinc-300 text-xs"
                     >
-                      Đóng Preview
+                      Close Preview
                     </button>
                   </div>
                   <pre className="text-[11px] font-mono bg-zinc-900 p-3 rounded-lg border border-zinc-800 text-zinc-300 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed">
@@ -793,16 +793,16 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               )}
             </div>
 
-            {/* SECTION 2: Kho Thẻ Chiến Lược Khoa Học Có Sẵn (Strategy Cards) */}
+            {/* SECTION 2: Grounded Research Strategy Catalog */}
             <div className="space-y-3 pt-2 border-t border-zinc-800">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Kho Thẻ Chiến Lược Nghiên Cứu 1-Click (Strategy Catalog)</span>
+                    <span>Grounded Research Strategy Catalog (1-Click)</span>
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    Các phương án khoa học đã thẩm định theo chuẩn AGENTS.md. Bấm 1-click để sinh file config chuẩn hoặc copy prompt giao việc.
+                    Vetted scientific interventions conforming to AGENTS.md standards. 1-click to scaffold a compliant config or copy an agent directive.
                   </p>
                 </div>
               </div>
@@ -882,11 +882,11 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                           className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded-md transition shadow-sm disabled:opacity-50"
                         >
                           {isGenerating ? (
-                            <span>Đang tạo Config...</span>
+                            <span>Scaffolding Config...</span>
                           ) : (
                             <>
                               <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
-                              <span>Tạo Config Ngay (1-Click)</span>
+                              <span>Scaffold Config (1-Click)</span>
                             </>
                           )}
                         </button>
