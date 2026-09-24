@@ -1,0 +1,96 @@
+task:
+  id: kaggle_titanic
+  platform: kaggle
+  task_name: Titanic Survival Prediction
+  name: Titanic Survival Prediction
+  task_type: Tabular Binary Classification
+  type: Tabular Binary Classification
+  modality: tabular
+  primary_metric: Accuracy
+  direction: maximize
+  primary_metric_baseline: 0.795
+  primary_metric_target: 0.865
+  inputs:
+  - name: tabular_features
+    type: tabular
+    source_columns:
+    - Pclass
+    - Sex
+    - Age
+    - SibSp
+    - Parch
+    - Fare
+    - Embarked
+  subtasks:
+  - id: survival_cls
+    name: Survival Classification
+    metric: Accuracy
+    type: accuracy
+    task_type: binary_classification
+    column: Survived
+    classes:
+    - '0'
+    - '1'
+    direction: maximize
+    baseline_score: 0.795
+    target_score: 0.865
+    weight: 1.0
+    description: Binary survival classification (0=died, 1=survived)
+  metrics:
+  - id: accuracy
+    name: Classification Accuracy
+    metric: Accuracy
+    direction: maximize
+    baseline_score: 0.795
+    target_score: 0.865
+    weight: 1.0
+    description: Top-level classification accuracy
+  - id: roc_auc
+    name: Area Under ROC Curve
+    metric: ROC-AUC
+    direction: maximize
+    baseline_score: 0.820
+    target_score: 0.890
+    weight: 0.0
+    description: ROC-AUC rank score
+  - id: logloss
+    name: Logarithmic Loss
+    metric: LogLoss
+    direction: minimize
+    baseline_score: 0.440
+    target_score: 0.350
+    weight: 0.0
+    description: Binary cross-entropy
+  languages: []
+  description: Canonical tabular classification benchmark on passenger survival.
+  data_config:
+    train_path: dataset/train.csv
+    test_path: dataset/test.csv
+    sample_submission_path: dataset/gender_submission.csv
+    split_strategy: StratifiedKFold
+    n_folds: 5
+    seed: 42
+    id_column: PassengerId
+    target_column: Survived
+    missing_data_policy: impute_median_categorical_mode
+    external_data_policy: forbidden
+  competition_rules:
+    allow_llm: false
+    allow_api: false
+    allow_external_data: false
+    allow_pretrained_models: false
+    max_params_limit: 50000000
+    max_gpu_hours: 4
+    daily_submission_limit: 10
+    deadline: '2026-11-30T23:59:59Z'
+    team_policy: Individual
+    reproducibility_required: true
+  submission_spec:
+    file_name: submission.csv
+    archive_format: csv
+    required_columns:
+    - PassengerId
+    - Survived
+    min_diff_pct: 2.0
+    max_kappa: 0.85
+    min_disagreement: 5.0

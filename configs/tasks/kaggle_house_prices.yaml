@@ -1,0 +1,91 @@
+task:
+  id: kaggle_house_prices
+  platform: kaggle
+  task_name: House Prices Regression
+  name: House Prices Regression
+  task_type: Tabular Regression
+  type: Tabular Regression
+  modality: tabular
+  primary_metric: RMSE
+  direction: minimize
+  primary_metric_baseline: 0.145
+  primary_metric_target: 0.110
+  inputs:
+  - name: tabular_features
+    type: tabular
+    source_columns:
+    - OverallQual
+    - GrLivArea
+    - TotalBsmtSF
+    - GarageCars
+    - YearBuilt
+  subtasks:
+  - id: saleprice_reg
+    name: Sale Price Prediction
+    metric: RMSE
+    type: rmse
+    task_type: regression
+    column: SalePrice
+    direction: minimize
+    baseline_score: 0.145
+    target_score: 0.110
+    weight: 1.0
+    description: Predicting log-transformed residential sale prices
+  metrics:
+  - id: rmse
+    name: Root Mean Squared Error
+    metric: RMSE
+    direction: minimize
+    baseline_score: 0.145
+    target_score: 0.110
+    weight: 1.0
+    description: Log-scale RMSE
+  - id: mae
+    name: Mean Absolute Error
+    metric: MAE
+    direction: minimize
+    baseline_score: 0.095
+    target_score: 0.075
+    weight: 0.0
+    description: L1 error reference
+  - id: r2
+    name: R-Squared
+    metric: R2
+    direction: maximize
+    baseline_score: 0.890
+    target_score: 0.940
+    weight: 0.0
+    description: Variance explained
+  languages: []
+  description: Tabular regression benchmark optimizing Root Mean Squared Error (RMSE).
+  data_config:
+    train_path: dataset/train.csv
+    test_path: dataset/test.csv
+    sample_submission_path: dataset/sample_submission.csv
+    split_strategy: KFold
+    n_folds: 5
+    seed: 42
+    id_column: Id
+    target_column: SalePrice
+    missing_data_policy: impute_median_categorical_missing
+    external_data_policy: forbidden
+  competition_rules:
+    allow_llm: false
+    allow_api: false
+    allow_external_data: false
+    allow_pretrained_models: false
+    max_params_limit: 50000000
+    max_gpu_hours: 6
+    daily_submission_limit: 5
+    deadline: '2026-12-31T23:59:59Z'
+    team_policy: Max 3 members
+    reproducibility_required: true
+  submission_spec:
+    file_name: submission.csv
+    archive_format: csv
+    required_columns:
+    - Id
+    - SalePrice
+    min_diff_pct: 2.0
+    max_kappa: 0.85
+    min_disagreement: 5.0
