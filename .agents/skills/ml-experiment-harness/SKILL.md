@@ -26,7 +26,8 @@ auditing predictions, or registering verified submissions for **StereoQueerEval*
 |---|---|---|---|---|---|---|
 | **Stereotype Detection** (`subtask_a`) | `Macro-F1` | `maximize` | `0.6962` | `0.88` | `0.333` | Binary stereotype detection (no vs yes) across EN, IT, NL |
 | **Hate Speech Classification** (`subtask_b`) | `Macro-F1` | `maximize` | `0.5238` | `0.8` | `0.333` | 3-class classification (no vs yes_explicit vs yes_implicit) |
-| **Target Type & Identity** (`subtask_c`) | `Macro-F1` | `maximize` | `0.7178` | `0.85` | `0.334` | Evaluated strictly on oracle_hate comments (hate_speech != no) |
+| **Target Type** (`subtask_c_type`) | `Macro-F1` | `maximize` | `0.7178` | `0.85` | `0.167` | Evaluated strictly on oracle_hate comments (hate_speech != no) |
+| **Target Identities** (`subtask_c_identity`) | `Macro-F1` | `maximize` | `0.2408` | `0.85` | `0.167` | Multi-label classification across 9 identity codes |
 
 ### Data & Cross-Validation Strategy:
 - **Validation Scheme**: `GroupKFold` (5 folds, seed 42)

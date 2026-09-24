@@ -834,6 +834,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "direction": task.get("direction", "maximize"),
             "primary_metric_baseline": task.get("primary_metric_baseline"),
             "primary_metric_target": task.get("primary_metric_target"),
+            "inputs": task.get("inputs", []),
+            "subtasks": task.get("subtasks", task.get("metrics", [])),
             "metrics": task.get("metrics", []),
             "languages": task.get("languages", []),
             "description": task.get("description", ""),
