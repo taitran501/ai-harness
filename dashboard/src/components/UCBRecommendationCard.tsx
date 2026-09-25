@@ -13,7 +13,7 @@ export const UCBRecommendationCard: React.FC<UCBRecommendationCardProps> = ({ re
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
       <div className="flex items-center gap-2 text-indigo-400 font-semibold text-xs uppercase tracking-wider">
         <Compass className="w-4 h-4 text-indigo-400" />
-        AIDE UCB Tree Search
+        UCB Tree Recommendation
       </div>
 
       <div className="space-y-1">

@@ -1044,12 +1044,12 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               <div className="p-3.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
                 <div className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>SWE-Agent Deterministic Audit Gate Parameters</span>
+                  <span>Audit Gate Parameters</span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">MMES Threshold (% rows)</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Min Prediction Delta (% rows)</label>
                     <input
                       type="number"
                       step="0.1"
@@ -1058,11 +1058,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       placeholder="2.0"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">Minimum row delta vs baseline</span>
+                    <span className="text-[10px] text-zinc-500">Min % changed vs baseline (default 2.0%)</span>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Ensemble Max Cohen's Kappa</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">Max Ensemble Correlation (Kappa)</label>
                     <input
                       type="number"
                       step="0.01"
@@ -1071,7 +1071,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       placeholder="0.85"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">Blocks identical pseudo-ensembles</span>
+                    <span className="text-[10px] text-zinc-500">Blocks identical models (ceiling 0.85)</span>
                   </div>
 
                   <div>
@@ -1084,7 +1084,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       placeholder="5.0"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">Ensures distinct prediction patterns</span>
+                    <span className="text-[10px] text-zinc-500">Min prediction diversity (floor 5.0%)</span>
                   </div>
                 </div>
               </div>
