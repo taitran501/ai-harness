@@ -346,7 +346,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                 <span>Competition & Benchmark Setup</span>
-                {name && <span className="text-xs text-zinc-400 font-normal">• {name}</span>}
+                {name && <span className="text-xs text-zinc-400 font-normal">({name})</span>}
               </h2>
               <p className="text-[11px] text-zinc-500">
                 Configure task objectives, cross-validation data splits, competition rules, and audit gates

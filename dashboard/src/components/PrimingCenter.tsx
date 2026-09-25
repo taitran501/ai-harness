@@ -59,11 +59,8 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
       {/* Top Header & Copy Action */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 pb-3">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
-            <span>Agent Prompts Hub</span>
-            <span className="text-[10px] bg-zinc-900 text-zinc-400 border border-zinc-800 px-1.5 py-0.2 rounded font-mono uppercase">
-              {selectedIde} • {selectedIntent}
-            </span>
+          <h2 className="text-sm font-semibold text-zinc-100 tracking-tight">
+            Agent Prompts Hub
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
             Copy tailored system priming prompts for Antigravity or OpenAI Codex CLI sessions.
@@ -199,16 +196,17 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
 
       {/* Context Summary Banner */}
       <div className="bg-zinc-900/60 border border-zinc-800 p-2.5 rounded-lg flex items-center justify-between gap-3 text-xs text-zinc-400">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-4 min-w-0">
           <Info className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-          <span className="truncate">
-            Task: <strong className="text-zinc-200 font-mono">{taskInfo?.task_name || 'Active Task'}</strong> • Target:{' '}
-            <strong className="text-zinc-200 font-mono">{taskInfo?.primary_metric || 'Score'}</strong>
+          <span>
+            Task: <strong className="text-zinc-200 font-mono">{taskInfo?.task_name || 'Active Task'}</strong>
+          </span>
+          <span>
+            Target: <strong className="text-zinc-200 font-mono">{taskInfo?.primary_metric || 'Score'}</strong>
           </span>
         </div>
-        <div className="flex items-center gap-2 font-mono text-[11px] shrink-0 text-zinc-500">
+        <div className="flex items-center gap-4 font-mono text-[11px] shrink-0 text-zinc-500">
           <span>{charCount.toLocaleString()} chars</span>
-          <span>•</span>
           <span>~{tokenEst.toLocaleString()} tokens</span>
         </div>
       </div>

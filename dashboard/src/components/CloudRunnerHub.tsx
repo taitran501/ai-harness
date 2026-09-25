@@ -700,7 +700,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                     {auditReceipt.status}
                   </span>
                   <span className="text-zinc-400 ml-2 font-mono text-[11px]">
-                    Effect Size: {(auditReceipt.differing_fraction * 100).toFixed(1)}% (Floor &ge; 2.0%) • Differing rows: {auditReceipt.differing_rows}/{auditReceipt.total_rows}
+                    Effect Size: {(auditReceipt.differing_fraction * 100).toFixed(1)}% (Floor &ge; 2.0%), Differing rows: {auditReceipt.differing_rows}/{auditReceipt.total_rows}
                   </span>
                 </div>
               </div>

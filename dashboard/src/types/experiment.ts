@@ -494,6 +494,13 @@ export interface HFModelInfo {
   pipeline_tag?: string;
   last_modified?: string;
   is_unsloth: boolean;
+  family?: string;
+  param_size_b?: number | null;
+  param_label?: string | null;
+  quantization?: string;
+  is_bnb_4bit?: boolean;
+  is_gguf?: boolean;
+  is_instruct?: boolean;
 }
 
 export interface UnslothModelInfo extends HFModelInfo {
@@ -534,7 +541,7 @@ export interface LLMUnslothGenerateRequest {
 export interface StrategyCard {
   id: string;
   branch: BranchType;
-  badge: string;
+  badge?: string;
   title: string;
   problem_addressed: string;
   hypothesis: string;
@@ -545,7 +552,7 @@ export interface StrategyCard {
   descriptor: string;
   rationale: string;
   target_tasks: string[];
-  estimated_delta: string;
+  estimated_delta?: string;
   param_size?: string | null;
   llm_spec?: LLMSpec | null;
   uncertainty_level?: string;

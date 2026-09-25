@@ -1,9 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Sparkles,
   Play,
   Cpu,
-  Settings,
   Code2,
   CheckCircle2,
   AlertTriangle,
@@ -12,19 +10,11 @@ import {
   RefreshCw,
   Plus,
   Trash2,
-  HelpCircle,
-  FileCode,
-  Flame,
   Key,
   Database,
-  ArrowRight,
   Layers,
-  ChevronDown,
   Search,
   ExternalLink,
-  Download,
-  ThumbsUp,
-  Zap,
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -38,6 +28,14 @@ import {
   ProviderModelInfo,
 } from '../types/experiment';
 
+const DEFAULT_PROMPT_TAGS = [
+  'StereoQueerEval_id',
+  'yt_title',
+  'yt_description',
+  'yt_comment',
+  'stereotype',
+];
+
 const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
   {
     id: 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit',
@@ -45,6 +43,9 @@ const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
     downloads: 640000,
     likes: 1950,
     family: 'Qwen',
+    param_size_b: 7.0,
+    param_label: '7B',
+    quantization: '4-bit',
     is_bnb_4bit: true,
     is_gguf: false,
     is_instruct: true,
@@ -57,18 +58,9 @@ const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
     downloads: 580000,
     likes: 2200,
     family: 'DeepSeek',
-    is_bnb_4bit: true,
-    is_gguf: false,
-    is_instruct: true,
-    recommended_for_lora: true,
-    is_unsloth: true,
-  },
-  {
-    id: 'unsloth/Llama-3.3-70B-Instruct-bnb-4bit',
-    name: 'Llama-3.3-70B-Instruct-bnb-4bit',
-    downloads: 410000,
-    likes: 1600,
-    family: 'Llama',
+    param_size_b: 14.0,
+    param_label: '14B',
+    quantization: '4-bit',
     is_bnb_4bit: true,
     is_gguf: false,
     is_instruct: true,
@@ -81,6 +73,9 @@ const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
     downloads: 820000,
     likes: 2800,
     family: 'Llama',
+    param_size_b: 8.0,
+    param_label: '8B',
+    quantization: '4-bit',
     is_bnb_4bit: true,
     is_gguf: false,
     is_instruct: true,
@@ -93,6 +88,9 @@ const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
     downloads: 490000,
     likes: 1750,
     family: 'DeepSeek',
+    param_size_b: 8.0,
+    param_label: '8B',
+    quantization: '4-bit',
     is_bnb_4bit: true,
     is_gguf: false,
     is_instruct: true,
@@ -105,6 +103,9 @@ const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
     downloads: 380000,
     likes: 1400,
     family: 'Qwen',
+    param_size_b: 14.0,
+    param_label: '14B',
+    quantization: '4-bit',
     is_bnb_4bit: true,
     is_gguf: false,
     is_instruct: true,
@@ -117,6 +118,9 @@ const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
     downloads: 290000,
     likes: 980,
     family: 'Mistral',
+    param_size_b: 7.0,
+    param_label: '7B',
+    quantization: '4-bit',
     is_bnb_4bit: true,
     is_gguf: false,
     is_instruct: true,
@@ -129,6 +133,9 @@ const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
     downloads: 260000,
     likes: 870,
     family: 'Gemma',
+    param_size_b: 9.0,
+    param_label: '9B',
+    quantization: '4-bit',
     is_bnb_4bit: true,
     is_gguf: false,
     is_instruct: true,
@@ -141,18 +148,9 @@ const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
     downloads: 195000,
     likes: 720,
     family: 'Phi',
-    is_bnb_4bit: true,
-    is_gguf: false,
-    is_instruct: true,
-    recommended_for_lora: true,
-    is_unsloth: true,
-  },
-  {
-    id: 'unsloth/Qwen2.5-Coder-7B-Instruct-bnb-4bit',
-    name: 'Qwen2.5-Coder-7B-Instruct-bnb-4bit',
-    downloads: 310000,
-    likes: 1100,
-    family: 'Qwen',
+    param_size_b: 3.8,
+    param_label: '3.8B',
+    quantization: '4-bit',
     is_bnb_4bit: true,
     is_gguf: false,
     is_instruct: true,
@@ -167,14 +165,10 @@ const FALLBACK_HF_MODELS: HFModelInfo[] = [
     name: 'Qwen2.5-7B-Instruct',
     downloads: 2400000,
     likes: 3600,
-    pipeline_tag: 'text-generation',
-    is_unsloth: false,
-  },
-  {
-    id: 'meta-llama/Llama-3.3-70B-Instruct',
-    name: 'Llama-3.3-70B-Instruct',
-    downloads: 1820000,
-    likes: 4400,
+    family: 'Qwen',
+    param_size_b: 7.0,
+    param_label: '7B',
+    quantization: 'FP16/BF16',
     pipeline_tag: 'text-generation',
     is_unsloth: false,
   },
@@ -183,14 +177,10 @@ const FALLBACK_HF_MODELS: HFModelInfo[] = [
     name: 'DeepSeek-R1-Distill-Qwen-14B',
     downloads: 2600000,
     likes: 6100,
-    pipeline_tag: 'text-generation',
-    is_unsloth: false,
-  },
-  {
-    id: 'microsoft/phi-4',
-    name: 'phi-4',
-    downloads: 1250000,
-    likes: 2900,
+    family: 'DeepSeek',
+    param_size_b: 14.0,
+    param_label: '14B',
+    quantization: 'FP16/BF16',
     pipeline_tag: 'text-generation',
     is_unsloth: false,
   },
@@ -199,6 +189,10 @@ const FALLBACK_HF_MODELS: HFModelInfo[] = [
     name: 'xlm-roberta-base',
     downloads: 5200000,
     likes: 1950,
+    family: 'RoBERTa',
+    param_size_b: 0.28,
+    param_label: '0.3B',
+    quantization: 'FP16/BF16',
     pipeline_tag: 'fill-mask',
     is_unsloth: false,
   },
@@ -207,6 +201,10 @@ const FALLBACK_HF_MODELS: HFModelInfo[] = [
     name: 'deberta-v3-large',
     downloads: 3400000,
     likes: 1800,
+    family: 'DeBERTa',
+    param_size_b: 0.43,
+    param_label: '0.4B',
+    quantization: 'FP16/BF16',
     pipeline_tag: 'fill-mask',
     is_unsloth: false,
   },
@@ -221,9 +219,7 @@ interface LLMStudioProps {
 export const LLMStudio: React.FC<LLMStudioProps> = ({
   taskInfo,
   onRefreshSolutionTree,
-  onOpenConfigModal,
 }) => {
-  // Mode selection: Prompting vs Unsloth/PEFT vs HF Hub Explorer
   const [studioMode, setStudioMode] = useState<'prompting' | 'unsloth' | 'hf_hub'>('prompting');
 
   // Providers & keys state
@@ -253,8 +249,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     'You are an expert NLP classification model specializing in nuance, social context, and hate speech analysis.'
   );
   const [promptTemplate, setPromptTemplate] = useState<string>(
-    'Analyze the following content:\n\nComment: "{text}"\n\nDetermine whether this comment contains stereotype or hate speech. Provide your final classification label strictly as requested.'
+    'Analyze the following content:\n\nVideo Title: "{yt_title}"\nComment: "{yt_comment}"\n\nDetermine whether this comment contains stereotype or hate speech. Provide your final classification label strictly as requested.'
   );
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Few-Shot examples
   const [fewShots, setFewShots] = useState<Array<{ input: string; output: string; explanation?: string }>>([]);
@@ -274,8 +271,8 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
   // Unsloth & LoRA Fine-Tuning state
   const [fineTuningFramework, setFineTuningFramework] = useState<'unsloth' | 'peft'>('unsloth');
   const [peftModelName, setPeftModelName] = useState('unsloth/Qwen2.5-7B-Instruct-bnb-4bit');
-  const [peftTextCol, setPeftTextCol] = useState('text');
-  const [peftTargetCol, setPeftTargetCol] = useState('target');
+  const [peftTextCol, setPeftTextCol] = useState('yt_comment');
+  const [peftTargetCol, setPeftTargetCol] = useState('stereotype');
   const [peftLoraR, setPeftLoraR] = useState(16);
   const [peftLoraAlpha, setPeftLoraAlpha] = useState(32);
   const [peftMaxSeqLength, setPeftMaxSeqLength] = useState(2048);
@@ -286,20 +283,86 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
   const [peftResult, setPeftResult] = useState<LLMPeftGenerateResponse | null>(null);
   const [copiedScript, setCopiedScript] = useState(false);
 
-  // Unsloth Live Models list (initialized with curated models)
+  // Unsloth Live Models list & filter state
   const [unslothModels, setUnslothModels] = useState<UnslothModelInfo[]>(FALLBACK_UNSLOTH_MODELS);
   const [loadingUnslothModels, setLoadingUnslothModels] = useState(false);
-  const [unslothFamilyFilter, setUnslothFamilyFilter] = useState<string>('All');
+  const [unslothSearch, setUnslothSearch] = useState<string>('');
+  const [unslothFamily, setUnslothFamily] = useState<string>('all');
+  const [unslothParamRange, setUnslothParamRange] = useState<string>('all');
+  const [unslothQuantization, setUnslothQuantization] = useState<string>('all');
+  const [unslothSort, setUnslothSort] = useState<string>('downloads');
+  const [unslothLastFetched, setUnslothLastFetched] = useState<string>('');
 
-  // Hugging Face Live Hub Search (initialized with curated models)
-  const [hfSearchQuery, setHfSearchQuery] = useState('');
+  // Hugging Face Live Hub Search & filter state
   const [hfModels, setHfModels] = useState<HFModelInfo[]>(FALLBACK_HF_MODELS);
   const [loadingHfModels, setLoadingHfModels] = useState(false);
-  const [hfSortFilter, setHfSortFilter] = useState<'downloads' | 'trendingScore' | 'likes'>('downloads');
+  const [hfSearchQuery, setHfSearchQuery] = useState<string>('');
+  const [hfFamily, setHfFamily] = useState<string>('all');
+  const [hfParamRange, setHfParamRange] = useState<string>('all');
+  const [hfQuantization, setHfQuantization] = useState<string>('all');
+  const [hfSortFilter, setHfSortFilter] = useState<string>('downloads');
+  const [hfLastFetched, setHfLastFetched] = useState<string>('');
 
   // Experiment Registration State
   const [registeringExp, setRegisteringExp] = useState(false);
   const [registeredExpMsg, setRegisteredExpMsg] = useState<string | null>(null);
+
+  // Available tags for User Prompt Template
+  const availableColumns =
+    sampleData?.columns && sampleData.columns.length > 0
+      ? sampleData.columns
+      : DEFAULT_PROMPT_TAGS;
+
+  // Check if a column tag is currently in promptTemplate
+  const isTagActive = (col: string): boolean => {
+    return promptTemplate.includes(`{${col}}`);
+  };
+
+  // Toggle column tag in/out of promptTemplate
+  const toggleColumnToken = (col: string) => {
+    const token = `{${col}}`;
+    if (promptTemplate.includes(token)) {
+      // Remove all occurrences of {col} and normalize redundant spaces
+      setPromptTemplate((prev) =>
+        prev
+          .split(token)
+          .join('')
+          .replace(/ {2,}/g, ' ')
+          .trim()
+      );
+    } else {
+      // Insert at cursor position if textarea is focused, otherwise append
+      const el = promptTextareaRef.current;
+      if (el && typeof el.selectionStart === 'number') {
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        const nextVal =
+          promptTemplate.slice(0, start) +
+          (start > 0 && !/\s$/.test(promptTemplate.slice(0, start)) ? ' ' : '') +
+          token +
+          promptTemplate.slice(end);
+        setPromptTemplate(nextVal);
+      } else {
+        setPromptTemplate((prev) => `${prev.trim()} ${token}`);
+      }
+    }
+  };
+
+  // Handle Drag-and-Drop of column tag into textarea
+  const handlePromptDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    const token = e.dataTransfer.getData('text/plain');
+    if (!token || !token.startsWith('{')) return;
+
+    const el = e.currentTarget;
+    const start = typeof el.selectionStart === 'number' ? el.selectionStart : promptTemplate.length;
+    const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : promptTemplate.length;
+    const prefix = promptTemplate.slice(0, start);
+    const suffix = promptTemplate.slice(end);
+    const spacerBefore = prefix.length > 0 && !/\s$/.test(prefix) ? ' ' : '';
+    const spacerAfter = suffix.length > 0 && !/^\s/.test(suffix) ? ' ' : '';
+    setPromptTemplate(`${prefix}${spacerBefore}${token}${spacerAfter}${suffix}`);
+  };
 
   // Fetch providers
   const loadProviders = async () => {
@@ -319,7 +382,6 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     }
   };
 
-  // Fetch dynamic models for selected provider
   const loadProviderModels = async (providerId: string) => {
     setLoadingProviderModels(true);
     try {
@@ -335,13 +397,22 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     }
   };
 
-  // Fetch live Unsloth models
-  const loadUnslothModels = async () => {
+  // Real-time fetch for Unsloth models
+  const loadUnslothModels = async (forceRefresh = false) => {
     setLoadingUnslothModels(true);
     try {
-      const res = await api.getUnslothModels(50);
-      if (res.models && res.models.length > 0) {
+      const res = await api.getUnslothModels({
+        search: unslothSearch.trim(),
+        family: unslothFamily,
+        param_range: unslothParamRange,
+        quantization: unslothQuantization,
+        sort: unslothSort,
+        limit: 50,
+        force_refresh: forceRefresh,
+      });
+      if (res.models) {
         setUnslothModels(res.models);
+        setUnslothLastFetched(new Date().toLocaleTimeString());
       }
     } catch (err) {
       console.warn('Failed to load Unsloth models from HF Hub:', err);
@@ -350,19 +421,24 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     }
   };
 
-  // Search Hugging Face Hub (do not restrict pipeline tag when user searches specifically)
-  const searchHfHub = async (query = '', sort = hfSortFilter) => {
+  // Real-time fetch for Hugging Face Hub models
+  const searchHfHub = async (forceRefresh = false) => {
     setLoadingHfModels(true);
     try {
-      const trimmedQuery = query.trim();
+      const trimmedQuery = hfSearchQuery.trim();
       const res = await api.getHFModels({
         search: trimmedQuery,
         pipeline: trimmedQuery ? undefined : 'text-generation',
-        sort,
-        limit: 20,
+        family: hfFamily,
+        param_range: hfParamRange,
+        quantization: hfQuantization,
+        sort: hfSortFilter,
+        limit: 35,
+        force_refresh: forceRefresh,
       });
-      if (res.models && res.models.length > 0) {
+      if (res.models) {
         setHfModels(res.models);
+        setHfLastFetched(new Date().toLocaleTimeString());
       }
     } catch (err) {
       console.warn('Failed to search Hugging Face Hub:', err);
@@ -377,7 +453,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
       const data = await api.getLLMSampleData();
       setSampleData(data);
       if (data.columns && data.columns.length > 0) {
-        setPeftTextCol(data.columns[0]);
+        const textCandidate =
+          data.columns.find((c) => c.includes('comment') || c.includes('text')) || data.columns[0];
+        setPeftTextCol(textCandidate);
         if (data.columns.length > 1) {
           setPeftTargetCol(data.columns[data.columns.length - 1]);
         }
@@ -390,11 +468,24 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
   useEffect(() => {
     loadProviders();
     loadSampleData();
-    loadUnslothModels();
-    searchHfHub('', 'downloads');
   }, []);
 
-  // Update models when provider changes
+  // Debounced live fetch when Unsloth filters change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadUnslothModels(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [unslothSearch, unslothFamily, unslothParamRange, unslothQuantization, unslothSort]);
+
+  // Debounced live fetch when Hugging Face Hub filters change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchHfHub(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [hfSearchQuery, hfFamily, hfParamRange, hfQuantization, hfSortFilter]);
+
   const handleSelectProvider = async (provId: string) => {
     setSelectedProviderId(provId);
     setIsCustomModel(false);
@@ -403,7 +494,6 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
 
   const currentProvider = providers.find((p) => p.id === selectedProviderId);
 
-  // Open key configuration
   const handleOpenKeyConfig = (envKeyName: string | null) => {
     if (!envKeyName) return;
     setKeyToConfigure(envKeyName);
@@ -412,7 +502,6 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     setShowKeyModal(true);
   };
 
-  // Save API Key
   const handleSaveApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!keyToConfigure || !apiKeyInput.trim()) return;
@@ -421,7 +510,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     try {
       const res = await api.saveLLMKey(keyToConfigure, apiKeyInput.trim());
       if (res.success) {
-        setKeySuccessMsg(`Key '${keyToConfigure}' saved successfully!`);
+        setKeySuccessMsg(`Key '${keyToConfigure}' saved successfully.`);
         await loadProviders();
         await loadProviderModels(selectedProviderId);
         setTimeout(() => {
@@ -436,12 +525,6 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     }
   };
 
-  // Insert column token into template
-  const insertColumnToken = (col: string) => {
-    setPromptTemplate((prev) => `${prev} {${col}}`);
-  };
-
-  // Add few-shot item
   const handleAddFewShot = () => {
     setFewShots((prev) => [
       ...prev,
@@ -449,12 +532,10 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     ]);
   };
 
-  // Remove few-shot item
   const handleRemoveFewShot = (index: number) => {
     setFewShots((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Run test inference
   const handleRunInference = async () => {
     setTestingPrompt(true);
     setTestError(null);
@@ -469,11 +550,11 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
 
     let rowData: Record<string, any> = {};
     if (useCustomInput) {
-      rowData = { text: customInputText || 'Sample test input' };
+      rowData = { text: customInputText || 'Sample test input', yt_comment: customInputText || 'Sample test input' };
     } else if (sampleData && sampleData.rows.length > selectedSampleIndex) {
       rowData = sampleData.rows[selectedSampleIndex];
     } else {
-      rowData = { text: 'Test input comment' };
+      rowData = { text: 'Test input comment', yt_comment: 'Test input comment' };
     }
 
     const validClasses: string[] = [];
@@ -506,7 +587,6 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     }
   };
 
-  // Generate Fine-Tuning Script (Unsloth or Standard PEFT)
   const handleGenerateScript = async (saveToDisk = false) => {
     setGeneratingPeft(true);
     try {
@@ -553,7 +633,6 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     }
   };
 
-  // Register as Solution Tree Experiment
   const handleRegisterAsExperiment = async () => {
     setRegisteringExp(true);
     setRegisteredExpMsg(null);
@@ -571,7 +650,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
         model_family: 'llm_api',
         model_name: activeModelName,
         provider: selectedProviderId,
-        hypothesis: `Zero-shot / Few-shot ICL with ${activeModelName} (CoT=${useCot}) provides high contextual generalization.`,
+        hypothesis: `Zero-shot or few-shot prompting with ${activeModelName} (CoT=${useCot}) provides contextual generalization.`,
         intervention: `Inference pipeline via ${selectedProviderId}:${activeModelName} with temperature=${temperature}.`,
         problem_addressed: 'Complex implicit nuances require large language model pre-training and reasoning.',
         source_type: 'api_provider',
@@ -588,7 +667,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
 
       const saveRes = await api.createExperimentConfig(payload);
       if (saveRes.success) {
-        setRegisteredExpMsg(`Registered experiment '${expId}'! Solution tree synchronized.`);
+        setRegisteredExpMsg(`Registered experiment '${expId}'. Solution tree synchronized.`);
         onRefreshSolutionTree?.();
         setTimeout(() => setRegisteredExpMsg(null), 4000);
       }
@@ -605,66 +684,50 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     setTimeout(() => setCopiedScript(false), 2000);
   };
 
-  // Filter Unsloth models
-  const filteredUnslothModels = unslothModels.filter((m) => {
-    if (unslothFamilyFilter === 'All') return true;
-    return m.family.toLowerCase() === unslothFamilyFilter.toLowerCase();
-  });
-
   return (
     <div className="w-full flex-1 flex flex-col bg-zinc-950 text-zinc-100 overflow-y-auto">
       {/* Top Header / Mode Switcher */}
-      <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-4 border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-purple-500/10 border border-purple-500/30 rounded-xl text-purple-400">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold text-zinc-100">LLM & Unsloth Fine-Tuning Studio</h1>
-            </div>
-            <p className="text-xs text-zinc-400">
-              Live model discovery from Hugging Face Hub, official Unsloth 4-bit checkpoints, and multi-provider APIs.
-            </p>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
+        <div>
+          <h1 className="text-base font-bold text-zinc-100">LLM & Unsloth Fine-Tuning Studio</h1>
+          <p className="text-xs text-zinc-400">
+            Real-time model discovery from Hugging Face Hub, Unsloth checkpoints, and inference provider APIs.
+          </p>
         </div>
 
-        {/* Tab Switcher */}
+        {/* Tab Switcher without emojis or decorative badges */}
         <div className="flex items-center bg-zinc-900 border border-zinc-800 p-1 rounded-xl">
           <button
             onClick={() => setStudioMode('prompting')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
               studioMode === 'prompting'
-                ? 'bg-purple-600 text-white shadow'
+                ? 'bg-purple-600 text-white'
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Prompt Playground</span>
+            Prompt Playground
           </button>
 
           <button
             onClick={() => setStudioMode('unsloth')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
               studioMode === 'unsloth'
-                ? 'bg-amber-600 text-white shadow'
+                ? 'bg-amber-600 text-white'
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Zap className="w-3.5 h-3.5 text-amber-300" />
-            <span>🦥 Unsloth LoRA Studio</span>
+            Unsloth LoRA Studio
           </button>
 
           <button
             onClick={() => setStudioMode('hf_hub')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
               studioMode === 'hf_hub'
-                ? 'bg-blue-600 text-white shadow'
+                ? 'bg-blue-600 text-white'
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Search className="w-3.5 h-3.5" />
-            <span>🤗 Hugging Face Hub</span>
+            Hugging Face Hub
           </button>
         </div>
       </div>
@@ -725,10 +788,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-medium text-zinc-400">Model Name</label>
                       {providerModels.length > 0 && providerModels[0].is_live && (
-                        <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
-                          <CheckCircle2 className="w-2.5 h-2.5" />
-                          <span>Live from API</span>
-                        </span>
+                        <span className="text-[10px] text-emerald-400 font-mono">Live from API</span>
                       )}
                     </div>
 
@@ -740,7 +800,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       >
                         {providerModels.map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.name || m.id} {m.is_live ? '(Live)' : '(Docs)'}
+                            {m.name || m.id}
                           </option>
                         ))}
                       </select>
@@ -849,32 +909,54 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   />
                 </div>
 
-                {/* User Prompt Template */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-zinc-400">User Prompt Template</label>
-                    {sampleData?.columns && sampleData.columns.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] text-zinc-500">Insert tag:</span>
-                        {sampleData.columns.slice(0, 5).map((col) => (
+                {/* User Prompt Template with Toggle & Drag-and-Drop Tags */}
+                <div className="space-y-2">
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium text-zinc-400">User Prompt Template</label>
+                      <span className="text-[10px] text-zinc-500">
+                        Click tag to toggle in/out or drag tag into editor
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {availableColumns.map((col) => {
+                        const active = isTagActive(col);
+                        return (
                           <button
                             key={col}
-                            onClick={() => insertColumnToken(col)}
-                            className="px-1.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-purple-300 rounded text-[10px] font-mono border border-zinc-700 transition"
+                            type="button"
+                            draggable={true}
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('text/plain', `{${col}}`);
+                            }}
+                            onClick={() => toggleColumnToken(col)}
+                            title={
+                              active
+                                ? `Active in prompt. Click to remove {${col}} or drag to reposition.`
+                                : `Click to insert {${col}} or drag into prompt template.`
+                            }
+                            className={`px-2 py-1 rounded-md text-[11px] font-mono border transition cursor-grab active:cursor-grabbing ${
+                              active
+                                ? 'bg-purple-600/25 border-purple-500 text-purple-200 font-semibold'
+                                : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border-zinc-800'
+                            }`}
                           >
                             {`{${col}}`}
                           </button>
-                        ))}
-                      </div>
-                    )}
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <textarea
+                    ref={promptTextareaRef}
                     rows={4}
                     value={promptTemplate}
                     onChange={(e) => setPromptTemplate(e.target.value)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={handlePromptDrop}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 font-mono focus:outline-none focus:border-purple-500 resize-y leading-relaxed"
-                    placeholder="Enter template with {text} or {column_name} placeholders..."
+                    placeholder="Enter template or drag {column_name} tags here..."
                   />
                 </div>
 
@@ -1025,14 +1107,13 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   </div>
                 )}
 
-                {/* Run Test Button */}
                 <button
                   onClick={handleRunInference}
                   disabled={testingPrompt || (!currentProvider?.has_key && !currentProvider?.is_local)}
-                  className={`w-full py-2.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition shadow-lg ${
+                  className={`w-full py-2.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition ${
                     testingPrompt || (!currentProvider?.has_key && !currentProvider?.is_local)
                       ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                      : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-950/50'
+                      : 'bg-purple-600 hover:bg-purple-500 text-white'
                   }`}
                 >
                   {testingPrompt ? (
@@ -1107,10 +1188,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       <button
                         onClick={handleRegisterAsExperiment}
                         disabled={registeringExp}
-                        className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition shadow-md"
+                        className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition"
                       >
-                        <Sparkles className="w-4 h-4" />
-                        <span>{registeringExp ? 'Registering...' : 'Register as LLM Experiment in Tree'}</span>
+                        {registeringExp ? 'Registering...' : 'Register as LLM Experiment in Tree'}
                       </button>
                       {registeredExpMsg && (
                         <p className="text-[11px] text-center pt-2 text-emerald-400 font-medium">
@@ -1133,23 +1213,15 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
         {studioMode === 'unsloth' && (
           <div className="space-y-6">
             <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 space-y-6">
-              {/* Unsloth Hero Banner */}
-              <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-gradient-to-r from-amber-950/40 via-purple-950/30 to-zinc-900/60 border border-amber-800/40 rounded-xl">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400 text-xl font-bold">
-                    🦥
-                  </div>
-                  <div>
-                    <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
-                      <span>Unsloth High-Performance LoRA & QLoRA</span>
-                      <span className="px-2 py-0.5 text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full font-mono">
-                        2x - 5x Faster • 80% Less VRAM
-                      </span>
-                    </h2>
-                    <p className="text-xs text-zinc-400">
-                      Unsloth implements manual backprop math and FlashAttention kernels to dramatically accelerate fine-tuning for competitive LLM tasks.
-                    </p>
-                  </div>
+              {/* Clean Header without Badges or Emojis */}
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-zinc-800">
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-100">
+                    Unsloth High-Performance LoRA & QLoRA
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Select a base model checkpoint below using live parameter and quantization filters, then generate a reproducible training script.
+                  </p>
                 </div>
 
                 {/* Framework Selector */}
@@ -1158,17 +1230,17 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     onClick={() => setFineTuningFramework('unsloth')}
                     className={`px-3 py-1 text-xs font-semibold rounded-lg transition ${
                       fineTuningFramework === 'unsloth'
-                        ? 'bg-amber-600 text-white shadow'
+                        ? 'bg-amber-600 text-white'
                         : 'text-zinc-400 hover:text-zinc-200'
                     }`}
                   >
-                    Unsloth (Recommended)
+                    Unsloth QLoRA
                   </button>
                   <button
                     onClick={() => setFineTuningFramework('peft')}
                     className={`px-3 py-1 text-xs font-semibold rounded-lg transition ${
                       fineTuningFramework === 'peft'
-                        ? 'bg-purple-600 text-white shadow'
+                        ? 'bg-purple-600 text-white'
                         : 'text-zinc-400 hover:text-zinc-200'
                     }`}
                   >
@@ -1177,74 +1249,168 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 </div>
               </div>
 
-              {/* Model Selection & Unsloth Model Hub Picker */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-zinc-300 flex items-center gap-2">
-                    <FileCode className="w-4 h-4 text-amber-400" />
-                    <span>Select Base Model (HF Hub ID)</span>
+              {/* Selected Base Model Input + Live Filter Bar */}
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-zinc-300">
+                    Selected Base Model ID
                   </label>
-                  <button
-                    onClick={loadUnslothModels}
-                    disabled={loadingUnslothModels}
-                    className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 transition"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loadingUnslothModels ? 'animate-spin' : ''}`} />
-                    <span>Refresh Unsloth Hub API</span>
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {unslothLastFetched && (
+                      <span className="text-[11px] text-zinc-500 font-mono">
+                        Live synced at {unslothLastFetched}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => loadUnslothModels(true)}
+                      disabled={loadingUnslothModels}
+                      className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 transition"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingUnslothModels ? 'animate-spin' : ''}`} />
+                      <span>Sync Live Hub</span>
+                    </button>
+                  </div>
                 </div>
 
                 <input
                   type="text"
                   value={peftModelName}
                   onChange={(e) => setPeftModelName(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-zinc-200 focus:outline-none focus:border-amber-500"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-amber-500"
                   placeholder="e.g. unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
                 />
 
-                {/* Unsloth Curated Model Pills */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] text-zinc-500 font-mono">Filter Family:</span>
-                      {['All', 'Qwen', 'Llama', 'DeepSeek', 'Mistral'].map((fam) => (
-                        <button
-                          key={fam}
-                          onClick={() => setUnslothFamilyFilter(fam)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-medium transition ${
-                            unslothFamilyFilter === fam
-                              ? 'bg-amber-600 text-white'
-                              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-                          }`}
-                        >
-                          {fam}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="text-[10px] text-zinc-500 font-mono">
-                      {filteredUnslothModels.length} models fetched
-                    </span>
+                {/* Real-Time Filter Bar for Unsloth Models */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 p-3 bg-zinc-950/80 border border-zinc-800/80 rounded-xl">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={unslothSearch}
+                      onChange={(e) => setUnslothSearch(e.target.value)}
+                      placeholder="Filter model name..."
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-zinc-200 font-mono focus:outline-none focus:border-amber-500"
+                    />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 bg-zinc-950/60 border border-zinc-800/80 rounded-xl">
-                    {filteredUnslothModels.slice(0, 15).map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => setPeftModelName(m.id)}
-                        className={`text-left p-2 rounded-lg border text-xs font-mono transition truncate ${
-                          peftModelName === m.id
-                            ? 'bg-amber-950/50 border-amber-600 text-amber-200'
-                            : 'bg-zinc-900/60 border-zinc-800/60 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900'
-                        }`}
-                      >
-                        <div className="font-semibold truncate text-[11px]">{m.id}</div>
-                        <div className="flex items-center justify-between text-[10px] text-zinc-500 mt-0.5">
-                          <span>{m.family}</span>
-                          <span>{m.downloads.toLocaleString()} dls</span>
-                        </div>
-                      </button>
-                    ))}
+                  <select
+                    value={unslothFamily}
+                    onChange={(e) => setUnslothFamily(e.target.value)}
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Families</option>
+                    <option value="Qwen">Qwen</option>
+                    <option value="Llama">Llama</option>
+                    <option value="DeepSeek">DeepSeek</option>
+                    <option value="Mistral">Mistral</option>
+                    <option value="Gemma">Gemma</option>
+                    <option value="Phi">Phi</option>
+                  </select>
+
+                  <select
+                    value={unslothParamRange}
+                    onChange={(e) => setUnslothParamRange(e.target.value)}
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Parameter Sizes</option>
+                    <option value="<3B">Under 3B</option>
+                    <option value="3B-8B">3B to 8B</option>
+                    <option value="8B-14B">8B to 14B</option>
+                    <option value="14B-32B">14B to 32B</option>
+                    <option value=">32B">Over 32B</option>
+                  </select>
+
+                  <select
+                    value={unslothQuantization}
+                    onChange={(e) => setUnslothQuantization(e.target.value)}
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Quantizations</option>
+                    <option value="4-bit">4-bit (BNB / AWQ)</option>
+                    <option value="8-bit">8-bit</option>
+                    <option value="FP16/BF16">FP16 / BF16</option>
+                    <option value="GGUF">GGUF</option>
+                  </select>
+
+                  <select
+                    value={unslothSort}
+                    onChange={(e) => setUnslothSort(e.target.value)}
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="downloads">Sort: Downloads</option>
+                    <option value="lastModified">Sort: Recently Updated</option>
+                    <option value="likes">Sort: Likes</option>
+                  </select>
+                </div>
+
+                {/* Vertical Model List (divide-y) */}
+                <div className="border border-zinc-800 rounded-xl bg-zinc-950/60 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2 bg-zinc-900/80 border-b border-zinc-800 text-[11px] font-semibold text-zinc-400">
+                    <span>Model Repository ({unslothModels.length} matching checkpoints)</span>
+                    <span>Parameters / Quantization / Downloads</span>
                   </div>
+
+                  {loadingUnslothModels ? (
+                    <div className="py-10 text-center text-xs text-zinc-400 flex items-center justify-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                      <span>Querying live Unsloth checkpoints from Hugging Face Hub...</span>
+                    </div>
+                  ) : unslothModels.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-zinc-500">
+                      No Unsloth models match the active filters.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-800/80 max-h-72 overflow-y-auto">
+                      {unslothModels.map((m) => {
+                        const isSelected = peftModelName === m.id;
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={() => setPeftModelName(m.id)}
+                            className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 cursor-pointer transition ${
+                              isSelected
+                                ? 'bg-amber-950/30 text-amber-200'
+                                : 'hover:bg-zinc-900/70 text-zinc-300'
+                            }`}
+                          >
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <div className="font-mono text-xs font-semibold truncate">
+                                {m.id}
+                              </div>
+                              <div className="flex items-center gap-4 text-[11px] text-zinc-500 mt-0.5">
+                                <span>Family: {m.family || 'Other'}</span>
+                                {m.param_label && <span>Size: {m.param_label}</span>}
+                                {m.quantization && <span>Precision: {m.quantization}</span>}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-4 text-xs font-mono shrink-0">
+                              <span className="text-zinc-400">
+                                {m.downloads.toLocaleString()} downloads
+                              </span>
+                              <span className="text-zinc-500">
+                                {m.likes.toLocaleString()} likes
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPeftModelName(m.id);
+                                }}
+                                className={`px-2.5 py-1 rounded text-[11px] font-sans font-medium transition ${
+                                  isSelected
+                                    ? 'bg-amber-600 text-white'
+                                    : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
+                                }`}
+                              >
+                                {isSelected ? 'Selected' : 'Select'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1257,7 +1423,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     value={peftTextCol}
                     onChange={(e) => setPeftTextCol(e.target.value)}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200"
-                    placeholder="e.g. text or comment"
+                    placeholder="e.g. yt_comment"
                   />
                 </div>
 
@@ -1268,7 +1434,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     value={peftTargetCol}
                     onChange={(e) => setPeftTargetCol(e.target.value)}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200"
-                    placeholder="e.g. target or label"
+                    placeholder="e.g. stereotype"
                   />
                 </div>
               </div>
@@ -1283,7 +1449,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     className="w-full bg-zinc-900 border border-zinc-800 rounded p-1.5 text-zinc-200 mt-1"
                   >
                     <option value={8}>r = 8</option>
-                    <option value={16}>r = 16 (Optimal)</option>
+                    <option value={16}>r = 16</option>
                     <option value={32}>r = 32</option>
                     <option value={64}>r = 64</option>
                   </select>
@@ -1297,7 +1463,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     className="w-full bg-zinc-900 border border-zinc-800 rounded p-1.5 text-zinc-200 mt-1"
                   >
                     <option value={16}>alpha = 16</option>
-                    <option value={32}>alpha = 32 (Optimal)</option>
+                    <option value={32}>alpha = 32</option>
                     <option value={64}>alpha = 64</option>
                   </select>
                 </div>
@@ -1345,27 +1511,23 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 <button
                   onClick={() => handleGenerateScript(false)}
                   disabled={generatingPeft}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition shadow-lg ${
+                  className={`px-5 py-2.5 rounded-xl text-xs font-semibold transition ${
                     fineTuningFramework === 'unsloth'
-                      ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-950/50'
-                      : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-950/50'
+                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                      : 'bg-purple-600 hover:bg-purple-500 text-white'
                   }`}
                 >
-                  <Zap className="w-4 h-4" />
-                  <span>
-                    {generatingPeft
-                      ? 'Generating...'
-                      : `Generate ${fineTuningFramework === 'unsloth' ? 'Unsloth Fast' : 'PEFT'} Script`}
-                  </span>
+                  {generatingPeft
+                    ? 'Generating...'
+                    : `Generate ${fineTuningFramework === 'unsloth' ? 'Unsloth' : 'PEFT'} Script`}
                 </button>
 
                 <button
                   onClick={() => handleGenerateScript(true)}
                   disabled={generatingPeft}
-                  className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-medium flex items-center gap-2 transition"
+                  className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-medium transition"
                 >
-                  <Database className="w-4 h-4 text-amber-400" />
-                  <span>Save Script to scripts/llm/</span>
+                  Save Script to scripts/llm/
                 </button>
               </div>
 
@@ -1373,14 +1535,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
               {peftResult && (
                 <div className="space-y-3 pt-4 border-t border-zinc-800">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-zinc-300 flex items-center gap-2">
-                      <Code2 className="w-4 h-4 text-amber-400" />
-                      <span>Generated Training Script ({fineTuningFramework.toUpperCase()}):</span>
-                      {peftResult.saved_path && (
-                        <span className="text-emerald-400 font-mono text-[11px]">
-                          Saved to: {peftResult.saved_path}
-                        </span>
-                      )}
+                    <span className="text-xs font-semibold text-zinc-300">
+                      Generated Training Script ({fineTuningFramework.toUpperCase()})
+                      {peftResult.saved_path ? ` — Saved to ${peftResult.saved_path}` : ''}
                     </span>
 
                     <button
@@ -1388,7 +1545,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-mono flex items-center gap-1.5 transition"
                     >
                       {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedScript ? 'Copied!' : 'Copy Code'}</span>
+                      <span>{copiedScript ? 'Copied' : 'Copy Code'}</span>
                     </button>
                   </div>
 
@@ -1401,144 +1558,182 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
           </div>
         )}
 
-        {/* Mode 3: Hugging Face Live Hub Explorer */}
+        {/* Mode 3: Hugging Face Live Hub Explorer (Vertical List + Live Filters) */}
         {studioMode === 'hf_hub' && (
           <div className="space-y-6">
-            <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 space-y-6">
-              <div>
-                <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
-                  <Search className="w-4 h-4 text-blue-400" />
-                  <span>Hugging Face Hub Live Model Browser</span>
-                </h2>
-                <p className="text-xs text-zinc-400">
-                  Query the official Hugging Face API directly to discover, inspect, and select the highest-performing models without guessing.
-                </p>
+            <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-zinc-800">
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-100">
+                    Hugging Face Hub Live Model Browser
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Real-time query against the Hugging Face Hub API with family, parameter size, and quantization filters.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {hfLastFetched && (
+                    <span className="text-[11px] text-zinc-500 font-mono">
+                      Live synced at {hfLastFetched}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => searchHfHub(true)}
+                    disabled={loadingHfModels}
+                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingHfModels ? 'animate-spin' : ''}`} />
+                    <span>Sync Live Hub</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Search Bar & Filters */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex-1 relative min-w-[280px]">
-                  <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-3 pointer-events-none" />
+              {/* Filter Bar */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 p-3 bg-zinc-950/80 border border-zinc-800/80 rounded-xl">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5 pointer-events-none" />
                   <input
                     type="text"
                     value={hfSearchQuery}
-                    onChange={(e) => {
-                      setHfSearchQuery(e.target.value);
-                      searchHfHub(e.target.value, hfSortFilter);
-                    }}
-                    placeholder="Search Hugging Face models (e.g. qwen2.5, llama-3.2, deberta, phi-4)..."
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-zinc-200 font-mono focus:outline-none focus:border-blue-500"
+                    onChange={(e) => setHfSearchQuery(e.target.value)}
+                    placeholder="Search Hugging Face Hub..."
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-zinc-200 font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 p-1 rounded-xl text-xs">
-                  <button
-                    onClick={() => {
-                      setHfSortFilter('downloads');
-                      searchHfHub(hfSearchQuery, 'downloads');
-                    }}
-                    className={`px-3 py-1 rounded-lg transition ${
-                      hfSortFilter === 'downloads' ? 'bg-blue-600 text-white font-semibold' : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    📥 Downloads
-                  </button>
-                  <button
-                    onClick={() => {
-                      setHfSortFilter('trendingScore');
-                      searchHfHub(hfSearchQuery, 'trendingScore');
-                    }}
-                    className={`px-3 py-1 rounded-lg transition ${
-                      hfSortFilter === 'trendingScore' ? 'bg-blue-600 text-white font-semibold' : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    🔥 Trending
-                  </button>
-                  <button
-                    onClick={() => {
-                      setHfSortFilter('likes');
-                      searchHfHub(hfSearchQuery, 'likes');
-                    }}
-                    className={`px-3 py-1 rounded-lg transition ${
-                      hfSortFilter === 'likes' ? 'bg-blue-600 text-white font-semibold' : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    ❤️ Likes
-                  </button>
-                </div>
+                <select
+                  value={hfFamily}
+                  onChange={(e) => setHfFamily(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Families</option>
+                  <option value="Qwen">Qwen</option>
+                  <option value="Llama">Llama</option>
+                  <option value="DeepSeek">DeepSeek</option>
+                  <option value="Mistral">Mistral</option>
+                  <option value="Gemma">Gemma</option>
+                  <option value="Phi">Phi</option>
+                  <option value="RoBERTa">RoBERTa</option>
+                  <option value="DeBERTa">DeBERTa</option>
+                </select>
+
+                <select
+                  value={hfParamRange}
+                  onChange={(e) => setHfParamRange(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Parameter Sizes</option>
+                  <option value="<3B">Under 3B</option>
+                  <option value="3B-8B">3B to 8B</option>
+                  <option value="8B-14B">8B to 14B</option>
+                  <option value="14B-32B">14B to 32B</option>
+                  <option value=">32B">Over 32B</option>
+                </select>
+
+                <select
+                  value={hfQuantization}
+                  onChange={(e) => setHfQuantization(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Quantizations</option>
+                  <option value="4-bit">4-bit (BNB / AWQ / GPTQ)</option>
+                  <option value="8-bit">8-bit</option>
+                  <option value="FP16/BF16">FP16 / BF16</option>
+                  <option value="GGUF">GGUF</option>
+                </select>
+
+                <select
+                  value={hfSortFilter}
+                  onChange={(e) => setHfSortFilter(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="downloads">Sort: Downloads</option>
+                  <option value="lastModified">Sort: Recently Updated</option>
+                  <option value="likes">Sort: Likes</option>
+                  <option value="trendingScore">Sort: Trending</option>
+                </select>
               </div>
 
-              {/* Models Result Grid */}
-              {loadingHfModels ? (
-                <div className="py-16 text-center text-xs text-zinc-400 flex items-center justify-center gap-2">
-                  <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
-                  <span>Fetching models from Hugging Face Hub API...</span>
+              {/* Vertical List Results */}
+              <div className="border border-zinc-800 rounded-xl bg-zinc-950/60 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2 bg-zinc-900/80 border-b border-zinc-800 text-[11px] font-semibold text-zinc-400">
+                  <span>Model Repository ({hfModels.length} results)</span>
+                  <span>Metrics & Actions</span>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {hfModels.map((m) => (
-                    <div
-                      key={m.id}
-                      className="p-4 bg-zinc-950/70 border border-zinc-800/80 rounded-xl space-y-3 hover:border-zinc-700 transition flex flex-col justify-between"
-                    >
-                      <div className="space-y-1.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="font-mono text-xs font-bold text-zinc-200 break-all leading-snug">
-                            {m.id}
-                          </span>
-                          <a
-                            href={`https://huggingface.co/${m.id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-zinc-500 hover:text-blue-400 transition shrink-0"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        </div>
 
-                        <div className="flex items-center gap-3 text-[10px] text-zinc-400 font-mono">
-                          <span className="flex items-center gap-1">
-                            <Download className="w-3 h-3 text-emerald-400" />
-                            <span>{m.downloads.toLocaleString()}</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <ThumbsUp className="w-3 h-3 text-rose-400" />
-                            <span>{m.likes.toLocaleString()}</span>
-                          </span>
-                          {m.is_unsloth && (
-                            <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded font-semibold">
-                              🦥 Unsloth
+                {loadingHfModels ? (
+                  <div className="py-12 text-center text-xs text-zinc-400 flex items-center justify-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
+                    <span>Querying live models from Hugging Face Hub API...</span>
+                  </div>
+                ) : hfModels.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-zinc-500">
+                    No models found matching your filter criteria.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-zinc-800/80 max-h-[520px] overflow-y-auto">
+                    {hfModels.map((m) => (
+                      <div
+                        key={m.id}
+                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 hover:bg-zinc-900/70 transition"
+                      >
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-zinc-100 truncate">
+                              {m.id}
                             </span>
-                          )}
+                            <a
+                              href={`https://huggingface.co/${m.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-zinc-500 hover:text-blue-400 transition shrink-0"
+                              title="Open on Hugging Face Hub"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-4 text-[11px] text-zinc-500 mt-0.5">
+                            <span>Family: {m.family || 'General'}</span>
+                            {m.param_label && <span>Size: {m.param_label}</span>}
+                            {m.quantization && <span>Precision: {m.quantization}</span>}
+                            {m.pipeline_tag && <span>Task: {m.pipeline_tag}</span>}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 text-xs shrink-0">
+                          <span className="font-mono text-zinc-400">
+                            {m.downloads.toLocaleString()} downloads
+                          </span>
+                          <span className="font-mono text-zinc-500">
+                            {m.likes.toLocaleString()} likes
+                          </span>
+
+                          <button
+                            onClick={() => {
+                              setPeftModelName(m.id);
+                              setStudioMode('unsloth');
+                            }}
+                            className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded text-[11px] font-medium transition"
+                          >
+                            Use in LoRA
+                          </button>
+                          <button
+                            onClick={() => {
+                              setCustomModelInput(m.id);
+                              setIsCustomModel(true);
+                              setStudioMode('prompting');
+                            }}
+                            className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-purple-300 rounded text-[11px] font-medium transition"
+                          >
+                            Use in Prompt
+                          </button>
                         </div>
                       </div>
-
-                      {/* Action buttons */}
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/60">
-                        <button
-                          onClick={() => {
-                            setPeftModelName(m.id);
-                            setStudioMode('unsloth');
-                          }}
-                          className="px-2 py-1.5 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-800/40 text-amber-300 rounded-lg text-[11px] font-semibold transition text-center"
-                        >
-                          Use in LoRA
-                        </button>
-                        <button
-                          onClick={() => {
-                            setCustomModelInput(m.id);
-                            setIsCustomModel(true);
-                            setStudioMode('prompting');
-                          }}
-                          className="px-2 py-1.5 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-800/40 text-purple-300 rounded-lg text-[11px] font-semibold transition text-center"
-                        >
-                          Use in Prompt
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1557,12 +1752,12 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 onClick={() => setShowKeyModal(false)}
                 className="text-zinc-500 hover:text-zinc-300 text-sm"
               >
-                ✕
+                Close
               </button>
             </div>
 
             <p className="text-xs text-zinc-400">
-              This API key will be saved securely to your local <code className="text-purple-300">.env</code> file and activated in the running process.
+              This API key will be saved to your local <code className="text-purple-300">.env</code> file and activated in the running process.
             </p>
 
             <form onSubmit={handleSaveApiKey} className="space-y-4">

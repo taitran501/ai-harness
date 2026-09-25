@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GitBranch, Table, Cpu, Layers, Crown, Award, Cloud, Sparkles } from 'lucide-react';
+import { GitBranch, Table, Cpu, Award, Cloud } from 'lucide-react';
 import { api } from './services/api';
 import { Header } from './components/Header';
 import { TreeCanvas } from './components/TreeCanvas';
@@ -13,6 +13,7 @@ import { LLMStudio } from './components/LLMStudio';
 import { CompetitionReadinessModal } from './components/CompetitionReadinessModal';
 import { ExperimentConfigModal } from './components/ExperimentConfigModal';
 import { CloudEnvironmentModal } from './components/CloudEnvironmentModal';
+import { LanguageProvider, useLanguage } from './constants/i18n';
 import {
   TreeGraphResponse,
   ExperimentSummary,
@@ -23,7 +24,8 @@ import {
   SubmissionEntry,
 } from './types/experiment';
 
-export const App: React.FC = () => {
+const DashboardContent: React.FC = () => {
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('tree');
   const [graphData, setGraphData] = useState<TreeGraphResponse>({ nodes: [], edges: [], best_id: null });
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
@@ -41,7 +43,7 @@ export const App: React.FC = () => {
   const [isEnvModalOpen, setIsEnvModalOpen] = useState(false);
   const [configModalTarget, setConfigModalTarget] = useState<string | undefined>(undefined);
   const [configModalParentId, setConfigModalParentId] = useState<string | undefined>(undefined);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -125,46 +127,46 @@ export const App: React.FC = () => {
       />
 
       <main className="flex-1 w-full px-5 py-3 space-y-3 flex flex-col">
-        {/* Sleek Segmented Navigation */}
+        {/* Segmented Navigation */}
         <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
           <nav className="flex space-x-1 bg-zinc-900/70 p-1 rounded-lg border border-zinc-800">
             <button
               onClick={() => setActiveTab('tree')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'tree'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
               <GitBranch className="w-3.5 h-3.5" />
-              <span>Solution Tree</span>
+              <span>{t('nav_tree', 'Solution Tree')}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('experiments')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'experiments'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
               <Table className="w-3.5 h-3.5" />
-              <span>Leaderboard</span>
+              <span>{t('nav_experiments', 'Leaderboard')}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('submissions')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'submissions'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
               <Award className="w-3.5 h-3.5" />
-              <span>Submissions</span>
+              <span>{t('nav_submissions', 'Submissions')}</span>
               {submissions.length > 0 && (
-                <span className="bg-zinc-800 text-zinc-300 text-[10px] font-mono px-1.5 py-0.2 rounded border border-zinc-700">
-                  {submissions.length}
+                <span className="text-zinc-400 text-[10px] font-mono">
+                  ({submissions.length})
                 </span>
               )}
             </button>
@@ -173,41 +175,40 @@ export const App: React.FC = () => {
               onClick={() => setActiveTab('cloud')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'cloud'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
               <Cloud className="w-3.5 h-3.5" />
-              <span>Cloud Runners</span>
+              <span>{t('nav_cloud_runner', 'Cloud Runners')}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('llm')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'llm'
-                  ? 'bg-zinc-800 text-purple-300 shadow-sm border border-purple-800/40'
+                  ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-              <span>LLM Studio</span>
+              <span>{t('nav_llm_studio', 'LLM Studio')}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('priming')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'priming'
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                  ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
               <Cpu className="w-3.5 h-3.5" />
-              <span>Agent Prompts</span>
+              <span>{t('nav_priming', 'Agent Prompts')}</span>
             </button>
           </nav>
         </div>
 
-        {/* Tab 1: Solution Tree (100% full-width, zero bulky sidebars) */}
+        {/* Tab 1: Solution Tree */}
         {activeTab === 'tree' && (
           <div className="w-full flex-1 flex flex-col">
             <TreeCanvas
@@ -269,7 +270,6 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Node Inspector Drawer */}
       {selectedNodeDetail && (
         <NodeInspector
           node={selectedNodeDetail}
@@ -279,7 +279,6 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Task Configuration Modal */}
       <TaskConfigModal
         isOpen={isTaskConfigOpen}
         initialTab={taskConfigTab}
@@ -291,7 +290,6 @@ export const App: React.FC = () => {
         }}
       />
 
-      {/* Competition Readiness Assessment Modal */}
       <CompetitionReadinessModal
         isOpen={isReadinessOpen}
         onClose={() => setIsReadinessOpen(false)}
@@ -304,7 +302,6 @@ export const App: React.FC = () => {
         }}
       />
 
-      {/* Target Experiment Configuration Modal */}
       {isConfigModalOpen && (
         <ExperimentConfigModal
           initialConfigPath={configModalTarget}
@@ -317,7 +314,6 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Cloud & Hardware Environment Modal */}
       <CloudEnvironmentModal
         isOpen={isEnvModalOpen}
         onClose={() => setIsEnvModalOpen(false)}
@@ -326,3 +322,9 @@ export const App: React.FC = () => {
     </div>
   );
 };
+
+export const App: React.FC = () => (
+  <LanguageProvider>
+    <DashboardContent />
+  </LanguageProvider>
+);

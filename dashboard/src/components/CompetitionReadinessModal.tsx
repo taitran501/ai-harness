@@ -1,21 +1,13 @@
 import React from 'react';
 import {
   X,
-  ShieldCheck,
   CheckCircle2,
   AlertTriangle,
   Clock,
-  Layers,
-  FileCheck,
-  Cpu,
-  Database,
   Sliders,
-  Scale,
-  Award,
-  BookOpen,
   ArrowRight,
 } from 'lucide-react';
-import { TaskInfo, SystemStatus, SubmissionEntry, CompetitionPillarCheck } from '../types/experiment';
+import { TaskInfo, SystemStatus, SubmissionEntry } from '../types/experiment';
 
 interface CompetitionReadinessModalProps {
   isOpen: boolean;
@@ -24,6 +16,15 @@ interface CompetitionReadinessModalProps {
   status: SystemStatus | null;
   submissions: SubmissionEntry[];
   onOpenTaskConfig: (tabKey?: 'task' | 'data' | 'rules' | 'submission') => void;
+}
+
+interface PillarDisplayItem {
+  id: string;
+  title: string;
+  status: 'passed' | 'warning' | 'pending';
+  summary: string;
+  attributes: Array<{ label: string; value: string }>;
+  tabKey?: 'task' | 'data' | 'rules' | 'submission';
 }
 
 export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps> = ({
@@ -40,16 +41,19 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
   const rules = taskInfo?.competition_rules || {};
   const subSpec = taskInfo?.submission_spec || {};
 
-  // Compute 8 pillars
-  const pillars: CompetitionPillarCheck[] = [
+  const pillars: PillarDisplayItem[] = [
     {
       id: 'task_objective',
       title: '1. Task & Metric Objectives',
       status: taskInfo?.primary_metric ? 'passed' : 'warning',
       summary: taskInfo?.primary_metric
-        ? `${taskInfo.task_name || 'Benchmark'} • ${taskInfo.primary_metric} (${taskInfo.direction || 'maximize'})`
+        ? `${taskInfo.task_name || 'Benchmark'} (${taskInfo.primary_metric}, ${taskInfo.direction || 'maximize'})`
         : 'Primary metric not declared',
-      details: `Target: ${taskInfo?.primary_metric_target ?? 'Not set'} | Baseline: ${taskInfo?.primary_metric_baseline ?? 'Not set'} | Subtasks: ${taskInfo?.metrics?.length || 0}`,
+      attributes: [
+        { label: 'Target Score', value: String(taskInfo?.primary_metric_target ?? 'Not set') },
+        { label: 'Baseline Score', value: String(taskInfo?.primary_metric_baseline ?? 'Not set') },
+        { label: 'Subtasks', value: String(taskInfo?.metrics?.length || 0) },
+      ],
       tabKey: 'task',
     },
     {
@@ -57,9 +61,13 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
       title: '2. Data & Anti-Leakage Cross-Validation',
       status: dataCfg.split_strategy ? 'passed' : 'warning',
       summary: dataCfg.split_strategy
-        ? `${dataCfg.split_strategy} (${dataCfg.n_folds || 5} folds) • Anti-Leakage: ${dataCfg.group_column || 'Standard'}`
+        ? `${dataCfg.split_strategy} (${dataCfg.n_folds || 5} folds)`
         : 'Cross-validation split scheme not configured',
-      details: `Train path: ${dataCfg.train_path || 'dataset/'} | Group Column: ${dataCfg.group_column || 'None'} | ID: ${dataCfg.id_column || 'id'}`,
+      attributes: [
+        { label: 'Train Path', value: dataCfg.train_path || 'dataset/' },
+        { label: 'Group Column', value: dataCfg.group_column || 'None' },
+        { label: 'ID Column', value: dataCfg.id_column || 'id' },
+      ],
       tabKey: 'data',
     },
     {
@@ -67,49 +75,68 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
       title: '3. Model Strategy & Parameter Ceilings',
       status: rules.max_params_limit ? 'passed' : 'warning',
       summary: rules.max_params_limit
-        ? `Parameter ceiling: ${(rules.max_params_limit / 1e6).toFixed(0)}M params • Modality: ${taskInfo?.modality || 'Generic'}`
+        ? `Parameter ceiling: ${(rules.max_params_limit / 1e6).toFixed(0)}M parameters`
         : 'Parameter limit not constrained',
-      details: `Pretrained models: ${rules.allow_pretrained_models ? 'Permitted' : 'Forbidden'} | Backbones registered in KNOWLEDGE_BASE.md`,
+      attributes: [
+        { label: 'Modality', value: taskInfo?.modality || 'Generic' },
+        { label: 'Pretrained Models', value: rules.allow_pretrained_models ? 'Permitted' : 'Forbidden' },
+      ],
       tabKey: 'rules',
     },
     {
       id: 'experiment_lineage',
-      title: '4. MCTS Solution Tree & Lineage Tracking',
+      title: '4. Solution Tree & Lineage Tracking',
       status: (status?.total_nodes || 0) > 0 ? 'passed' : 'pending',
-      summary: `${status?.total_nodes || 0} runs tracked • ${status?.distinct_families || 0} distinct model families`,
-      details: `Champion Node: ${status?.best_node || 'None'} (${(status?.best_score || 0).toFixed(4)}) | UCB tree search active`,
+      summary: `${status?.total_nodes || 0} runs tracked across ${status?.distinct_families || 0} model families`,
+      attributes: [
+        { label: 'Best Node', value: status?.best_node || 'None' },
+        { label: 'Best Score', value: (status?.best_score || 0).toFixed(4) },
+      ],
       tabKey: 'task',
     },
     {
       id: 'validation_overfitting',
       title: '5. Overfitting & Leaderboard Divergence Guard',
       status: 'passed',
-      summary: `MMES >= ${subSpec.min_diff_pct ?? 2.0}% floor • Divergence trigger Delta(LB - CV) < -0.05`,
-      details: 'Prevents submitting random noise or overfitting to public leaderboard feedback.',
+      summary: 'Prevents submitting noise or overfitting to public leaderboard feedback',
+      attributes: [
+        { label: 'Minimum Effect Size', value: `>= ${subSpec.min_diff_pct ?? 2.0}%` },
+        { label: 'Divergence Threshold', value: 'Delta(LB - CV) < -0.05' },
+      ],
       tabKey: 'submission',
     },
     {
       id: 'competition_rules',
       title: '6. Competition Rules & Compute Quotas',
       status: rules.daily_submission_limit ? 'passed' : 'warning',
-      summary: `Daily Quota: ${rules.daily_submission_limit ?? 'Unlimited'} subs/day • Deadline: ${rules.deadline ? rules.deadline.split('T')[0] : 'Open'}`,
-      details: `LLMs: ${rules.allow_llm ? 'Allowed' : 'Local only'} | External data: ${rules.allow_external_data ? 'Allowed' : 'Forbidden'}`,
+      summary: `Daily quota: ${rules.daily_submission_limit ?? 'Unlimited'} submissions per day`,
+      attributes: [
+        { label: 'LLMs Policy', value: rules.allow_llm ? 'Allowed' : 'Local only' },
+        { label: 'External Data', value: rules.allow_external_data ? 'Allowed' : 'Forbidden' },
+        { label: 'Deadline', value: rules.deadline ? rules.deadline.split('T')[0] : 'Open' },
+      ],
       tabKey: 'rules',
     },
     {
       id: 'final_submission',
       title: '7. Final Submission & Audit Gate Packaging',
       status: submissions.length > 0 ? 'passed' : 'pending',
-      summary: `${submissions.length} verified submissions on disk • Output format: ${subSpec.file_name || 'submission.zip'}`,
-      details: `Cryptographic AUDIT_RECEIPT.json generated • Ensemble Kappa <= ${subSpec.max_kappa ?? 0.85}`,
+      summary: `${submissions.length} verified submissions on disk (${subSpec.file_name || 'submission.zip'})`,
+      attributes: [
+        { label: 'Verification Receipt', value: 'AUDIT_RECEIPT.json generated' },
+        { label: 'Ensemble Diversity', value: `Kappa <= ${subSpec.max_kappa ?? 0.85}` },
+      ],
       tabKey: 'submission',
     },
     {
       id: 'system_description',
       title: '8. Paper & System Description Readiness',
       status: (status?.total_nodes || 0) > 0 ? 'passed' : 'pending',
-      summary: 'Auto-generated EXPERIMENT_CARD.md, DIAGNOSTICS.md & Summary tables ready',
-      details: 'All hypotheses, delta scores, error slices, and ablation branches serialized in artifacts/.',
+      summary: 'EXPERIMENT_CARD.md and summary tables generated per run',
+      attributes: [
+        { label: 'Artifact Storage', value: 'artifacts/<exp_id>/' },
+        { label: 'Lineage Ledger', value: 'EXPERIMENTS.md' },
+      ],
       tabKey: 'task',
     },
   ];
@@ -119,24 +146,21 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/60">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-              <ShieldCheck className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <span>Competition Readiness Assessment</span>
-                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  {passedCount} / {pillars.length} Verified
-                </span>
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-sm font-semibold text-zinc-100">
+                Competition Readiness Assessment
               </h2>
-              <p className="text-xs text-zinc-400">
-                Evaluating the 8 essential dimensions for competitive ML/DL benchmarks
-              </p>
+              <span className="text-[11px] font-mono text-emerald-400">
+                ({passedCount} of {pillars.length} verified)
+              </span>
             </div>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Evaluating the 8 essential dimensions for competitive ML/DL benchmarks.
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -159,8 +183,8 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
                   : 'bg-zinc-950/30 border-zinc-800 hover:border-zinc-700'
               }`}
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-2.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 flex-1">
                   <div className="mt-0.5">
                     {pillar.status === 'passed' ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -170,10 +194,20 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
                       <Clock className="w-4 h-4 text-zinc-500" />
                     )}
                   </div>
-                  <div>
+                  <div className="flex-1 space-y-1.5">
                     <h3 className="text-xs font-semibold text-zinc-200">{pillar.title}</h3>
-                    <p className="text-xs text-zinc-300 font-medium mt-0.5">{pillar.summary}</p>
-                    <p className="text-[11px] text-zinc-500 mt-1">{pillar.details}</p>
+                    <p className="text-xs text-zinc-300">{pillar.summary}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                      {pillar.attributes.map((attr) => (
+                        <div
+                          key={attr.label}
+                          className="bg-zinc-900/80 border border-zinc-800/80 rounded px-2.5 py-1 text-[11px]"
+                        >
+                          <span className="text-zinc-500 block text-[10px]">{attr.label}</span>
+                          <span className="text-zinc-300 font-mono font-medium">{attr.value}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -183,7 +217,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
                       onClose();
                       onOpenTaskConfig(pillar.tabKey);
                     }}
-                    className="flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-2 py-1 rounded transition"
+                    className="flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-2.5 py-1 rounded transition shrink-0"
                   >
                     <span>Configure</span>
                     <ArrowRight className="w-3 h-3" />
@@ -199,11 +233,11 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
           <div className="text-xs text-zinc-400">
             {warningCount > 0 ? (
               <span className="text-amber-400 font-medium">
-                ⚠️ {warningCount} areas need attention before official submission.
+                {warningCount} areas need attention before official submission.
               </span>
             ) : (
               <span className="text-emerald-400 font-medium">
-                ✔ All competition dimensions are configured and audit-ready.
+                All competition dimensions are configured and audit-ready.
               </span>
             )}
           </div>

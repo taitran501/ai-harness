@@ -530,27 +530,124 @@ class LLMEngine:
         """Retrieve curated fallback Unsloth models."""
         return list(cls.CURATED_UNSLOTH_MODELS)[:limit]
 
+    @staticmethod
+    def _extract_model_attributes(m_id: str, raw_obj: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Extract family, parameter size, and quantization format from model ID and metadata."""
+        lower = m_id.lower()
+        family = "Other"
+        if "qwen" in lower:
+            family = "Qwen"
+        elif "llama" in lower:
+            family = "Llama"
+        elif "deepseek" in lower:
+            family = "DeepSeek"
+        elif "mistral" in lower or "mixtral" in lower:
+            family = "Mistral"
+        elif "gemma" in lower:
+            family = "Gemma"
+        elif "phi" in lower:
+            family = "Phi"
+        elif any(k in lower for k in ["deberta", "roberta", "xlm", "bert", "electra"]):
+            family = "Encoder"
+
+        # Extract parameter size (e.g. 7B, 14B, 27B, 0.5B, 1.5B, 70B)
+        param_size_b: Optional[float] = None
+        param_label: str = "—"
+        match = re.search(r"(?:^|[-_/])(\d+(?:\.\d+)?)\s*[bB](?:$|[-_/])", m_id)
+        if match:
+            try:
+                param_size_b = float(match.group(1))
+                param_label = f"{match.group(1)}B"
+            except ValueError:
+                pass
+        elif raw_obj and isinstance(raw_obj.get("safetensors"), dict):
+            total_params = raw_obj["safetensors"].get("total")
+            if isinstance(total_params, (int, float)) and total_params > 0:
+                param_size_b = round(total_params / 1e9, 1)
+                param_label = f"{param_size_b}B" if param_size_b >= 1.0 else f"{int(total_params / 1e6)}M"
+
+        # Extract quantization format
+        is_gguf = "gguf" in lower
+        is_4bit = any(k in lower for k in ["bnb-4bit", "4bit", "awq", "gptq", "nvfp4", "fp4", "nf4", "int4"])
+        is_8bit = any(k in lower for k in ["8bit", "fp8", "int8"])
+        if is_gguf:
+            quantization = "GGUF"
+        elif is_4bit:
+            quantization = "4-bit"
+        elif is_8bit:
+            quantization = "8-bit"
+        else:
+            quantization = "FP16/BF16"
+
+        is_instruct = any(k in lower for k in ["instruct", "-it", "_it", "chat"])
+        return {
+            "family": family,
+            "param_size_b": param_size_b,
+            "param_label": param_label,
+            "quantization": quantization,
+            "is_bnb_4bit": is_4bit,
+            "is_gguf": is_gguf,
+            "is_instruct": is_instruct,
+            "recommended_for_lora": is_4bit or (not is_gguf and is_instruct),
+        }
+
+    @staticmethod
+    def _matches_filters(
+        item: Dict[str, Any],
+        family: Optional[str] = None,
+        param_range: Optional[str] = None,
+        quantization: Optional[str] = None,
+    ) -> bool:
+        if family and family.lower() not in ("all", ""):
+            if item.get("family", "").lower() != family.lower():
+                return False
+        if quantization and quantization.lower() not in ("all", ""):
+            if item.get("quantization", "").lower() != quantization.lower():
+                return False
+        if param_range and param_range.lower() not in ("all", ""):
+            p = item.get("param_size_b")
+            if p is None:
+                return False
+            if param_range == "<3B" and not (p < 3.0):
+                return False
+            elif param_range == "3B-8B" and not (3.0 <= p <= 8.5):
+                return False
+            elif param_range == "8B-14B" and not (8.5 < p <= 15.0):
+                return False
+            elif param_range == "14B-32B" and not (15.0 < p <= 35.0):
+                return False
+            elif param_range == ">32B" and not (p > 35.0):
+                return False
+        return True
+
     @classmethod
     def fetch_hf_models(
         cls,
         query: str = "",
         pipeline_tag: Optional[str] = None,
         author: Optional[str] = None,
-        limit: int = 20,
+        limit: int = 50,
         sort: str = "downloads",
+        family: Optional[str] = None,
+        param_range: Optional[str] = None,
+        quantization: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Fetch real-time model list from Hugging Face Hub API with caching and curated fallbacks."""
-        cache_key = f"hf:{query}:{pipeline_tag}:{author}:{limit}:{sort}"
-        cached = _get_cached(cache_key, ttl=180.0)
-        if cached is not None:
-            return cached
+        """Fetch real-time model list from Hugging Face Hub API with attribute filtering."""
+        cache_key = f"hf:{query}:{pipeline_tag}:{author}:{limit}:{sort}:{family}:{param_range}:{quantization}"
+        if not force_refresh:
+            cached = _get_cached(cache_key, ttl=20.0)
+            if cached is not None:
+                return cached
 
-        params = [f"limit={min(max(limit, 1), 100)}"]
+        fetch_limit = min(max(limit * 2, 60), 100)
+        params = [f"limit={fetch_limit}", "full=true"]
         if sort:
             params.append(f"sort={sort}&direction=-1")
-        if query:
-            params.append(f"search={urllib.parse.quote(query)}")
-        if pipeline_tag:
+        search_terms = [t for t in [query, family if family and family.lower() not in ("all", "other", "encoder") else ""] if t]
+        if search_terms:
+            params.append(f"search={urllib.parse.quote(' '.join(search_terms))}")
+        if pipeline_tag and pipeline_tag.lower() not in ("all", ""):
             params.append(f"pipeline_tag={urllib.parse.quote(pipeline_tag)}")
         if author:
             params.append(f"author={urllib.parse.quote(author)}")
@@ -568,72 +665,62 @@ class LLMEngine:
                 m_id = m.get("id") or m.get("modelId")
                 if not m_id:
                     continue
-                results.append({
+                attrs = cls._extract_model_attributes(m_id, m)
+                item = {
                     "id": m_id,
                     "name": m_id.split("/")[-1],
                     "author": m_id.split("/")[0] if "/" in m_id else None,
                     "downloads": m.get("downloads", 0),
                     "likes": m.get("likes", 0),
                     "pipeline_tag": m.get("pipeline_tag"),
-                    "last_modified": m.get("lastModified"),
+                    "last_modified": (m.get("lastModified") or "")[:10],
                     "is_unsloth": "unsloth" in m_id.lower(),
-                })
-            if not results:
-                results = cls._get_fallback_hf_models(query=query, pipeline_tag=pipeline_tag, author=author, limit=limit)
+                    **attrs,
+                }
+                if cls._matches_filters(item, family=family, param_range=param_range, quantization=quantization):
+                    results.append(item)
+            if not results and not (query or family or param_range or quantization):
+                fallback_raw = cls._get_fallback_hf_models(query=query, pipeline_tag=pipeline_tag, author=author, limit=limit)
+                results = [{**m, **cls._extract_model_attributes(m["id"], m)} for m in fallback_raw]
+            results = results[:limit]
             _set_cached(cache_key, results)
             return results
         except Exception as e:
-            print(f"⚠️ Warning: Failed to fetch Hugging Face models ({e}), returning curated fallback catalog.")
+            print(f"Warning: Failed to fetch Hugging Face models ({e}), returning fallback catalog.")
             fallback = cls._get_fallback_hf_models(query=query, pipeline_tag=pipeline_tag, author=author, limit=limit)
-            _set_cached(cache_key, fallback)
-            return fallback
+            enriched = [
+                {**m, **cls._extract_model_attributes(m["id"], m)}
+                for m in fallback
+            ]
+            filtered = [
+                item for item in enriched
+                if cls._matches_filters(item, family=family, param_range=param_range, quantization=quantization)
+            ][:limit]
+            _set_cached(cache_key, filtered)
+            return filtered
 
     @classmethod
-    def fetch_unsloth_models(cls, limit: int = 40) -> List[Dict[str, Any]]:
-        """Fetch curated and latest Unsloth 4-bit and Instruct models directly from HF Hub."""
-        cache_key = f"unsloth:{limit}"
-        cached = _get_cached(cache_key, ttl=300.0)
-        if cached is not None:
-            return cached
-
-        raw = cls.fetch_hf_models(author="unsloth", limit=100, sort="downloads")
-        results = []
-        for m in raw:
-            m_id = m["id"]
-            is_gguf = "gguf" in m_id.lower()
-            is_bnb = "bnb-4bit" in m_id.lower() or "unsloth-bnb" in m_id.lower() or "nvfp4" in m_id.lower()
-            is_instruct = "instruct" in m_id.lower() or "it" in m_id.lower()
-
-            family = "Other"
-            lower = m_id.lower()
-            if "qwen" in lower:
-                family = "Qwen"
-            elif "llama" in lower:
-                family = "Llama"
-            elif "deepseek" in lower:
-                family = "DeepSeek"
-            elif "mistral" in lower:
-                family = "Mistral"
-            elif "gemma" in lower:
-                family = "Gemma"
-            elif "phi" in lower:
-                family = "Phi"
-
-            results.append({
-                **m,
-                "family": family,
-                "is_bnb_4bit": is_bnb,
-                "is_gguf": is_gguf,
-                "is_instruct": is_instruct,
-                "recommended_for_lora": is_bnb or (not is_gguf and is_instruct),
-            })
-
-        results.sort(key=lambda x: (x["recommended_for_lora"], not x["is_gguf"], x["downloads"]), reverse=True)
-        res_subset = results[:limit]
-        if not res_subset:
-            res_subset = cls._get_fallback_unsloth_models(limit=limit)
-        _set_cached(cache_key, res_subset)
-        return res_subset
+    def fetch_unsloth_models(
+        cls,
+        limit: int = 50,
+        query: str = "",
+        family: Optional[str] = None,
+        param_range: Optional[str] = None,
+        quantization: Optional[str] = None,
+        sort: str = "downloads",
+        force_refresh: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Fetch real-time Unsloth models directly from Hugging Face Hub API with filtering."""
+        return cls.fetch_hf_models(
+            query=query,
+            author="unsloth",
+            limit=limit,
+            sort=sort,
+            family=family,
+            param_range=param_range,
+            quantization=quantization,
+            force_refresh=force_refresh,
+        )
 
     @classmethod
     def fetch_provider_live_models(cls, provider: str, api_key: Optional[str] = None) -> List[Dict[str, Any]]:

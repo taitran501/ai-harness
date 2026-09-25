@@ -42,8 +42,9 @@ class TestStrategyCardsAndSpawner(unittest.TestCase):
             self.assertIn("problem_addressed", card)
             self.assertIn("model_family", card)
             self.assertIn("model_name", card)
-            self.assertIn("estimated_delta", card)
             self.assertIn("approach_type", card)
+            self.assertNotIn("estimated_delta", card)
+            self.assertNotIn("badge", card)
 
     def test_api_strategy_cards_endpoint(self):
         url = f"http://127.0.0.1:{self.port}/api/strategy_cards"

@@ -1,19 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Crown,
   RefreshCw,
   Layers,
   Sliders,
   ShieldCheck,
-  FileCode,
   Server,
   ChevronDown,
   Plus,
   Check,
-  Sparkles,
 } from 'lucide-react';
 import { SystemStatus, TaskInfo, TaskSummary } from '../types/experiment';
 import { api } from '../services/api';
+import { useLanguage } from '../constants/i18n';
 
 interface HeaderProps {
   status: SystemStatus | null;
@@ -34,10 +32,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenConfigModal,
   onOpenEnvironmentModal,
 }) => {
+  const { lang, setLang } = useLanguage();
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
-  // Multi-Task Switcher
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [isTaskMenuOpen, setIsTaskMenuOpen] = useState(false);
   const [switchingTask, setSwitchingTask] = useState(false);
@@ -87,7 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
     setSyncing(true);
     try {
       await onRefresh();
-      setSyncMessage('Artifacts Synced!');
+      setSyncMessage('Synced');
       setTimeout(() => setSyncMessage(null), 2500);
     } catch (err) {
       console.error(err);
@@ -109,11 +107,10 @@ export const Header: React.FC<HeaderProps> = ({
           <Layers className="w-3.5 h-3.5" />
         </div>
 
-        {/* Task Selector Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setIsTaskMenuOpen(!isTaskMenuOpen)}
-            className="flex items-center gap-2 hover:bg-zinc-900/80 px-2 py-1 rounded-lg border border-transparent hover:border-zinc-800 transition text-left"
+            className="flex items-center gap-2.5 hover:bg-zinc-900/80 px-2 py-1 rounded-lg border border-transparent hover:border-zinc-800 transition text-left"
           >
             <div className="flex items-center gap-1.5">
               <span className="text-sm font-semibold text-zinc-100 tracking-tight">
@@ -128,20 +125,19 @@ export const Header: React.FC<HeaderProps> = ({
             )}
             {taskInfo?.primary_metric && (
               <span className="text-[11px] font-mono text-zinc-500 hidden sm:inline">
-                • {taskInfo.primary_metric}
+                ({taskInfo.primary_metric})
               </span>
             )}
           </button>
 
-          {/* Dropdown Menu */}
           {isTaskMenuOpen && (
-            <div className="absolute top-full left-0 mt-1.5 w-72 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in duration-150">
+            <div className="absolute top-full left-0 mt-1.5 w-72 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-2 z-50 space-y-1">
               <div className="px-2 py-1 text-[10px] font-mono uppercase text-zinc-500 font-semibold border-b border-zinc-800/80 flex justify-between items-center">
-                <span>Switch Competition / Task</span>
+                <span>Switch Competition Task</span>
                 {switchingTask && <RefreshCw className="w-3 h-3 animate-spin text-zinc-400" />}
               </div>
 
-              <div className="max-h-56 overflow-y-auto space-y-1 custom-scrollbar">
+              <div className="max-h-56 overflow-y-auto space-y-1">
                 {tasks.map((t) => {
                   const isActive = t.is_active || t.name === taskName;
                   return (
@@ -162,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
                           </span>
                         </div>
                         <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                          {t.modality} • {t.primary_metric}
+                          {t.modality} ({t.primary_metric})
                         </div>
                       </div>
                       {isActive && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
@@ -180,7 +176,7 @@ export const Header: React.FC<HeaderProps> = ({
                   className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-zinc-900 transition"
                 >
                   <Plus className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Configure / Add New Task</span>
+                  <span>Configure or Add Task</span>
                 </button>
               </div>
             </div>
@@ -188,20 +184,20 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Right Controls: Champion, Settings & Sync */}
+      {/* Right Controls: Best Node, Readiness, Setup, Environment, Strategy Hub, Sync, Language */}
       <div className="flex items-center space-x-2">
         {status?.best_node && (
-          <div className="flex items-center gap-1.5 bg-amber-500/5 border border-amber-500/20 px-2.5 py-1 rounded-md text-xs text-amber-300/90 font-mono">
-            <Crown className="w-3.5 h-3.5 text-amber-400" />
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-md text-xs font-mono">
+            <span className="text-zinc-400">Best:</span>
             <span className="font-semibold text-zinc-200">{status.best_node}</span>
-            <span className="text-amber-400 font-bold">{status.best_score.toFixed(4)}</span>
+            <span className="text-emerald-400 font-bold">{status.best_score.toFixed(4)}</span>
           </div>
         )}
 
         {onOpenReadinessModal && (
           <button
             onClick={onOpenReadinessModal}
-            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-md border border-emerald-500/30 text-xs font-medium transition"
+            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-md border border-emerald-500/30 text-xs font-medium transition"
             title="Evaluate 8 Competition Readiness Dimensions"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
@@ -212,7 +208,7 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenTaskConfig && (
           <button
             onClick={onOpenTaskConfig}
-            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
+            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
             title="Configure task platform, metrics, and subtasks"
           >
             <Sliders className="w-3.5 h-3.5 text-zinc-400" />
@@ -223,7 +219,7 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenEnvironmentModal && (
           <button
             onClick={onOpenEnvironmentModal}
-            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
+            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
             title="Inspect & configure Modal, Kaggle, Docker, and local GPU accounts"
           >
             <Server className="w-3.5 h-3.5 text-sky-400" />
@@ -234,10 +230,9 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenConfigModal && (
           <button
             onClick={onOpenConfigModal}
-            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
+            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
             title="Open Strategy Catalog and configure experiment targets"
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             <span>Strategy Hub</span>
           </button>
         )}
@@ -245,12 +240,34 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={handleSync}
           disabled={syncing}
-          className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-300 hover:text-white p-1.5 sm:px-2.5 sm:py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
+          className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white p-1.5 sm:px-2.5 sm:py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
           title="Scan artifacts/ directory for new runs"
         >
-          <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${syncing ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">{syncMessage || (syncing ? 'Syncing...' : 'Sync')}</span>
+          <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-zinc-400' : 'text-zinc-400'}`} />
+          <span className="hidden sm:inline">{syncMessage || 'Sync'}</span>
         </button>
+
+        {/* Explicit Language Toggle (EN default / VI option) */}
+        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-md p-0.5 text-[11px] font-mono">
+          <button
+            type="button"
+            onClick={() => setLang('en')}
+            className={`px-2 py-0.5 rounded transition ${
+              lang === 'en' ? 'bg-zinc-800 text-zinc-100 font-semibold' : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            EN
+          </button>
+          <button
+            type="button"
+            onClick={() => setLang('vi')}
+            className={`px-2 py-0.5 rounded transition ${
+              lang === 'vi' ? 'bg-zinc-800 text-zinc-100 font-semibold' : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            VI
+          </button>
+        </div>
       </div>
     </header>
   );

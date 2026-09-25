@@ -87,10 +87,9 @@ DEFAULT_STRATEGY_CARDS = [
     {
         "id": "feat_video_title",
         "branch": "feat",
-        "badge": "Feature Engineering",
         "title": "Video Title Context Injection",
         "problem_addressed": "Baseline TF-IDF on raw comments misses topical cues needed for implicit hate speech.",
-        "hypothesis": "Prepending YouTube video title (yt_title) to comment text provides topical context, boosting Subtask B implicit hate Macro-F1 by +0.03.",
+        "hypothesis": "Prepending YouTube video title (yt_title) to comment text provides topical context to improve Subtask B implicit hate Macro-F1.",
         "intervention": "Prepend yt_title to raw comment text before vectorization: '[TITLE] ' + yt_title + ' [COMMENT] ' + text.",
         "approach_type": "ml",
         "model_family": "linear",
@@ -98,7 +97,6 @@ DEFAULT_STRATEGY_CARDS = [
         "descriptor": "video_title_ctx",
         "rationale": "YouTube comments frequently reference video topics implicitly. Injecting yt_title bridges the lexical knowledge gap.",
         "target_tasks": ["Subtask A (Stereotype)", "Subtask B (Hate Speech)"],
-        "estimated_delta": "+0.02 - 0.03 Macro-F1",
         "uncertainty_level": "low",
         "source_type": "verified_baseline",
         "source_id": "sklearn_tfidf_with_context",
@@ -112,10 +110,9 @@ DEFAULT_STRATEGY_CARDS = [
     {
         "id": "model_xlmr_base",
         "branch": "model",
-        "badge": "Multilingual LM",
         "title": "Multilingual Transformer (XLM-RoBERTa)",
         "problem_addressed": "Classical n-grams cannot capture semantic nuances and transfer learning across EN, IT, and NL comments.",
-        "hypothesis": "Fine-tuning xlm-roberta-base with shared multilingual representations will outperform bag-of-words by +0.05 Macro-F1 across non-English splits.",
+        "hypothesis": "Fine-tuning xlm-roberta-base with shared multilingual representations will improve cross-lingual transfer across non-English splits.",
         "intervention": "Replace TF-IDF + LogisticRegression backbone with fine-tuned xlm-roberta-base with pooled classification heads.",
         "approach_type": "dl",
         "model_family": "transformer",
@@ -123,7 +120,6 @@ DEFAULT_STRATEGY_CARDS = [
         "descriptor": "xlmr_multilingual",
         "rationale": "Cross-lingual pretraining transfers toxic lexical knowledge learned in English directly to low-resource Italian and Dutch subsets.",
         "target_tasks": ["All Subtasks (A, B, C)"],
-        "estimated_delta": "+0.04 - 0.06 Macro-F1",
         "uncertainty_level": "medium",
         "source_type": "huggingface_hub",
         "source_id": "FacebookAI/xlm-roberta-base",
@@ -138,10 +134,9 @@ DEFAULT_STRATEGY_CARDS = [
     {
         "id": "loss_focal_identities",
         "branch": "loss",
-        "badge": "Class Imbalance",
         "title": "Class-Balanced Focal Loss for Subtask C",
         "problem_addressed": "Extreme class imbalance in Subtask C target identities ('a', 'i', 'nb' have <20 positive samples), resulting in near-zero recall.",
-        "hypothesis": "Replacing standard Binary Cross-Entropy with Focal Loss (gamma=2.0, alpha=0.25) will penalize easy negatives and boost rare identity Macro-F1 by +0.04.",
+        "hypothesis": "Replacing standard Binary Cross-Entropy with Focal Loss (gamma=2.0, alpha=0.25) will penalize easy negatives and improve rare identity recall.",
         "intervention": "Switch Subtask C identity loss objective from BCE to SigmoidFocalLoss(gamma=2.0, alpha=0.25).",
         "approach_type": "dl",
         "model_family": "transformer",
@@ -149,7 +144,6 @@ DEFAULT_STRATEGY_CARDS = [
         "descriptor": "focal_rare_identities",
         "rationale": "Focal Loss dynamically scales cross-entropy down for easy negatives, focusing gradients squarely on hard rare minority classes.",
         "target_tasks": ["Subtask C (Identities: l, g, b, t, q, i, a, nb)"],
-        "estimated_delta": "+0.03 - 0.05 Identity F1",
         "uncertainty_level": "medium",
         "source_type": "verified_literature",
         "source_id": "lin2017focal",
@@ -162,10 +156,9 @@ DEFAULT_STRATEGY_CARDS = [
     {
         "id": "ens_threshold_opt",
         "branch": "ens",
-        "badge": "Post-Processing",
         "title": "Language-Specific Threshold Optimization",
         "problem_addressed": "Static 0.5 decision thresholds are suboptimal because label priors and classifier calibration diverge significantly across EN, IT, and NL.",
-        "hypothesis": "Optimizing decision thresholds per language on out-of-fold validation probabilities via Nelder-Mead will yield +0.015 Macro-F1 with zero extra training cost.",
+        "hypothesis": "Optimizing decision thresholds per language on out-of-fold validation probabilities via Nelder-Mead will improve Macro-F1 calibration without extra training.",
         "intervention": "Apply harness/tuning_engine.py ThresholdOptimizer per language split on out-of-fold validation logits.",
         "approach_type": "ml",
         "model_family": "ensemble",
@@ -173,7 +166,6 @@ DEFAULT_STRATEGY_CARDS = [
         "descriptor": "threshold_tuning_per_lang",
         "rationale": "Threshold search shifts the precision-recall trade-off to maximize Macro-F1 directly on validation folds without retraining.",
         "target_tasks": ["Subtask A", "Subtask B", "Subtask C"],
-        "estimated_delta": "+0.01 - 0.02 Macro-F1",
         "uncertainty_level": "low",
         "source_type": "verified_baseline",
         "source_id": "harness.tuning_engine",
@@ -186,18 +178,16 @@ DEFAULT_STRATEGY_CARDS = [
     {
         "id": "model_unsloth_qwen_7b",
         "branch": "model",
-        "badge": "Fast LoRA (7B)",
         "title": "Unsloth Fast QLoRA (Qwen2.5 7B Instruct)",
         "problem_addressed": "Encoder transformers struggle with subtle implicit toxicity and complex sarcasm across multilingual comments.",
-        "hypothesis": "Fine-tuning unsloth/Qwen2.5-7B-Instruct with 4-bit QLoRA (r=16, alpha=32) unlocks generative world knowledge and lifts composite Macro-F1 by +0.07.",
+        "hypothesis": "Fine-tuning unsloth/Qwen2.5-7B-Instruct with 4-bit QLoRA (r=16, alpha=32) unlocks generative world knowledge for implicit hate classification.",
         "intervention": "Execute Unsloth fast LoRA fine-tuning on 4-bit quantized Qwen-2.5-7B with custom classification instruction formatting.",
         "approach_type": "llm",
         "model_family": "llm_peft",
         "model_name": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
         "descriptor": "unsloth_qwen_7b_qlora",
-        "rationale": "4-bit quantized Qwen 7B consumes <9GB VRAM with Unsloth Triton kernels, training 2x faster while capturing intricate cultural context.",
+        "rationale": "4-bit quantized Qwen 7B consumes <9GB VRAM with Unsloth Triton kernels while capturing multilingual context.",
         "target_tasks": ["Subtask A (Stereotype)", "Subtask B (Implicit Hate)", "Subtask C (Target Type)"],
-        "estimated_delta": "+0.06 - 0.08 Macro-F1",
         "param_size": "7B",
         "uncertainty_level": "low",
         "source_type": "unsloth_hub",
@@ -218,10 +208,9 @@ DEFAULT_STRATEGY_CARDS = [
     {
         "id": "model_deepseek_r1_cot_14b",
         "branch": "model",
-        "badge": "Reasoning CoT (14B)",
         "title": "DeepSeek-R1 Distill 14B Chain-of-Thought",
         "problem_addressed": "Implicit hate comments rely on coded linguistic framing that requires multi-step deductive reasoning to detect.",
-        "hypothesis": "Deploying distilled reasoning traces with DeepSeek-R1-Distill-Qwen-14B will deconstruct subtle derogatory tropes and boost minority class recall by +0.08.",
+        "hypothesis": "Deploying distilled reasoning traces with DeepSeek-R1-Distill-Qwen-14B will deconstruct subtle derogatory tropes and improve minority class recall.",
         "intervention": "Apply zero-shot chain-of-thought prompting with DeepSeek-R1-Distill-Qwen-14B and structured JSON classification parsing.",
         "approach_type": "llm",
         "model_family": "llm_reasoning",
@@ -229,7 +218,6 @@ DEFAULT_STRATEGY_CARDS = [
         "descriptor": "deepseek_r1_cot_14b",
         "rationale": "Reasoning-specialized distillation models excel at unpacking implicit subtext and multi-lingual metaphors without task-specific retraining.",
         "target_tasks": ["Subtask B (Hate Speech)", "Subtask C (Target Type & Identity)"],
-        "estimated_delta": "+0.07 - 0.10 Macro-F1",
         "param_size": "14B",
         "uncertainty_level": "medium",
         "source_type": "huggingface_hub",
@@ -2066,14 +2054,22 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             search = params.get("search", [""])[0]
             pipeline = params.get("pipeline", [None])[0]
             author = params.get("author", [None])[0]
+            family = params.get("family", [None])[0]
+            param_range = params.get("param_range", [None])[0]
+            quantization = params.get("quantization", [None])[0]
             sort = params.get("sort", ["downloads"])[0]
-            limit = int(params.get("limit", [20])[0])
+            limit = int(params.get("limit", [30])[0])
+            force_refresh = params.get("force_refresh", ["false"])[0].lower() in ("true", "1", "yes")
             models = LLMEngine.fetch_hf_models(
                 query=search,
                 pipeline_tag=pipeline,
                 author=author,
+                family=family,
+                param_range=param_range,
+                quantization=quantization,
                 limit=limit,
                 sort=sort,
+                force_refresh=force_refresh,
             )
             self.send_json({"models": models, "count": len(models)})
         except Exception as e:
@@ -2082,8 +2078,22 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def handle_api_llm_unsloth_models(self, query_str: str) -> None:
         try:
             params = urllib.parse.parse_qs(query_str)
+            search = params.get("search", [""])[0]
+            family = params.get("family", [None])[0]
+            param_range = params.get("param_range", [None])[0]
+            quantization = params.get("quantization", [None])[0]
+            sort = params.get("sort", ["downloads"])[0]
             limit = int(params.get("limit", [50])[0])
-            models = LLMEngine.fetch_unsloth_models(limit=limit)
+            force_refresh = params.get("force_refresh", ["false"])[0].lower() in ("true", "1", "yes")
+            models = LLMEngine.fetch_unsloth_models(
+                query=search,
+                family=family,
+                param_range=param_range,
+                quantization=quantization,
+                limit=limit,
+                sort=sort,
+                force_refresh=force_refresh,
+            )
             self.send_json({"models": models, "count": len(models)})
         except Exception as e:
             self.send_json({"error": str(e), "models": []}, status=500)

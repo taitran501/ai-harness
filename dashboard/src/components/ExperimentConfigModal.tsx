@@ -8,19 +8,11 @@ import {
   Copy,
   Check,
   RotateCcw,
-  Sparkles,
   GitBranch,
   ShieldCheck,
-  FileText,
-  Zap,
-  Target,
-  Compass,
   ArrowRight,
   Eye,
   EyeOff,
-  Layers,
-  Cpu,
-  TrendingUp,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { CloudPreflightResult, ExperimentSummary, StrategyCard } from '../types/experiment';
@@ -37,10 +29,9 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
   {
     id: 'feat_video_title',
     branch: 'feat',
-    badge: 'Feature Engineering',
     title: 'Video Title Context Injection',
     problem_addressed: 'Baseline TF-IDF on raw comments misses topical cues needed for implicit hate speech.',
-    hypothesis: 'Prepending YouTube video title (yt_title) to comment text provides topical context, boosting Subtask B implicit hate Macro-F1 by +0.03.',
+    hypothesis: 'Prepending YouTube video title (yt_title) to comment text provides topical context to improve Subtask B implicit hate Macro-F1.',
     intervention: "Prepend yt_title to raw comment text before vectorization: '[TITLE] ' + yt_title + ' [COMMENT] ' + text.",
     approach_type: 'ml',
     model_family: 'linear',
@@ -48,7 +39,6 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
     descriptor: 'video_title_ctx',
     rationale: 'YouTube comments frequently reference video topics implicitly. Injecting yt_title bridges the lexical knowledge gap.',
     target_tasks: ['Subtask A (Stereotype)', 'Subtask B (Hate Speech)'],
-    estimated_delta: '+0.02 - 0.03 Macro-F1',
     uncertainty_level: 'low',
     source_type: 'verified_baseline',
     source_id: 'sklearn_tfidf_with_context',
@@ -62,10 +52,9 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
   {
     id: 'model_xlmr_base',
     branch: 'model',
-    badge: 'Multilingual LM',
     title: 'Multilingual Transformer (XLM-RoBERTa)',
     problem_addressed: 'Classical n-grams cannot capture semantic nuances and transfer learning across EN, IT, and NL comments.',
-    hypothesis: 'Fine-tuning xlm-roberta-base with shared multilingual representations will outperform bag-of-words by +0.05 Macro-F1 across non-English splits.',
+    hypothesis: 'Fine-tuning xlm-roberta-base with shared multilingual representations will improve cross-lingual transfer across non-English splits.',
     intervention: 'Replace TF-IDF + LogisticRegression backbone with fine-tuned xlm-roberta-base with pooled classification heads.',
     approach_type: 'dl',
     model_family: 'transformer',
@@ -73,7 +62,6 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
     descriptor: 'xlmr_multilingual',
     rationale: 'Cross-lingual pretraining transfers toxic lexical knowledge learned in English directly to low-resource Italian and Dutch subsets.',
     target_tasks: ['All Subtasks (A, B, C)'],
-    estimated_delta: '+0.04 - 0.06 Macro-F1',
     uncertainty_level: 'medium',
     source_type: 'huggingface_hub',
     source_id: 'FacebookAI/xlm-roberta-base',
@@ -88,10 +76,9 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
   {
     id: 'loss_focal_identities',
     branch: 'loss',
-    badge: 'Class Imbalance',
     title: 'Class-Balanced Focal Loss for Subtask C',
     problem_addressed: "Extreme class imbalance in Subtask C target identities ('a', 'i', 'nb' have <20 positive samples), resulting in near-zero recall.",
-    hypothesis: 'Replacing standard Binary Cross-Entropy with Focal Loss (gamma=2.0, alpha=0.25) will penalize easy negatives and boost rare identity Macro-F1 by +0.04.',
+    hypothesis: 'Replacing standard Binary Cross-Entropy with Focal Loss (gamma=2.0, alpha=0.25) will penalize easy negatives and improve rare identity recall.',
     intervention: 'Switch Subtask C identity loss objective from BCE to SigmoidFocalLoss(gamma=2.0, alpha=0.25).',
     approach_type: 'dl',
     model_family: 'transformer',
@@ -99,7 +86,6 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
     descriptor: 'focal_rare_identities',
     rationale: 'Focal Loss dynamically scales cross-entropy down for easy negatives, focusing gradients squarely on hard rare minority classes.',
     target_tasks: ['Subtask C (Identities: l, g, b, t, q, i, a, nb)'],
-    estimated_delta: '+0.03 - 0.05 Identity F1',
     uncertainty_level: 'medium',
     source_type: 'verified_literature',
     source_id: 'lin2017focal',
@@ -112,10 +98,9 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
   {
     id: 'ens_threshold_opt',
     branch: 'ens',
-    badge: 'Post-Processing',
     title: 'Language-Specific Threshold Optimization',
     problem_addressed: 'Static 0.5 decision thresholds are suboptimal because label priors and classifier calibration diverge significantly across EN, IT, and NL.',
-    hypothesis: 'Optimizing decision thresholds per language on out-of-fold validation probabilities via Nelder-Mead will yield +0.015 Macro-F1 with zero extra training cost.',
+    hypothesis: 'Optimizing decision thresholds per language on out-of-fold validation probabilities via Nelder-Mead will improve Macro-F1 calibration without extra training.',
     intervention: 'Apply harness/tuning_engine.py ThresholdOptimizer per language split on out-of-fold validation logits.',
     approach_type: 'ml',
     model_family: 'ensemble',
@@ -123,7 +108,6 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
     descriptor: 'threshold_tuning_per_lang',
     rationale: 'Threshold search shifts the precision-recall trade-off to maximize Macro-F1 directly on validation folds without retraining.',
     target_tasks: ['Subtask A', 'Subtask B', 'Subtask C'],
-    estimated_delta: '+0.01 - 0.02 Macro-F1',
     uncertainty_level: 'low',
     source_type: 'verified_baseline',
     source_id: 'harness.tuning_engine',
@@ -136,18 +120,16 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
   {
     id: 'model_unsloth_qwen_7b',
     branch: 'model',
-    badge: 'Fast LoRA (7B)',
     title: 'Unsloth Fast QLoRA (Qwen2.5 7B Instruct)',
     problem_addressed: 'Encoder transformers struggle with subtle implicit toxicity and complex sarcasm across multilingual comments.',
-    hypothesis: 'Fine-tuning unsloth/Qwen2.5-7B-Instruct with 4-bit QLoRA (r=16, alpha=32) unlocks generative world knowledge and lifts composite Macro-F1 by +0.07.',
+    hypothesis: 'Fine-tuning unsloth/Qwen2.5-7B-Instruct with 4-bit QLoRA (r=16, alpha=32) unlocks generative world knowledge for implicit hate classification.',
     intervention: 'Execute Unsloth fast LoRA fine-tuning on 4-bit quantized Qwen-2.5-7B with custom classification instruction formatting.',
     approach_type: 'llm',
     model_family: 'llm_peft',
     model_name: 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit',
     descriptor: 'unsloth_qwen_7b_qlora',
-    rationale: '4-bit quantized Qwen 7B consumes <9GB VRAM with Unsloth Triton kernels, training 2x faster while capturing intricate cultural context.',
+    rationale: '4-bit quantized Qwen 7B consumes <9GB VRAM with Unsloth Triton kernels while capturing multilingual context.',
     target_tasks: ['Subtask A (Stereotype)', 'Subtask B (Implicit Hate)', 'Subtask C (Target Type)'],
-    estimated_delta: '+0.06 - 0.08 Macro-F1',
     param_size: '7B',
     uncertainty_level: 'low',
     source_type: 'unsloth_hub',
@@ -168,10 +150,9 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
   {
     id: 'model_deepseek_r1_cot_14b',
     branch: 'model',
-    badge: 'Reasoning CoT (14B)',
     title: 'DeepSeek-R1 Distill 14B Chain-of-Thought',
     problem_addressed: 'Implicit hate comments rely on coded linguistic framing that requires multi-step deductive reasoning to detect.',
-    hypothesis: 'Deploying distilled reasoning traces with DeepSeek-R1-Distill-Qwen-14B will deconstruct subtle derogatory tropes and boost minority class recall by +0.08.',
+    hypothesis: 'Deploying distilled reasoning traces with DeepSeek-R1-Distill-Qwen-14B will deconstruct subtle derogatory tropes and improve minority class recall.',
     intervention: 'Apply zero-shot chain-of-thought prompting with DeepSeek-R1-Distill-Qwen-14B and structured JSON classification parsing.',
     approach_type: 'llm',
     model_family: 'llm_reasoning',
@@ -179,7 +160,6 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
     descriptor: 'deepseek_r1_cot_14b',
     rationale: 'Reasoning-specialized distillation models excel at unpacking implicit subtext and multi-lingual metaphors without task-specific retraining.',
     target_tasks: ['Subtask B (Hate Speech)', 'Subtask C (Target Type & Identity)'],
-    estimated_delta: '+0.07 - 0.10 Macro-F1',
     param_size: '14B',
     uncertainty_level: 'medium',
     source_type: 'huggingface_hub',
@@ -202,7 +182,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   onClose,
   onConfigSaved,
 }) => {
-  // Determine reigning champion
   const bestExp =
     experiments.find((e) => e.is_best) ||
     (experiments.length > 0
@@ -210,12 +189,10 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
       : null);
   const defaultParentId = initialParentId || bestExp?.id || 'exp001_baseline_tfidf';
 
-  // Primary navigation: Default to 'strategies' unless initialConfigPath was explicitly opened
   const [activeTab, setActiveTab] = useState<'strategies' | 'editor'>(
     initialConfigPath ? 'editor' : 'strategies'
   );
 
-  // Strategy & Agent State
   const [selectedParentId, setSelectedParentId] = useState<string>(defaultParentId);
   const [strategyCards, setStrategyCards] = useState<StrategyCard[]>(FALLBACK_STRATEGIES);
   const [strategyCategory, setStrategyCategory] = useState<'all' | 'llm' | 'dl' | 'ml'>('all');
@@ -225,7 +202,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   const [previewPromptContent, setPreviewPromptContent] = useState<{ title: string; prompt: string } | null>(null);
   const [spawnSuccessMessage, setSpawnSuccessMessage] = useState<string | null>(null);
 
-  // Editor State
   const [configs, setConfigs] = useState<string[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<string>(
     initialConfigPath || 'configs/exp001_tfidf_baseline.yaml'
@@ -238,11 +214,9 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedYaml, setCopiedYaml] = useState<boolean>(false);
 
-  // Preflight state
   const [runningPreflight, setRunningPreflight] = useState<boolean>(false);
   const [preflightResult, setPreflightResult] = useState<CloudPreflightResult | null>(null);
 
-  // Load strategy cards from server
   useEffect(() => {
     api
       .getStrategyCards()
@@ -256,7 +230,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
       });
   }, []);
 
-  // Load configs list
   const loadConfigsList = async () => {
     try {
       const res = await api.getConfigs();
@@ -275,7 +248,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
     loadConfigsList();
   }, []);
 
-  // Load content of selected config
   useEffect(() => {
     if (!selectedConfig) return;
     setLoadingConfig(true);
@@ -296,7 +268,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
       .finally(() => setLoadingConfig(false));
   }, [selectedConfig]);
 
-  // Handle saving YAML content
   const handleSave = async () => {
     setSaving(true);
     setErrorMessage(null);
@@ -316,7 +287,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
     }
   };
 
-  // Handle preflight verification check
   const handlePreflight = async () => {
     setRunningPreflight(true);
     setErrorMessage(null);
@@ -335,7 +305,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
     }
   };
 
-  // Handle 1-Click Spawning of Strategy Card
   const handleSpawnStrategy = async (card: StrategyCard) => {
     setGeneratingCardId(card.id);
     setErrorMessage(null);
@@ -375,7 +344,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
     }
   };
 
-  // Build prompt for intent or strategy
   const buildAgentPrompt = (type: 'iterate' | 'explore' | 'card', card?: StrategyCard): string => {
     const parentNode = experiments.find((e) => e.id === selectedParentId);
     const parentScore = parentNode?.score ? parentNode.score.toFixed(4) : 'baseline';
@@ -384,22 +352,22 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
       return selectedIde === 'antigravity'
         ? `# ANTIGRAVITY ITERATION DIRECTIVE: OPTIMIZE BOTTLENECK ON ${selectedParentId}
 
-> Target Baseline: **${selectedParentId}** (Macro-F1: ${parentScore})
-> Operating Contract: Strictly adhere to AGENTS.md.
-> Rule Invariant: Single Atomic Intervention (Control vs Treatment).
+- Target Baseline: ${selectedParentId} (Macro-F1: ${parentScore})
+- Operating Contract: Strictly adhere to AGENTS.md.
+- Rule Invariant: Single Atomic Intervention (Control vs Treatment).
 
 ## MANDATORY STEPS:
-1. **Failure Mode Analysis**: Inspect \`artifacts/${selectedParentId}/run.log\` and diagnostics. Identify whether the primary error is implicit hate speech (Subtask B) or rare identities (Subtask C).
-2. **Formulate Target Config**: Create \`configs/exp<NNN>_<branch>_<descriptor>.yaml\` declaring:
+1. Failure Mode Analysis: Inspect \`artifacts/${selectedParentId}/run.log\` and diagnostics. Identify whether the primary error is implicit hate speech (Subtask B) or rare identities (Subtask C).
+2. Formulate Target Config: Create \`configs/exp<NNN>_<branch>_<descriptor>.yaml\` declaring:
    - \`parent_id: "${selectedParentId}"\`
    - Single atomic intervention addressing the diagnosed bottleneck.
    - Grounding citation from local knowledge base or Hugging Face Hub.
-3. **Execute Smoke Test**:
+3. Execute Smoke Test:
    \`\`\`powershell
    python train.py --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0
    \`\`\`
-4. **Run Full 5-Fold Cross-Validation**: Execute full CV and record artifacts.
-5. **Deterministic Audit Gate**: Validate that validation delta achieves Min Prediction Delta >= 2.0% without regression.`
+4. Run Full 5-Fold Cross-Validation: Execute full CV and record artifacts.
+5. Deterministic Audit Gate: Validate that validation delta achieves Min Prediction Delta >= 2.0% without regression.`
         : `# OPENAI CODEX CLI DIRECTIVE: ITERATE & ADDRESS FAILURE MODES
 
 - Parent Baseline: \`${selectedParentId}\` (Macro-F1: ${parentScore})
@@ -416,21 +384,21 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
       return selectedIde === 'antigravity'
         ? `# ANTIGRAVITY DIRECTIVE: PARADIGM SHIFT & BRANCH EXPLORATION
 
-> Current Record: **${selectedParentId}** (Macro-F1: ${parentScore})
-> Objective: Explore an un-sampled model family per solution tree search.
+- Current Record: ${selectedParentId} (Macro-F1: ${parentScore})
+- Objective: Explore an un-sampled model family per solution tree search.
 
 ## SCIENTIFIC EXPLORATION PROTOCOL:
-1. **Epistemic Grounding**: Do not guess hyperparameters. Retrieve verified model architectures (e.g. \`xlm-roberta-base\` or \`microsoft/mdeberta-v3-base\`) that support multilingual text (EN, IT, NL).
-2. **Declare Experiment Config**: Create \`configs/exp<NNN>_model_<backbone>.yaml\` specifying \`grounding:\` and \`assumption_register:\`.
-3. **Pre-flight & Verification Probe**: Run pre-flight check:
+1. Epistemic Grounding: Do not guess hyperparameters. Retrieve verified model architectures (e.g. \`xlm-roberta-base\` or \`microsoft/mdeberta-v3-base\`) that support multilingual text (EN, IT, NL).
+2. Declare Experiment Config: Create \`configs/exp<NNN>_model_<backbone>.yaml\` specifying \`grounding:\` and \`assumption_register:\`.
+3. Pre-flight Verification Probe:
    \`\`\`powershell
    python harness/cloud_inspector.py --config configs/exp<NNN>_model_<backbone>.yaml
    \`\`\`
-4. **Execute Cross-Validation**: Run full training, log fold-by-fold results, and update \`EXPERIMENTS.md\`.`
+4. Execute Cross-Validation: Run full training, log fold-by-fold results, and update \`EXPERIMENTS.md\`.`
         : `# OPENAI CODEX CLI DIRECTIVE: ARCHITECTURE PARADIGM SHIFT
 
 - Parent Baseline: \`${selectedParentId}\`
-- Goal: Shift from linear baseline to deep learning transformer / distinct model family.
+- Goal: Shift from linear baseline to deep learning transformer or distinct model family.
 - Protocol:
   1. Create \`configs/exp<NNN>_model_<name>.yaml\` with explicit model backbone.
   2. Implement necessary model loader or pipeline in \`src/\`.
@@ -438,20 +406,19 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   4. Run full CV and output evaluation metrics.`;
     }
 
-    // Card-specific prompt
     if (card) {
       return `# DIRECTIVE: IMPLEMENT RESEARCH STRATEGY [${card.title.toUpperCase()}]
 
-> Target IDE: **${selectedIde === 'antigravity' ? 'Antigravity IDE' : 'OpenAI Codex CLI'}**
-> Strategy Branch: \`${card.branch}\` | Model Family: \`${card.model_family}\` (${card.model_name})
-> Parent Experiment: \`${selectedParentId}\` (Score: ${parentScore})
-> Estimated Gain: ${card.estimated_delta}
+- Target IDE: ${selectedIde === 'antigravity' ? 'Antigravity IDE' : 'OpenAI Codex CLI'}
+- Strategy Branch: \`${card.branch}\`
+- Model Family: \`${card.model_family}\` (${card.model_name})
+- Parent Experiment: \`${selectedParentId}\` (Score: ${parentScore})
 
 ## SCIENTIFIC SPECIFICATION:
-- **Problem Addressed**: ${card.problem_addressed}
-- **Scientific Hypothesis**: ${card.hypothesis}
-- **Controlled Intervention**: ${card.intervention}
-- **Rationale**: ${card.rationale}
+- Problem Addressed: ${card.problem_addressed}
+- Scientific Hypothesis: ${card.hypothesis}
+- Controlled Intervention: ${card.intervention}
+- Rationale: ${card.rationale}
 
 ## EXECUTION SEQUENCE:
 1. Create or inspect config \`configs/exp<NNN>_${card.descriptor}.yaml\` with \`parent_id: "${selectedParentId}"\`.
@@ -497,41 +464,18 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 
   const isDirty = yamlContent !== initialContent;
 
-  const getBranchBadgeStyle = (branch: string) => {
-    switch (branch) {
-      case 'feat':
-        return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30';
-      case 'model':
-        return 'bg-purple-500/10 text-purple-400 border-purple-500/30';
-      case 'loss':
-        return 'bg-rose-500/10 text-rose-400 border-rose-500/30';
-      case 'ens':
-        return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
-      default:
-        return 'bg-zinc-800 text-zinc-300 border-zinc-700';
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/70">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <span>Strategy Catalog & Experiment Targets</span>
-                <span className="text-[11px] font-mono text-zinc-400 font-normal">
-                  • Curated Strategies & Agent Directives
-                </span>
-              </h2>
-              <p className="text-[11px] text-zinc-500">
-                Scaffold verified research interventions or generate prompt directives for Antigravity & OpenAI Codex
-              </p>
-            </div>
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-100">
+              Strategy Catalog & Experiment Targets
+            </h2>
+            <p className="text-[11px] text-zinc-500">
+              Scaffold verified research interventions or generate prompt directives for Antigravity and OpenAI Codex.
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -543,20 +487,16 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 
         {/* Tab Navigation */}
         <div className="px-5 pt-2 pb-0 border-b border-zinc-800 bg-zinc-950/40 flex items-center justify-between">
-          <div className="flex space-x-1">
+          <div className="flex space-x-2">
             <button
               onClick={() => setActiveTab('strategies')}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
+              className={`px-3 py-2 text-xs font-medium border-b-2 transition ${
                 activeTab === 'strategies'
                   ? 'border-amber-400 text-amber-300'
                   : 'border-transparent text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Strategy Catalog & Directives</span>
-              <span className="ml-1 text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.2 rounded font-mono">
-                Curated
-              </span>
+              Strategy Catalog & Directives
             </button>
 
             <button
@@ -569,13 +509,10 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
             >
               <FileCode className="w-3.5 h-3.5" />
               <span>Inspect & Edit YAML</span>
-              {isDirty && (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              )}
+              {isDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
             </button>
           </div>
 
-          {/* Quick Config Picker if in Editor */}
           {activeTab === 'editor' && (
             <div className="flex items-center gap-2 pb-2">
               <label className="text-[11px] text-zinc-500">File:</label>
@@ -629,7 +566,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
         {saveSuccess && (
           <div className="mx-5 mt-3 p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            <span>Target configuration successfully saved to disk.</span>
+            <span>Target configuration saved to disk.</span>
           </div>
         )}
 
@@ -643,13 +580,8 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   <GitBranch className="w-4 h-4 text-emerald-400" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-zinc-200">Parent Baseline Model:</span>
-                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.2 rounded font-mono">
-                      Reigning Champion Auto-Detected
-                    </span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
+                  <span className="text-xs font-semibold text-zinc-200">Parent Baseline Model</span>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
                     <select
                       value={selectedParentId}
                       onChange={(e) => setSelectedParentId(e.target.value)}
@@ -658,12 +590,13 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       <option value="exp001_baseline_tfidf">exp001_baseline_tfidf (Root TF-IDF Baseline)</option>
                       {experiments.map((exp) => (
                         <option key={exp.id} value={exp.id}>
-                          {exp.id} ({exp.branch}, score: {exp.score ? exp.score.toFixed(4) : 'N/A'}{exp.is_best ? ' 🏆' : ''})
+                          {exp.id} ({exp.branch}, score: {exp.score ? exp.score.toFixed(4) : 'N/A'}
+                          {exp.is_best ? ', Best' : ''})
                         </option>
                       ))}
                     </select>
                     <span className="text-[11px] text-zinc-500">
-                      All candidate runs will benchmark directly against this Parent baseline.
+                      Candidate runs benchmark directly against this parent baseline.
                     </span>
                   </div>
                 </div>
@@ -677,7 +610,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   onClick={() => setSelectedIde('antigravity')}
                   className={`px-2.5 py-1 text-xs rounded font-medium transition ${
                     selectedIde === 'antigravity'
-                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700'
+                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
                       : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
@@ -688,7 +621,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   onClick={() => setSelectedIde('codex')}
                   className={`px-2.5 py-1 text-xs rounded font-medium transition ${
                     selectedIde === 'codex'
-                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700'
+                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
                       : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
@@ -699,37 +632,23 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 
             {/* SECTION 1: AI Agent Target Directives */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span>AI Agent Target Directives</span>
-                  </h3>
-                  <p className="text-[11px] text-zinc-400">
-                    Generate structured prompt directives pre-injected with failure diagnostics for autonomous coding agents.
-                  </p>
-                </div>
+              <div>
+                <h3 className="text-xs font-semibold text-zinc-200">
+                  AI Agent Target Directives
+                </h3>
+                <p className="text-[11px] text-zinc-400">
+                  Generate structured prompt directives pre-injected with failure diagnostics for autonomous coding agents.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {/* Intent Card 1: Iterate / Optimize diagnosed bottleneck */}
                 <div className="p-4 bg-zinc-950/60 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3">
                   <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                          <Target className="w-3.5 h-3.5" />
-                        </div>
-                        <span className="text-xs font-semibold text-zinc-200">
-                          Iterate & Fix Diagnosed Bottlenecks
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded text-zinc-400">
-                        Atomic Patch
-                      </span>
-                    </div>
+                    <span className="text-xs font-semibold text-zinc-200">
+                      Iterate & Fix Diagnosed Bottlenecks
+                    </span>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">
-                      AI Agent analyzes failure modes and diagnostic logs of <code className="text-zinc-300 font-mono">{selectedParentId}</code> (e.g. implicit hate speech, rare identities) to apply a single atomic patch.
+                      Agent analyzes failure modes and diagnostic logs of <code className="text-zinc-300 font-mono">{selectedParentId}</code> to apply a single controlled intervention.
                     </p>
                   </div>
 
@@ -760,7 +679,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {copiedPromptId === 'iterate' ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-300">Directive Copied!</span>
+                          <span className="text-emerald-300">Directive Copied</span>
                         </>
                       ) : (
                         <>
@@ -772,24 +691,13 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   </div>
                 </div>
 
-                {/* Intent Card 2: Explore / Novel architecture paradigm */}
                 <div className="p-4 bg-zinc-950/60 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3">
                   <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-                          <Compass className="w-3.5 h-3.5" />
-                        </div>
-                        <span className="text-xs font-semibold text-zinc-200">
-                          Explore Novel Architecture & Paradigm
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded">
-                        Tree Search
-                      </span>
-                    </div>
+                    <span className="text-xs font-semibold text-zinc-200">
+                      Explore Novel Architecture & Paradigm
+                    </span>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">
-                      AI Agent explores a completely new model family (Multilingual Transformer / Multi-Task Learning) guided by tree search with epistemic grounding.
+                      Agent explores a distinct model family (Multilingual Transformer or Multi-Task Learning) guided by tree search with epistemic grounding.
                     </p>
                   </div>
 
@@ -820,7 +728,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {copiedPromptId === 'explore' ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-300">Directive Copied!</span>
+                          <span className="text-emerald-300">Directive Copied</span>
                         </>
                       ) : (
                         <>
@@ -833,9 +741,8 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                 </div>
               </div>
 
-              {/* Collapsible Prompt Preview */}
               {previewPromptContent && (
-                <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2 animate-in fade-in duration-150">
+                <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-zinc-300 font-mono">
                       {previewPromptContent.title} ({selectedIde})
@@ -859,12 +766,11 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
             <div className="space-y-3 pt-2 border-t border-zinc-800">
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
                 <div>
-                  <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Research Strategy Catalog</span>
+                  <h3 className="text-xs font-semibold text-zinc-200">
+                    Research Strategy Catalog
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    Vetted scientific interventions conforming to repository standards. Scaffold a target config or copy prompt directive.
+                    Scientific interventions conforming to repository standards. Scaffold a target config or copy prompt directive.
                   </p>
                 </div>
 
@@ -875,7 +781,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                     onClick={() => setStrategyCategory('all')}
                     className={`px-2 py-0.5 rounded transition ${
                       strategyCategory === 'all'
-                        ? 'bg-zinc-800 text-zinc-100 font-semibold shadow-sm'
+                        ? 'bg-zinc-800 text-zinc-100 font-semibold'
                         : 'text-zinc-400 hover:text-zinc-200'
                     }`}
                   >
@@ -884,21 +790,20 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setStrategyCategory('llm')}
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded transition ${
+                    className={`px-2 py-0.5 rounded transition ${
                       strategyCategory === 'llm'
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold shadow-sm'
+                        ? 'bg-zinc-800 text-zinc-100 font-semibold'
                         : 'text-zinc-400 hover:text-zinc-200'
                     }`}
                   >
-                    <Sparkles className="w-3 h-3 text-amber-400" />
-                    <span>LLM ({strategyCards.filter((c) => c.approach_type === 'llm').length})</span>
+                    LLM ({strategyCards.filter((c) => c.approach_type === 'llm').length})
                   </button>
                   <button
                     type="button"
                     onClick={() => setStrategyCategory('dl')}
                     className={`px-2 py-0.5 rounded transition ${
                       strategyCategory === 'dl'
-                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold shadow-sm'
+                        ? 'bg-zinc-800 text-zinc-100 font-semibold'
                         : 'text-zinc-400 hover:text-zinc-200'
                     }`}
                   >
@@ -909,7 +814,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                     onClick={() => setStrategyCategory('ml')}
                     className={`px-2 py-0.5 rounded transition ${
                       strategyCategory === 'ml'
-                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30 font-semibold shadow-sm'
+                        ? 'bg-zinc-800 text-zinc-100 font-semibold'
                         : 'text-zinc-400 hover:text-zinc-200'
                     }`}
                   >
@@ -928,93 +833,58 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                     return (
                       <div
                         key={card.id}
-                        className="p-4 bg-zinc-950/70 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3.5 shadow-sm"
+                        className="p-4 bg-zinc-950/70 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3"
                       >
                         <div className="space-y-2">
-                          {/* Header Badge & Delta */}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border font-semibold ${getBranchBadgeStyle(
-                                  card.branch
-                                )}`}
-                              >
-                                {card.badge || card.branch}
-                              </span>
-                              {card.param_size && (
-                                <span className="text-[10px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
-                                  <Sparkles className="w-2.5 h-2.5 text-amber-400" />
-                                  <span>{card.param_size}</span>
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                              <TrendingUp className="w-3 h-3" />
-                              <span>{card.estimated_delta}</span>
-                            </span>
+                          <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
+                            <span>Branch: {card.branch}</span>
+                            <span>{card.model_family}: {card.model_name}</span>
                           </div>
 
-                        {/* Title */}
-                        <h4 className="text-xs font-bold text-zinc-100">{card.title}</h4>
+                          <h4 className="text-xs font-bold text-zinc-100">{card.title}</h4>
 
-                        {/* Problem & Rationale */}
-                        <p className="text-[11px] text-zinc-400 leading-relaxed">
-                          {card.rationale || card.problem_addressed}
-                        </p>
+                          <p className="text-[11px] text-zinc-400 leading-relaxed">
+                            {card.rationale || card.problem_addressed}
+                          </p>
 
-                        {/* Metadata Pills */}
-                        <div className="flex flex-wrap gap-1.5 pt-1 text-[10px] font-mono text-zinc-400">
-                          <span className="bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded flex items-center gap-1">
-                            <Cpu className="w-2.5 h-2.5 text-zinc-500" />
-                            <span>{card.model_family} ({card.model_name})</span>
-                          </span>
                           {card.target_tasks && (
-                            <span className="bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded text-zinc-400">
+                            <div className="text-[11px] text-zinc-500 font-mono">
                               Targets: {card.target_tasks.join(', ')}
-                            </span>
+                            </div>
                           )}
                         </div>
-                      </div>
 
-                      {/* Action Buttons */}
-                      <div className="pt-2.5 border-t border-zinc-900 flex items-center justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleCopyPrompt('card', card)}
-                          className="flex items-center gap-1 px-2.5 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 rounded border border-zinc-800 transition"
-                        >
-                          {isCopied ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-400" />
-                              <span className="text-emerald-300">Copied!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3 text-zinc-400" />
-                              <span>Copy Prompt</span>
-                            </>
-                          )}
-                        </button>
+                        <div className="pt-2.5 border-t border-zinc-900 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPrompt('card', card)}
+                            className="flex items-center gap-1 px-2.5 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 rounded border border-zinc-800 transition"
+                          >
+                            {isCopied ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span className="text-emerald-300">Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3 text-zinc-400" />
+                                <span>Copy Prompt</span>
+                              </>
+                            )}
+                          </button>
 
-                        <button
-                          type="button"
-                          disabled={isGenerating}
-                          onClick={() => handleSpawnStrategy(card)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded-md transition shadow-sm disabled:opacity-50"
-                        >
-                          {isGenerating ? (
-                            <span>Creating Config...</span>
-                          ) : (
-                            <>
-                              <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
-                              <span>Create Config</span>
-                            </>
-                          )}
-                        </button>
+                          <button
+                            type="button"
+                            disabled={isGenerating}
+                            onClick={() => handleSpawnStrategy(card)}
+                            className="px-3 py-1.5 text-xs bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded-md transition disabled:opacity-50"
+                          >
+                            {isGenerating ? 'Creating Config...' : 'Create Config'}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
               </div>
             </div>
           </div>
@@ -1023,7 +893,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
         {/* TAB 2: YAML Editor & Preflight Inspector */}
         {activeTab === 'editor' && (
           <div className="flex-1 overflow-hidden flex flex-col p-5 space-y-3">
-            {/* Top Toolbar */}
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
                 <span className="text-zinc-400">Config:</span>
@@ -1080,7 +949,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               </div>
             </div>
 
-            {/* Code Textarea Area */}
             <div className="flex-1 min-h-[340px] flex flex-col relative bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden">
               {loadingConfig ? (
                 <div className="flex-1 flex items-center justify-center text-xs text-zinc-500">
@@ -1097,7 +965,6 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               )}
             </div>
 
-            {/* Preflight Results Panel (if run) */}
             {preflightResult && (
               <div
                 className={`p-3 rounded-lg border text-xs space-y-1.5 ${

@@ -531,22 +531,46 @@ export const api = {
     search?: string;
     pipeline?: string;
     author?: string;
+    family?: string;
+    param_range?: string;
+    quantization?: string;
     limit?: number;
     sort?: string;
+    force_refresh?: boolean;
   }): Promise<{ models: HFModelInfo[] }> {
     const query = new URLSearchParams();
     if (params?.search) query.append('search', params.search);
     if (params?.pipeline) query.append('pipeline', params.pipeline);
     if (params?.author) query.append('author', params.author);
+    if (params?.family && params.family !== 'all') query.append('family', params.family);
+    if (params?.param_range && params.param_range !== 'all') query.append('param_range', params.param_range);
+    if (params?.quantization && params.quantization !== 'all') query.append('quantization', params.quantization);
     if (params?.limit) query.append('limit', params.limit.toString());
     if (params?.sort) query.append('sort', params.sort);
+    if (params?.force_refresh) query.append('force_refresh', 'true');
     const res = await fetch(`${API_BASE}/llm/hf_models?${query.toString()}`);
     if (!res.ok) throw new Error(`Failed to fetch Hugging Face models: ${res.statusText}`);
     return res.json();
   },
 
-  async getUnslothModels(limit = 50): Promise<{ models: UnslothModelInfo[] }> {
-    const res = await fetch(`${API_BASE}/llm/unsloth_models?limit=${limit}`);
+  async getUnslothModels(params?: {
+    search?: string;
+    family?: string;
+    param_range?: string;
+    quantization?: string;
+    limit?: number;
+    sort?: string;
+    force_refresh?: boolean;
+  }): Promise<{ models: UnslothModelInfo[] }> {
+    const query = new URLSearchParams();
+    if (params?.search) query.append('search', params.search);
+    if (params?.family && params.family !== 'all') query.append('family', params.family);
+    if (params?.param_range && params.param_range !== 'all') query.append('param_range', params.param_range);
+    if (params?.quantization && params.quantization !== 'all') query.append('quantization', params.quantization);
+    query.append('limit', (params?.limit || 50).toString());
+    if (params?.sort) query.append('sort', params.sort);
+    if (params?.force_refresh) query.append('force_refresh', 'true');
+    const res = await fetch(`${API_BASE}/llm/unsloth_models?${query.toString()}`);
     if (!res.ok) throw new Error(`Failed to fetch Unsloth models: ${res.statusText}`);
     return res.json();
   },

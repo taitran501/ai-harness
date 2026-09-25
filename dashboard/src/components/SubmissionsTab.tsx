@@ -218,11 +218,9 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
     <div className="space-y-3">
       {/* Compact Stats Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-zinc-900/50 border border-zinc-800/80 px-3.5 py-2 rounded-lg text-xs">
-        <div className="flex items-center gap-3 text-zinc-400 font-mono text-[11px]">
+        <div className="flex items-center gap-4 text-zinc-400 font-mono text-[11px]">
           <span>Registered: <strong className="text-zinc-100">{totalSubs}</strong></span>
-          <span>•</span>
           <span>Scored: <strong className="text-zinc-100">{scoredSubs}</strong></span>
-          <span>•</span>
           <span>Verified Packages: <strong className="text-zinc-100">{submissions.filter((s) => s.archive_path).length}</strong></span>
         </div>
         {divergenceCount > 0 ? (
