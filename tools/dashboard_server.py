@@ -33,7 +33,7 @@ from harness.tree_journal import Node, TreeJournal
 from harness.submission_manager import SubmissionManager
 from harness.cloud_inspector import CloudPreflightInspector
 from harness.templates.kaggle_template import KaggleKernelManager
-from harness.templates.modal_template import generate_modal_script
+from harness.templates.modal_template import generate_modal_script, push_dataset_to_modal
 from harness.environment_detector import EnvironmentDetector
 from harness.cloud_job_runner import CloudJobManager, CloudJob
 from harness.llm_engine import LLMEngine, LLMConfig
@@ -664,6 +664,35 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     rec_parent = rec.get("parent_id") or best_id
     rec_branch = rec.get("branch") or "feat"
 
+    # Extract latest Competition Submissions & Codabench Leaderboard feedback
+    submission_feedback_lines = []
+    try:
+        sub_entries = SubmissionManager().get_all_submissions()
+        if sub_entries:
+            for s in sub_entries[-5:]:
+                cv_val = s.cv_scores.get("primary_metric") or s.cv_scores.get("subtask_a_macro") or "N/A"
+                lb_val = "Pending on Codabench"
+                if s.official_scores:
+                    lb_num = (
+                        s.official_scores.get("primary_metric")
+                        or s.official_scores.get("subtask_a_macro")
+                        or s.official_scores.get("score")
+                    )
+                    if lb_num is not None:
+                        lb_val = f"{float(lb_num):.4f}"
+                note_str = f" — Note: {s.notes}" if s.notes else ""
+                submission_feedback_lines.append(
+                    f"- **`{s.id}` (`{s.exp_id}`)**: Local CV = `{cv_val}` | Official Codabench LB = `{lb_val}`{note_str}"
+                )
+    except Exception:
+        pass
+    if not submission_feedback_lines:
+        submission_feedback_lines.append("- No Codabench submissions recorded yet.")
+
+    diagnostics_notes.append("")
+    diagnostics_notes.append("### Competition Leaderboard (Codabench LB vs Local CV) Feedback")
+    diagnostics_notes.extend(submission_feedback_lines)
+
     # Normalize template_id / aliases
     tid = template_id.lower().strip()
     if tid in ("antigravity", "antigravity_iterate"):
@@ -861,6 +890,31 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_status()
         elif path == "/api/submissions":
             self.handle_api_submissions()
+        elif path == "/api/submissions/download":
+            params = urllib.parse.parse_qs(parsed_url.query)
+            sub_id = params.get("id", [""])[0]
+            mgr = SubmissionManager()
+            sub = next((s for s in mgr.get_all_submissions() if s.id == sub_id), None)
+            rel_file = (
+                getattr(sub, "archive_path", None)
+                or getattr(sub, "zip_path", None)
+                or getattr(sub, "submission_file", None)
+                if sub
+                else None
+            )
+            if not rel_file or not (PROJECT_ROOT / rel_file).exists():
+                self.send_json({"error": "Submission package file not found on disk."}, status=404)
+                return
+            fpath = PROJECT_ROOT / rel_file
+            data_bytes = fpath.read_bytes()
+            self.send_response(200)
+            ctype = "application/zip" if fpath.suffix == ".zip" else "text/csv"
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Disposition", f'attachment; filename="{fpath.name}"')
+            self.send_header("Content-Length", str(len(data_bytes)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data_bytes)
         elif path == "/api/task_info":
             self.handle_api_task_info()
         elif path == "/api/tasks":
@@ -1089,6 +1143,30 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length).decode("utf-8")
                 data = json.loads(body)
                 self.handle_api_cloud_generate(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/cloud/push-dataset":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_cloud_push_dataset(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/cloud/kaggle-status":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_cloud_kaggle_status(data)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/cloud/pull-output":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_cloud_pull_output(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/config":
@@ -1712,6 +1790,65 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     "output_cmd": f"kaggle kernels output {meta_json.get('id', 'antigravity/' + exp_id)} -p artifacts/{exp_id}/",
                 }
             })
+
+    def handle_api_cloud_push_dataset(self, data: Dict[str, Any]) -> None:
+        platform = (data.get("platform") or data.get("backend") or "kaggle").lower()
+        dataset_slug = data.get("dataset_slug")
+        volume_name = data.get("volume_name", "stereoqueer-dataset-vol")
+
+        if platform == "modal":
+            res = push_dataset_to_modal(volume_name=volume_name)
+        else:
+            res = KaggleKernelManager.push_dataset_to_kaggle(dataset_slug=dataset_slug)
+
+        self.send_json(res, status=200 if res.get("success") else 400)
+
+    def handle_api_cloud_kaggle_status(self, data: Dict[str, Any]) -> None:
+        config_path = data.get("config_path", "")
+        exp_id = data.get("exp_id") or Path(config_path).stem
+        kernel_slug = data.get("kernel_slug")
+        res = KaggleKernelManager.get_kernel_status(exp_id=exp_id, kernel_slug=kernel_slug)
+        self.send_json(res)
+
+    def handle_api_cloud_pull_output(self, data: Dict[str, Any]) -> None:
+        platform = (data.get("platform") or data.get("backend") or "kaggle").lower()
+        config_path = data.get("config_path", "")
+        exp_id = data.get("exp_id") or Path(config_path).stem
+        kernel_slug = data.get("kernel_slug")
+
+        if platform == "kaggle":
+            res = KaggleKernelManager.pull_kernel_output(exp_id=exp_id, kernel_slug=kernel_slug)
+        else:
+            # For Modal or Local, inspect local artifacts/<exp_id>/ directory
+            exp_dir = PROJECT_ROOT / "artifacts" / exp_id
+            found_files = []
+            metrics_data = None
+            if exp_dir.exists():
+                found_files = [p.name for p in exp_dir.iterdir() if p.is_file()]
+                mp = exp_dir / "metrics.json"
+                if mp.exists():
+                    try:
+                        metrics_data = json.loads(mp.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+            res = {
+                "success": len(found_files) > 0,
+                "exp_id": exp_id,
+                "artifacts_dir": str(exp_dir),
+                "migrated_files": found_files,
+                "metrics": metrics_data,
+                "raw_output": f"Verified {len(found_files)} artifact files in artifacts/{exp_id}/",
+            }
+
+        # Automatically sync Solution Tree DAG if outputs were pulled
+        if res.get("success"):
+            try:
+                journal = TreeJournal()
+                journal.sync_from_artifacts()
+            except Exception:
+                pass
+
+        self.send_json(res)
 
     def handle_api_sync(self) -> None:
         journal = TreeJournal()

@@ -121,6 +121,61 @@ export const api = {
     return res.json();
   },
 
+  getSubmissionDownloadUrl(subId: string): string {
+    return `${API_BASE}/submissions/download?id=${encodeURIComponent(subId)}`;
+  },
+
+  async pushDatasetToCloud(params: {
+    platform: 'kaggle' | 'modal';
+    dataset_slug?: string;
+    volume_name?: string;
+  }): Promise<{ success: boolean; dataset_slug?: string; volume_name?: string; logs: string; error?: string }> {
+    const res = await fetch(`${API_BASE}/cloud/push-dataset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+    if (!res.ok && !data.logs) {
+      throw new Error(data.error || `Failed to push dataset: ${res.statusText}`);
+    }
+    return data;
+  },
+
+  async getKaggleKernelStatus(params: {
+    config_path?: string;
+    exp_id?: string;
+    kernel_slug?: string;
+  }): Promise<{ success: boolean; kernel_slug: string; status: string; raw_output: string }> {
+    const res = await fetch(`${API_BASE}/cloud/kaggle-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  },
+
+  async pullCloudOutput(params: {
+    platform: 'kaggle' | 'modal';
+    config_path?: string;
+    exp_id?: string;
+    kernel_slug?: string;
+  }): Promise<{
+    success: boolean;
+    exp_id: string;
+    artifacts_dir?: string;
+    migrated_files: string[];
+    metrics?: Record<string, any>;
+    raw_output: string;
+  }> {
+    const res = await fetch(`${API_BASE}/cloud/pull-output`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    return res.json();
+  },
+
   async recordOfficialScore(
     subId: string,
     officialScores: Record<string, any>,

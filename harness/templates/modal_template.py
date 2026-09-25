@@ -1,20 +1,83 @@
 """Modal.com Serverless GPU Runner Template.
 
 Enables remote training on A10G / A100 / H100 with:
-1. Live log streaming to the local terminal.
-2. Direct mounting of local codebase and datasets.
-3. HuggingFace model cache volume to prevent redownloading weights.
-4. Selective artifact download (only oof_predictions, metrics, summary, diagnostics).
+1. Dataset Volume syncing (`modal volume put`) so dataset/ and splits/ are stored once on Modal.
+2. Live log streaming to the local terminal.
+3. Automatic execution of `run_training_remote.remote()` in `@app.local_entrypoint()`.
+4. Selective lightweight artifact download (`oof_predictions.csv`, `test_predictions.csv`, `metrics.json`, `summary.md`, `run.log`, `EXPERIMENT_CARD.md`) directly into `artifacts/<exp_id>/` without downloading multi-GB model checkpoints.
 """
 
 from __future__ import annotations
 
-import os
+import subprocess
 from pathlib import Path
+from typing import Dict, Any
 
 
-def generate_modal_script(config_path: str, gpu: str = "A10G", exp_id: str = "remote_exp") -> str:
-    """Generate self-contained Modal app script."""
+def push_dataset_to_modal(volume_name: str = "stereoqueer-dataset-vol") -> Dict[str, Any]:
+    """Create Modal Volume if needed and push dataset/ and splits/ to the volume."""
+    logs = []
+    try:
+        # 1. Ensure volume exists
+        create_proc = subprocess.run(
+            ["modal", "volume", "create", volume_name],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        logs.append(f"$ modal volume create {volume_name}")
+        if create_proc.stdout:
+            logs.append(create_proc.stdout.strip())
+
+        # 2. Upload dataset/ directory if present
+        if Path("dataset").exists():
+            put_data = subprocess.run(
+                ["modal", "volume", "put", volume_name, "dataset", "/dataset", "--force"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            logs.append(f"$ modal volume put {volume_name} dataset /dataset --force")
+            if put_data.returncode != 0 and put_data.stderr:
+                logs.append(put_data.stderr.strip())
+            else:
+                logs.append("Uploaded dataset/ to Modal volume /dataset.")
+
+        # 3. Upload splits/ directory if present
+        if Path("splits").exists():
+            put_splits = subprocess.run(
+                ["modal", "volume", "put", volume_name, "splits", "/splits", "--force"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            logs.append(f"$ modal volume put {volume_name} splits /splits --force")
+            if put_splits.returncode != 0 and put_splits.stderr:
+                logs.append(put_splits.stderr.strip())
+            else:
+                logs.append("Uploaded splits/ to Modal volume /splits.")
+
+        return {
+            "success": True,
+            "volume_name": volume_name,
+            "logs": "\n".join(logs),
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "volume_name": volume_name,
+            "error": str(exc),
+            "logs": "\n".join(logs),
+        }
+
+
+def generate_modal_script(
+    config_path: str,
+    gpu: str = "A10G",
+    exp_id: str = "remote_exp",
+    volume_name: str = "stereoqueer-dataset-vol",
+) -> str:
+    """Generate self-contained Modal app script that runs training and pulls lightweight artifacts back to local disk."""
     return f'''import modal
 import os
 import shutil
@@ -38,15 +101,16 @@ image = (
     )
 )
 
-# 2. Cache volume for HuggingFace pre-trained weights
+# 2. Persistent Volumes for HuggingFace cache and Dataset
 hf_cache = modal.Volume.from_name("stereoqueer-hf-cache", create_if_missing=True)
+data_volume = modal.Volume.from_name("{volume_name}", create_if_missing=True)
 
-# 3. Mount local project directory
+# 3. Mount lightweight local code & config
 project_mount = modal.Mount.from_local_dir(
     ".",
     remote_path="/root/workspace",
     condition=lambda p: not any(
-        x in p for x in [".git", "tmp", "__pycache__", "venv", ".venv", "artifacts"]
+        x in p for x in [".git", "tmp", "__pycache__", "venv", ".venv", "artifacts", "node_modules", "dashboard"]
     ),
 )
 
@@ -55,13 +119,23 @@ project_mount = modal.Mount.from_local_dir(
     gpu="{gpu}",
     timeout=14400,
     mounts=[project_mount],
-    volumes={{"/root/.cache/huggingface": hf_cache}},
+    volumes={{
+        "/root/.cache/huggingface": hf_cache,
+        "/mnt/cloud_data": data_volume,
+    }},
 )
 def run_training_remote(config_path: str, exp_id: str):
     import os
     os.chdir("/root/workspace")
-    print(f"🚀 [Modal Remote] Starting training for experiment: {{exp_id}}")
-    print(f"🚀 [Modal Remote] Config: {{config_path}}")
+
+    # Symlink dataset/ and splits/ from Modal Volume if not mounted directly
+    if Path("/mnt/cloud_data/dataset").exists() and not Path("dataset").exists():
+        os.symlink("/mnt/cloud_data/dataset", "dataset")
+    if Path("/mnt/cloud_data/splits").exists() and not Path("splits").exists():
+        os.symlink("/mnt/cloud_data/splits", "splits")
+
+    print(f"[Modal Remote] Starting GPU training for experiment: {{exp_id}} on {gpu}")
+    print(f"[Modal Remote] Config: {{config_path}}")
 
     cmd = ["python", "train.py", "--config", config_path]
     process = subprocess.Popen(
@@ -81,13 +155,15 @@ def run_training_remote(config_path: str, exp_id: str):
     if ret != 0:
         raise RuntimeError(f"Remote training failed with exit code: {{ret}}")
 
-    # Read essential artifacts into memory dictionary to return to local machine
+    # Package lightweight output artifacts (no heavy .safetensors / .bin weights)
     exp_dir = Path("artifacts") / exp_id
     essential_files = [
         "metrics.json",
         "summary.csv",
         "summary.md",
         "oof_predictions.csv",
+        "test_predictions.csv",
+        "submission.csv",
         "DIAGNOSTICS.md",
         "diagnostics.json",
         "run.log",
@@ -101,10 +177,24 @@ def run_training_remote(config_path: str, exp_id: str):
         if p.exists():
             bundle[fname] = p.read_bytes()
 
-    print(f"✔ [Modal Remote] Packaged {{len(bundle)}} essential artifact files.")
+    print(f"[Modal Remote] Returning {{len(bundle)}} lightweight artifact files to local host.")
     return bundle
 
 @app.local_entrypoint()
 def main():
-    print("Remote execution complete.")
+    exp_id = "{exp_id}"
+    config_path = "{config_path}"
+    print(f"Dispatching remote job '{{exp_id}}' to Modal GPU ({gpu})...")
+    bundle = run_training_remote.remote(config_path, exp_id)
+
+    local_exp_dir = Path("artifacts") / exp_id
+    local_exp_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_files = []
+    for fname, content in (bundle or {{}}).items():
+        out_path = local_exp_dir / fname
+        out_path.write_bytes(content)
+        saved_files.append(fname)
+
+    print(f"Pulled {{len(saved_files)}} artifacts into {{local_exp_dir}}: {{', '.join(saved_files)}}")
 '''

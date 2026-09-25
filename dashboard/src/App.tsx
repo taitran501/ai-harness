@@ -13,6 +13,7 @@ import { LLMStudio } from './components/LLMStudio';
 import { CompetitionReadinessModal } from './components/CompetitionReadinessModal';
 import { ExperimentConfigModal } from './components/ExperimentConfigModal';
 import { CloudEnvironmentModal } from './components/CloudEnvironmentModal';
+import { CompetitionPipelineHub } from './components/CompetitionPipelineHub';
 import { LanguageProvider, useLanguage } from './constants/i18n';
 import {
   TreeGraphResponse,
@@ -26,7 +27,7 @@ import {
 
 const DashboardContent: React.FC = () => {
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('tree');
+  const [activeTab, setActiveTab] = useState<'pipeline' | 'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('pipeline');
   const [graphData, setGraphData] = useState<TreeGraphResponse>({ nodes: [], edges: [], best_id: null });
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionEntry[]>([]);
@@ -129,7 +130,18 @@ const DashboardContent: React.FC = () => {
       <main className="flex-1 w-full px-5 py-3 space-y-3 flex flex-col">
         {/* Segmented Navigation */}
         <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
-          <nav className="flex space-x-1 bg-zinc-900/70 p-1 rounded-lg border border-zinc-800">
+          <nav className="flex flex-wrap gap-1 bg-zinc-900/70 p-1 rounded-lg border border-zinc-800">
+            <button
+              onClick={() => setActiveTab('pipeline')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-md transition ${
+                activeTab === 'pipeline'
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-zinc-300 hover:text-white hover:bg-zinc-800/60'
+              }`}
+            >
+              <span>Competition Pipeline (Steps 1–4)</span>
+            </button>
+
             <button
               onClick={() => setActiveTab('tree')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
@@ -155,35 +167,6 @@ const DashboardContent: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveTab('submissions')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'submissions'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
-            >
-              <Award className="w-3.5 h-3.5" />
-              <span>{t('nav_submissions', 'Submissions')}</span>
-              {submissions.length > 0 && (
-                <span className="text-zinc-400 text-[10px] font-mono">
-                  ({submissions.length})
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('cloud')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'cloud'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
-            >
-              <Cloud className="w-3.5 h-3.5" />
-              <span>{t('nav_cloud_runner', 'Cloud Runners')}</span>
-            </button>
-
-            <button
               onClick={() => setActiveTab('llm')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'llm'
@@ -195,20 +178,42 @@ const DashboardContent: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveTab('priming')}
+              onClick={() => setActiveTab('submissions')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'priming'
+                activeTab === 'submissions'
                   ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>{t('nav_priming', 'Agent Prompts')}</span>
+              <Award className="w-3.5 h-3.5" />
+              <span>{t('nav_submissions', 'Submissions History')}</span>
+              {submissions.length > 0 && (
+                <span className="text-zinc-400 text-[10px] font-mono">
+                  ({submissions.length})
+                </span>
+              )}
             </button>
           </nav>
         </div>
 
-        {/* Tab 1: Solution Tree */}
+        {/* Unified 4-Step Competition Pipeline Hub */}
+        {activeTab === 'pipeline' && (
+          <CompetitionPipelineHub
+            taskInfo={taskInfo}
+            experiments={experiments as any}
+            submissions={submissions}
+            initialPrompt={primingPrompt}
+            onOpenTaskConfig={(tab) => {
+              setTaskConfigTab(tab || 'task');
+              setIsTaskConfigOpen(true);
+            }}
+            onOpenConfigModal={(targetPath, parentId) => handleOpenConfigModal(targetPath, parentId)}
+            onOpenEnvModal={() => setIsEnvModalOpen(true)}
+            onRefreshAll={loadData}
+          />
+        )}
+
+        {/* Tab: Solution Tree */}
         {activeTab === 'tree' && (
           <div className="w-full flex-1 flex flex-col">
             <TreeCanvas
