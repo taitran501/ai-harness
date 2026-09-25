@@ -4,12 +4,35 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    font-size: 18px;
+  }
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    font-size: 0.95rem;
+    line-height: 1.5;
   }
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }
+}
+
+/* Global typography scale boost so no text is tiny */
+.text-\[9px\],
+.text-\[10px\] {
+  font-size: 0.78rem !important;
+  line-height: 1.35 !important;
+}
+
+.text-\[11px\],
+.text-xs {
+  font-size: 0.85rem !important;
+  line-height: 1.45 !important;
+}
+
+.text-sm {
+  font-size: 0.95rem !important;
+  line-height: 1.5 !important;
 }
 
 /* Custom React Flow styling for dark mode */

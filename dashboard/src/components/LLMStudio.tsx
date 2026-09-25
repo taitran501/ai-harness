@@ -1035,117 +1035,40 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
               </div>
             </div>
 
-            {/* Right Column: Interactive Test Console & Results (5 cols) */}
+            {/* Right Column: Prompt Execution & Output (5 cols) */}
             <div className="lg:col-span-5 space-y-5">
-              {/* Test Input Card */}
+              {/* Execution Output Card */}
               <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Database className="w-4 h-4 text-purple-400" />
-                    <span className="text-sm font-semibold text-zinc-200">Input Data for Test</span>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs">
-                    <button
-                      onClick={() => setUseCustomInput(false)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                        !useCustomInput ? 'bg-purple-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      Dataset Sample
-                    </button>
-                    <button
-                      onClick={() => setUseCustomInput(true)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                        useCustomInput ? 'bg-purple-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      Custom Text
-                    </button>
-                  </div>
-                </div>
-
-                {!useCustomInput ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs text-zinc-400">
-                      <span>Pick Sample Row ({sampleData?.rows.length || 0} loaded):</span>
-                      <select
-                        value={selectedSampleIndex}
-                        onChange={(e) => setSelectedSampleIndex(parseInt(e.target.value))}
-                        className="bg-zinc-950 border border-zinc-800 rounded px-2 py-0.5 text-xs text-zinc-200"
-                      >
-                        {sampleData?.rows.map((_, i) => (
-                          <option key={i} value={i}>
-                            Row #{i + 1}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-3 text-xs font-mono text-zinc-300 max-h-36 overflow-y-auto space-y-1">
-                      {sampleData && sampleData.rows.length > selectedSampleIndex ? (
-                        Object.entries(sampleData.rows[selectedSampleIndex]).map(([k, v]) => (
-                          <div key={k} className="truncate">
-                            <span className="text-purple-400">{k}:</span> {String(v)}
-                          </div>
-                        ))
-                      ) : (
-                        <span className="text-zinc-500 italic">No dataset samples available.</span>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400">Custom Test Comment</label>
-                    <textarea
-                      rows={4}
-                      value={customInputText}
-                      onChange={(e) => setCustomInputText(e.target.value)}
-                      placeholder="Type custom text to evaluate with prompt..."
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 font-mono focus:outline-none focus:border-purple-500 resize-y"
-                    />
-                  </div>
-                )}
-
-                <button
-                  onClick={handleRunInference}
-                  disabled={testingPrompt || (!currentProvider?.has_key && !currentProvider?.is_local)}
-                  className={`w-full py-2.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition ${
-                    testingPrompt || (!currentProvider?.has_key && !currentProvider?.is_local)
-                      ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                      : 'bg-purple-600 hover:bg-purple-500 text-white'
-                  }`}
-                >
-                  {testingPrompt ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Running Inference on {isCustomModel ? customModelInput : selectedModel}...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4" />
-                      <span>Run Test Inference</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {/* Inference Results Display Card */}
-              <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div className="flex items-center justify-between border-b border-zinc-800 pb-3 gap-3">
                   <span className="text-sm font-semibold text-zinc-200">Execution Output</span>
-                  {testResult && (
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-300 text-[10px] font-mono rounded">
+                  <div className="flex items-center gap-2">
+                    {testResult && (
+                      <span className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs font-mono rounded">
                         {testResult.latency_ms} ms
                       </span>
-                      {testResult.usage.completion_tokens && (
-                        <span className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-300 text-[10px] font-mono rounded">
-                          {testResult.usage.completion_tokens} tokens
-                        </span>
+                    )}
+                    <button
+                      onClick={handleRunInference}
+                      disabled={testingPrompt || (!currentProvider?.has_key && !currentProvider?.is_local)}
+                      className={`px-3.5 py-1.5 rounded-lg font-semibold text-xs flex items-center gap-1.5 transition ${
+                        testingPrompt || (!currentProvider?.has_key && !currentProvider?.is_local)
+                          ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                          : 'bg-purple-600 hover:bg-purple-500 text-white'
+                      }`}
+                    >
+                      {testingPrompt ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Running...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5" />
+                          <span>Run Test</span>
+                        </>
                       )}
-                    </div>
-                  )}
+                    </button>
+                  </div>
                 </div>
 
                 {testError && (

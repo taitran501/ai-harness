@@ -41,7 +41,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
   onRefreshSolutionTree,
   onOpenConfigModal,
 }) => {
-  const [platform, setPlatform] = useState<'modal' | 'kaggle' | 'local'>('modal');
+  const [platform, setPlatform] = useState<'modal' | 'kaggle'>('modal');
   const [configs, setConfigs] = useState<string[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<string>('configs/exp001_tfidf_baseline.yaml');
 
@@ -155,7 +155,6 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
   };
 
   const handleGenerate = async () => {
-    if (platform === 'local') return;
     setGenerating(true);
     setGenerateError(null);
     try {
@@ -331,17 +330,6 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
             >
               Kaggle: <strong>{envStatus?.kaggle.username || 'Not auth'}</strong>
             </span>
-
-            {/* GPU Pill */}
-            <span
-              className={`px-2 py-0.5 rounded border ${
-                envStatus?.gpu.detected
-                  ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                  : 'bg-zinc-900 text-zinc-500 border-zinc-800'
-              }`}
-            >
-              Local GPU: <strong>{envStatus?.gpu.gpu_name ? `${envStatus.gpu.gpu_name.split(' ')[0]} ${envStatus.gpu.memory_total_mb}MB` : 'CPU'}</strong>
-            </span>
           </div>
         </div>
 
@@ -362,7 +350,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
             <span>Cloud Runner Hub</span>
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Launch GPU experiments to Modal.com, Kaggle Kernels, or Local Hardware with real-time log streaming and automated audit gate.
+            Launch remote GPU experiments on Modal.com or Kaggle Kernels with real-time log streaming and automated audit gate.
           </p>
         </div>
 
@@ -389,17 +377,6 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
           >
             <Globe className="w-3.5 h-3.5 text-cyan-400" />
             <span>Kaggle Kernels</span>
-          </button>
-          <button
-            onClick={() => setPlatform('local')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition ${
-              platform === 'local'
-                ? 'bg-zinc-800 text-zinc-100 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Cpu className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Local GPU</span>
           </button>
         </div>
       </div>
@@ -464,7 +441,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
           <div className="space-y-2.5">
             <div>
               <label className="block text-[11px] text-zinc-400 mb-1">
-                Hardware Accelerator:
+                Cloud GPU Accelerator:
               </label>
               {platform === 'modal' ? (
                 <select
@@ -472,12 +449,12 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   onChange={(e) => setModalGpu(e.target.value)}
                   className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-zinc-700"
                 >
-                  <option value="A10G">NVIDIA A10G (24GB VRAM) — Recommended</option>
-                  <option value="T4">NVIDIA T4 (16GB VRAM) — Budget</option>
-                  <option value="A100-40GB">NVIDIA A100 (40GB VRAM) — Fast</option>
-                  <option value="H100">NVIDIA H100 (80GB VRAM) — Maximum</option>
+                  <option value="A10G">NVIDIA A10G (24GB VRAM)</option>
+                  <option value="T4">NVIDIA T4 (16GB VRAM)</option>
+                  <option value="A100-40GB">NVIDIA A100 (40GB VRAM)</option>
+                  <option value="H100">NVIDIA H100 (80GB VRAM)</option>
                 </select>
-              ) : platform === 'kaggle' ? (
+              ) : (
                 <select
                   value={kaggleGpu}
                   onChange={(e) => setKaggleGpu(e.target.value)}
@@ -486,12 +463,6 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   <option value="T4 x 2">2 x NVIDIA T4 (Free 30h/week)</option>
                   <option value="P100">1 x NVIDIA P100 (16GB)</option>
                 </select>
-              ) : (
-                <div className="p-2 bg-zinc-900 border border-zinc-800 rounded text-xs text-zinc-300 font-mono">
-                  {envStatus?.gpu.detected
-                    ? `${envStatus.gpu.gpu_name} (${envStatus.gpu.memory_total_mb}MB)`
-                    : 'Local CPU Host'}
-                </div>
               )}
             </div>
 
@@ -519,14 +490,14 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
           </div>
         </div>
 
-        {/* Step 3: 1-Click Launch & Pre-flight */}
+        {/* Step 3: Execution & Pre-flight */}
         <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-4 shadow-xl space-y-3">
           <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 rounded-full bg-zinc-800 text-zinc-300 flex items-center justify-center text-xs font-mono font-bold">
                 3
               </span>
-              <span className="text-xs font-semibold text-zinc-200">1-Click Execution</span>
+              <span className="text-xs font-semibold text-zinc-200">Execution</span>
             </div>
             <Terminal className="w-4 h-4 text-zinc-500" />
           </div>
@@ -573,7 +544,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
               </div>
             )}
 
-            {/* Big Launch Button */}
+            {/* Launch Button */}
             {activeJob?.status === 'RUNNING' ? (
               <button
                 onClick={handleStopExecution}
@@ -593,7 +564,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                 <span>
                   {isLaunching
                     ? 'Launching Remote Job...'
-                    : `Run 1-Click (${platform.toUpperCase()})`}
+                    : 'Run'}
                 </span>
               </button>
             )}

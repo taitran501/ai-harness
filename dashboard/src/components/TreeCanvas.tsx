@@ -210,11 +210,6 @@ const FlowInner: React.FC<TreeCanvasProps> = ({ graphData, onSelectNode, selecte
     fitView({ duration: 400, padding: 0.2 });
   }, [fitView]);
 
-  const hasValidRecommendation = Boolean(
-    recommendation &&
-    (recommendation.parent_id || (recommendation.guideline && !recommendation.guideline.toLowerCase().includes('no recommendation')))
-  );
-
   return (
     <div className="w-full h-[calc(100vh-140px)] min-h-[500px] rounded-xl overflow-hidden border border-zinc-800/80 bg-zinc-950 relative flex flex-col">
       {/* Top Floating Controls */}
@@ -260,21 +255,6 @@ const FlowInner: React.FC<TreeCanvasProps> = ({ graphData, onSelectNode, selecte
           </button>
         </div>
       </div>
-
-      {/* Floating Next Exploration Hint (Only if valid recommendation exists) */}
-      {hasValidRecommendation && (
-        <div className="absolute bottom-3 left-3 z-10 max-w-sm bg-zinc-900/90 backdrop-blur-md border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 pointer-events-auto flex items-center gap-2 shadow-xl">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="font-semibold text-zinc-200 shrink-0">Next Exploration:</span>
-            {recommendation?.parent_id && (
-              <span className="font-mono text-[10px] text-zinc-300 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-700 truncate">
-                {recommendation.branch ? `[${recommendation.branch}] ` : ''}from {recommendation.parent_id}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Empty State Overlay */}
       {filteredNodes.length === 0 && (

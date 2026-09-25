@@ -514,86 +514,12 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   className="flex items-center gap-1.5 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition"
                   title="Execute kaggle login auth --force to authenticate automatically"
                 >
-                  <span>{savingKaggle ? 'Running Auth...' : 'Authorize (kaggle login auth --force)'}</span>
-                </button>
-
-                <label className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-lg border border-zinc-800 text-xs font-medium cursor-pointer transition">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Upload kaggle.json</span>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={handleKaggleFileUpload}
-                    className="hidden"
-                  />
-                </label>
-
-                <button
-                  type="button"
-                  onClick={() => setShowKaggleForm(!showKaggleForm)}
-                  className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 font-mono px-2 py-1 bg-zinc-900 hover:bg-zinc-800 rounded-lg border border-zinc-800 transition"
-                >
-                  <Key className="w-3 h-3" />
-                  <span>{showKaggleForm ? 'Close' : 'Manual Key'}</span>
+                  <span>{savingKaggle ? 'Logging in...' : 'Kaggle Login'}</span>
                 </button>
               </div>
             </div>
 
-            {/* Direct CLI Command Box for kaggle login auth --force */}
-            <div className="flex items-center justify-between gap-2 p-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg font-mono text-xs">
-              <div className="flex items-center gap-2">
-                <span className="text-zinc-500">CLI Login Command:</span>
-                <code className="text-cyan-300 font-semibold">kaggle login auth --force</code>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText('kaggle login auth --force');
-                  setKaggleSuccessMsg("Copied 'kaggle login auth --force' to clipboard.");
-                  setTimeout(() => setKaggleSuccessMsg(null), 2500);
-                }}
-                className="px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-[11px] transition"
-              >
-                Copy Command
-              </button>
-            </div>
-
-            {/* Kaggle Key Form */}
-            {showKaggleForm && (
-              <form onSubmit={handleSaveKaggleCreds} className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-zinc-400 font-mono">Username</label>
-                    <input
-                      type="text"
-                      value={kaggleUser}
-                      onChange={(e) => setKaggleUser(e.target.value)}
-                      placeholder="e.g. locminh504"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-zinc-700"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-zinc-400 font-mono">API Key</label>
-                    <input
-                      type="password"
-                      value={kaggleKey}
-                      onChange={(e) => setKaggleKey(e.target.value)}
-                      placeholder="32-character key"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono focus:outline-none focus:border-zinc-700"
-                    />
-                  </div>
-                </div>
-                <button
-                  type="submit"
-                  disabled={savingKaggle || !kaggleUser || !kaggleKey}
-                  className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-semibold"
-                >
-                  {savingKaggle ? 'Saving...' : 'Save Kaggle Credentials'}
-                </button>
-              </form>
-            )}
-
-            <div className="flex items-center justify-between text-[11px] text-zinc-400 font-mono">
+            <div className="flex items-center justify-between text-xs text-zinc-400 font-mono">
               <span>Config Directory:</span>
               <span className="text-zinc-300">{envStatus?.kaggle.config_dir || '~/.kaggle'}</span>
             </div>
