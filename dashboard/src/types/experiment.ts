@@ -2,6 +2,25 @@ export type ApproachType = 'ml' | 'dl' | 'llm' | 'hybrid';
 export type BranchType = 'baseline' | 'feat' | 'model' | 'loss' | 'mtl' | 'ens' | string;
 export type NodeStatus = 'COMPLETED' | 'BUGGY' | 'PRUNED' | 'RUNNING' | string;
 
+export interface LLMSpec {
+  model_name: string;
+  param_size?: string | null; // e.g. "7B", "14B", "70B", "8B", "1.5B"
+  param_count?: number | null; // e.g. 7000000000
+  quantization?: string | null; // e.g. "4-bit NormalFloat (NF4)", "8-bit", "bfloat16"
+  paradigm?: 'unsloth_qlora' | 'zero_shot_cot' | 'few_shot_icl' | 'ensemble_blend' | string;
+  context_length?: number | null; // e.g. 2048, 8192
+  provider?: 'unsloth' | 'huggingface' | 'gemini' | 'openrouter' | 'groq' | 'local' | string;
+  lora_r?: number | null; // e.g. 16
+  lora_alpha?: number | null; // e.g. 32
+  lora_dropout?: number | null; // e.g. 0.05
+  target_modules?: string | null; // e.g. "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
+  temperature?: number | null;
+  use_cot?: boolean;
+  system_prompt?: string | null;
+  prompt_template?: string | null;
+  few_shot_count?: number | null;
+}
+
 export interface GraphNode {
   id: string;
   label: string;
@@ -12,6 +31,8 @@ export interface GraphNode {
   score: number;
   parent_delta?: number | null;
   param_count: number | null;
+  param_size?: string | null;
+  llm_spec?: LLMSpec | null;
   status: NodeStatus;
   is_best: boolean;
   is_buggy: boolean;
@@ -46,6 +67,8 @@ export interface ExperimentSummary {
   model_family: string;
   score: number;
   param_count: number | null;
+  param_size?: string | null;
+  llm_spec?: LLMSpec | null;
   status: NodeStatus;
   is_best: boolean;
   is_buggy: boolean;
@@ -66,6 +89,8 @@ export interface NodeDetail {
   model_family: string;
   score: number;
   param_count: number | null;
+  param_size?: string | null;
+  llm_spec?: LLMSpec | null;
   status: NodeStatus;
   is_buggy: boolean;
   atomic_hypothesis?: string;
@@ -521,6 +546,8 @@ export interface StrategyCard {
   rationale: string;
   target_tasks: string[];
   estimated_delta: string;
+  param_size?: string | null;
+  llm_spec?: LLMSpec | null;
   uncertainty_level?: string;
   source_type?: string;
   source_id?: string;

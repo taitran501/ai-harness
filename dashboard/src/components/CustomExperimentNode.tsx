@@ -128,7 +128,12 @@ export const CustomExperimentNode = memo(({ id, data, selected }: NodeProps<Expe
       <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
         <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider leading-none flex items-center gap-1">
           {isBest && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block shadow-sm" />}
-          {data?.metric_name || data?.primary_metric_name || 'Score'}
+          <span>{data?.metric_name || data?.primary_metric_name || 'Score'}</span>
+          {data?.param_size && (
+            <span className="text-[9px] bg-slate-800/90 text-amber-300 border border-slate-700/60 px-1 py-0.2 rounded font-mono font-semibold">
+              {data.param_size}
+            </span>
+          )}
         </span>
         <span
           className={`font-mono text-xs font-bold leading-none ${

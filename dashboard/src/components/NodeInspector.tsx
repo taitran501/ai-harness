@@ -11,6 +11,11 @@ import {
   FileText,
   AlertTriangle,
   FolderCheck,
+  Sparkles,
+  Bot,
+  Zap,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { NodeDetail, TaskInfo } from '../types/experiment';
 
@@ -27,15 +32,33 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
   onClose,
   onOpenConfigModal,
 }) => {
-  const [activeTab, setActiveTab] = useState<'metrics' | 'hypothesis' | 'diagnostics' | 'grounding' | 'config' | 'raw'>('metrics');
+  const [activeTab, setActiveTab] = useState<'metrics' | 'hypothesis' | 'llm' | 'diagnostics' | 'grounding' | 'config' | 'raw'>('metrics');
+  const [copiedLlmPrompt, setCopiedLlmPrompt] = useState(false);
 
   if (!node) return null;
 
-  const isDL = node.approach_type === 'dl';
+  const isLLM =
+    node.approach_type === 'llm' ||
+    Boolean(node.llm_spec) ||
+    node.model_family?.toLowerCase().includes('llm') ||
+    ['qwen', 'deepseek', 'llama', 'unsloth', 'gpt', 'gemini'].some((k) =>
+      node.id.toLowerCase().includes(k)
+    );
+  const isDL = !isLLM && node.approach_type === 'dl';
   const grounding = node.grounding_receipt?.grounding;
   const assumptions = node.grounding_receipt?.assumption_register;
   const metrics = node.metrics || {};
   const diagnostics = node.diagnostics_summary || {};
+  const llmSpec = node.llm_spec;
+
+  const formatParams = (count?: number | null, size?: string | null): string => {
+    if (size) return size;
+    if (!count) return 'N/A';
+    if (count >= 1e9) return `${(count / 1e9).toFixed(1)}B`;
+    if (count >= 1e6) return `${(count / 1e6).toFixed(1)}M`;
+    if (count >= 1e3) return `${(count / 1e3).toFixed(1)}K`;
+    return String(count);
+  };
 
   // Dynamically resolve all metrics to display
   const metricCards = useMemo(() => {
@@ -110,13 +133,21 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
           <div className="flex items-center gap-2">
             <span
               className={`flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                isDL
+                isLLM
+                  ? 'bg-gradient-to-r from-purple-900/70 via-indigo-900/70 to-amber-900/60 text-amber-300 border border-amber-500/40 shadow-sm'
+                  : isDL
                   ? 'bg-purple-900/60 text-purple-300 border border-purple-700/50'
                   : 'bg-blue-900/60 text-blue-300 border border-blue-700/50'
               }`}
             >
-              {isDL ? <Cpu className="w-3 h-3" /> : <Layers className="w-3 h-3" />}
-              {node.approach_type.toUpperCase()} ({node.model_family})
+              {isLLM ? (
+                <Sparkles className="w-3 h-3 text-amber-400" />
+              ) : isDL ? (
+                <Cpu className="w-3 h-3" />
+              ) : (
+                <Layers className="w-3 h-3" />
+              )}
+              {isLLM ? 'LLM' : node.approach_type.toUpperCase()} ({node.model_family})
             </span>
             <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
               {node.branch}
@@ -133,7 +164,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               {taskInfo?.primary_metric || 'Score (CV)'}: <strong className="font-mono text-emerald-400 text-sm">{node.score.toFixed(4)}</strong>
             </span>
             <span>
-              Params: <strong className="font-mono text-slate-200">{node.param_count ? `${(node.param_count / 1e6).toFixed(1)}M` : 'N/A'}</strong>
+              Scale: <strong className="font-mono text-slate-200">{formatParams(node.param_count, node.param_size)}</strong>
             </span>
           </div>
         </div>
@@ -167,6 +198,22 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
           }`}
         >
           Hypothesis & Plan
+        </button>
+        <button
+          onClick={() => setActiveTab('llm')}
+          className={`py-3 px-3 font-medium border-b-2 whitespace-nowrap transition flex items-center gap-1.5 ${
+            activeTab === 'llm'
+              ? 'border-amber-400 text-amber-300 font-semibold'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+          <span>LLM Specs</span>
+          {isLLM && (
+            <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded font-mono">
+              {node.param_size || '7B+'}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setActiveTab('diagnostics')}
@@ -312,6 +359,175 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                 <p className="text-slate-300 font-sans leading-relaxed">{node.notes}</p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Tab: LLM Architecture & Specs */}
+        {activeTab === 'llm' && (
+          <div className="space-y-4">
+            {/* If node is not LLM, show informative callout */}
+            {!isLLM && (
+              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-semibold text-slate-200">
+                      Classical {node.approach_type.toUpperCase()} Experiment ({node.model_family})
+                    </h4>
+                    <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                      This run executed under a classical tabular/deep encoder architecture. You can fork this experiment into an LLM target to benchmark 7B or 14B instruction models against this baseline.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pt-1 border-t border-slate-900">
+                  <button
+                    type="button"
+                    onClick={() => onOpenConfigModal?.('create', node.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold rounded-lg transition"
+                  >
+                    <Zap className="w-3.5 h-3.5 fill-current" />
+                    <span>Fork into 7B Unsloth LoRA Target</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenConfigModal?.('create', node.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-lg border border-slate-700 transition"
+                  >
+                    <span>Fork into 14B DeepSeek-R1 CoT</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Model Architecture & Scaling Overview */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-200 font-semibold text-xs flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-amber-400" />
+                  <span>Model Backbone & Scale</span>
+                </h4>
+                <span className="font-mono text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded">
+                  {llmSpec?.param_size || node.param_size || (isLLM ? '7B' : 'N/A')}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 font-mono text-[11px]">
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80">
+                  <div className="text-[10px] text-slate-400">Model Identifier</div>
+                  <div className="text-slate-100 font-semibold truncate mt-0.5" title={llmSpec?.model_name || node.metrics?.model || node.id}>
+                    {llmSpec?.model_name || node.metrics?.model || (isLLM ? 'Qwen2.5-7B-Instruct' : node.id)}
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80">
+                  <div className="text-[10px] text-slate-400">Quantization / Precision</div>
+                  <div className="text-amber-300 font-semibold mt-0.5">
+                    {llmSpec?.quantization || (isLLM ? '4-bit NormalFloat (NF4)' : 'bfloat16')}
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80">
+                  <div className="text-[10px] text-slate-400">Context Window</div>
+                  <div className="text-indigo-300 font-semibold mt-0.5">
+                    {llmSpec?.context_length ? `${llmSpec.context_length} tokens` : '8,192 tokens'}
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80">
+                  <div className="text-[10px] text-slate-400">Provider / Engine</div>
+                  <div className="text-emerald-400 font-semibold mt-0.5">
+                    {llmSpec?.provider || (isLLM ? 'Unsloth Triton Kernel' : 'PyTorch Native')}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* PEFT / LoRA Hyperparameters */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+              <h4 className="text-slate-200 font-semibold text-xs flex items-center justify-between">
+                <span>PEFT & LoRA Adaptation</span>
+                <span className="text-[10px] font-mono text-indigo-400">
+                  {llmSpec?.paradigm || 'unsloth_qlora'}
+                </span>
+              </h4>
+
+              <div className="grid grid-cols-3 gap-2 text-center font-mono text-[11px]">
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80">
+                  <div className="text-[10px] text-slate-400">LoRA Rank (r)</div>
+                  <div className="text-indigo-300 font-bold text-sm mt-0.5">
+                    {llmSpec?.lora_r ?? 16}
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80">
+                  <div className="text-[10px] text-slate-400">Scaling (alpha)</div>
+                  <div className="text-indigo-300 font-bold text-sm mt-0.5">
+                    {llmSpec?.lora_alpha ?? 32}
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80">
+                  <div className="text-[10px] text-slate-400">Dropout</div>
+                  <div className="text-slate-300 font-bold text-sm mt-0.5">
+                    {llmSpec?.lora_dropout ?? 0.05}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80 space-y-1">
+                <span className="text-[10px] text-slate-400 font-mono block">Target Projections:</span>
+                <code className="text-[11px] font-mono text-slate-300 break-all leading-relaxed block">
+                  {llmSpec?.target_modules || 'q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj'}
+                </code>
+              </div>
+            </div>
+
+            {/* Prompting & Reasoning Paradigm */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-200 font-semibold text-xs flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-purple-400" />
+                  <span>Prompting & Reasoning Paradigm</span>
+                </h4>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-950/60 border border-purple-800/60 text-purple-300">
+                    {llmSpec?.use_cot !== false ? 'CoT Reasoning Enabled' : 'Direct Classification'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const promptText = llmSpec?.system_prompt || 'You are an expert NLP classifier for StereoQueerEval.';
+                      navigator.clipboard.writeText(promptText);
+                      setCopiedLlmPrompt(true);
+                      setTimeout(() => setCopiedLlmPrompt(false), 2000);
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+                    title="Copy Prompt"
+                  >
+                    {copiedLlmPrompt ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-[10px] text-slate-400">System Instruction:</div>
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80 font-mono text-[11px] text-slate-300 leading-relaxed max-h-28 overflow-y-auto">
+                  {llmSpec?.system_prompt ||
+                    'You are an expert NLP judge for StereoQueerEval. Classify comments conditioned on video metadata for Stereotype, Hate Speech, and Target Identity.'}
+                </div>
+              </div>
+
+              {llmSpec?.prompt_template && (
+                <div className="space-y-2">
+                  <div className="text-[10px] text-slate-400">Prompt Template:</div>
+                  <pre className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80 font-mono text-[11px] text-indigo-300 leading-relaxed max-h-28 overflow-y-auto whitespace-pre-wrap">
+                    {llmSpec.prompt_template}
+                  </pre>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

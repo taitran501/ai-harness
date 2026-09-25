@@ -151,9 +151,16 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                     <span className="group-hover:text-zinc-200 transition">{exp.id}</span>
                   </td>
                   <td className="py-2.5 px-3 text-zinc-400">
-                    <span className="text-[10px] bg-zinc-900 text-zinc-300 px-1.5 py-0.5 rounded border border-zinc-800">
-                      {exp.branch}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] bg-zinc-900 text-zinc-300 px-1.5 py-0.5 rounded border border-zinc-800">
+                        {exp.branch}
+                      </span>
+                      {exp.approach_type === 'llm' && (
+                        <span className="text-[9px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1 py-0.2 rounded font-mono font-semibold">
+                          LLM
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-2.5 px-3 text-zinc-500">{exp.parent_id}</td>
                   <td
@@ -166,8 +173,16 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                   <td className="py-2.5 px-3 text-right text-zinc-300 font-bold">
                     {official?.primary !== undefined ? `${official.primary.toFixed(4)}` : '-'}
                   </td>
-                  <td className="py-2.5 px-3 text-right text-zinc-400">
-                    {exp.param_count ? `${(exp.param_count / 1e6).toFixed(1)}M` : '-'}
+                  <td className="py-2.5 px-3 text-right text-zinc-400 font-mono">
+                    {exp.param_size ? (
+                      <span className="font-semibold text-amber-300">{exp.param_size}</span>
+                    ) : exp.param_count ? (
+                      exp.param_count >= 1e9
+                        ? `${(exp.param_count / 1e9).toFixed(1)}B`
+                        : `${(exp.param_count / 1e6).toFixed(1)}M`
+                    ) : (
+                      '-'
+                    )}
                   </td>
                   <td className="py-3 px-3 text-slate-300 font-sans text-xs">
                     <div className="flex items-start justify-between gap-2">

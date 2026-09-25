@@ -22,12 +22,17 @@ class TestStrategyCardsAndSpawner(unittest.TestCase):
         cls.server.server_close()
 
     def test_default_strategy_cards_completeness(self):
-        self.assertEqual(len(DEFAULT_STRATEGY_CARDS), 4)
+        self.assertEqual(len(DEFAULT_STRATEGY_CARDS), 6)
         branches = {c["branch"] for c in DEFAULT_STRATEGY_CARDS}
         self.assertIn("feat", branches)
         self.assertIn("model", branches)
         self.assertIn("loss", branches)
         self.assertIn("ens", branches)
+
+        approaches = {c["approach_type"] for c in DEFAULT_STRATEGY_CARDS}
+        self.assertIn("ml", approaches)
+        self.assertIn("dl", approaches)
+        self.assertIn("llm", approaches)
 
         for card in DEFAULT_STRATEGY_CARDS:
             self.assertIn("id", card)
@@ -46,7 +51,7 @@ class TestStrategyCardsAndSpawner(unittest.TestCase):
             self.assertEqual(response.status, 200)
             data = json.loads(response.read().decode("utf-8"))
             self.assertIn("strategies", data)
-            self.assertEqual(len(data["strategies"]), 4)
+            self.assertEqual(len(data["strategies"]), len(DEFAULT_STRATEGY_CARDS))
 
     def test_get_next_experiment_id(self):
         res = get_next_experiment_id("feat", "video_title_ctx")

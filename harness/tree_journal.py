@@ -31,6 +31,8 @@ class Node:
     intervention: str = ""
     metrics: Dict[str, Any] = field(default_factory=dict)
     param_count: Optional[int] = None
+    param_size: Optional[str] = None
+    llm_spec: Optional[Dict[str, Any]] = None
     commit_hash: Optional[str] = None
     status: str = "COMPLETED"  # COMPLETED, BUGGY, PRUNED, RUNNING
     is_buggy: bool = False
@@ -228,6 +230,23 @@ class TreeJournal:
                     pass
 
             param_count = cfg_data.get("constraints", {}).get("max_params_limit")
+            llm_spec = cfg_data.get("llm") or model_info.get("llm_spec")
+            param_size = (
+                (cfg_data.get("llm") or {}).get("param_size")
+                or model_info.get("param_size")
+            )
+            if not param_size:
+                if param_count:
+                    if param_count >= 1_000_000_000:
+                        param_size = f"{round(param_count / 1e9, 1)}B"
+                    elif param_count >= 1_000_000:
+                        param_size = f"{round(param_count / 1e6, 1)}M"
+                else:
+                    id_lower = exp_id.lower()
+                    for sz in ["70b", "32b", "14b", "8b", "7b", "3b", "1.5b", "1b"]:
+                        if sz in id_lower or (model_info.get("name") and sz in model_info["name"].lower()):
+                            param_size = sz.upper()
+                            break
 
             node = Node(
                 id=exp_id,
@@ -241,6 +260,8 @@ class TreeJournal:
                 intervention=intervention,
                 metrics=metrics_dict,
                 param_count=param_count,
+                param_size=param_size,
+                llm_spec=llm_spec,
                 status="COMPLETED",
                 artifact_dir=str(exp_dir),
                 timestamp=exp_dir.stat().st_mtime,
@@ -306,6 +327,8 @@ class TreeJournal:
                 "score": round(n.get_score(), 4),
                 "parent_delta": delta,
                 "param_count": n.param_count,
+                "param_size": getattr(n, "param_size", None),
+                "llm_spec": getattr(n, "llm_spec", None),
                 "status": n.status,
                 "is_best": (n.id == best_id),
                 "is_buggy": n.is_buggy,
