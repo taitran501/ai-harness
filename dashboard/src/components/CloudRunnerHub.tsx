@@ -342,17 +342,6 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
             >
               Local GPU: <strong>{envStatus?.gpu.gpu_name ? `${envStatus.gpu.gpu_name.split(' ')[0]} ${envStatus.gpu.memory_total_mb}MB` : 'CPU'}</strong>
             </span>
-
-            {/* Docker Pill */}
-            <span
-              className={`px-2 py-0.5 rounded border ${
-                envStatus?.docker.running
-                  ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
-                  : 'bg-zinc-900 text-zinc-500 border-zinc-800'
-              }`}
-            >
-              Docker: <strong>{envStatus?.docker.running ? 'Running' : 'Standby'}</strong>
-            </span>
           </div>
         </div>
 

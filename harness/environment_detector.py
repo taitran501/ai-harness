@@ -199,20 +199,37 @@ class EnvironmentDetector:
 
     @staticmethod
     def launch_kaggle_auth() -> Dict[str, Any]:
-        """Open Kaggle Account settings web page in browser."""
-        auth_url = "https://www.kaggle.com/settings"
-        opened = False
+        """Run `kaggle login auth --force` to authenticate Kaggle CLI automatically."""
+        cmd = ["kaggle", "login", "auth", "--force"]
         try:
-            import webbrowser
-            opened = webbrowser.open(auth_url)
-        except Exception:
-            pass
-        return {
-            "success": True,
-            "opened_browser": opened,
-            "auth_url": auth_url,
-            "message": "Opened Kaggle Account settings (https://www.kaggle.com/settings) in your browser.",
-        }
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                stdout, stderr = proc.communicate(timeout=4)
+                output = (stdout or "") + "\n" + (stderr or "")
+                return {
+                    "success": proc.returncode in (0, None),
+                    "command": "kaggle login auth --force",
+                    "output": output.strip(),
+                    "message": "Executed 'kaggle login auth --force'. Complete the login flow in your browser.",
+                }
+            except subprocess.TimeoutExpired:
+                return {
+                    "success": True,
+                    "command": "kaggle login auth --force",
+                    "message": "Running 'kaggle login auth --force' in background. Complete login in your browser.",
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "command": "kaggle login auth --force",
+                "error": str(e),
+                "message": f"Failed to run 'kaggle login auth --force': {e}",
+            }
 
     @staticmethod
     def detect_kaggle() -> Dict[str, Any]:
@@ -228,22 +245,39 @@ class EnvironmentDetector:
             "error": None,
         }
 
-        # Check credentials in ~/.kaggle/credentials.json or ~/.kaggle/kaggle.json
-        kaggle_dir = Path.home() / ".kaggle"
-        for cred_name in ["credentials.json", "kaggle.json"]:
-            cred_file = kaggle_dir / cred_name
-            if cred_file.exists():
-                try:
-                    data = json.loads(cred_file.read_text(encoding="utf-8"))
-                    username = data.get("username") or data.get("user")
-                    if username:
-                        result["authenticated"] = True
-                        result["username"] = username
-                        break
-                except Exception:
-                    pass
+        # Check credentials in ~/.kaggle/ or ~/.config/kaggle/
+        search_dirs = [
+            Path.home() / ".kaggle",
+            Path.home() / ".config" / "kaggle",
+        ]
+        for k_dir in search_dirs:
+            for cred_name in ["credentials.json", "kaggle.json", "access_token"]:
+                cred_file = k_dir / cred_name
+                if cred_file.exists():
+                    try:
+                        raw = cred_file.read_text(encoding="utf-8").strip()
+                        if cred_name.endswith(".json"):
+                            data = json.loads(raw)
+                            username = (
+                                data.get("username")
+                                or data.get("user")
+                                or data.get("user_name")
+                                or ("OAuth User" if data.get("access_token") or data.get("refresh_token") else None)
+                            )
+                            if username:
+                                result["authenticated"] = True
+                                result["username"] = username
+                                break
+                        elif raw:
+                            result["authenticated"] = True
+                            result["username"] = "Kaggle OAuth"
+                            break
+                    except Exception:
+                        pass
+            if result["authenticated"]:
+                break
 
-        # If still not found, execute kaggle config view
+        # Also check kaggle config view
         if not result["username"] and result["installed"]:
             try:
                 proc = subprocess.run(
@@ -446,47 +480,11 @@ class EnvironmentDetector:
                 "reachable": is_set,
             }
 
-        ollama_active = False
-        try:
-            req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "ML-Harness"})
-            with urllib.request.urlopen(req, timeout=0.5) as r:
-                ollama_active = r.status < 500
-        except Exception:
-            pass
-
-        providers["ollama"] = {
-            "configured": ollama_active,
-            "env_var": None,
-            "masked_key": None,
-            "is_local": True,
-            "endpoint": "http://localhost:11434",
-            "reachable": ollama_active,
-        }
-
-        vllm_active = False
-        try:
-            req = urllib.request.Request("http://localhost:8000/v1/models", headers={"User-Agent": "ML-Harness"})
-            with urllib.request.urlopen(req, timeout=0.5) as r:
-                vllm_active = r.status < 500
-        except Exception:
-            pass
-
-        providers["vllm"] = {
-            "configured": vllm_active,
-            "env_var": None,
-            "masked_key": None,
-            "is_local": True,
-            "endpoint": "http://localhost:8000",
-            "reachable": vllm_active,
-        }
-
         total_configured = sum(1 for p in providers.values() if p["configured"] or p["reachable"])
 
         return {
             "keys": keys,
             "providers": providers,
-            "ollama_active": ollama_active,
-            "vllm_active": vllm_active,
             "active_providers_count": total_configured,
             "total_configured": total_configured,
         }
