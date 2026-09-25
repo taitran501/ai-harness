@@ -220,6 +220,8 @@ export const api = {
     model_family?: string;
     model_name?: string;
     model_params?: Record<string, any>;
+    param_size?: string | null;
+    llm_spec?: any;
     source_type?: string;
     source_id?: string;
     retrieval_summary?: string;

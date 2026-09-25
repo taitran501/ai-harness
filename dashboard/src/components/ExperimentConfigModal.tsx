@@ -133,6 +133,66 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
       per_language: true,
     },
   },
+  {
+    id: 'model_unsloth_qwen_7b',
+    branch: 'model',
+    badge: 'Fast LoRA (7B)',
+    title: 'Unsloth Fast QLoRA (Qwen2.5 7B Instruct)',
+    problem_addressed: 'Encoder transformers struggle with subtle implicit toxicity and complex sarcasm across multilingual comments.',
+    hypothesis: 'Fine-tuning unsloth/Qwen2.5-7B-Instruct with 4-bit QLoRA (r=16, alpha=32) unlocks generative world knowledge and lifts composite Macro-F1 by +0.07.',
+    intervention: 'Execute Unsloth fast LoRA fine-tuning on 4-bit quantized Qwen-2.5-7B with custom classification instruction formatting.',
+    approach_type: 'llm',
+    model_family: 'llm_peft',
+    model_name: 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit',
+    descriptor: 'unsloth_qwen_7b_qlora',
+    rationale: '4-bit quantized Qwen 7B consumes <9GB VRAM with Unsloth Triton kernels, training 2x faster while capturing intricate cultural context.',
+    target_tasks: ['Subtask A (Stereotype)', 'Subtask B (Implicit Hate)', 'Subtask C (Target Type)'],
+    estimated_delta: '+0.06 - 0.08 Macro-F1',
+    param_size: '7B',
+    uncertainty_level: 'low',
+    source_type: 'unsloth_hub',
+    source_id: 'unsloth/Qwen2.5-7B-Instruct-bnb-4bit',
+    model_params: {
+      param_size: '7B',
+      quantization: '4-bit NormalFloat (NF4)',
+      paradigm: 'unsloth_qlora',
+      lora_r: 16,
+      lora_alpha: 32,
+      lora_dropout: 0.05,
+      target_modules: 'q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj',
+      context_length: 8192,
+      epochs: 3,
+      learning_rate: 2e-4,
+    },
+  },
+  {
+    id: 'model_deepseek_r1_cot_14b',
+    branch: 'model',
+    badge: 'Reasoning CoT (14B)',
+    title: 'DeepSeek-R1 Distill 14B Chain-of-Thought',
+    problem_addressed: 'Implicit hate comments rely on coded linguistic framing that requires multi-step deductive reasoning to detect.',
+    hypothesis: 'Deploying distilled reasoning traces with DeepSeek-R1-Distill-Qwen-14B will deconstruct subtle derogatory tropes and boost minority class recall by +0.08.',
+    intervention: 'Apply zero-shot chain-of-thought prompting with DeepSeek-R1-Distill-Qwen-14B and structured JSON classification parsing.',
+    approach_type: 'llm',
+    model_family: 'llm_reasoning',
+    model_name: 'deepseek-ai/DeepSeek-R1-Distill-Qwen-14B',
+    descriptor: 'deepseek_r1_cot_14b',
+    rationale: 'Reasoning-specialized distillation models excel at unpacking implicit subtext and multi-lingual metaphors without task-specific retraining.',
+    target_tasks: ['Subtask B (Hate Speech)', 'Subtask C (Target Type & Identity)'],
+    estimated_delta: '+0.07 - 0.10 Macro-F1',
+    param_size: '14B',
+    uncertainty_level: 'medium',
+    source_type: 'huggingface_hub',
+    source_id: 'deepseek-ai/DeepSeek-R1-Distill-Qwen-14B',
+    model_params: {
+      param_size: '14B',
+      quantization: '4-bit AWQ / NF4',
+      paradigm: 'zero_shot_cot',
+      use_cot: true,
+      temperature: 0.2,
+      context_length: 8192,
+    },
+  },
 ];
 
 export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
@@ -158,6 +218,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   // Strategy & Agent State
   const [selectedParentId, setSelectedParentId] = useState<string>(defaultParentId);
   const [strategyCards, setStrategyCards] = useState<StrategyCard[]>(FALLBACK_STRATEGIES);
+  const [strategyCategory, setStrategyCategory] = useState<'all' | 'llm' | 'dl' | 'ml'>('all');
   const [selectedIde, setSelectedIde] = useState<'antigravity' | 'codex'>('antigravity');
   const [generatingCardId, setGeneratingCardId] = useState<string | null>(null);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
@@ -296,6 +357,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
         model_family: card.model_family,
         model_name: card.model_name,
         model_params: card.model_params,
+        param_size: card.param_size,
         source_type: card.source_type,
         source_id: card.source_id,
         uncertainty_level: card.uncertainty_level,
@@ -795,7 +857,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 
             {/* SECTION 2: Grounded Research Strategy Catalog */}
             <div className="space-y-3 pt-2 border-t border-zinc-800">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
                 <div>
                   <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-indigo-400" />
@@ -805,33 +867,92 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                     Vetted scientific interventions conforming to AGENTS.md standards. 1-click to scaffold a compliant config or copy an agent directive.
                   </p>
                 </div>
+
+                {/* Strategy Category Filter */}
+                <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800 text-[11px] font-medium self-end md:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setStrategyCategory('all')}
+                    className={`px-2 py-0.5 rounded transition ${
+                      strategyCategory === 'all'
+                        ? 'bg-zinc-800 text-zinc-100 font-semibold shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    All ({strategyCards.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStrategyCategory('llm')}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded transition ${
+                      strategyCategory === 'llm'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <span>LLM ({strategyCards.filter((c) => c.approach_type === 'llm').length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStrategyCategory('dl')}
+                    className={`px-2 py-0.5 rounded transition ${
+                      strategyCategory === 'dl'
+                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    DL ({strategyCards.filter((c) => c.approach_type === 'dl').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStrategyCategory('ml')}
+                    className={`px-2 py-0.5 rounded transition ${
+                      strategyCategory === 'ml'
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30 font-semibold shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    ML ({strategyCards.filter((c) => c.approach_type === 'ml').length})
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {strategyCards.map((card) => {
-                  const isGenerating = generatingCardId === card.id;
-                  const isCopied = copiedPromptId === card.id;
+                {strategyCards
+                  .filter((c) => (strategyCategory === 'all' ? true : c.approach_type === strategyCategory))
+                  .map((card) => {
+                    const isGenerating = generatingCardId === card.id;
+                    const isCopied = copiedPromptId === card.id;
 
-                  return (
-                    <div
-                      key={card.id}
-                      className="p-4 bg-zinc-950/70 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3.5 shadow-sm"
-                    >
-                      <div className="space-y-2">
-                        {/* Header Badge & Delta */}
-                        <div className="flex items-center justify-between">
-                          <span
-                            className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border font-semibold ${getBranchBadgeStyle(
-                              card.branch
-                            )}`}
-                          >
-                            {card.badge || card.branch}
-                          </span>
-                          <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                            <TrendingUp className="w-3 h-3" />
-                            <span>{card.estimated_delta}</span>
-                          </span>
-                        </div>
+                    return (
+                      <div
+                        key={card.id}
+                        className="p-4 bg-zinc-950/70 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3.5 shadow-sm"
+                      >
+                        <div className="space-y-2">
+                          {/* Header Badge & Delta */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border font-semibold ${getBranchBadgeStyle(
+                                  card.branch
+                                )}`}
+                              >
+                                {card.badge || card.branch}
+                              </span>
+                              {card.param_size && (
+                                <span className="text-[10px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                  <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                                  <span>{card.param_size}</span>
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                              <TrendingUp className="w-3 h-3" />
+                              <span>{card.estimated_delta}</span>
+                            </span>
+                          </div>
 
                         {/* Title */}
                         <h4 className="text-xs font-bold text-zinc-100">{card.title}</h4>

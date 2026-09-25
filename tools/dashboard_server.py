@@ -183,6 +183,66 @@ DEFAULT_STRATEGY_CARDS = [
             "per_language": True,
         },
     },
+    {
+        "id": "model_unsloth_qwen_7b",
+        "branch": "model",
+        "badge": "Fast LoRA (7B)",
+        "title": "Unsloth Fast QLoRA (Qwen2.5 7B Instruct)",
+        "problem_addressed": "Encoder transformers struggle with subtle implicit toxicity and complex sarcasm across multilingual comments.",
+        "hypothesis": "Fine-tuning unsloth/Qwen2.5-7B-Instruct with 4-bit QLoRA (r=16, alpha=32) unlocks generative world knowledge and lifts composite Macro-F1 by +0.07.",
+        "intervention": "Execute Unsloth fast LoRA fine-tuning on 4-bit quantized Qwen-2.5-7B with custom classification instruction formatting.",
+        "approach_type": "llm",
+        "model_family": "llm_peft",
+        "model_name": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+        "descriptor": "unsloth_qwen_7b_qlora",
+        "rationale": "4-bit quantized Qwen 7B consumes <9GB VRAM with Unsloth Triton kernels, training 2x faster while capturing intricate cultural context.",
+        "target_tasks": ["Subtask A (Stereotype)", "Subtask B (Implicit Hate)", "Subtask C (Target Type)"],
+        "estimated_delta": "+0.06 - 0.08 Macro-F1",
+        "param_size": "7B",
+        "uncertainty_level": "low",
+        "source_type": "unsloth_hub",
+        "source_id": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+        "model_params": {
+            "param_size": "7B",
+            "quantization": "4-bit NormalFloat (NF4)",
+            "paradigm": "unsloth_qlora",
+            "lora_r": 16,
+            "lora_alpha": 32,
+            "lora_dropout": 0.05,
+            "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+            "context_length": 8192,
+            "epochs": 3,
+            "learning_rate": 2e-4,
+        },
+    },
+    {
+        "id": "model_deepseek_r1_cot_14b",
+        "branch": "model",
+        "badge": "Reasoning CoT (14B)",
+        "title": "DeepSeek-R1 Distill 14B Chain-of-Thought",
+        "problem_addressed": "Implicit hate comments rely on coded linguistic framing that requires multi-step deductive reasoning to detect.",
+        "hypothesis": "Deploying distilled reasoning traces with DeepSeek-R1-Distill-Qwen-14B will deconstruct subtle derogatory tropes and boost minority class recall by +0.08.",
+        "intervention": "Apply zero-shot chain-of-thought prompting with DeepSeek-R1-Distill-Qwen-14B and structured JSON classification parsing.",
+        "approach_type": "llm",
+        "model_family": "llm_reasoning",
+        "model_name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        "descriptor": "deepseek_r1_cot_14b",
+        "rationale": "Reasoning-specialized distillation models excel at unpacking implicit subtext and multi-lingual metaphors without task-specific retraining.",
+        "target_tasks": ["Subtask B (Hate Speech)", "Subtask C (Target Type & Identity)"],
+        "estimated_delta": "+0.07 - 0.10 Macro-F1",
+        "param_size": "14B",
+        "uncertainty_level": "medium",
+        "source_type": "huggingface_hub",
+        "source_id": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        "model_params": {
+            "param_size": "14B",
+            "quantization": "4-bit AWQ / NF4",
+            "paradigm": "zero_shot_cot",
+            "use_cot": True,
+            "temperature": 0.2,
+            "context_length": 8192,
+        },
+    },
 ]
 
 
@@ -1124,6 +1184,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "model_family": getattr(n, "model_family", "linear"),
                 "score": round(n.get_score(), 4),
                 "param_count": n.param_count,
+                "param_size": getattr(n, "param_size", None),
+                "llm_spec": getattr(n, "llm_spec", None),
                 "status": n.status,
                 "is_best": (n.id == best_id),
                 "is_buggy": n.is_buggy,
@@ -1177,6 +1239,62 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception:
                     pass
 
+        # Determine llm_spec and param_size
+        llm_spec = getattr(node, "llm_spec", None)
+        param_size = getattr(node, "param_size", None)
+
+        if config_data and config_data.get("content"):
+            try:
+                parsed_cfg = yaml.safe_load(config_data["content"]) or {}
+                if not llm_spec and parsed_cfg.get("llm"):
+                    llm_spec = parsed_cfg.get("llm")
+                if not param_size and llm_spec and isinstance(llm_spec, dict):
+                    param_size = llm_spec.get("param_size")
+                if not param_size and parsed_cfg.get("model", {}).get("param_size"):
+                    param_size = parsed_cfg["model"]["param_size"]
+            except Exception:
+                pass
+
+        # If node represents an LLM, ensure a sensible spec structure
+        node_approach = getattr(node, "approach_type", "ml")
+        lower_id = node.id.lower()
+        if (node_approach == "llm" or any(k in lower_id for k in ["llm", "qwen", "deepseek", "llama", "unsloth", "cot", "qlora"])) and not llm_spec:
+            model_name = node.metrics.get("model") or node.id
+            if "deepseek" in lower_id:
+                llm_spec = {
+                    "model_name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+                    "param_size": "14B",
+                    "quantization": "4-bit AWQ / NF4",
+                    "paradigm": "zero_shot_cot",
+                    "context_length": 8192,
+                    "provider": "huggingface",
+                    "use_cot": True,
+                }
+                param_size = param_size or "14B"
+            elif "qwen" in lower_id or "unsloth" in lower_id:
+                llm_spec = {
+                    "model_name": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+                    "param_size": "7B",
+                    "quantization": "4-bit NormalFloat (NF4)",
+                    "paradigm": "unsloth_qlora",
+                    "context_length": 8192,
+                    "provider": "unsloth",
+                    "lora_r": 16,
+                    "lora_alpha": 32,
+                    "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+                    "use_cot": True,
+                }
+                param_size = param_size or "7B"
+            else:
+                llm_spec = {
+                    "model_name": model_name,
+                    "param_size": param_size or "7B",
+                    "quantization": "4-bit NF4",
+                    "paradigm": "unsloth_qlora",
+                    "context_length": 4096,
+                    "provider": "unsloth",
+                }
+
         details = {
             "id": node.id,
             "parent_id": node.parent_id,
@@ -1185,6 +1303,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "model_family": getattr(node, "model_family", "linear"),
             "score": round(node.get_score(), 4),
             "param_count": node.param_count,
+            "param_size": param_size,
+            "llm_spec": llm_spec,
             "status": node.status,
             "is_buggy": node.is_buggy,
             "atomic_hypothesis": node.atomic_hypothesis,
@@ -1503,6 +1623,25 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "debug": False,
             },
         }
+
+        if approach_type == "llm":
+            m_params = data.get("model_params", {})
+            param_size = data.get("param_size") or m_params.get("param_size", "7B")
+            new_cfg["llm"] = {
+                "model_name": data.get("model_name", "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"),
+                "param_size": param_size,
+                "quantization": m_params.get("quantization", "4-bit NormalFloat (NF4)"),
+                "paradigm": m_params.get("paradigm", "unsloth_qlora"),
+                "context_length": m_params.get("context_length", 8192),
+                "provider": m_params.get("provider", "unsloth"),
+                "lora_r": m_params.get("lora_r", 16),
+                "lora_alpha": m_params.get("lora_alpha", 32),
+                "lora_dropout": m_params.get("lora_dropout", 0.05),
+                "target_modules": m_params.get("target_modules", "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"),
+                "use_cot": m_params.get("use_cot", True),
+                "system_prompt": "You are an expert NLP classifier for hate speech, stereotype, and target identity detection.",
+                "prompt_template": "Classify the following comment conditioned on YouTube context.\nTitle: {yt_title}\nComment: {text}",
+            }
 
         yaml_content = yaml.dump(new_cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
         dest.parent.mkdir(parents=True, exist_ok=True)
