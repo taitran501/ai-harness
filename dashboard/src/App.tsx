@@ -37,7 +37,7 @@ const DashboardContent: React.FC = () => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeDetail, setSelectedNodeDetail] = useState<NodeDetail | null>(null);
   const [isTaskConfigOpen, setIsTaskConfigOpen] = useState(false);
-  const [taskConfigTab, setTaskConfigTab] = useState<'task' | 'data' | 'rules' | 'submission'>('task');
+  const [taskConfigTab, setTaskConfigTab] = useState<'task' | 'data' | 'cv' | 'rules' | 'submission'>('task');
   const [isReadinessOpen, setIsReadinessOpen] = useState(false);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isEnvModalOpen, setIsEnvModalOpen] = useState(false);

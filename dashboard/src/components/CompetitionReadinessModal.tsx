@@ -15,7 +15,7 @@ interface CompetitionReadinessModalProps {
   taskInfo: TaskInfo | null;
   status: SystemStatus | null;
   submissions: SubmissionEntry[];
-  onOpenTaskConfig: (tabKey?: 'task' | 'data' | 'rules' | 'submission') => void;
+  onOpenTaskConfig: (tabKey?: 'task' | 'data' | 'cv' | 'rules' | 'submission') => void;
 }
 
 interface PillarDisplayItem {
@@ -24,7 +24,7 @@ interface PillarDisplayItem {
   status: 'passed' | 'warning' | 'pending';
   summary: string;
   attributes: Array<{ label: string; value: string }>;
-  tabKey?: 'task' | 'data' | 'rules' | 'submission';
+  tabKey?: 'task' | 'data' | 'cv' | 'rules' | 'submission';
 }
 
 export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps> = ({
@@ -58,15 +58,13 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
     },
     {
       id: 'data_splits',
-      title: '2. Data & Anti-Leakage Cross-Validation',
-      status: dataCfg.split_strategy ? 'passed' : 'warning',
-      summary: dataCfg.split_strategy
-        ? `${dataCfg.split_strategy} (${dataCfg.n_folds || 5} folds)`
-        : 'Cross-validation split scheme not configured',
+      title: '2. Dataset Schema & Preprocessing Strategy',
+      status: dataCfg.train_path ? 'passed' : 'warning',
+      summary: `Train: ${dataCfg.train_path || 'dataset/'} — Context + Target Schema Configured`,
       attributes: [
-        { label: 'Train Path', value: dataCfg.train_path || 'dataset/' },
-        { label: 'Group Column', value: dataCfg.group_column || 'None' },
-        { label: 'ID Column', value: dataCfg.id_column || 'id' },
+        { label: 'ID Column', value: dataCfg.id_column || 'StereoQueerEval_id' },
+        { label: 'Target Columns', value: dataCfg.target_column || 'stereotype, hate_speech...' },
+        { label: 'Validation Split', value: `${dataCfg.split_strategy || 'GroupKFold'} (${dataCfg.n_folds || 5} folds)` },
       ],
       tabKey: 'data',
     },

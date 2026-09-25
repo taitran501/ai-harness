@@ -28,7 +28,7 @@ interface TaskConfigModalProps {
   currentTask: TaskInfo | null;
   onClose: () => void;
   onSave: (updatedTask: TaskInfo) => Promise<void>;
-  initialTab?: 'task' | 'data' | 'rules' | 'submission';
+  initialTab?: 'task' | 'data' | 'cv' | 'rules' | 'submission';
 }
 
 const PLATFORMS = [
@@ -49,11 +49,24 @@ const MODALITIES = [
   { id: 'multimodal', label: 'Multimodal' },
 ];
 
+const DATA_STRATEGIES = [
+  { id: 'title_comment_concat', name: 'Context Concatenation ([yt_title] + [yt_comment])' },
+  { id: 'full_context_concat', name: 'Full Video Context ([yt_title] + [yt_description] + [yt_comment])' },
+  { id: 'comment_only', name: 'Comment Text Only ([yt_comment])' },
+  { id: 'lang_routed_context', name: 'Language-Routed Context (EN / IT / NL specific formatting)' },
+];
+
+const IMBALANCE_STRATEGIES = [
+  { id: 'hierarchical_conditional', name: 'Hierarchical Filtering (Subtask C trained only on hate_speech != no)' },
+  { id: 'class_weighted', name: 'Inverse Frequency Class Weighting / Focal Loss' },
+  { id: 'none', name: 'Standard Empirical Distribution (No Resampling)' },
+];
+
 const SPLIT_STRATEGIES = [
-  { id: 'GroupKFold', name: 'GroupKFold', desc: 'Prevents leakage by keeping groups (e.g. video_id, patient_id) strictly in one fold' },
-  { id: 'StratifiedKFold', name: 'StratifiedKFold', desc: 'Preserves balanced percentage of samples for each target class' },
-  { id: 'KFold', name: 'Standard KFold', desc: 'Standard non-stratified random k-fold cross-validation' },
-  { id: 'TimeSeriesSplit', name: 'TimeSeriesSplit', desc: 'Strictly forward-rolling temporal validation without future leakage' },
+  { id: 'GroupKFold', name: 'GroupKFold (Grouped by Video / Entity ID)' },
+  { id: 'StratifiedKFold', name: 'StratifiedKFold (Stratified by Target Class)' },
+  { id: 'KFold', name: 'Standard KFold (Random Split)' },
+  { id: 'TimeSeriesSplit', name: 'TimeSeriesSplit (Temporal Forward Split)' },
 ];
 
 export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
@@ -63,7 +76,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   onSave,
   initialTab = 'task',
 }) => {
-  const [activeTab, setActiveTab] = useState<'task' | 'data' | 'rules' | 'submission'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'task' | 'data' | 'cv' | 'rules' | 'submission'>(initialTab);
   const [presets, setPresets] = useState<TaskPreset[]>([]);
 
   // Tab 1: Task & Objective
@@ -71,7 +84,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [name, setName] = useState<string>('');
   const [type, setType] = useState<string>('');
   const [modality, setModality] = useState<string>('text');
-  const [primaryMetric, setPrimaryMetric] = useState<string>('Macro-F1 (CV)');
+  const [primaryMetric, setPrimaryMetric] = useState<string>('Macro-F1');
   const [direction, setDirection] = useState<'maximize' | 'minimize'>('maximize');
   const [primaryBaseline, setPrimaryBaseline] = useState<string>('');
   const [primaryTarget, setPrimaryTarget] = useState<string>('');
@@ -80,19 +93,25 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [languages, setLanguages] = useState<string>('');
   const [description, setDescription] = useState<string>('');
 
-  // Tab 2: Data & Split Strategy
+  // Tab 2: Data Schema & Strategy
   const [trainPath, setTrainPath] = useState<string>('dataset/');
   const [testPath, setTestPath] = useState<string>('dataset/test/');
   const [sampleSubPath, setSampleSubPath] = useState<string>('submissions/sample_submission.csv');
+  const [idColumn, setIdColumn] = useState<string>('StereoQueerEval_id');
+  const [featureColumns, setFeatureColumns] = useState<string>('yt_title, yt_description, yt_comment');
+  const [targetColumn, setTargetColumn] = useState<string>('stereotype, hate_speech, target_type, target_identities');
+  const [dataStrategy, setDataStrategy] = useState<string>('title_comment_concat');
+  const [imbalanceStrategy, setImbalanceStrategy] = useState<string>('hierarchical_conditional');
+  const [missingDataPolicy, setMissingDataPolicy] = useState<string>('fill_empty_context');
+
+  // Tab 3: Validation Protocol (CV)
   const [splitStrategy, setSplitStrategy] = useState<string>('GroupKFold');
   const [groupColumn, setGroupColumn] = useState<string>('yt_title');
   const [nFolds, setNFolds] = useState<number>(5);
   const [seed, setSeed] = useState<number>(42);
-  const [idColumn, setIdColumn] = useState<string>('id');
-  const [targetColumn, setTargetColumn] = useState<string>('target');
-  const [missingDataPolicy, setMissingDataPolicy] = useState<string>('drop_invalid_rows');
+  const [foldFilePath, setFoldFilePath] = useState<string>('splits/fold_assignments.tsv');
 
-  // Tab 3: Competition Rules & Constraints
+  // Tab 4: Competition Rules & Constraints
   const [allowLlm, setAllowLlm] = useState<boolean>(false);
   const [allowApi, setAllowApi] = useState<boolean>(false);
   const [allowExternalData, setAllowExternalData] = useState<boolean>(false);
@@ -104,7 +123,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [teamPolicy, setTeamPolicy] = useState<string>('');
   const [reproducibilityRequired, setReproducibilityRequired] = useState<boolean>(true);
 
-  // Tab 4: Submission & Audit Specification
+  // Tab 5: Submission & Audit Specification
   const [submissionFileName, setSubmissionFileName] = useState<string>('submission.zip');
   const [archiveFormat, setArchiveFormat] = useState<'zip' | 'csv' | 'tar.gz'>('zip');
   const [minDiffPct, setMinDiffPct] = useState<string>('2.0');
@@ -361,9 +380,10 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
           </button>
         </div>
 
-        {/* 4-Tab Navigation */}
-        <div className="px-5 pt-2 pb-0 border-b border-zinc-800 bg-zinc-950/40 flex space-x-1">
+        {/* 5-Tab Navigation */}
+        <div className="px-5 pt-2 pb-0 border-b border-zinc-800 bg-zinc-950/40 flex flex-wrap gap-1">
           <button
+            type="button"
             onClick={() => setActiveTab('task')}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
               activeTab === 'task'
@@ -376,6 +396,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('data')}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
               activeTab === 'data'
@@ -384,10 +405,24 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             }`}
           >
             <Database className="w-3.5 h-3.5" />
-            <span>2. Data & Validation Strategy</span>
+            <span>2. Data Schema & Strategy</span>
           </button>
 
           <button
+            type="button"
+            onClick={() => setActiveTab('cv')}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
+              activeTab === 'cv'
+                ? 'border-zinc-200 text-zinc-100'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>3. Validation Split (CV)</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('rules')}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
               activeTab === 'rules'
@@ -396,10 +431,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             }`}
           >
             <Scale className="w-3.5 h-3.5" />
-            <span>3. Rules & Constraints</span>
+            <span>4. Rules & Constraints</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('submission')}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition ${
               activeTab === 'submission'
@@ -408,7 +444,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             }`}
           >
             <FileArchive className="w-3.5 h-3.5" />
-            <span>4. Submission & Audit Standards</span>
+            <span>5. Submission & Audit</span>
           </button>
         </div>
 
@@ -783,119 +819,191 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: Data & Validation Strategy */}
+          {/* TAB 2: Data Schema & Strategy */}
           {activeTab === 'data' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Cross-Validation Split Scheme</label>
-                  <select
-                    value={splitStrategy}
-                    onChange={(e) => setSplitStrategy(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
-                  >
-                    {SPLIT_STRATEGIES.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.desc})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
+                <div className="text-xs font-semibold text-zinc-200">Dataset Directories</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Training Data Path</label>
+                    <input
+                      type="text"
+                      value={trainPath}
+                      onChange={(e) => setTrainPath(e.target.value)}
+                      placeholder="e.g. dataset/train.csv or dataset/"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1 flex items-center gap-1.5">
-                    <span>Anti-Leakage Group Column</span>
-                    <span className="text-[10px] text-amber-400 font-mono">(Crucial for GroupKFold)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={groupColumn}
-                    onChange={(e) => setGroupColumn(e.target.value)}
-                    placeholder="e.g. video_id, yt_title, patient_id, group_id"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-zinc-700"
-                  />
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Test Data Path</label>
+                    <input
+                      type="text"
+                      value={testPath}
+                      onChange={(e) => setTestPath(e.target.value)}
+                      placeholder="e.g. dataset/test/"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Number of Folds (k)</label>
-                  <input
-                    type="number"
-                    min={2}
-                    max={20}
-                    value={nFolds}
-                    onChange={(e) => setNFolds(parseInt(e.target.value, 10) || 5)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
-                  />
-                </div>
+              <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
+                <div className="text-xs font-semibold text-zinc-200">Column Schema</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">ID Column Name</label>
+                    <input
+                      type="text"
+                      value={idColumn}
+                      onChange={(e) => setIdColumn(e.target.value)}
+                      placeholder="e.g. StereoQueerEval_id"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Fixed Random Seed</label>
-                  <input
-                    type="number"
-                    value={seed}
-                    onChange={(e) => setSeed(parseInt(e.target.value, 10) || 42)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Input / Context Columns</label>
+                    <input
+                      type="text"
+                      value={featureColumns}
+                      onChange={(e) => setFeatureColumns(e.target.value)}
+                      placeholder="e.g. yt_title, yt_description, yt_comment"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">ID Column Name</label>
-                  <input
-                    type="text"
-                    value={idColumn}
-                    onChange={(e) => setIdColumn(e.target.value)}
-                    placeholder="e.g. id, StereoQueerEval_id"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Target Column(s)</label>
-                  <input
-                    type="text"
-                    value={targetColumn}
-                    onChange={(e) => setTargetColumn(e.target.value)}
-                    placeholder="e.g. target, SalePrice"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
-                  />
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Target Column(s)</label>
+                    <input
+                      type="text"
+                      value={targetColumn}
+                      onChange={(e) => setTargetColumn(e.target.value)}
+                      placeholder="e.g. stereotype, hate_speech, target_type, target_identities"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Training Data Path</label>
-                  <input
-                    type="text"
-                    value={trainPath}
-                    onChange={(e) => setTrainPath(e.target.value)}
-                    placeholder="e.g. dataset/train.csv or dataset/"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100"
-                  />
+              <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
+                <div className="text-xs font-semibold text-zinc-200">Data Processing & Representation Strategy</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Feature / Context Strategy</label>
+                    <select
+                      value={dataStrategy}
+                      onChange={(e) => setDataStrategy(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100"
+                    >
+                      {DATA_STRATEGIES.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Label Filtering & Imbalance Strategy</label>
+                    <select
+                      value={imbalanceStrategy}
+                      onChange={(e) => setImbalanceStrategy(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100"
+                    >
+                      {IMBALANCE_STRATEGIES.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Test Data Path</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Missing Data Handling Policy</label>
                   <input
                     type="text"
-                    value={testPath}
-                    onChange={(e) => setTestPath(e.target.value)}
-                    placeholder="e.g. dataset/test.csv"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100"
+                    value={missingDataPolicy}
+                    onChange={(e) => setMissingDataPolicy(e.target.value)}
+                    placeholder="e.g. fill_empty_context, drop_invalid_rows"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100"
                   />
                 </div>
               </div>
+            </div>
+          )}
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Missing Data Handling Policy</label>
-                <input
-                  type="text"
-                  value={missingDataPolicy}
-                  onChange={(e) => setMissingDataPolicy(e.target.value)}
-                  placeholder="e.g. impute_median_categorical_missing, drop_invalid_rows"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100"
-                />
+          {/* TAB 3: Validation Split (CV) */}
+          {activeTab === 'cv' && (
+            <div className="space-y-4">
+              <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
+                <div className="text-xs font-semibold text-zinc-200">Cross-Validation Split Protocol</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Validation Split Scheme</label>
+                    <select
+                      value={splitStrategy}
+                      onChange={(e) => setSplitStrategy(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100"
+                    >
+                      {SPLIT_STRATEGIES.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">
+                      Group / Entity Column (Anti-Leakage)
+                    </label>
+                    <input
+                      type="text"
+                      value={groupColumn}
+                      onChange={(e) => setGroupColumn(e.target.value)}
+                      placeholder="e.g. yt_title, video_id"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Number of Folds (k)</label>
+                    <input
+                      type="number"
+                      min={2}
+                      max={20}
+                      value={nFolds}
+                      onChange={(e) => setNFolds(parseInt(e.target.value, 10) || 5)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Fixed Random Seed</label>
+                    <input
+                      type="number"
+                      value={seed}
+                      onChange={(e) => setSeed(parseInt(e.target.value, 10) || 42)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">Precomputed Fold File</label>
+                    <input
+                      type="text"
+                      value={foldFilePath}
+                      onChange={(e) => setFoldFilePath(e.target.value)}
+                      placeholder="splits/fold_assignments.tsv"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}
