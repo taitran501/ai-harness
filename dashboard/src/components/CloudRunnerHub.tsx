@@ -515,7 +515,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   onChange={(e) => setAutoAudit(e.target.checked)}
                   className="rounded bg-zinc-900 border-zinc-700 text-indigo-600 focus:ring-0"
                 />
-                <span>Auto-run SWE Audit Gate (MMES &ge; 2%)</span>
+                <span>Auto-run Audit Gate (Min Diff &ge; 2%)</span>
               </label>
               <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                 <input
@@ -689,7 +689,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
                 )}
                 <div>
-                  <span className="font-semibold text-zinc-200">SWE Audit Gate: </span>
+                  <span className="font-semibold text-zinc-200">Audit Gate: </span>
                   <span
                     className={
                       auditReceipt.status === 'PASS'

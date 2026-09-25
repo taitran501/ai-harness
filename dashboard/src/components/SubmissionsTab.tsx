@@ -266,7 +266,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
             <FileArchive className="w-10 h-10 text-slate-600 mx-auto" />
             <h3 className="text-sm font-semibold text-slate-300">No Submissions Registered Yet</h3>
             <p className="text-xs text-slate-400 max-w-lg mx-auto leading-relaxed">
-              Submissions must pass the deterministic SWE-agent Audit Gate before being registered. Package a candidate via:
+              Submissions must pass the Audit Gate before being registered. Package a candidate via:
             </p>
             <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300 max-w-xl mx-auto text-left">
               python tools/audit_gate.py --candidate artifacts/expXXX/oof_predictions.csv --baseline artifacts/exp001/oof_predictions.csv --output-zip submission.zip
@@ -556,7 +556,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                   <span>Register & Audit New Submission</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Package candidate predictions via the SWE Audit Gate (verifies MMES &ge; 2.0% and formats archive).
+                  Package candidate predictions via the Audit Gate (verifies min prediction delta &ge; 2.0% and formats archive).
                 </p>
               </div>
               <button
@@ -623,7 +623,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Parent Baseline CSV Path (for MMES delta check)
+                  Parent Baseline CSV Path (for prediction delta check)
                 </label>
                 <input
                   type="text"
@@ -640,7 +640,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
-                    MMES Threshold (%)
+                    Min Prediction Delta (%)
                   </label>
                   <input
                     type="number"
