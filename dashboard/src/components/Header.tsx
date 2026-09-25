@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Plus,
   Check,
+  Sparkles,
 } from 'lucide-react';
 import { SystemStatus, TaskInfo, TaskSummary } from '../types/experiment';
 import { api } from '../services/api';
@@ -234,10 +235,10 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenConfigModal}
             className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-300 hover:text-white px-2.5 py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
-            title="Inspect, edit, or create target experiment YAML configuration"
+            title="Open Strategy Catalog and configure experiment targets"
           >
-            <FileCode className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Target Config</span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Strategy Hub</span>
           </button>
         )}
 
