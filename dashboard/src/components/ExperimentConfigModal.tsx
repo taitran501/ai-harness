@@ -399,7 +399,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
    python train.py --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0
    \`\`\`
 4. **Run Full 5-Fold Cross-Validation**: Execute full CV and record artifacts.
-5. **Deterministic Audit Gate**: Validate that validation delta achieves MMES >= 2.0% without regression.`
+5. **Deterministic Audit Gate**: Validate that validation delta achieves Min Prediction Delta >= 2.0% without regression.`
         : `# OPENAI CODEX CLI DIRECTIVE: ITERATE & ADDRESS FAILURE MODES
 
 - Parent Baseline: \`${selectedParentId}\` (Macro-F1: ${parentScore})
@@ -409,7 +409,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   1. Inspect \`artifacts/${selectedParentId}/\` to diagnose errors.
   2. Create a new config in \`configs/\` specifying the intervention.
   3. Run smoke test on Fold 0, then full 5-fold cross-validation.
-  4. Summarize validation metrics and verify MMES >= 2.0% row delta.`;
+  4. Summarize validation metrics and verify Min Prediction Delta >= 2.0% row delta.`;
     }
 
     if (type === 'explore') {
@@ -417,7 +417,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
         ? `# ANTIGRAVITY DIRECTIVE: PARADIGM SHIFT & BRANCH EXPLORATION
 
 > Current Record: **${selectedParentId}** (Macro-F1: ${parentScore})
-> Objective: Explore an un-sampled model family per AIDE UCB tree search.
+> Objective: Explore an un-sampled model family per solution tree search.
 
 ## SCIENTIFIC EXPLORATION PROTOCOL:
 1. **Epistemic Grounding**: Do not guess hyperparameters. Retrieve verified model architectures (e.g. \`xlm-roberta-base\` or \`microsoft/mdeberta-v3-base\`) that support multilingual text (EN, IT, NL).
@@ -523,13 +523,13 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <span>Experiment Targets & Strategy Hub</span>
+                <span>Strategy Catalog & Experiment Targets</span>
                 <span className="text-[11px] font-mono text-zinc-400 font-normal">
-                  • 1-Click Strategy Catalog & Agent Spawner
+                  • Curated Strategies & Agent Directives
                 </span>
               </h2>
               <p className="text-[11px] text-zinc-500">
-                Spawn vetted research targets with 1-click or generate prompt directives for Antigravity & Codex
+                Scaffold verified research interventions or generate prompt directives for Antigravity & OpenAI Codex
               </p>
             </div>
           </div>
@@ -553,9 +553,9 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               }`}
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>1-Click Strategies & AI Agent</span>
+              <span>Strategy Catalog & Directives</span>
               <span className="ml-1 text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.2 rounded font-mono">
-                Guided
+                Curated
               </span>
             </button>
 
@@ -697,16 +697,16 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               </div>
             </div>
 
-            {/* SECTION 1: Delegate Target Design to AI Agent */}
+            {/* SECTION 1: AI Agent Target Directives */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                     <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Delegate Next Target Design to AI Agent</span>
+                    <span>AI Agent Target Directives</span>
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    No manual YAML editing required. Select a directive below to generate an epistemic prompt injected with repository diagnostics.
+                    Generate structured prompt directives pre-injected with failure diagnostics for autonomous coding agents.
                   </p>
                 </div>
               </div>
@@ -721,7 +721,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                           <Target className="w-3.5 h-3.5" />
                         </div>
                         <span className="text-xs font-semibold text-zinc-200">
-                          Iterate & Fix Diagnosed Failure Modes
+                          Iterate & Fix Diagnosed Bottlenecks
                         </span>
                       </div>
                       <span className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded text-zinc-400">
@@ -765,7 +765,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5 text-zinc-400" />
-                          <span>Copy Agent Directive</span>
+                          <span>Copy Directive</span>
                         </>
                       )}
                     </button>
@@ -785,11 +785,11 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                         </span>
                       </div>
                       <span className="text-[10px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded">
-                        UCB Tree Search
+                        Tree Search
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">
-                      AI Agent explores a completely new model family (Multilingual Transformer / Multi-Task Learning) guided by UCB tree search with epistemic grounding.
+                      AI Agent explores a completely new model family (Multilingual Transformer / Multi-Task Learning) guided by tree search with epistemic grounding.
                     </p>
                   </div>
 
@@ -825,7 +825,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5 text-zinc-400" />
-                          <span>Copy Agent Directive</span>
+                          <span>Copy Directive</span>
                         </>
                       )}
                     </button>
@@ -855,16 +855,16 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               )}
             </div>
 
-            {/* SECTION 2: Grounded Research Strategy Catalog */}
+            {/* SECTION 2: Research Strategy Catalog */}
             <div className="space-y-3 pt-2 border-t border-zinc-800">
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
                 <div>
                   <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Grounded Research Strategy Catalog</span>
+                    <span>Research Strategy Catalog</span>
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    Vetted scientific interventions conforming to AGENTS.md standards. Create a compliant config or copy an agent directive.
+                    Vetted scientific interventions conforming to repository standards. Scaffold a target config or copy prompt directive.
                   </p>
                 </div>
 
