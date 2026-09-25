@@ -504,6 +504,29 @@ export const api = {
     return res.json();
   },
 
+  async verifyLLMKey(
+    providerOrKey: string,
+    keyValue?: string
+  ): Promise<{
+    success: boolean;
+    valid: boolean;
+    provider: string;
+    latency_ms?: number;
+    message?: string;
+    error?: string;
+  }> {
+    const res = await fetch(`${API_BASE}/environment/llm/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: providerOrKey, key_value: keyValue }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Failed to verify API key: ${res.statusText}`);
+    }
+    return res.json();
+  },
+
   async getHFModels(params?: {
     search?: string;
     pipeline?: string;

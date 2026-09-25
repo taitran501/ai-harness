@@ -1151,6 +1151,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.handle_api_llm_save_key(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/environment/llm/verify":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(body)
+                self.handle_api_llm_verify_key(data)
+            except Exception as e:
+                self.send_json({"error": str(e), "success": False, "valid": False}, status=400)
         else:
             self.send_response(404)
             self.end_headers()
@@ -2039,6 +2047,18 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(res)
         except Exception as e:
             self.send_json({"error": str(e)}, status=400)
+
+    def handle_api_llm_verify_key(self, data: Dict[str, Any]) -> None:
+        try:
+            provider = data.get("provider") or data.get("key_name") or ""
+            key_value = data.get("key_value") or data.get("api_key")
+            if not provider:
+                self.send_json({"error": "provider or key_name is required.", "success": False, "valid": False}, status=400)
+                return
+            res = EnvironmentDetector.verify_llm_api_key(provider, key_value)
+            self.send_json(res)
+        except Exception as e:
+            self.send_json({"error": str(e), "success": False, "valid": False}, status=400)
 
     def handle_api_llm_hf_models(self, query_str: str) -> None:
         try:

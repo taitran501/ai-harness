@@ -13,12 +13,35 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+KEY_TO_PROVIDER: Dict[str, str] = {
+    "GEMINI_API_KEY": "gemini",
+    "GOOGLE_API_KEY": "gemini",
+    "OPENAI_API_KEY": "openai",
+    "ANTHROPIC_API_KEY": "anthropic",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "GROQ_API_KEY": "groq",
+    "OPENROUTER_API_KEY": "openrouter",
+}
+PROVIDER_TO_KEY: Dict[str, str] = {
+    "gemini": "GEMINI_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 
 
 
@@ -377,55 +400,255 @@ class EnvironmentDetector:
 
         return result
 
-    @staticmethod
-    def detect_llm_status() -> Dict[str, Any]:
-        """Detect LLM API keys and local inference endpoints."""
-        keys = {}
-        for k in ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY"]:
-            val = os.environ.get(k)
-            if not val:
-                # check .env
-                env_file = PROJECT_ROOT / ".env"
-                if env_file.exists():
-                    for line in env_file.read_text(encoding="utf-8").splitlines():
-                        if line.strip().startswith(f"{k}="):
-                            val = line.strip().split("=", 1)[1].strip("\"' ")
-                            break
-            keys[k] = {
-                "set": bool(val),
-                "preview": f"{val[:6]}...{val[-4:]}" if val and len(val) > 10 else ("***" if val else None),
+    @classmethod
+    def detect_llm_status(cls) -> Dict[str, Any]:
+        """Detect LLM API keys, configured providers, and local inference endpoints."""
+        env_dict: Dict[str, str] = {}
+        env_file = PROJECT_ROOT / ".env"
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    env_dict[k.strip()] = v.strip("\"' ")
+
+        key_vars = {
+            "gemini": "GEMINI_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+        }
+
+        providers: Dict[str, Any] = {}
+        keys: Dict[str, Any] = {}
+
+        for p_name, env_key in key_vars.items():
+            val = os.environ.get(env_key) or env_dict.get(env_key)
+            if p_name == "gemini" and not val:
+                val = os.environ.get("GOOGLE_API_KEY") or env_dict.get("GOOGLE_API_KEY")
+
+            is_set = bool(val)
+            masked = f"{val[:4]}...{val[-4:]}" if val and len(val) > 8 else ("***" if val else None)
+
+            keys[env_key] = {
+                "set": is_set,
+                "preview": masked,
+            }
+
+            providers[p_name] = {
+                "configured": is_set,
+                "env_var": env_key,
+                "masked_key": masked,
+                "is_local": False,
+                "endpoint": None,
+                "reachable": is_set,
             }
 
         ollama_active = False
         try:
-            import urllib.request
             req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "ML-Harness"})
             with urllib.request.urlopen(req, timeout=0.5) as r:
                 ollama_active = r.status < 500
         except Exception:
             pass
 
+        providers["ollama"] = {
+            "configured": ollama_active,
+            "env_var": None,
+            "masked_key": None,
+            "is_local": True,
+            "endpoint": "http://localhost:11434",
+            "reachable": ollama_active,
+        }
+
         vllm_active = False
         try:
-            import urllib.request
             req = urllib.request.Request("http://localhost:8000/v1/models", headers={"User-Agent": "ML-Harness"})
             with urllib.request.urlopen(req, timeout=0.5) as r:
                 vllm_active = r.status < 500
         except Exception:
             pass
 
-        active_count = sum(1 for v in keys.values() if v["set"])
-        if ollama_active:
-            active_count += 1
-        if vllm_active:
-            active_count += 1
+        providers["vllm"] = {
+            "configured": vllm_active,
+            "env_var": None,
+            "masked_key": None,
+            "is_local": True,
+            "endpoint": "http://localhost:8000",
+            "reachable": vllm_active,
+        }
+
+        total_configured = sum(1 for p in providers.values() if p["configured"] or p["reachable"])
 
         return {
             "keys": keys,
+            "providers": providers,
             "ollama_active": ollama_active,
             "vllm_active": vllm_active,
-            "active_providers_count": active_count,
+            "active_providers_count": total_configured,
+            "total_configured": total_configured,
         }
+
+    @classmethod
+    def verify_llm_api_key(cls, provider_or_key: str, key_value: Optional[str] = None) -> Dict[str, Any]:
+        """Test whether an API key for the given provider is valid by pinging official endpoints."""
+        prov = provider_or_key.strip()
+        if prov.upper() in KEY_TO_PROVIDER:
+            prov = KEY_TO_PROVIDER[prov.upper()]
+        else:
+            prov = prov.lower()
+
+        # Resolve key value if not provided
+        val = key_value.strip() if key_value else None
+        if not val:
+            env_var = PROVIDER_TO_KEY.get(prov)
+            if env_var:
+                val = os.environ.get(env_var)
+                if not val and prov == "gemini":
+                    val = os.environ.get("GOOGLE_API_KEY")
+                if not val:
+                    env_file = PROJECT_ROOT / ".env"
+                    if env_file.exists():
+                        for line in env_file.read_text(encoding="utf-8").splitlines():
+                            line = line.strip()
+                            if env_var and line.startswith(f"{env_var}="):
+                                val = line.split("=", 1)[1].strip("\"' ")
+                                break
+                            if prov == "gemini" and line.startswith("GOOGLE_API_KEY="):
+                                val = line.split("=", 1)[1].strip("\"' ")
+                                break
+
+        t0 = time.time()
+        ctx = ssl._create_unverified_context()
+
+        # Handle local daemons
+        if prov == "ollama":
+            try:
+                req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "ML-Harness/2.0"})
+                with urllib.request.urlopen(req, timeout=3.0, context=ctx) as resp:
+                    latency = int((time.time() - t0) * 1000)
+                    return {
+                        "success": True,
+                        "valid": resp.status < 500,
+                        "provider": prov,
+                        "latency_ms": latency,
+                        "message": f"Ollama local daemon responding (HTTP {resp.status})",
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "valid": False,
+                    "provider": prov,
+                    "error": f"Ollama daemon not reachable at localhost:11434 ({e})",
+                }
+
+        if prov == "vllm":
+            try:
+                req = urllib.request.Request("http://localhost:8000/v1/models", headers={"User-Agent": "ML-Harness/2.0"})
+                with urllib.request.urlopen(req, timeout=3.0, context=ctx) as resp:
+                    latency = int((time.time() - t0) * 1000)
+                    return {
+                        "success": True,
+                        "valid": resp.status < 500,
+                        "provider": prov,
+                        "latency_ms": latency,
+                        "message": f"vLLM server responding (HTTP {resp.status})",
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "valid": False,
+                    "provider": prov,
+                    "error": f"vLLM server not reachable at localhost:8000 ({e})",
+                }
+
+        if not val:
+            return {
+                "success": False,
+                "valid": False,
+                "provider": prov,
+                "error": f"No API key provided or found in environment for provider '{prov}'.",
+            }
+
+        headers: Dict[str, str] = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ML-Harness/2.0",
+        }
+
+        if prov == "gemini":
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={urllib.parse.quote_plus(val)}"
+        elif prov == "openai":
+            url = "https://api.openai.com/v1/models"
+            headers["Authorization"] = f"Bearer {val}"
+        elif prov == "anthropic":
+            url = "https://api.anthropic.com/v1/models"
+            headers["x-api-key"] = val
+            headers["anthropic-version"] = "2023-06-01"
+        elif prov == "deepseek":
+            url = "https://api.deepseek.com/models"
+            headers["Authorization"] = f"Bearer {val}"
+        elif prov == "groq":
+            url = "https://api.groq.com/openai/v1/models"
+            headers["Authorization"] = f"Bearer {val}"
+        elif prov == "openrouter":
+            url = "https://openrouter.ai/api/v1/auth/key"
+            headers["Authorization"] = f"Bearer {val}"
+        else:
+            return {
+                "success": False,
+                "valid": False,
+                "provider": prov,
+                "error": f"Unsupported LLM provider '{prov}'.",
+            }
+
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8.0, context=ctx) as resp:
+                latency = int((time.time() - t0) * 1000)
+                return {
+                    "success": True,
+                    "valid": True,
+                    "provider": prov,
+                    "latency_ms": latency,
+                    "message": f"Active & Verified ({resp.status} OK, {latency}ms)",
+                }
+        except urllib.error.HTTPError as e:
+            latency = int((time.time() - t0) * 1000)
+            body = e.read().decode("utf-8", errors="ignore")
+            error_msg = f"HTTP {e.code}"
+            try:
+                parsed = json.loads(body)
+                if "error" in parsed:
+                    err_obj = parsed["error"]
+                    error_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+                elif "message" in parsed:
+                    error_msg = parsed["message"]
+            except Exception:
+                pass
+
+            if e.code in (400, 401, 403):
+                return {
+                    "success": True,
+                    "valid": False,
+                    "provider": prov,
+                    "latency_ms": latency,
+                    "error": f"{error_msg} ({e.code})",
+                }
+            return {
+                "success": False,
+                "valid": False,
+                "provider": prov,
+                "latency_ms": latency,
+                "error": f"HTTP {e.code}: {error_msg}",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "valid": False,
+                "provider": prov,
+                "error": str(e),
+            }
 
     @staticmethod
     def save_llm_api_key(key_name: str, key_value: str) -> Dict[str, Any]:
