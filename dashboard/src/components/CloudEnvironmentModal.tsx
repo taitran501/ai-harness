@@ -6,8 +6,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
-  Cpu,
-  HardDrive,
   UserCheck,
   Key,
   Shield,
@@ -58,6 +56,22 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
   const [llmKeyValue, setLLMKeyValue] = useState('');
   const [savingLLMKey, setSavingLLMKey] = useState(false);
   const [llmKeySuccessMsg, setLLMKeySuccessMsg] = useState<string | null>(null);
+
+  // LLM Key verification state
+  const [testingInputKey, setTestingInputKey] = useState(false);
+  const [inputKeyTestResult, setInputKeyTestResult] = useState<{
+    valid: boolean;
+    latency_ms?: number;
+    message?: string;
+    error?: string;
+  } | null>(null);
+  const [verifyingProviders, setVerifyingProviders] = useState<Record<string, boolean>>({});
+  const [providerVerificationResults, setProviderVerificationResults] = useState<Record<string, {
+    valid: boolean;
+    latency_ms?: number;
+    message?: string;
+    error?: string;
+  }>>({});
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -222,6 +236,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
       if (res.success) {
         setLLMKeySuccessMsg(`Key '${selectedLLMKeyName}' saved!`);
         setLLMKeyValue('');
+        setInputKeyTestResult(null);
         await fetchStatus();
         onStatusChanged?.();
         setTimeout(() => {
@@ -233,6 +248,46 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
       setError(err.message || 'Failed to save LLM key.');
     } finally {
       setSavingLLMKey(false);
+    }
+  };
+
+  const handleTestInputKey = async () => {
+    if (!llmKeyValue.trim()) return;
+    setTestingInputKey(true);
+    setInputKeyTestResult(null);
+    try {
+      const res = await api.verifyLLMKey(selectedLLMKeyName, llmKeyValue.trim());
+      setInputKeyTestResult(res);
+    } catch (err: any) {
+      setInputKeyTestResult({ valid: false, error: err.message || 'Verification failed.' });
+    } finally {
+      setTestingInputKey(false);
+    }
+  };
+
+  const handleVerifyProvider = async (provider: string) => {
+    setVerifyingProviders((prev) => ({ ...prev, [provider]: true }));
+    try {
+      const res = await api.verifyLLMKey(provider);
+      setProviderVerificationResults((prev) => ({ ...prev, [provider]: res }));
+    } catch (err: any) {
+      setProviderVerificationResults((prev) => ({
+        ...prev,
+        [provider]: { valid: false, error: err.message || 'Verification failed.' },
+      }));
+    } finally {
+      setVerifyingProviders((prev) => ({ ...prev, [provider]: false }));
+    }
+  };
+
+  const handleVerifyAllConfigured = async () => {
+    if (!envStatus?.llm?.providers) return;
+    const providersToTest = Object.entries(envStatus.llm.providers)
+      .filter(([_, info]) => info.configured || info.reachable)
+      .map(([name]) => name);
+
+    for (const p of providersToTest) {
+      handleVerifyProvider(p);
     }
   };
 
@@ -250,10 +305,10 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <span>Hardware & Cloud Environment</span>
+                <span>Cloud & LLM Environment</span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Live status and account configuration for Modal.com, Kaggle, Docker, and local GPU.
+                Live status and credentials for Modal.com, Kaggle, and LLM API providers.
               </p>
             </div>
           </div>
@@ -322,7 +377,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   title="Open Modal token creation page in browser"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Authorize on Modal.com</span>
+                  <span>Authorize</span>
                 </button>
                 <button
                   type="button"
@@ -414,7 +469,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   })
                 ) : (
                   <p className="text-[11px] text-zinc-500 italic col-span-2">
-                    No Modal profiles configured. Click "Authorize on Modal.com" above to generate a token or run `modal setup` in terminal.
+                    No Modal profiles configured. Click "Authorize" above to generate a token or run `modal setup` in terminal.
                   </p>
                 )}
               </div>
@@ -460,7 +515,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   title="Open Kaggle Account Settings to create/download token"
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Get Token on Kaggle</span>
+                  <span>Authorize</span>
                 </button>
 
                 <button
@@ -515,81 +570,36 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             </div>
           </div>
 
-          {/* 3. Local Hardware & Docker */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Local GPU */}
-            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-3.5 space-y-2">
-              <div className="flex items-center gap-2 border-b border-zinc-800 pb-2">
-                <Cpu className="w-4 h-4 text-emerald-400" />
-                <span className="font-semibold text-zinc-200">Local NVIDIA GPU</span>
-              </div>
-              {envStatus?.gpu.detected ? (
-                <div className="space-y-1 text-[11px] font-mono">
-                  <div className="text-zinc-200 font-medium">{envStatus.gpu.gpu_name}</div>
-                  <div className="flex justify-between text-zinc-400">
-                    <span>VRAM Total:</span>
-                    <span className="text-zinc-200">{envStatus.gpu.memory_total_mb} MiB</span>
-                  </div>
-                  <div className="flex justify-between text-zinc-400">
-                    <span>VRAM Free:</span>
-                    <span className="text-emerald-400">{envStatus.gpu.memory_free_mb} MiB</span>
-                  </div>
-                  <div className="flex justify-between text-zinc-400">
-                    <span>Driver Version:</span>
-                    <span className="text-zinc-300">{envStatus.gpu.driver_version}</span>
-                  </div>
-                  <div className="flex justify-between text-zinc-400">
-                    <span>PyTorch CUDA:</span>
-                    <span className="text-emerald-400">{envStatus.gpu.cuda_available ? 'Available' : 'No'}</span>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[11px] text-zinc-500 italic">No NVIDIA GPU detected on local host.</p>
-              )}
-            </div>
-
-            {/* Docker Environment */}
-            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-3.5 space-y-2">
-              <div className="flex items-center gap-2 border-b border-zinc-800 pb-2">
-                <HardDrive className="w-4 h-4 text-blue-400" />
-                <span className="font-semibold text-zinc-200">Docker Containerization</span>
-              </div>
-              <div className="space-y-1 text-[11px] font-mono">
-                <div className="flex justify-between text-zinc-400">
-                  <span>Installed:</span>
-                  <span className={envStatus?.docker.installed ? 'text-emerald-400' : 'text-zinc-500'}>
-                    {envStatus?.docker.installed ? 'Yes' : 'No'}
-                  </span>
-                </div>
-                <div className="flex justify-between text-zinc-400">
-                  <span>Daemon Status:</span>
-                  <span className={envStatus?.docker.running ? 'text-emerald-400' : 'text-amber-400'}>
-                    {envStatus?.docker.running ? 'Running' : 'Stopped / Standby'}
-                  </span>
-                </div>
-                {envStatus?.docker.version && (
-                  <div className="text-[10px] text-zinc-500 truncate pt-1">
-                    {envStatus.docker.version}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* 4. LLM API Providers & Local Daemons */}
+          {/* 3. LLM API Providers & Local Daemons */}
           <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-purple-400" />
-                <span className="font-semibold text-zinc-200">LLM API Providers & Local Daemons</span>
+                <span className="font-semibold text-zinc-200">LLM API Providers & Inference Daemons</span>
               </div>
-              <button
-                onClick={() => setShowLLMKeyForm(!showLLMKeyForm)}
-                className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-purple-300 rounded text-xs font-medium transition flex items-center gap-1.5"
-              >
-                <Key className="w-3 h-3 text-purple-400" />
-                <span>{showLLMKeyForm ? 'Cancel' : 'Set API Key'}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {envStatus?.llm?.providers && (
+                  <button
+                    type="button"
+                    onClick={handleVerifyAllConfigured}
+                    className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 rounded text-xs font-mono transition flex items-center gap-1.5"
+                    title="Test all configured provider keys"
+                  >
+                    <RefreshCw className="w-3 h-3 text-cyan-400" />
+                    <span>Test All</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setShowLLMKeyForm(!showLLMKeyForm);
+                    setInputKeyTestResult(null);
+                  }}
+                  className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-purple-300 rounded text-xs font-medium transition flex items-center gap-1.5"
+                >
+                  <Key className="w-3 h-3 text-purple-400" />
+                  <span>{showLLMKeyForm ? 'Cancel' : 'Set API Key'}</span>
+                </button>
+              </div>
             </div>
 
             {showLLMKeyForm && (
@@ -599,7 +609,10 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                     <label className="text-[10px] text-zinc-400 font-mono">Provider Key</label>
                     <select
                       value={selectedLLMKeyName}
-                      onChange={(e) => setSelectedLLMKeyName(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedLLMKeyName(e.target.value);
+                        setInputKeyTestResult(null);
+                      }}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono"
                     >
                       <option value="GEMINI_API_KEY">GEMINI_API_KEY (Google Gemini)</option>
@@ -615,26 +628,67 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                     <input
                       type="password"
                       value={llmKeyValue}
-                      onChange={(e) => setLLMKeyValue(e.target.value)}
+                      onChange={(e) => {
+                        setLLMKeyValue(e.target.value);
+                        setInputKeyTestResult(null);
+                      }}
                       placeholder="Paste API secret..."
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono"
                     />
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  {llmKeySuccessMsg ? (
-                    <span className="text-xs text-emerald-400 font-medium">{llmKeySuccessMsg}</span>
-                  ) : (
-                    <span className="text-[10px] text-zinc-500">Key will be saved to .env</span>
-                  )}
-                  <button
-                    type="submit"
-                    disabled={savingLLMKey || !llmKeyValue.trim()}
-                    className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold"
-                  >
-                    {savingLLMKey ? 'Saving...' : 'Save API Key'}
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex items-center gap-2">
+                    {inputKeyTestResult && (
+                      <span
+                        className={`text-[11px] font-mono flex items-center gap-1.5 px-2 py-0.5 rounded border ${
+                          inputKeyTestResult.valid
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                        }`}
+                      >
+                        {inputKeyTestResult.valid ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Valid ({inputKeyTestResult.latency_ms}ms)</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                            <span className="truncate max-w-[200px]" title={inputKeyTestResult.error}>
+                              {inputKeyTestResult.error || 'Invalid key'}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {llmKeySuccessMsg && (
+                      <span className="text-xs text-emerald-400 font-medium">{llmKeySuccessMsg}</span>
+                    )}
+                    {!inputKeyTestResult && !llmKeySuccessMsg && (
+                      <span className="text-[10px] text-zinc-500">Key will be saved to .env</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={testingInputKey || !llmKeyValue.trim()}
+                      onClick={handleTestInputKey}
+                      className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded text-xs font-medium transition flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${testingInputKey ? 'animate-spin text-purple-400' : 'text-zinc-400'}`} />
+                      <span>{testingInputKey ? 'Testing...' : 'Test Key'}</span>
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingLLMKey || !llmKeyValue.trim()}
+                      className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold disabled:opacity-50"
+                    >
+                      {savingLLMKey ? 'Saving...' : 'Save API Key'}
+                    </button>
+                  </div>
                 </div>
               </form>
             )}
@@ -642,27 +696,77 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             {/* Providers Status Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
               {envStatus?.llm?.providers ? (
-                Object.entries(envStatus.llm.providers).map(([pName, pInfo]) => (
-                  <div key={pName} className="p-2 bg-zinc-950/60 border border-zinc-800/60 rounded-lg space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-zinc-300 font-medium capitalize">{pName}</span>
-                      {pInfo.configured || pInfo.reachable ? (
-                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
-                      )}
+                Object.entries(envStatus.llm.providers).map(([pName, pInfo]) => {
+                  const isVerifying = verifyingProviders[pName];
+                  const testResult = providerVerificationResults[pName];
+                  const isConfiguredOrLocal = pInfo.configured || pInfo.reachable;
+
+                  return (
+                    <div
+                      key={pName}
+                      className={`p-2.5 rounded-lg border space-y-1.5 transition ${
+                        testResult?.valid
+                          ? 'bg-emerald-950/20 border-emerald-700/50'
+                          : testResult && !testResult.valid
+                          ? 'bg-rose-950/20 border-rose-700/50'
+                          : 'bg-zinc-950/60 border-zinc-800/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-200 font-medium capitalize">{pName}</span>
+                        {isVerifying ? (
+                          <RefreshCw className="w-3 h-3 animate-spin text-purple-400" />
+                        ) : testResult ? (
+                          testResult.valid ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                          )
+                        ) : isConfiguredOrLocal ? (
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-1 text-[10px]">
+                        <span className="truncate text-zinc-400">
+                          {testResult ? (
+                            testResult.valid ? (
+                              <span className="text-emerald-400">Valid ({testResult.latency_ms}ms)</span>
+                            ) : (
+                              <span className="text-rose-400 truncate" title={testResult.error}>
+                                {testResult.error?.includes('401') ? 'Invalid (401)' : testResult.error?.includes('400') ? 'Invalid (400)' : 'Failed'}
+                              </span>
+                            )
+                          ) : pInfo.is_local ? (
+                            pInfo.reachable ? (
+                              <span className="text-emerald-400">Daemon Live</span>
+                            ) : (
+                              <span className="text-zinc-500">Not Running</span>
+                            )
+                          ) : pInfo.configured ? (
+                            <span className="text-zinc-300">{pInfo.masked_key || 'Configured'}</span>
+                          ) : (
+                            <span className="text-zinc-500">No Key</span>
+                          )}
+                        </span>
+
+                        {isConfiguredOrLocal && (
+                          <button
+                            type="button"
+                            disabled={isVerifying}
+                            onClick={() => handleVerifyProvider(pName)}
+                            className="px-1.5 py-0.5 bg-zinc-900 hover:bg-zinc-800 text-[10px] text-zinc-300 hover:text-white rounded border border-zinc-800 transition shrink-0"
+                            title="Test this provider API key live"
+                          >
+                            {isVerifying ? '...' : 'Check'}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-[10px] text-zinc-500 truncate">
-                      {pInfo.is_local
-                        ? pInfo.reachable
-                          ? 'Daemon Live'
-                          : 'Not Running'
-                        : pInfo.configured
-                        ? pInfo.masked_key || 'Configured'
-                        : 'No Key'}
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="col-span-4 text-xs text-zinc-500 italic">No LLM provider status loaded.</div>
               )}
@@ -673,7 +777,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-800 bg-zinc-900/50">
           <span className="text-[11px] text-zinc-500 font-mono">
-            Environment verified across Modal, Kaggle, Docker & Local GPU.
+            Environment verified across Modal, Kaggle, and LLM API providers.
           </span>
           <button
             onClick={onClose}

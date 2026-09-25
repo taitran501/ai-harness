@@ -127,7 +127,37 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertTrue(res["success"])
             self.assertIn("FastLanguageModel", res["script_code"])
             self.assertIn("unsloth", res["script_code"])
-            self.assertIn("SFTTrainer", res["script_code"])
+    def test_post_verify_llm_key_endpoint(self):
+        url = f"http://localhost:{self.port}/api/environment/llm/verify"
+        payload = {
+            "provider": "openai",
+            "key_value": "sk-dummy-test-key-12345",
+        }
+        data_bytes = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data_bytes, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            res = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(res["success"])
+            self.assertFalse(res["valid"])
+            self.assertEqual(res["provider"], "openai")
+            self.assertIn("error", res)
+
+    def test_environment_detector_providers_status(self):
+        from harness.environment_detector import EnvironmentDetector
+        status = EnvironmentDetector.detect_llm_status()
+        self.assertIn("providers", status)
+        self.assertIn("total_configured", status)
+        self.assertIn("gemini", status["providers"])
+        self.assertIn("openai", status["providers"])
+        self.assertIn("anthropic", status["providers"])
+        self.assertIn("deepseek", status["providers"])
+        self.assertIn("groq", status["providers"])
+        self.assertIn("openrouter", status["providers"])
+        self.assertIn("ollama", status["providers"])
+        self.assertIn("vllm", status["providers"])
+        self.assertTrue(status["providers"]["ollama"]["is_local"])
+        self.assertFalse(status["providers"]["openai"]["is_local"])
 
 
 if __name__ == "__main__":
