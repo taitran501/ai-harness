@@ -104,11 +104,11 @@ Open [http://localhost:8080](http://localhost:8080) to inspect the Solution Tree
 ### 3. Run Experiments
 
 ```bash
-# Smoke test on a single fold (Fold 0)
-python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0
+# Smoke test on a single fold (Fold 0) - use --force if re-running existing baseline
+python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0 --force
 
 # Run full cross-validation
-python train.py --config configs/exp001_tfidf_baseline.yaml
+python train.py --config configs/exp001_tfidf_baseline.yaml --force
 ```
 
 ### 4. Run Tree Operations & UCB Recommendation
@@ -124,11 +124,14 @@ python tools/journal_tool.py --recommend
 ### 5. Audit & Register a Submission
 
 ```bash
-# Verify candidate predictions against baseline (enforces MMES >= 2.0%)
-python tools/audit_gate.py --candidate artifacts/exp001_baseline_tfidf/oof_predictions.csv --output-zip submissions/sub001.zip
+# Verify initial baseline predictions (--allow-initial for root baseline)
+python tools/audit_gate.py --candidate artifacts/exp001_baseline_tfidf/oof_predictions.csv --allow-initial --output-zip submissions/sub001.zip
+
+# Verify candidate predictions against parent baseline (enforces min prediction delta >= 2.0%)
+python tools/audit_gate.py --candidate artifacts/exp002_feat_video_title/oof_predictions.csv --baseline artifacts/exp001_baseline_tfidf/oof_predictions.csv --output-zip submissions/sub002.zip
 
 # Register verified submission
-python tools/submission_tool.py register --exp-id exp001_baseline_tfidf --candidate artifacts/exp001_baseline_tfidf/oof_predictions.csv
+python tools/submission_tool.py register --exp-id exp001_baseline_tfidf --candidate artifacts/exp001_baseline_tfidf/oof_predictions.csv --allow-initial
 ```
 
 ### 6. Cloud Execution Dispatch

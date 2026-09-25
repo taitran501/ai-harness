@@ -65,7 +65,7 @@ def run_experiment(args: argparse.Namespace) -> None:
     if exp_dir.exists() and (exp_dir / "metrics.json").exists() and not args.force:
         print(
             f"ERROR: Experiment directory '{exp_dir}' already exists with completed metrics.\n"
-            f"Experiments are immutable by contract. Please define a new experiment ID or pass --force.",
+            f"Experiments are immutable by contract. To test or re-run, pass --force or define a new experiment ID in configs/.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -329,6 +329,11 @@ def run_experiment(args: argparse.Namespace) -> None:
         )
         journal.append(node)
         logger.info(f"TreeJournal successfully updated with node: '{node.id}'")
+    else:
+        logger.info(
+            f"Skipping central leaderboard and TreeJournal updates (evaluated {len(target_folds)}/5 folds; "
+            "full 5-fold cross-validation required to register globally)."
+        )
 
     logger.info("Experiment run finished.")
 
