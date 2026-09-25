@@ -534,42 +534,42 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       <optgroup label="Classification">
                         {ML_METRICS_CATALOG.filter((m) => m.category === 'Classification').map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.id} — {m.name.slice(0, 32)}
+                            {m.name}
                           </option>
                         ))}
                       </optgroup>
                       <optgroup label="Regression">
                         {ML_METRICS_CATALOG.filter((m) => m.category === 'Regression').map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.id} — {m.name.slice(0, 32)}
+                            {m.name}
                           </option>
                         ))}
                       </optgroup>
                       <optgroup label="Ranking & RecSys">
                         {ML_METRICS_CATALOG.filter((m) => m.category === 'Ranking').map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.id} — {m.name.slice(0, 32)}
+                            {m.name}
                           </option>
                         ))}
                       </optgroup>
                       <optgroup label="NLP & Generation">
                         {ML_METRICS_CATALOG.filter((m) => m.category === 'NLP').map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.id} — {m.name.slice(0, 32)}
+                            {m.name}
                           </option>
                         ))}
                       </optgroup>
                       <optgroup label="Computer Vision">
                         {ML_METRICS_CATALOG.filter((m) => m.category === 'Vision').map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.id} — {m.name.slice(0, 32)}
+                            {m.name}
                           </option>
                         ))}
                       </optgroup>
                       <optgroup label="Clustering">
                         {ML_METRICS_CATALOG.filter((m) => m.category === 'Clustering').map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.id} — {m.name.slice(0, 32)}
+                            {m.name}
                           </option>
                         ))}
                       </optgroup>
