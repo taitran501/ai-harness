@@ -14,6 +14,7 @@ import { CompetitionReadinessModal } from './components/CompetitionReadinessModa
 import { ExperimentConfigModal } from './components/ExperimentConfigModal';
 import { CloudEnvironmentModal } from './components/CloudEnvironmentModal';
 import { CompetitionPipelineHub } from './components/CompetitionPipelineHub';
+import { CompetitionJourneyWorkspace } from './components/CompetitionJourneyWorkspace';
 import { LanguageProvider, useLanguage } from './constants/i18n';
 import {
   TreeGraphResponse,
@@ -27,7 +28,8 @@ import {
 
 const DashboardContent: React.FC = () => {
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'pipeline' | 'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('pipeline');
+  const [activeTab, setActiveTab] = useState<'journey' | 'pipeline' | 'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('journey');
+  const [compState, setCompState] = useState<any>(null);
   const [graphData, setGraphData] = useState<TreeGraphResponse>({ nodes: [], edges: [], best_id: null });
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionEntry[]>([]);
@@ -49,7 +51,7 @@ const DashboardContent: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [treeRes, expRes, recRes, statusRes, promptRes, taskRes, subRes] = await Promise.all([
+      const [treeRes, expRes, recRes, statusRes, promptRes, taskRes, subRes, compRes] = await Promise.all([
         api.getTree().catch(() => ({ nodes: [], edges: [], best_id: null })),
         api.getExperiments().catch(() => ({ total: 0, experiments: [] })),
         api.getRecommendation().catch(() => ({ guideline: 'No recommendations available.', parent_id: null })),
@@ -57,6 +59,7 @@ const DashboardContent: React.FC = () => {
         api.getPrimingPrompt().catch(() => ({ prompt: '', character_count: 0 })),
         api.getTaskInfo().catch(() => null),
         api.getSubmissions().catch(() => ({ total: 0, submissions: [] })),
+        api.getCompetitionState().catch(() => null),
       ]);
 
       setGraphData(treeRes);
@@ -66,6 +69,7 @@ const DashboardContent: React.FC = () => {
       setPrimingPrompt(promptRes.prompt);
       setTaskInfo(taskRes);
       setSubmissions(subRes.submissions);
+      setCompState(compRes);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
     } finally {
@@ -132,14 +136,25 @@ const DashboardContent: React.FC = () => {
         <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
           <nav className="flex flex-wrap gap-1 bg-zinc-900/70 p-1 rounded-lg border border-zinc-800">
             <button
-              onClick={() => setActiveTab('pipeline')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-md transition ${
-                activeTab === 'pipeline'
+              onClick={() => setActiveTab('journey')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+                activeTab === 'journey'
                   ? 'bg-indigo-600 text-white shadow'
                   : 'text-zinc-300 hover:text-white hover:bg-zinc-800/60'
               }`}
             >
-              <span>Competition Pipeline (Steps 1–4)</span>
+              <span>🧭 Competition Journey (Phases 1–8)</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('pipeline')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                activeTab === 'pipeline'
+                  ? 'bg-zinc-800 text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+              }`}
+            >
+              <span>Execution Runner</span>
             </button>
 
             <button
@@ -195,6 +210,28 @@ const DashboardContent: React.FC = () => {
             </button>
           </nav>
         </div>
+
+        {/* Primary 8-Phase Competition Journey + 4-Question Hero HUD */}
+        {activeTab === 'journey' && (
+          <CompetitionJourneyWorkspace
+            compState={compState}
+            taskInfo={taskInfo}
+            experiments={experiments}
+            submissions={submissions}
+            graphData={graphData}
+            recommendation={recommendation}
+            primingPrompt={primingPrompt}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={handleSelectNode}
+            onOpenTaskConfig={(tab) => {
+              setTaskConfigTab(tab || 'task');
+              setIsTaskConfigOpen(true);
+            }}
+            onOpenConfigModal={(targetPath, parentId) => handleOpenConfigModal(targetPath, parentId)}
+            onOpenEnvModal={() => setIsEnvModalOpen(true)}
+            onRefreshAll={loadData}
+          />
+        )}
 
         {/* Unified 4-Step Competition Pipeline Hub */}
         {activeTab === 'pipeline' && (

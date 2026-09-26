@@ -38,6 +38,9 @@ from harness.environment_detector import EnvironmentDetector
 from harness.cloud_job_runner import CloudJobManager, CloudJob
 from harness.llm_engine import LLMEngine, LLMConfig
 from harness.skill_injector import inject_skill_file
+from harness.competition_state import CompetitionStateMachine
+from harness.agent_runtime import AgentRuntime
+from harness.agent_bridge import AgentBridge
 
 
 def get_next_experiment_id(branch: str = "feat", descriptor: str = "run") -> Dict[str, Any]:
@@ -845,6 +848,14 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "*Wait for user confirmation after completing this acknowledgment before executing training commands.*",
         ]
 
+    try:
+        comp_state = CompetitionStateMachine(PROJECT_ROOT)
+        comp_block = comp_state.render_agent_context_block(journal, SubmissionManager(), task)
+        if comp_block:
+            prompt_lines = [comp_block, "", "---", ""] + prompt_lines
+    except Exception as comp_err:
+        print(f"⚠️ Warning: Failed to render competition state context: {comp_err}")
+
     prompt_text = "\n".join(prompt_lines)
     return {
         "template_id": template_id,
@@ -951,6 +962,20 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_llm_unsloth_models(parsed_url.query)
         elif path == "/api/llm/provider_models":
             self.handle_api_llm_provider_models(parsed_url.query)
+        elif path == "/api/competition-state":
+            comp = CompetitionStateMachine(PROJECT_ROOT)
+            snap = comp.evaluate_journey_snapshot(TreeJournal(auto_sync=True), SubmissionManager(), load_task_config())
+            self.send_json(snap)
+        elif path == "/api/agent-bridge/context":
+            params = urllib.parse.parse_qs(parsed_url.query)
+            sid = params.get("session_id", [None])[0]
+            bridge = AgentBridge(PROJECT_ROOT)
+            pkt = bridge.get_context_packet(session_id=sid)
+            pkt["markdown"] = bridge.render_context_markdown(session_id=sid)
+            self.send_json(pkt)
+        elif path == "/api/agent-bridge/sessions":
+            bridge = AgentBridge(PROJECT_ROOT)
+            self.send_json({"sessions": bridge.list_sessions()})
         else:
             # Fallback to serving static frontend
             super().do_GET()
@@ -966,7 +991,118 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
 
-        if path == "/api/submissions/record-score":
+        if path.startswith("/api/agent-bridge/"):
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else "{}"
+                data = json.loads(body) if body else {}
+                bridge = AgentBridge(PROJECT_ROOT)
+                sub_action = path.replace("/api/agent-bridge/", "").strip()
+
+                if sub_action == "start-session":
+                    sess = bridge.start_session(
+                        goal=data.get("goal", "Iterative competition optimization via Antigravity IDE"),
+                        budget=data.get("budget"),
+                        session_id=data.get("session_id"),
+                    )
+                    self.send_json({"success": True, "session": asdict(sess)})
+                elif sub_action == "act":
+                    sess, obs = bridge.execute_action(
+                        action=data.get("action", "inspect_diagnostics"),
+                        params=data.get("params", {}),
+                        rationale=data.get("rationale", ""),
+                        session_id=data.get("session_id"),
+                        goal=data.get("goal"),
+                        budget=data.get("budget"),
+                        user_approved=bool(data.get("user_approved", False)),
+                    )
+                    self.send_json({
+                        "success": obs.status == "SUCCESS",
+                        "session": asdict(sess),
+                        "observation": asdict(obs),
+                    })
+                elif sub_action == "approve":
+                    sid = data.get("session_id")
+                    if not sid:
+                        sessions = bridge.list_sessions(limit=1)
+                        sid = sessions[0]["session_id"] if sessions else None
+                    if not sid:
+                        self.send_json({"error": "No active session to approve."}, status=400)
+                        return
+                    sess, obs = bridge.approve_pending_action(sid)
+                    self.send_json({
+                        "success": True,
+                        "session": asdict(sess),
+                        "observation": asdict(obs) if obs else None,
+                    })
+                else:
+                    self.send_json({"error": f"Unknown agent-bridge action: {sub_action}"}, status=404)
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+            return
+        elif path.startswith("/api/competition-state/"):
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else "{}"
+                data = json.loads(body) if body else {}
+                comp = CompetitionStateMachine(PROJECT_ROOT)
+                action = path.replace("/api/competition-state/", "").strip()
+
+                if action == "gate":
+                    for gk, gv in data.get("gates", {}).items():
+                        comp.state["gates"][gk] = gv
+                    if "mode" in data:
+                        comp.state["mode"] = data["mode"]
+                    if "manual_phase_override" in data:
+                        comp.state["manual_phase_override"] = data["manual_phase_override"]
+                    if "toggle_pin_candidate" in data:
+                        cid = data["toggle_pin_candidate"]
+                        pinned = comp.state["candidate_pool"].get("pinned_candidates", [])
+                        if cid in pinned:
+                            pinned.remove(cid)
+                        else:
+                            pinned.append(cid)
+                        comp.state["candidate_pool"]["pinned_candidates"] = pinned
+                    comp.save()
+                elif action == "data-audit":
+                    comp.run_data_readiness_audit(data.get("config"))
+                elif action == "agent-context":
+                    if "config" in data:
+                        comp.state["agent_context_config"].update(data["config"])
+                        comp.save()
+                elif action == "synthesize-candidate":
+                    comp.synthesize_candidate(
+                        name=data.get("name", "specialist_router_v1"),
+                        mode=data.get("mode", "specialist_router"),
+                        source_map=data.get("source_map", {}),
+                    )
+                elif action == "freeze":
+                    comp.freeze_final_candidates(
+                        slot_1_id=data.get("slot_1_safe_cv", "baseline_v1_comment"),
+                        slot_2_id=data.get("slot_2_aggressive_lb"),
+                        notes=data.get("notes", ""),
+                    )
+                elif action == "unfreeze":
+                    comp.emergency_unfreeze(reason=data.get("reason", "Manual unfreeze via UI"))
+                elif action == "finalize":
+                    comp.finalize_competition(data, TreeJournal(auto_sync=True), SubmissionManager())
+                elif action == "agent-run":
+                    rt = AgentRuntime(PROJECT_ROOT)
+                    goal = data.get("goal") or "Improve Subtask B and C without degrading Subtask A"
+                    max_exp = int(data.get("max_experiments", 3))
+                    rt.start_run(goal=goal, max_experiments=max_exp)
+                elif action == "agent-approve":
+                    rt = AgentRuntime(PROJECT_ROOT)
+                    run_id = data.get("run_id") or comp.state.get("agent_copilot", {}).get("last_run_id")
+                    if run_id:
+                        rt.approve_pending_action(run_id)
+
+                snap = comp.evaluate_journey_snapshot(TreeJournal(auto_sync=True), SubmissionManager(), load_task_config())
+                self.send_json({"success": True, "state": snap})
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=400)
+            return
+        elif path == "/api/submissions/record-score":
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(content_length).decode("utf-8")
