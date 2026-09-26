@@ -648,6 +648,25 @@ export const api = {
     }
     return res.json();
   },
+
+  async getCompetitionState(): Promise<any> {
+    const res = await fetch(`${API_BASE}/competition-state`);
+    if (!res.ok) throw new Error(`Failed to fetch competition state: ${res.statusText}`);
+    return res.json();
+  },
+
+  async postCompetitionAction(action: string, payload: Record<string, any> = {}): Promise<{ success: boolean; state: any }> {
+    const res = await fetch(`${API_BASE}/competition-state/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `Competition action '${action}' failed`);
+    }
+    return res.json();
+  },
 };
 
 
