@@ -37,6 +37,11 @@ splits/
 legacy/
 docs/specs/
 artifacts/baseline_v1/
+artifacts/agent_runs/
+artifacts/agent_sessions/
+artifacts/cand_*/
+artifacts/competition_state.json
+artifacts/DATA_READINESS_REPORT.json
 
 # Agent teamwork scratch runs
 .agents/teamwork/
