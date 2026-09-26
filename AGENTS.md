@@ -4,6 +4,7 @@ This document defines the 3-layer architecture, constraints, operational state m
 
 > **Motto & Operating Boundary**:  
 > **“Antigravity thinks. AgentBridge coordinates. Harness verifies and executes.”**
+> *(Core Harness is cleanly separated from competition-specific adapters: core retains universal ML competition primitives such as OOF tracking, CV folds, and candidate management, while domain schemas and custom logic reside strictly in adapters).*
 
 ---
 
@@ -23,7 +24,7 @@ Competition & Execution Harness (Layer 3)
    │
    ├─ Competition State Machine (8-Phase Journey)
    ├─ Experiment Memory & TreeJournal (AIDE UCB Tree)
-   ├─ Deterministic Guardrails (ExperimentValidator, GroundingGate, AuditGate)
+   ├─ Deterministic Guardrails (ExperimentValidator, GroundingGate, EnsembleGuard, AuditGate)
    ├─ Diagnostics & Error Slices
    ├─ Candidate Pool & Composition Strategies
    └─ Execution Backends (Local / Modal / Kaggle)
@@ -50,12 +51,13 @@ Competition & Execution Harness (Layer 3)
      4. `Parallel Track 1 — Experiment Loop`: Grounded iterations across exploration branches (`feat`, `model`, `loss`, `mtl`, `ens`).
      5. `Parallel Track 2 — Candidate Management`: Candidate Pool governance and composition strategies (specialist routing, weighted blending, rank averaging).
      6. `Parallel Track 3 — External Evaluation`: External leaderboard tracking, submission registry, and CV-vs-LB alignment.
-     7. `Freeze`: Strict code/pipeline lock prior to final submission.
+     7. `Freeze`: Khóa final candidate portfolio và các mutation ảnh hưởng submission (read-only diagnostics, inspections, và audit logs vẫn hoạt động bình thường).
      8. `Closure`: Post-competition audit receipts, code archiving, and technical report generation.
    - **Deterministic Guardrails & Clear Boundaries**:
      - `ExperimentValidator` (`harness/validator.py`): Verifies leakage prevention, group split integrity, schema alignment, and shape consistency.
      - `GroundingGate` (`harness/grounding_gate.py`): Enforces epistemic verification (parent ID, problem addressed, hypothesis, grounded literature/empirical basis, and assumption register) before persisting any config.
-     - `AuditGate` (`tools/audit_gate.py`): Performs pre-submission statistical verification, SHA-256 duplicate detection, Minimum Meaningful Effect Size (MMES $\ge$ 2.0%), McNemar significance testing, EnsembleGuard diversity checks (Cohen's $\kappa \le 0.85$, disagreement $\ge 5.0\%$), and signs `AUDIT_RECEIPT.json`.
+     - `EnsembleGuard` (`harness/ensemble_guard.py`): Verifies candidate diversity for ensembling and composition (Cohen's $\kappa \le 0.85$, disagreement $\ge 5.0\%$).
+     - `AuditGate` (`tools/audit_gate.py`): Performs pre-submission statistical verification, SHA-256 duplicate detection, Minimum Meaningful Effect Size (MMES $\ge$ 2.0%), McNemar significance testing, and signs `AUDIT_RECEIPT.json`.
 
 ---
 
@@ -114,7 +116,11 @@ python tools/agent_bridge_cli.py act --action run_smoke_test --params '{"config_
 # 5. Full Validation (Local / Modal / Kaggle)
 python tools/agent_bridge_cli.py act --action run_full_validation --params '{"config_path": "configs/<exp_config>.yaml", "backend": "local"}'
 
-# 6. Synthesize Candidate / Specialist Router
+# 6. Antigravity Analyzes Observation -> Promote Single Model OR Synthesize Composition
+# Option A: Promote single verified experiment to Candidate Pool
+python tools/agent_bridge_cli.py act --action promote_candidate --params '{"exp_id": "<exp_id>", "name": "single_best_v1"}'
+
+# Option B: Synthesize multi-model composition (e.g. specialist router, weighted blend)
 python tools/agent_bridge_cli.py act --action synthesize_candidate --params '{"name": "router_v1", "mode": "specialist_router"}'
 
 # 7. Audit & Submission (Requires USER_APPROVAL / Human Sign-off)

@@ -17,10 +17,9 @@
 - Implements **Upper Confidence Bound (UCB)** branch recommendation to balance exploiting the current top model vs. exploring under-sampled model families.
 - Automatically tracks parent-child lineage, atomic hypotheses, and post-mortems in `artifacts/journal.json`.
 
-### 2. SWE-Agent Deterministic & Statistical Audit Gate
-- Enforces a **Minimum Meaningful Effect Size (MMES $\ge 2.0\%$)** on validation samples to prevent submitting random seed noise or trivial variations.
-- **Anti-Pseudo-Ensemble Verification**: Requires constituent models to exhibit **Cohen's Kappa ($\kappa \le 0.85$)** and a **Disagreement Rate ($\ge 5.0\%$)** to ensure genuine diversity before ensembling.
-- Generates cryptographically verifiable `AUDIT_RECEIPT.json` receipts required for all competition submissions.
+### 2. SWE-Agent Deterministic AuditGate & EnsembleGuard
+- **AuditGate**: Enforces a **Minimum Meaningful Effect Size (MMES $\ge 2.0\%$)** on validation samples, SHA-256 duplicate detection, and McNemar testing before generating cryptographically verifiable `AUDIT_RECEIPT.json` receipts.
+- **EnsembleGuard**: Requires constituent models to exhibit **Cohen's Kappa ($\kappa \le 0.85$)** and a **Disagreement Rate ($\ge 5.0\%$)** to ensure genuine diversity before ensembling or composition.
 
 ### 3. Epistemic Grounding & Assumption Register
 - Inspired by Edwards & Schuster (2026) (*Ask or Assume?*), models must declare empirical grounding sources (literature citations, verified local registries) and explicit assumption registers before execution.
@@ -57,15 +56,16 @@ ml-harness/
 ├── docs/                       # Grounding knowledge base & architectural documentation
 │   └── KNOWLEDGE_BASE.md       # Empirical literature citations & verified architectures
 ├── harness/                    # Core experimentation platform engines
+│   ├── agent_bridge.py         # 3-Layer Agent Bridge, stateful sessions & typed actions
+│   ├── competition_state.py    # 8-Phase Journey, Candidate Pool & Freeze governance
 │   ├── tree_journal.py         # MCTS Solution Tree & UCB exploration algorithm
-│   ├── audit_gate.py           # Statistical audit gate & submission verification
+│   ├── ensemble_guard.py       # Candidate diversity & pseudo-ensemble prevention
 │   ├── grounding_gate.py       # Epistemic grounding & assumption register validation
-│   ├── cloud_runner.py         # Cloud execution orchestrator (Modal & Kaggle)
-│   ├── cloud_inspector.py      # Local pre-flight syntax & dependency inspector
-│   └── anti_degeneration.py    # Architectural diversity & pseudo-ensemble prevention
+│   └── cloud_runner.py         # Cloud execution orchestrator (Modal & Kaggle)
 ├── submissions/                # Submission packages, audit receipts, and submission tracker
-├── tests/                      # Full unit test suite (100% passing)
+├── tests/                      # Comprehensive unit and integration test suite
 ├── tools/                      # CLI utilities & high-performance dashboard server
+│   ├── audit_gate.py           # Pre-submission statistical verification & SHA-256 audit gate
 │   ├── dashboard_server.py     # REST API server & web application host
 │   ├── journal_tool.py         # CLI for tree operations & UCB recommendation
 │   ├── submission_tool.py      # CLI for registering verified competition submissions
