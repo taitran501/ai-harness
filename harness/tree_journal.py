@@ -56,13 +56,14 @@ class Node:
             if candidate in self.metrics and isinstance(self.metrics[candidate], (int, float)):
                 return float(self.metrics[candidate])
 
-        # Backward compatibility for multi-subtask dicts
+        # Dynamically check any nested subtask/target dictionaries
         scores = []
-        for task in ["subtask_a", "subtask_b", "subtask_c"]:
-            if task in self.metrics and isinstance(self.metrics[task], dict):
-                t_score = self.metrics[task].get("macro_f1")
-                if isinstance(t_score, (int, float)):
-                    scores.append(float(t_score))
+        for task, task_val in self.metrics.items():
+            if isinstance(task_val, dict):
+                for m_cand in ["macro_f1", "f1", "accuracy", "roc_auc", "auc", "type_macro_f1", "score", "rmse"]:
+                    if m_cand in task_val and isinstance(task_val[m_cand], (int, float)):
+                        scores.append(float(task_val[m_cand]))
+                        break
         return sum(scores) / len(scores) if scores else 0.0
 
 

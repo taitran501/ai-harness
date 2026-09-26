@@ -283,7 +283,7 @@ class CompetitionStateMachine:
         cfg = DataAuditConfig(**self.state["data_audit_config"])
         declared_checks = self.spec.get("data_checks", [])
         data_cfg = self.spec.get("data_config", {})
-        group_col = data_cfg.get("group_column", "yt_title")
+        group_col = data_cfg.get("group_column") or ("yt_title" if Path("splits/fold_assignments.tsv").exists() else "group")
 
         report: Dict[str, Any] = {
             "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -462,20 +462,26 @@ class CompetitionStateMachine:
         base_score = baseline_node.get_score() if baseline_node else float(self.spec.get("primary_metric_baseline", 0.6459))
 
         candidates_list: List[Dict[str, Any]] = []
+        criteria = self.spec.get("evaluation_criteria", {})
+
         for n in completed:
             score = n.get_score()
-            sub_a = n.metrics.get("subtask_a", {}).get("macro_f1", 0.0) if isinstance(n.metrics.get("subtask_a"), dict) else 0.0
-            sub_b = n.metrics.get("subtask_b", {}).get("macro_f1", 0.0) if isinstance(n.metrics.get("subtask_b"), dict) else 0.0
-            sub_c_type = (
-                n.metrics.get("subtask_c", {}).get("type_macro_f1", 0.0)
-                if isinstance(n.metrics.get("subtask_c"), dict)
-                else 0.0
-            )
-            sub_c_id = (
-                n.metrics.get("subtask_c", {}).get("id_macro_f1", 0.0)
-                if isinstance(n.metrics.get("subtask_c"), dict)
-                else 0.0
-            )
+            subtasks_scores = {}
+
+            # 1. Dynamically extract declared criteria
+            for crit_key, crit_meta in criteria.items():
+                val = 0.0
+                if isinstance(n.metrics.get(crit_key), (int, float)):
+                    val = float(n.metrics[crit_key])
+                elif isinstance(n.metrics.get(crit_key), dict):
+                    val = float(n.metrics[crit_key].get("macro_f1") or n.metrics[crit_key].get("score") or n.metrics[crit_key].get("type_macro_f1", 0.0))
+                subtasks_scores[crit_key] = round(val, 4)
+
+            # Backward-compatibility for subtask_a, subtask_b, subtask_c
+            sub_a = subtasks_scores.get("subtask_a") or (n.metrics.get("subtask_a", {}).get("macro_f1", 0.0) if isinstance(n.metrics.get("subtask_a"), dict) else 0.0)
+            sub_b = subtasks_scores.get("subtask_b") or (n.metrics.get("subtask_b", {}).get("macro_f1", 0.0) if isinstance(n.metrics.get("subtask_b"), dict) else 0.0)
+            sub_c_type = subtasks_scores.get("subtask_c_type") or (n.metrics.get("subtask_c", {}).get("type_macro_f1", 0.0) if isinstance(n.metrics.get("subtask_c"), dict) else 0.0)
+            sub_c_id = subtasks_scores.get("subtask_c_identity") or (n.metrics.get("subtask_c", {}).get("id_macro_f1", 0.0) if isinstance(n.metrics.get("subtask_c"), dict) else 0.0)
 
             fold_std = 0.015
             exp_dir = (self.project_root / n.artifact_dir).resolve() if n.artifact_dir else (self.artifacts_dir / n.id).resolve()
@@ -484,43 +490,48 @@ class CompetitionStateMachine:
             if summary_csv.exists():
                 try:
                     sdf = pd.read_csv(summary_csv)
-                    if "a_macro_f1" in sdf.columns:
-                        fold_std = round(float(sdf["a_macro_f1"].std()), 4)
+                    metric_cols = [c for c in sdf.columns if c.endswith("_f1") or c.endswith("_macro_f1") or c == "score"]
+                    if metric_cols:
+                        fold_std = round(float(sdf[metric_cols[0]].std()), 4)
                 except Exception:
                     pass
 
             delta = round(score - base_score, 4)
-            verdict = "KEEP" if (score >= base_score or sub_c_id > 0.28) else "REJECT"
+            verdict = "KEEP" if (score >= base_score or delta >= -0.005) else "REJECT"
 
-            candidates_list.append(
-                {
-                    "id": n.id,
-                    "branch": n.branch,
-                    "parent_id": n.parent_id,
-                    "model": n.metrics.get("model", n.model_family),
-                    "composite_score": round(score, 4),
-                    "delta_vs_baseline": delta,
-                    "subtask_a": round(float(sub_a), 4),
-                    "subtask_b": round(float(sub_b), 4),
-                    "subtask_c_type": round(float(sub_c_type), 4),
-                    "subtask_c_id": round(float(sub_c_id), 4),
-                    "fold_std": fold_std,
-                    "has_oof": oof_csv.exists(),
-                    "oof_path": str(oof_csv.relative_to(self.project_root)).replace("\\", "/") if oof_csv.exists() else None,
-                    "verdict": verdict,
-                    "is_pinned": n.id in self.state["candidate_pool"].get("pinned_candidates", []),
-                }
-            )
+            cand_entry = {
+                "id": n.id,
+                "branch": n.branch,
+                "parent_id": n.parent_id,
+                "model": n.metrics.get("model", n.model_family),
+                "composite_score": round(score, 4),
+                "delta_vs_baseline": delta,
+                "subtasks": subtasks_scores,
+                "subtask_a": round(float(sub_a), 4),
+                "subtask_b": round(float(sub_b), 4),
+                "subtask_c_type": round(float(sub_c_type), 4),
+                "subtask_c_id": round(float(sub_c_id), 4),
+                "fold_std": fold_std,
+                "has_oof": oof_csv.exists(),
+                "oof_path": str(oof_csv.relative_to(self.project_root)).replace("\\", "/") if oof_csv.exists() else None,
+                "verdict": verdict,
+                "is_pinned": n.id in self.state["candidate_pool"].get("pinned_candidates", []),
+            }
+            candidates_list.append(cand_entry)
 
         candidates_list.sort(key=lambda x: x["composite_score"], reverse=True)
 
         overall_best = candidates_list[0] if candidates_list else None
-        specialists = {
-            "subtask_a": max(candidates_list, key=lambda x: x["subtask_a"]) if candidates_list else None,
-            "subtask_b": max(candidates_list, key=lambda x: x["subtask_b"]) if candidates_list else None,
-            "subtask_c_type": max(candidates_list, key=lambda x: x["subtask_c_type"]) if candidates_list else None,
-            "subtask_c_id": max(candidates_list, key=lambda x: x["subtask_c_id"]) if candidates_list else None,
-        }
+        specialists = {}
+        for crit_key in criteria.keys():
+            matching = [c for c in candidates_list if crit_key in c.get("subtasks", {})]
+            if matching:
+                specialists[crit_key] = max(matching, key=lambda x: x["subtasks"][crit_key])
+        if not specialists and candidates_list:
+            for k in ["subtask_a", "subtask_b", "subtask_c_type", "subtask_c_id"]:
+                if k in candidates_list[0]:
+                    specialists[k] = max(candidates_list, key=lambda x: x.get(k, 0.0))
+
         stable_candidates = sorted(
             [c for c in candidates_list if c["verdict"] == "KEEP"],
             key=lambda x: (x["fold_std"], -x["composite_score"]),
@@ -559,6 +570,15 @@ class CompetitionStateMachine:
         out_dir.mkdir(parents=True, exist_ok=True)
         out_csv = out_dir / "oof_predictions.csv"
 
+        def _get_id_col(df_in: pd.DataFrame) -> str:
+            declared = self.spec.get("data_config", {}).get("id_column")
+            if declared and declared in df_in.columns:
+                return declared
+            for candidate in ["StereoQueerEval_id", "id", "ID", "sample_id", "comment_id"]:
+                if candidate in df_in.columns:
+                    return candidate
+            return df_in.columns[0]
+
         def _load_oof(exp_id_or_path: str, preferred_variant: Optional[str] = None) -> pd.DataFrame:
             p = Path(exp_id_or_path)
             if not p.exists():
@@ -584,50 +604,80 @@ class CompetitionStateMachine:
                 variants = df["input_variant"].unique()
                 chosen_var = preferred_variant if (preferred_variant in variants) else ("comment" if "comment" in variants else variants[0])
                 df = df[df["input_variant"] == chosen_var].copy()
-            return df.sort_values("StereoQueerEval_id").reset_index(drop=True)
+
+            id_col = _get_id_col(df)
+            if id_col in df.columns:
+                return df.sort_values(id_col).reset_index(drop=True)
+            return df.reset_index(drop=True)
 
         audit_notes: Dict[str, Any] = {}
         if mode in ("single_model", "checkpoint_selection"):
-            src_exp = source_map.get("source_exp") or source_map.get("subtask_a_exp") or "baseline_v1_comment"
+            src_exp = source_map.get("source_exp") or source_map.get("subtask_a_exp") or baseline_id
             merged = _load_oof(src_exp)
             merged.to_csv(out_csv, index=False)
             audit_notes = {"strategy": mode, "source_exp": src_exp}
         elif mode == "specialist_router":
-            exp_a = source_map.get("subtask_a_exp", "baseline_v1_comment")
-            exp_b = source_map.get("subtask_b_exp", "baseline_v1_comment")
-            exp_c = source_map.get("subtask_c_exp", "baseline_v1_full_context")
+            routing = source_map.get("routing", {}) or source_map.get("target_routing", {})
+            if not routing:
+                exp_a = source_map.get("subtask_a_exp") or baseline_id
+                exp_b = source_map.get("subtask_b_exp") or baseline_id
+                exp_c = source_map.get("subtask_c_exp") or baseline_id
+                routing = {
+                    "pred_stereotype": exp_a,
+                    "pred_hate_speech": exp_b,
+                    "pred_target_type": exp_c,
+                    "pred_identities": exp_c,
+                }
 
-            df_a = _load_oof(exp_a)
-            df_b = _load_oof(exp_b)
-            df_c = _load_oof(exp_c)
+            distinct_exps = {exp for exp in routing.values() if exp}
+            loaded_dfs = {exp: _load_oof(exp) for exp in distinct_exps}
+            first_df = next(iter(loaded_dfs.values()))
+            id_col = _get_id_col(first_df)
 
-            merged = df_a[["StereoQueerEval_id", "language", "fold"]].copy()
+            meta_cols = [c for c in [id_col, "language", "fold"] if c in first_df.columns]
+            merged = first_df[meta_cols].copy()
             merged["input_variant"] = "specialist_router"
-            merged["pred_stereotype"] = df_a["pred_stereotype"].values
-            merged["pred_hate_speech"] = df_b["pred_hate_speech"].values
-            merged["pred_target_type"] = df_c["pred_target_type"].values
-            merged["pred_identities"] = df_c["pred_identities"].values
+
+            for target_col, exp_id in routing.items():
+                col_name = target_col if target_col.startswith("pred_") else f"pred_{target_col}"
+                if exp_id in loaded_dfs and col_name in loaded_dfs[exp_id].columns:
+                    merged[col_name] = loaded_dfs[exp_id][col_name].values
+                elif exp_id in loaded_dfs and target_col in loaded_dfs[exp_id].columns:
+                    merged[col_name] = loaded_dfs[exp_id][target_col].values
 
             # Apply conditional rules declared in CompetitionSpec
             for chk in self.spec.get("data_checks", []):
                 if chk.get("type") == "conditional_label":
-                    non_hate_mask = merged["pred_hate_speech"] == chk.get("if_equals", "no")
-                    merged.loc[non_hate_mask, "pred_target_type"] = chk.get("require_value", "none")
-                    merged.loc[non_hate_mask, "pred_identities"] = "none"
+                    parent_col = f"pred_{chk.get('parent_target', 'hate_speech')}"
+                    if parent_col in merged.columns:
+                        non_cond_mask = merged[parent_col] == chk.get("if_equals", "no")
+                        child_type_col = f"pred_{chk.get('child_target', 'target_type')}"
+                        if child_type_col in merged.columns:
+                            merged.loc[non_cond_mask, child_type_col] = chk.get("require_value", "none")
+                        if "pred_identities" in merged.columns:
+                            merged.loc[non_cond_mask, "pred_identities"] = "none"
 
             merged.to_csv(out_csv, index=False)
-            audit_notes = {"routing": {"subtask_a": exp_a, "subtask_b": exp_b, "subtask_c": exp_c}}
+            audit_notes = {"routing": routing}
         else:
             comp_ids: List[str] = source_map.get("components", [])
             if len(comp_ids) < 2:
                 raise ValueError("Ensemble strategy requires at least 2 constituent models.")
             dfs = [_load_oof(cid) for cid in comp_ids]
+            id_col = _get_id_col(dfs[0])
+
+            pred_cols = [c for c in dfs[0].columns if c.startswith("pred_")]
+            if not pred_cols:
+                pred_cols = [c for c in dfs[0].columns if c not in [id_col, "fold", "language", "input_variant"]]
+
+            audit_col = "pred_stereotype" if "pred_stereotype" in pred_cols else pred_cols[0]
             passed, errs, div_details = EnsembleGuard.audit_constituent_diversity(
-                dfs, col="pred_stereotype", max_kappa=0.85, min_disagreement_pct=5.0
+                dfs, col=audit_col, max_kappa=0.85, min_disagreement_pct=5.0
             )
-            merged = dfs[0][["StereoQueerEval_id", "language", "fold"]].copy()
+            meta_cols = [c for c in [id_col, "language", "fold"] if c in dfs[0].columns]
+            merged = dfs[0][meta_cols].copy()
             merged["input_variant"] = "ensemble_vote"
-            for col in ["pred_stereotype", "pred_hate_speech", "pred_target_type", "pred_identities"]:
+            for col in pred_cols:
                 stacked = pd.DataFrame({f"m_{i}": d[col] for i, d in enumerate(dfs)})
                 merged[col] = stacked.mode(axis=1)[0]
 

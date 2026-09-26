@@ -45,13 +45,19 @@ class ExperimentValidator:
             )
         return param_count
 
-    @staticmethod
-    def assert_no_video_data_leakage(
+    @classmethod
+    def assert_no_group_data_leakage(
+        cls,
         train_df: pd.DataFrame,
         val_df: pd.DataFrame,
-        group_column: str = "yt_title",
+        group_column: Optional[str] = None,
     ) -> None:
-        """Assert that no YouTube videos exist in both training and validation folds."""
+        """Assert that no groups exist in both training and validation folds."""
+        if group_column is None:
+            from harness.task_spec import load_active_task_spec
+            spec = load_active_task_spec()
+            group_column = spec.group_column or ("yt_title" if "yt_title" in train_df.columns else "group")
+
         if group_column not in train_df.columns or group_column not in val_df.columns:
             return  # Column not available in this view
 
@@ -62,10 +68,20 @@ class ExperimentValidator:
         if intersection:
             leaked_sample = list(intersection)[:3]
             raise AssertionError(
-                f"[CRITICAL DATA LEAKAGE DETECTED] {len(intersection)} video groups leaked between "
+                f"[CRITICAL DATA LEAKAGE DETECTED] {len(intersection)} '{group_column}' groups leaked between "
                 f"train and validation splits! Sample leaked: {leaked_sample}. "
                 f"Pipelines MUST strictly use 'splits/fold_assignments.tsv'."
             )
+
+    @classmethod
+    def assert_no_video_data_leakage(
+        cls,
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        group_column: Optional[str] = None,
+    ) -> None:
+        """Backward-compatible alias for assert_no_group_data_leakage."""
+        return cls.assert_no_group_data_leakage(train_df, val_df, group_column=group_column or "yt_title")
 
     @staticmethod
     def assert_subtask_c_oracle_conditioning(df: pd.DataFrame) -> None:

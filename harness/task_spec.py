@@ -228,3 +228,49 @@ class UniversalTaskSpec:
                 masks[subtask_id] = np.ones(n_samples, dtype=bool)
 
         return masks
+
+    @property
+    def id_column(self) -> str:
+        """Resolve primary ID column declared in task data_config."""
+        return self.metadata.get("data_config", {}).get("id_column", "id")
+
+    @property
+    def group_column(self) -> Optional[str]:
+        """Resolve anti-leakage group column if defined."""
+        return self.metadata.get("data_config", {}).get("group_column")
+
+    @property
+    def train_path(self) -> str:
+        """Resolve raw training dataset directory or file."""
+        return self.metadata.get("data_config", {}).get("train_path", "dataset/")
+
+    @property
+    def test_path(self) -> str:
+        """Resolve raw test dataset directory or file."""
+        return self.metadata.get("data_config", {}).get("test_path", "dataset/test/")
+
+
+_ACTIVE_TASK_SPEC: Optional[UniversalTaskSpec] = None
+
+
+def load_active_task_spec(config_path: Path | str = "configs/task.yaml") -> UniversalTaskSpec:
+    """Safely load and cache the active task specification."""
+    global _ACTIVE_TASK_SPEC
+    p = Path(config_path)
+    if p.exists():
+        try:
+            _ACTIVE_TASK_SPEC = UniversalTaskSpec.from_yaml(p)
+            return _ACTIVE_TASK_SPEC
+        except Exception:
+            pass
+    if _ACTIVE_TASK_SPEC is not None:
+        return _ACTIVE_TASK_SPEC
+    return UniversalTaskSpec(
+        name="universal_task",
+        task_type="classification",
+        primary_metric="macro_f1",
+        direction="maximize",
+        inputs=[],
+        subtasks={},
+        metadata={},
+    )

@@ -617,43 +617,74 @@ class AgentBridge:
                 first_var = df_oof["input_variant"].iloc[0]
                 df_oof = df_oof[df_oof["input_variant"] == first_var].copy()
 
+        # Resolve ID column dynamically
+        id_col = None
+        spec = getattr(self.comp_state, "spec", {}) if hasattr(self, "comp_state") else {}
+        declared_id = spec.get("data_config", {}).get("id_column") if isinstance(spec, dict) else None
+        if declared_id and declared_id in df_gt.columns and declared_id in df_oof.columns:
+            id_col = declared_id
+        else:
+            for candidate_id in ["StereoQueerEval_id", "id", "ID", "sample_id", "comment_id"]:
+                if candidate_id in df_gt.columns and candidate_id in df_oof.columns:
+                    id_col = candidate_id
+                    break
+        if not id_col:
+            id_col = df_gt.columns[0]
+
         merged = pd.merge(
             df_gt,
             df_oof,
-            on="StereoQueerEval_id",
+            on=id_col,
             suffixes=("", "_oof"),
         )
         if len(merged) == 0:
             return 0.0, {}
 
-        id_matrix = np.zeros((len(merged), len(IDENTITIES)), dtype=int)
-        for idx, raw_val in enumerate(merged["pred_identities"].fillna("none")):
-            if str(raw_val) != "none":
-                parts = [p.strip() for p in str(raw_val).split(",")]
-                for j, ident in enumerate(IDENTITIES):
-                    if ident in parts:
-                        id_matrix[idx, j] = 1
+        # 1. Check if StereoQueerEval multi-task columns exist
+        if "pred_stereotype" in merged.columns and "pred_hate_speech" in merged.columns and "pred_identities" in merged.columns:
+            id_matrix = np.zeros((len(merged), len(IDENTITIES)), dtype=int)
+            for idx, raw_val in enumerate(merged["pred_identities"].fillna("none")):
+                if str(raw_val) != "none":
+                    parts = [p.strip() for p in str(raw_val).split(",")]
+                    for j, ident in enumerate(IDENTITIES):
+                        if ident in parts:
+                            id_matrix[idx, j] = 1
 
-        metrics = evaluate_predictions(
-            merged,
-            merged["pred_stereotype"].tolist(),
-            merged["pred_hate_speech"].tolist(),
-            merged["pred_target_type"].tolist(),
-            id_matrix,
-        )
-        a_f1 = float(metrics["subtask_a"]["macro_f1"])
-        b_f1 = float(metrics["subtask_b"]["macro_f1"])
-        c_type_f1 = float(metrics["subtask_c_target_type_oracle_hate"]["macro_f1"])
-        c_id_f1 = float(metrics["subtask_c_identity_oracle_hate"]["macro_f1"])
-        composite = round((a_f1 + b_f1 + c_type_f1) / 3.0, 4)
+            metrics = evaluate_predictions(
+                merged,
+                merged["pred_stereotype"].tolist(),
+                merged["pred_hate_speech"].tolist(),
+                merged["pred_target_type"].tolist() if "pred_target_type" in merged.columns else ["none"] * len(merged),
+                id_matrix,
+            )
+            a_f1 = float(metrics["subtask_a"]["macro_f1"])
+            b_f1 = float(metrics["subtask_b"]["macro_f1"])
+            c_type_f1 = float(metrics.get("subtask_c_target_type_oracle_hate", {}).get("macro_f1", 0.0))
+            c_id_f1 = float(metrics.get("subtask_c_identity_oracle_hate", {}).get("macro_f1", 0.0))
+            composite = round((a_f1 + b_f1 + c_type_f1) / 3.0, 4)
 
-        return composite, {
-            "composite_score": composite,
-            "subtask_a": round(a_f1, 4),
-            "subtask_b": round(b_f1, 4),
-            "subtask_c_type": round(c_type_f1, 4),
-            "subtask_c_id": round(c_id_f1, 4),
-        }
+            return composite, {
+                "composite_score": composite,
+                "subtask_a": round(a_f1, 4),
+                "subtask_b": round(b_f1, 4),
+                "subtask_c_type": round(c_type_f1, 4),
+                "subtask_c_id": round(c_id_f1, 4),
+            }
+
+        # 2. Generic Task Evaluation Fallback
+        from sklearn.metrics import f1_score, accuracy_score
+        scores_by_target = {}
+        for col in df_gt.columns:
+            pred_col = f"pred_{col}"
+            if pred_col in merged.columns:
+                try:
+                    scores_by_target[col] = round(float(f1_score(merged[col], merged[pred_col], average="macro")), 4)
+                except Exception:
+                    scores_by_target[col] = round(float(accuracy_score(merged[col], merged[pred_col])), 4)
+
+        composite = round(sum(scores_by_target.values()) / len(scores_by_target), 4) if scores_by_target else 0.0
+        scores_by_target["composite_score"] = composite
+        return composite, scores_by_target
 
     def execute_action(
         self,

@@ -110,13 +110,14 @@ auditing predictions, or registering verified submissions for **StereoQueerEval*
 - Declare a `problem_addressed` that directly targets a documented failure slice or confusion mode.
 - **Strictly DO NOT pseudo-ensemble** models of the same family or merge previous versions mechanically.
 
-### 3.5 Deterministic Guardrails: EnsembleGuard & SWE-Agent AuditGate
+### 3.5 SWE-Agent Physical & Statistical Audit Gate
 - Submissions and candidate predictions CANNOT be approved by natural language alone.
 - **EnsembleGuard (`harness/ensemble_guard.py`)**: Checks constituent model diversity before ensembling: Cohen's Kappa ($\kappa \le 0.85$) and Disagreement Rate ($\ge 5.0\%$).
-- **AuditGate (`tools/audit_gate.py`)**: Performs pre-submission statistical verification, SHA-256 duplicate detection, Minimum Meaningful Effect Size (MMES $\ge 2.0\%$), McNemar significance testing, and signs `AUDIT_RECEIPT.json`.
+- **AuditGate (`tools/audit_gate.py`)**: Performs pre-submission statistical verification, SHA-256 duplicate detection, Minimum Meaningful Effect Size (MMES >= 2.0%), McNemar significance testing, and signs `AUDIT_RECEIPT.json`.
   ```powershell
   python tools/audit_gate.py --candidate <candidate_pred_csv> --baseline <baseline_pred_csv> --output-zip submission.zip
   ```
+- **Minimum Meaningful Effect Size (MMES >= 2.0%)**: Candidates differing by < 2% of validation samples are physically rejected.
 
 ### 3.6 Approval Governance (`AUTO` / `AUTO_WITH_LIMIT` / `USER_APPROVAL`)
 - **AUTO**: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`

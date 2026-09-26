@@ -14,8 +14,14 @@ from pathlib import Path
 from typing import Dict, Any
 
 
-def push_dataset_to_modal(volume_name: str = "stereoqueer-dataset-vol") -> Dict[str, Any]:
+def push_dataset_to_modal(volume_name: Optional[str] = None) -> Dict[str, Any]:
     """Create Modal Volume if needed and push dataset/ and splits/ to the volume."""
+    if volume_name is None:
+        from harness.task_spec import load_active_task_spec
+        spec = load_active_task_spec()
+        t_slug = "".join(c if c.isalnum() else "_" for c in spec.name.lower()).strip("_") or "harness"
+        volume_name = f"{t_slug}-dataset-vol"
+
     logs = []
     try:
         # 1. Ensure volume exists
@@ -75,16 +81,24 @@ def generate_modal_script(
     config_path: str,
     gpu: str = "A10G",
     exp_id: str = "remote_exp",
-    volume_name: str = "stereoqueer-dataset-vol",
+    volume_name: Optional[str] = None,
 ) -> str:
     """Generate self-contained Modal app script that runs training and pulls lightweight artifacts back to local disk."""
+    from harness.task_spec import load_active_task_spec
+    spec = load_active_task_spec()
+    t_slug = "".join(c if c.isalnum() else "_" for c in spec.name.lower()).strip("_") or "harness"
+    if volume_name is None:
+        volume_name = f"{t_slug}-dataset-vol"
+    app_name = f"{t_slug}-{exp_id}"
+    cache_name = f"{t_slug}-hf-cache"
+
     return f'''import modal
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
-app = modal.App("stereoqueer-{exp_id}")
+app = modal.App("{app_name}")
 
 # 1. Container Image definition
 image = (
@@ -102,7 +116,7 @@ image = (
 )
 
 # 2. Persistent Volumes for HuggingFace cache and Dataset
-hf_cache = modal.Volume.from_name("stereoqueer-hf-cache", create_if_missing=True)
+hf_cache = modal.Volume.from_name("{cache_name}", create_if_missing=True)
 data_volume = modal.Volume.from_name("{volume_name}", create_if_missing=True)
 
 # 3. Mount lightweight local code & config

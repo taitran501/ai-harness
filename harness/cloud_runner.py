@@ -152,7 +152,7 @@ def handle_auto_submit(exp_id: str, baseline_csv: Optional[str] = None) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="StereoQueerEval Cloud GPU Dispatcher")
+    parser = argparse.ArgumentParser(description="ML-Harness Cloud GPU Dispatcher")
     parser.add_argument("--backend", choices=["modal", "kaggle"], default="modal")
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
     parser.add_argument("--gpu", default="A10G", help="Modal GPU type (A10G, A100, T4)")

@@ -1,4 +1,4 @@
-"""ML Experiment Harness for StereoQueerEval (SemEval-2027 Task 8).
+"""ML Experiment Harness - Autonomous Agentic ML/DL Experimentation Platform.
 
 Combines AIDE ML (Tree Search & Memory Compression) with SWE-agent (Deterministic Audit Gate).
 """

@@ -47,19 +47,24 @@ class CloudPreflightInspector:
 
     @staticmethod
     def inspect_datasets(data_dir: Path | str = "dataset") -> Tuple[bool, List[str]]:
-        """Verify presence of raw training data TSVs."""
+        """Verify presence of raw training data files."""
         d = Path(data_dir)
         errors = []
         if not d.exists() or not d.is_dir():
             return False, [f"Dataset directory '{d}' does not exist."]
 
-        languages = ["EN", "IT", "NL"]
-        for lang in languages:
-            expected = d / f"StereoQueerEval_{lang}_training.tsv"
-            if not expected.exists():
-                errors.append(f"Missing required training dataset: {expected.name}")
-            elif expected.stat().st_size == 0:
-                errors.append(f"Training dataset is empty (0 bytes): {expected.name}")
+        data_files = (
+            list(d.glob("*.tsv"))
+            + list(d.glob("*.csv"))
+            + list(d.glob("*.parquet"))
+            + list(d.glob("*.json"))
+        )
+        if not data_files:
+            return False, [f"No dataset files (.tsv, .csv, .parquet, .json) found in '{d}'."]
+
+        for df_file in data_files:
+            if df_file.stat().st_size == 0:
+                errors.append(f"Training dataset file is empty (0 bytes): {df_file.name}")
 
         return len(errors) == 0, errors
 
