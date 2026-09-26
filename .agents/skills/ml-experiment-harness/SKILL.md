@@ -51,20 +51,37 @@ auditing predictions, or registering verified submissions for **StereoQueerEval*
 
 ---
 
-## 2. Core Operational Rules (Enforced & Immutable)
+## 2. Three-Layer Architecture (`Antigravity IDE` <-> `AgentBridge` <-> `Harness`)
 
-### 2.1 The Context Protection Rule (Anti-Context Saturation)
+- **Layer 1 — True Agent Runtime (`Antigravity in IDE`)**: Performs scientific reasoning, hypothesis formulation, and the `Observe -> Decide -> Next Action` loop. The Harness does **not** run a separate internal LLM planner.
+- **Layer 2 — Agent Bridge & Context Bridge (`harness/agent_bridge.py` & `tools/agent_bridge_cli.py`)**:
+  - Feeds Antigravity a compressed **Context Packet** (`CompetitionState` 8-Phase HUD, Parallel Tracks, `TreeJournal` UCB recommendation, Parent `DIAGNOSTICS` bottlenecks, Idea Graveyard, and active `BridgeSession` budget/usage):
+    ```powershell
+    python tools/agent_bridge_cli.py context
+    ```
+  - Tracks stateful **`BridgeSession` (`session_XXXX`)** (`goal`, `experiments_run`, `compute_usage`, `consecutive_rejections`, optional `max_experiments` / `max_gpu_hours` / `max_cloud_runs` budgets) and enforces **`USER_APPROVAL` governance** on sensitive actions (`prepare_submission`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`).
+  - Exposes **Typed Harness Actions** returning structured `ActionObservation` JSON payloads (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `new_blockers`):
+    ```powershell
+    python tools/agent_bridge_cli.py start-session --goal "Improve target metric" --max-experiments 3
+    python tools/agent_bridge_cli.py act --action <typed_action> --params '{"...": "..."}'
+    ```
+- **Layer 3 — Competition State Machine & Execution Runtime (`harness/competition_state.py`, `train.py`, `harness/cloud_runner.py`)**:
+  - **8-Phase Journey**: `1. Setup` -> `2. Understand` -> `3. Baseline Anchor` -> **Parallel Iteration Tracks** (`4. Experiment Loop` || `5. Candidate Management` || `6. External Evaluation`) -> `7. Freeze` -> `8. Closure`.
+  - **Execution Backends**: Local (`train.py`), Modal Serverless GPU (`--backend modal`), and Kaggle Kernels CLI (`--backend kaggle`).
+
+---
+
+## 3. Core Operational Rules (Enforced & Immutable)
+
+### 3.1 The Context Protection Rule (Anti-Context Saturation)
 - **NEVER** attempt to dump raw fold logs or entire `artifacts/` directories into prompt context.
-- **ALWAYS** query the solution tree CLI for compressed state:
+- **ALWAYS** query the Agent Bridge Context Packet or Solution Tree CLI first:
   ```powershell
+  python tools/agent_bridge_cli.py context
   python tools/journal_tool.py --summary
   ```
-- To inspect a specific node or parent in depth:
-  ```powershell
-  python tools/journal_tool.py --node <exp_id>
-  ```
 
-### 2.2 The Anti-Pivot & Branch Exploration Rule (AIDE UCB Tree Search)
+### 3.2 The Anti-Pivot & Branch Exploration Rule (AIDE UCB Tree Search)
 - **DO NOT** make speculative guesses or pivot arbitrarily without mathematical justification.
 - Query the optimal branch recommendation according to Upper Confidence Bound (UCB):
   ```powershell
@@ -72,7 +89,7 @@ auditing predictions, or registering verified submissions for **StereoQueerEval*
   ```
 - Ensure every experiment implements **EXACTLY ONE ATOMIC INTERVENTION** (Control vs Treatment).
 
-### 2.3 Epistemic Grounding & Assumption Register Protocol (Anti-Hallucination)
+### 3.3 Epistemic Grounding & Assumption Register Protocol (Anti-Hallucination)
 - **MANDATORY RETRIEVAL**: Before formulating a new model configuration for Natural Language Processing (NLP):
   1. Inspect `docs/KNOWLEDGE_BASE.md` for verified backbones:
      - `microsoft/deberta-v3-base (English / General SOTA encoder)`
@@ -88,56 +105,33 @@ auditing predictions, or registering verified submissions for **StereoQueerEval*
   python harness/grounding_gate.py --config configs/<exp_config>.yaml
   ```
 
-### 2.4 Diagnostic-First Exploration Rule
-- Before writing any config, inspect `artifacts/<parent_id>/DIAGNOSTICS.md`.
+### 3.4 Diagnostic-First Exploration Rule
+- Before writing any config, inspect `artifacts/<parent_id>/DIAGNOSTICS.md` (or call `act --action inspect_diagnostics`).
 - Declare a `problem_addressed` that directly targets a documented failure slice or confusion mode.
 - **Strictly DO NOT pseudo-ensemble** models of the same family or merge previous versions mechanically.
 
-### 2.5 SWE-Agent Physical & Statistical Audit Gate
+### 3.5 SWE-Agent Physical & Statistical Audit Gate
 - Submissions and candidate predictions CANNOT be approved by natural language alone.
-- All submission archives MUST be generated through `tools/audit_gate.py`:
+- All submission archives MUST be generated through `tools/audit_gate.py` (or `act --action prepare_submission --user-approved`):
   ```powershell
   python tools/audit_gate.py --candidate <candidate_pred_csv> --baseline <baseline_pred_csv> --output-zip submission.zip
   ```
 - **Minimum Meaningful Effect Size (MMES >= 2.0%)**: Candidates differing by < 2% of validation samples are physically rejected.
 - **Ensemble Diversity Check**: Constituent models must satisfy **Cohen's Kappa ($\kappa \le 0.85$)** and **Disagreement Rate ($\ge 5.0\%$)**.
 
-### 2.6 Submission Management & Divergence Tracking
-- Register all verified packages permanently:
-  ```powershell
-  python tools/submission_tool.py register --exp-id <id> --candidate <cand_csv> --baseline <base_csv>
-  ```
-- List registered submissions and comparison against local CV:
-  ```powershell
-  python tools/submission_tool.py list
-  ```
-- Record official competition scores when released:
-  ```powershell
-  python tools/submission_tool.py record-score --sub-id <sub_id> --score <val>
-  ```
-- If $\Delta (\text{LB} - \text{CV}) < -0.05$, the system triggers a **Divergence Warning ⚠️** requiring CV leak diagnostics.
-
-### 2.7 Cloud Execution & GPU Offloading (Modal.com & Kaggle CLI)
-- Run local pre-flight checks before remote dispatch:
-  ```powershell
-  python harness/cloud_inspector.py --config configs/<exp_config>.yaml
-  ```
-- Dispatch remote training:
-  ```powershell
-  # For Modal:
-  python harness/cloud_runner.py --backend modal --config configs/<exp_config>.yaml --auto-submit
-  # For Kaggle:
-  python harness/cloud_runner.py --backend kaggle --config configs/<exp_config>.yaml
-  ```
+### 3.6 Approval Governance (`AUTO` / `AUTO_WITH_LIMIT` / `USER_APPROVAL`)
+- **AUTO**: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`
+- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (`local` | `modal` | `kaggle`), `synthesize_candidate`, `build_ensemble`
+- **USER_APPROVAL (Mandatory Human Confirmation)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`
 
 ---
 
-## 3. Standard Operating Procedure (SOP) for New Experiments
+## 4. Standard Operating Procedure (SOP) for Antigravity in IDE
 
-1. **Consult Central Memory**: Run `python tools/journal_tool.py --recommend` to identify parent node and target branch.
-2. **Inspect Parent Diagnostics**: Check `artifacts/<parent_id>/DIAGNOSTICS.md` to pinpoint specific bottlenecks.
-3. **Draft Grounded Config**: Create `configs/exp<NNN>_<branch>_<descriptor>.yaml` declaring hypothesis, grounding, and assumptions.
-4. **Execute Verification Smoke Test**: Run single-fold probe `python train.py --config configs/<exp_config>.yaml --debug --fold 0`.
-5. **Execute Full Cross-Validation**: Run full training `python train.py --config configs/<exp_config>.yaml`.
-6. **Verify Artifacts & Audit Gate**: Confirm `metrics.json`, `summary.md`, `oof_predictions.csv`, and run `tools/audit_gate.py`.
-7. **Update Central Memory**: Verify solution tree sync via `python tools/journal_tool.py --summary`.
+1. **Read Bridge Context Packet**: Run `python tools/agent_bridge_cli.py context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.
+2. **Start / Configure Session (Optional Budgets)**: Run `python tools/agent_bridge_cli.py start-session --goal "..." --max-experiments 3`.
+3. **Create Grounded Experiment**: Run `python tools/agent_bridge_cli.py act --action create_experiment --params '{...}'` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).
+4. **Execute Smoke Test**: Run `python tools/agent_bridge_cli.py act --action run_smoke_test --params '{"config_path": "configs/<exp>.yaml"}'`.
+5. **Execute Full 5-Fold Validation (`local` | `modal` | `kaggle`)**: Run `python tools/agent_bridge_cli.py act --action run_full_validation --params '{"config_path": "configs/<exp>.yaml", "backend": "local"}'`.
+6. **Observe & Decide Next Step**: Inspect the returned `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote winning candidates via `synthesize_candidate` or pivot to the next hypothesis.
+7. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.
