@@ -1,148 +1,108 @@
-# AGENTS.md — Universal Agent-Operable Competition Harness
+# AGENTS.md — Assistant Integration & Workflow Guide
 
-This document defines the 3-layer architecture, constraints, operational state machine, and workflow for the ML Competition Harness.
-
-> **Motto & Operating Boundary**:  
-> **“Antigravity thinks. AgentBridge coordinates. Harness verifies and executes.”**
-> *(Core Harness is cleanly separated from competition-specific adapters: core retains universal ML competition primitives such as OOF tracking, CV folds, and candidate management, while domain schemas and custom logic reside strictly in adapters).*
+This document outlines the workflow, conventions, and CLI commands for AI coding assistants (such as Antigravity, OpenAI Codex, or Claude Code) working within ML-Harness.
 
 ---
 
-## 1. Three-Layer Architecture (`Antigravity IDE` ↔ `AgentBridge` ↔ `Harness`)
+## 1. System Structure
+
+The system separates planning, coordination, and execution into three clean layers:
 
 ```text
-Antigravity IDE (Layer 1)
-   │
-   │ Scientific Reasoning / Hypothesis / Decision Loop
+Assistant / Engineer (Layer 1)
+   │ Scientific reasoning, hypothesis formulation, diagnostic review
    ▼
-AgentBridge (Layer 2)
-   │
-   │ Context Bridge / Stateful Sessions / Typed Actions
-   │ Budget Guards / Soft Stop Advisories / Human Approval
+Agent Bridge (Layer 2 - tools/agent_bridge_cli.py)
+   │ Context synthesis, session budgets, typed actions, human approval
    ▼
-Competition & Execution Harness (Layer 3)
-   │
-   ├─ Competition State Machine (8-Phase Journey)
-   ├─ Experiment Memory & TreeJournal (AIDE UCB Tree)
-   ├─ Deterministic Guardrails (ExperimentValidator, GroundingGate, EnsembleGuard, AuditGate)
-   ├─ Diagnostics & Error Slices
-   ├─ Candidate Pool & Composition Strategies
-   └─ Execution Backends (Local / Modal / Kaggle)
+Harness Runtime (Layer 3 - harness/)
+   │ Model execution, cross-validation, solution tree tracking, guardrails
 ```
 
-1. **Layer 1 — True Agent Runtime (`Antigravity in IDE`)**:
-   - Antigravity inside the IDE owns all scientific reasoning, hypothesis formulation, diagnostics analysis, and the `Observe -> Decide -> Action` loop.
-   - The Harness does **not** run an internal LLM planner loop; its runtime is strictly dedicated to state tracking, guardrails, and execution.
-2. **Layer 2 — Bidirectional Agent Bridge (`harness/agent_bridge.py` & `tools/agent_bridge_cli.py`)**:
-   - **Context Bridge (`context`)**: Synthesizes a high-density **Context Packet** containing the 8-Phase Journey HUD, Parallel Iteration Tracks, `TreeJournal` UCB recommendations, Parent `DIAGNOSTICS` bottlenecks, Idea Graveyard, and active `BridgeSession` telemetry.
-   - **Stateful Session & Budget Guards (`BridgeSession`)**: Tracks `session_id`, `goal`, `experiments_run`, compute usage (`local_runs`, `cloud_runs`, `gpu_hours_used`, `wall_seconds_used`), and syncs live activity to `competition_state.json`.
-   - **Hard Stop vs. Soft Stop (`REASSESS_RECOMMENDED`)**:
-     - *Hard Stop*: Resource exhaustion (`max_experiments`, `max_gpu_hours` $\rightarrow$ `BLOCKED_BY_BUDGET`), frozen competition state (`STOP_POLICY_TRIGGERED`), or pending human sign-off (`PAUSED_FOR_APPROVAL`).
-     - *Soft Stop*: When consecutive non-improving runs reach `max_consecutive_rejections`, the bridge returns advisory `REASSESS_RECOMMENDED` without hard-blocking, allowing Antigravity to autonomously pivot strategies.
-   - **Typed Action Contract (`act`) & Approval Governance (`ApprovalTier`)**:
-     - `AUTO`: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`
-     - `AUTO_WITH_LIMIT`: `establish_baseline_anchor`, `run_full_validation` (`--backend local|modal|kaggle`), `synthesize_candidate`, `promote_candidate`, `build_ensemble`
-     - `USER_APPROVAL` (Mandatory Human Sign-off): `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`
-3. **Layer 3 — Universal Competition State Machine & Execution Harness**:
-   - **8-Phase Competition Journey**:
-     1. `Setup`: Load `configs/task.yaml`, verify environment, dataset availability, split schemas, and execution prerequisites.
-     2. `Understand`: Data & schema analysis, class distributions, leakage risk profiling, and evaluation assumptions.
-     3. `Baseline Anchor`: Execute benchmark model, evaluate OOF metrics, and lock invariant baseline score.
-     4. `Parallel Track 1 — Experiment Loop`: Grounded iterations across exploration branches (`feat`, `model`, `loss`, `mtl`, `ens`).
-     5. `Parallel Track 2 — Candidate Management`: Candidate Pool governance and composition strategies (specialist routing, weighted blending, rank averaging).
-     6. `Parallel Track 3 — External Evaluation`: External leaderboard tracking, submission registry, and CV-vs-LB alignment.
-     7. `Freeze`: Khóa final candidate portfolio và các mutation ảnh hưởng submission (read-only diagnostics, inspections, và audit logs vẫn hoạt động bình thường).
-     8. `Closure`: Post-competition audit receipts, code archiving, and technical report generation.
-   - **Deterministic Guardrails & Clear Boundaries**:
-     - `ExperimentValidator` (`harness/validator.py`): Verifies leakage prevention, group split integrity, schema alignment, and shape consistency.
-     - `GroundingGate` (`harness/grounding_gate.py`): Enforces epistemic verification (parent ID, problem addressed, hypothesis, grounded literature/empirical basis, and assumption register) before persisting any config.
-     - `EnsembleGuard` (`harness/ensemble_guard.py`): Verifies candidate diversity for ensembling and composition (Cohen's $\kappa \le 0.85$, disagreement $\ge 5.0\%$).
-     - `AuditGate` (`tools/audit_gate.py`): Performs pre-submission statistical verification, SHA-256 duplicate detection, Minimum Meaningful Effect Size (MMES $\ge$ 2.0%), McNemar significance testing, and signs `AUDIT_RECEIPT.json`.
+1. **Layer 1 — Assistant / Engineer**:
+   - Analyzes validation metrics, failure slices, and dataset distributions.
+   - Formulates atomic hypotheses (changing one variable or intervention at a time).
+2. **Layer 2 — Agent Bridge (`harness/agent_bridge.py` & `tools/agent_bridge_cli.py`)**:
+   - **Context Packet (`context`)**: Returns a concise JSON/Markdown packet containing current task settings, top leaderboard models, UCB branch recommendations, and recent bottlenecks.
+   - **Session & Budgets (`start-session`)**: Tracks experiment counts, GPU runtime, and consecutive non-improving runs against optional user limits.
+   - **Action Governance (`act`)**:
+     - *Automatic*: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`.
+     - *Resource-managed*: `establish_baseline_anchor`, `run_full_validation`, `promote_candidate`, `build_ensemble`.
+     - *User approval required*: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`.
+3. **Layer 3 — Execution Harness**:
+   - **Runner (`harness/runner.py`)**: Executes models across supported paradigms (Classical ML, Transformers, QLoRA, Reasoning LLMs) and validation schemes (holdout, k-fold, debug probe).
+   - **Solution Tree (`harness/tree_journal.py`)**: Tracks experiment lineage, scores, and parent-child relations.
+   - **Guardrails**: Validates data splits (`harness/validator.py`), checks ensemble diversity (`harness/ensemble_guard.py`), and verifies submissions (`tools/audit_gate.py`).
 
 ---
 
-## 2. Universal Operating Principles
+## 2. Operating Principles
 
-1. **Grounded Experiment Creation**:
-   - Step 1: Construct candidate config in-memory.
-   - Step 2: Validate through `GroundingGate.verify_config()`.
-   - Step 3: Persist verified config to `configs/exp<NNN>_<branch>_<descriptor>.yaml`.
-2. **Experiment-to-Candidate Governance**:
-   - Running `run_full_validation` computes OOF metrics and updates `TreeJournal`. An experiment does **not** automatically become a competition candidate.
-   - Antigravity analyzes diagnostics/bottlenecks, then explicitly invokes `promote_candidate` or `synthesize_candidate` to enter the **Candidate Pool**.
-3. **Reproducibility & Immutability**:
-   - Set fixed seed (`42`), record git commit hash, and write resolved configs.
-   - Never overwrite existing folders inside `artifacts/`. Raw data files are strictly read-only.
-4. **Two-Tier Memory System**:
-   - **Tier 1 (Global)**: `EXPERIMENTS.md` (Hall of Fame & Idea Graveyard) + `artifacts/journal.json` (AIDE UCB Tree).
-   - **Tier 2 (Local)**: `artifacts/<exp_id>/EXPERIMENT_CARD.md` & `DIAGNOSTICS.md` (detailed error slices).
+1. **Grounded Configurations**:
+   - Construct experiment configs using the schema in `configs/exp000_template.yaml`.
+   - Specify the parent experiment ID, problem addressed, atomic hypothesis, and verification steps.
+2. **Atomic Interventions**:
+   - Change one variable at a time (e.g. feature representation, loss function, or model family) so performance deltas can be cleanly attributed.
+3. **Fast Probes Before Full Runs**:
+   - Run a single fold or debug probe (`--debug --fold 0`) first to verify code syntax and loss convergence before committing full multi-fold or cloud GPU resources.
+4. **Reproducibility**:
+   - Use fixed random seeds (`seed: 42`). Never overwrite existing artifacts in `artifacts/`.
 
 ---
 
-## 3. Declarative Task Contracts & Competition Adapters
+## 3. Task Specifications & Competition Presets
 
-The Core Harness is 100% domain-agnostic. All competition-specific rules, schemas, and metrics are declared declaratively in `configs/task.yaml`:
+The harness is task-agnostic. Competition-specific schemas and metrics are defined declaratively in `configs/task.yaml`:
 
-- **Universal Task Specification (`configs/task.yaml`)**:
-  - `name`: Competition / benchmark identifier.
-  - `platform`: `kaggle`, `codabench`, `drivendata`, `custom`.
+- **Task Definition (`configs/task.yaml`)**:
+  - `name`: Benchmark or competition identifier.
   - `task_type`: `classification`, `regression`, `multi_label`, `ranking`.
-  - `modality`: `text`, `tabular`, `vision`, `multimodal`.
-  - `primary_metric`: Primary evaluation metric (e.g. `Macro-F1`, `ROC-AUC`, `RMSE`, `LogLoss`).
-  - `direction`: Optimization direction (`maximize` | `minimize`).
+  - `primary_metric`: Primary optimization metric (`macro_f1`, `roc_auc`, `rmse`, `logloss`, etc.).
+  - `direction`: `maximize` or `minimize`.
   - `subtasks`: Optional array of subtasks with weights, metric formulas, and conditional filtering.
-- **Validation Protocols**:
-  - `holdout`: Fast evaluation against a designated dev set (`dev_split_name`).
-  - `kfold` / `GroupKFold` / `StratifiedKFold`: Cross-validation with anti-leakage grouping (`group_column`).
-  - `probe_samples`: Low-cost debug slice for rapid syntactic and convergence verification.
-- **Predefined Presets (`configs/tasks/`)**:
+- **Built-in Presets (`configs/tasks/`)**:
   - `configs/tasks/kaggle_tabular_regression.yaml`
   - `configs/tasks/kaggle_binary_classification.yaml`
-  - `configs/tasks/stereoqueereval.yaml` (SemEval Multi-Task NLP Reference)
+  - `configs/tasks/stereoqueereval.yaml` (Multi-Task NLP Reference)
 
 ---
 
-## 4. Standard Operating Procedure (SOP) via Agent Bridge
+## 4. Standard Workflow via Agent Bridge
 
 ```powershell
-# 1. Inspect Context Packet (HUD, TreeJournal UCB, Diagnostics Bottlenecks)
+# 1. Inspect current status and recommendations
 python tools/agent_bridge_cli.py context
 
-# 2. Start / Configure Session with Budgets
+# 2. Start a work session with a specific goal
 python tools/agent_bridge_cli.py start-session --goal "Improve primary validation metric" --max-experiments 3
 
-# 3. Create Grounded Config (In-memory verification -> Persist)
+# 3. Create a verified experiment configuration
 python tools/agent_bridge_cli.py act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_pipeline_v1"}'
 
-# 4. Smoke Test (Fold 0 or Debug Probe)
+# 4. Run a fast smoke test (Fold 0 or debug probe)
 python tools/agent_bridge_cli.py act --action run_smoke_test --params '{"config_path": "configs/<exp_config>.yaml"}'
 
-# 5. Full Validation (Local / Modal / Kaggle)
+# 5. Run full validation (local, modal, or kaggle)
 python tools/agent_bridge_cli.py act --action run_full_validation --params '{"config_path": "configs/<exp_config>.yaml", "backend": "local"}'
 
-# 6. Antigravity Analyzes Observation -> Promote Single Model OR Synthesize Composition
-# Option A: Promote single verified experiment to Candidate Pool
-python tools/agent_bridge_cli.py act --action promote_candidate --params '{"exp_id": "<exp_id>", "name": "single_best_v1"}'
+# 6. Promote successful experiment to the candidate pool
+python tools/agent_bridge_cli.py act --action promote_candidate --params '{"exp_id": "<exp_id>", "name": "candidate_v1"}'
 
-# Option B: Synthesize multi-model composition (e.g. specialist router, weighted blend)
-python tools/agent_bridge_cli.py act --action synthesize_candidate --params '{"name": "router_v1", "mode": "specialist_router"}'
-
-# 7. Audit & Submission (Requires USER_APPROVAL / Human Sign-off)
+# 7. Package and audit a submission (requires human approval)
 python tools/agent_bridge_cli.py act --action prepare_submission --user-approved --params '{"exp_id": "<id>", "candidate_csv": "<cand_csv>", "baseline_csv": "<base_csv>"}'
 ```
 
 ---
 
-## 5. Command Reference
+## 5. CLI Command Reference
 
-| Action | Command | Governance |
+| Purpose | Command | Notes |
 |---|---|---|
-| Read Bridge Context Packet | `python tools/agent_bridge_cli.py context` | `Read-only` |
-| Execute Typed Bridge Action | `python tools/agent_bridge_cli.py act --action <name> --params '{...}'` | `AUTO / AUTO_WITH_LIMIT` |
-| Approve Pending Action | `python tools/agent_bridge_cli.py approve --session-id <session_id>` | `Human Sign-off` |
-| Solution Tree UCB Recommend | `python tools/journal_tool.py --recommend` | `Read-only` |
-| Direct Smoke Test | `python train.py --config configs/<exp_config>.yaml --debug --fold 0` | `Execution` |
-| Direct Full 5-Fold CV | `python train.py --config configs/<exp_config>.yaml` | `Execution` |
-| Audit Submission (SHA-256 / MMES) | `python tools/audit_gate.py --candidate <cand.csv> --baseline <base.csv> --output-zip submission.zip` | `AuditGate` |
-| Run Test Suite | `python -m unittest discover -s tests -p "test_*.py"` | `Verification` |
-
+| View Assistant Context | `python tools/agent_bridge_cli.py context` | Read-only status overview |
+| Execute Typed Action | `python tools/agent_bridge_cli.py act --action <name> --params '{...}'` | Runs supported harness actions |
+| UCB Branch Recommendation | `python tools/journal_tool.py --recommend` | Suggests next exploration branch |
+| Solution Tree Summary | `python tools/journal_tool.py --summary` | Lists all experiments in DAG |
+| Fast Smoke Test | `python train.py --config configs/<config>.yaml --debug --fold 0` | Fast convergence check |
+| Full Validation | `python train.py --config configs/<config>.yaml` | Runs all configured folds |
+| Pre-Submission Audit | `python tools/audit_gate.py --candidate <cand.csv> --baseline <base.csv> --output-zip submission.zip` | Enforces non-duplicate checks |
+| Run Test Suite | `python -m unittest discover -s tests -p "test_*.py"` | Runs full test suite |
