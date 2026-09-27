@@ -114,41 +114,27 @@ pip install -r requirements.txt
 cd dashboard && pnpm install && pnpm build && cd ..
 ```
 
-### 2. Competition Setup & 2-Stage Agentic Workflow
+### 2. Competition Onboarding (Agent vs. Manual)
 
-Competitions and benchmarks vary widely in their file structures: from local `.zip` archives and multi-language TSVs to separated feature/label tables. Rather than enforcing rigid dataset paths, ML-Harness leverages the reasoning and code-execution abilities of modern AI coding assistants (Antigravity IDE, Claude Code, OpenAI Codex) through a **2-Stage Workflow**:
+To onboard a competition into ML-Harness, the AI coding assistant needs **at least one** of two inputs:
+1. **A Dataset**: Local archive (`.zip`, `.tar`), folder of TSV/CSVs, or download URL.
+2. **A Task Context**: Competition name, problem link (Kaggle/Codabench), paper, or guidelines.
 
-```text
-Raw Competition Data (.zip / folder / URLs)
-                  │
-                  ▼
-┌────────────────────────────────────────────────────────┐
-│  STAGE 1: Exploration, Research & Harness Alignment    │
-│  • Extract & inspect archive (columns, types, targets) │
-│  • Web search competition rules & metric if low-context│
-│  • Configure configs/task.yaml                         │
-│  • Run python tools/inject_skill.py                    │
-└─────────────────────────┬──────────────────────────────┘
-                          │
-                          ▼
-┌────────────────────────────────────────────────────────┐
-│  STAGE 2: Validation Strategy, Baseline & Execution    │
-│  • Set up leak-free CV split (Stratified/Group/Time)   │
-│  • Create configs/exp001_baseline.yaml                 │
-│  • Fast smoke test (--debug --fold 0)                  │
-│  • Full CV run & Solution Tree DAG anchor              │
-└────────────────────────────────────────────────────────┘
-```
+The assistant autonomously resolves the missing half:
+- *If only Dataset is provided:* The agent inspects schemas and web-searches its origin to discover the competition, official metric, and rules.
+- *If only Task Context is provided:* The agent researches the problem and locates/downloads the dataset.
+- *If both are provided:* The agent cross-verifies alignment before configuring the harness.
 
-#### Option A: Agent-Driven (Prompt Your Assistant)
-Place your dataset or `.zip` file in the workspace, then prompt your assistant:
+#### Option A: Agent-Driven (The Master Prompt)
 
-1. **Stage 1 Prompt (Discovery & Alignment)**:
-   > *"I have placed my competition archive in `dataset/`. Please extract and inspect the files, search for the official competition rules/metric if needed, configure `configs/task.yaml`, and run `python tools/inject_skill.py`."*
-2. **Stage 2 Prompt (Baseline & Execution)**:
-   > *"Stage 1 is complete. Now configure an atomic baseline in `configs/exp001_baseline.yaml`, run a fast smoke test (`--debug --fold 0`), and train the full baseline."*
+Open the workspace in your assistant (Antigravity IDE, Claude Code, OpenAI Codex) and paste the comprehensive onboarding prompt:
 
-👉 **See [`docs/COMPETITION_ONBOARDING.md`](docs/COMPETITION_ONBOARDING.md) for full copy-pasteable prompt templates and detailed stage deliverables.**
+> *"You are an expert competitive ML engineer setting up this project using the ML-Harness framework.  
+> **Task Context**: [Insert competition name/URL, or 'None provided']  
+> **Dataset**: [Insert path to archive/folder, or 'None provided']  
+> Resolve the missing piece, explore data hygiene, configure `configs/task.yaml`, run `python tools/inject_skill.py`, design a leak-free validation split, run a smoke test (`--debug --fold 0`), and establish the baseline."*
+
+👉 **Read the full, in-depth prompt and scenario walkthroughs in [`docs/COMPETITION_ONBOARDING.md`](docs/COMPETITION_ONBOARDING.md).**
 
 #### Option B: Manual Setup (3 Terminal Commands)
 If setting up manually without an assistant:
