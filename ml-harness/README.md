@@ -67,9 +67,12 @@ ml-harness/
 │   ├── exp000_template.yaml    # Starter experiment template
 │   └── exp001_tfidf_baseline.yaml # Baseline configuration
 ├── dashboard/                  # React + Vite frontend source code
-├── docs/                       # Reference documentation
-│   ├── AIDE_SWE_ARCHITECTURE.md# Background on MCTS tree search and SWE-agent patterns
-│   └── KNOWLEDGE_BASE.md       # Modeling reference guide (NLP, Tabular, Loss functions)
+├── docs/                       # Technical documentation
+│   ├── architecture.md         # System design, Solution Tree DAG, and verification gates
+│   ├── knowledge_base.md       # Modeling reference catalog (backbones, tabular, loss functions)
+│   ├── agent_workflow.md       # AI assistant conventions and Agent Bridge integration
+│   └── prompts/                # Assistant prompt templates
+│       └── onboarding.md       # Master competition onboarding prompt
 ├── harness/                    # Core Python library
 │   ├── runner.py               # Universal experiment execution engine
 │   ├── task_spec.py            # Task definition parsing and metric evaluation
@@ -134,7 +137,7 @@ Open the workspace in your assistant (Antigravity IDE, Claude Code, OpenAI Codex
 > **Dataset**: [Insert path to archive/folder, or 'None provided']  
 > Resolve the missing piece, explore data hygiene, configure `configs/task.yaml`, run `python tools/inject_skill.py`, design a leak-free validation split, run a smoke test (`--debug --fold 0`), and establish the baseline."*
 
-👉 **Read the full, in-depth prompt and scenario walkthroughs in [`docs/COMPETITION_ONBOARDING.md`](docs/COMPETITION_ONBOARDING.md).**
+👉 **Read the full, in-depth prompt and scenario walkthroughs in [`docs/prompts/onboarding.md`](docs/prompts/onboarding.md).**
 
 #### Option B: Manual Setup (3 Terminal Commands)
 If setting up manually without an assistant:

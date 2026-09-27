@@ -101,7 +101,7 @@ Open the workspace in your assistant (Antigravity IDE, Claude Code, OpenAI Codex
 > **Dataset**: [Insert path to archive/folder, or 'None provided']  
 > Resolve the missing piece, explore data hygiene, configure `configs/task.yaml`, run `python tools/inject_skill.py`, design a leak-free validation split, run a smoke test (`--debug --fold 0`), and establish the baseline."*
 
-👉 **Read the full, in-depth prompt and scenario walkthroughs in [`ml-harness/docs/COMPETITION_ONBOARDING.md`](ml-harness/docs/COMPETITION_ONBOARDING.md).**
+👉 **Read the full, in-depth prompt and scenario walkthroughs in [`ml-harness/docs/prompts/onboarding.md`](ml-harness/docs/prompts/onboarding.md).**
 
 #### Option B: Manual Setup (3 Terminal Commands)
 If setting up manually without an assistant:

@@ -1,17 +1,8 @@
-# Competition Onboarding: The Universal Agent Prompt Guide
+# Master Onboarding Prompt
 
-When starting a machine learning competition or benchmark (Kaggle, Codabench, DrivenData, academic shared tasks), you typically have **at least one** of two things:
+Use this prompt with any AI coding assistant (Antigravity IDE, Claude Code, OpenAI Codex) to onboard a new competition or benchmark into ML-Harness.
 
-1. **A Dataset**: A local archive (`.zip`, `.tar.gz`), a raw folder, multiple TSV/CSV files, or a download URL.
-2. **A Task Context**: A competition name, problem statement, competition link, academic paper, or evaluation guidelines.
-
-You do **not** need to have both upfront, and you do **not** need manual CLI ingestion scripts. Modern AI coding assistants (Antigravity IDE, Claude Code, OpenAI Codex) possess deep reasoning, code execution, and web research capabilities to bridge the missing pieces autonomously.
-
----
-
-## The Master Onboarding Prompt
-
-Copy and paste this prompt to your AI assistant. Simply fill in whatever information you have (Dataset, Task Context, or both) and let the agent handle everything from extraction to the first verified baseline:
+## The Prompt
 
 ```text
 You are an expert competitive ML engineer setting up this project using the ML-Harness framework.
@@ -69,61 +60,26 @@ Your mission is to take this information, autonomously bridge any missing gaps, 
 
 ## Scenario Walkthroughs
 
-### Scenario A: You only have a local `.zip` file (No context)
+### Scenario A: Dataset Only
+When you have a local archive or dataset folder but no context:
 ```text
 - Task Context: None provided
-- Dataset: dataset/StereoQueerEval_training.zip (or data.zip in workspace)
+- Dataset: dataset/StereoQueerEval_training.zip
 ```
-**What the Agent does:**
-1. Unzips the file into a clean folder.
-2. Reads the files (e.g. `StereoQueerEval_EN_training.tsv`).
-3. Searches the web for `StereoQueerEval` and identifies:
-   - Competition: SemEval-2027 Task 4.
-   - Metric: Macro-F1 across subtasks (Stereotype, Hate Speech, Target).
-   - Evaluation scheme: Multilingual evaluation.
-4. Auto-generates `configs/task.yaml`, runs `tools/inject_skill.py`, and launches the baseline.
+The agent inspects file names, reads schema headers, searches online for matches, discovers the competition rules, sets `configs/task.yaml`, and trains the baseline.
 
-### Scenario B: You only have a competition link or name (No data downloaded)
+### Scenario B: Task Context Only
+When you have a competition name or URL but have not downloaded the dataset:
 ```text
 - Task Context: Kaggle "House Prices - Advanced Regression Techniques"
 - Dataset: None provided
 ```
-**What the Agent does:**
-1. Searches the competition rules and data schema.
-2. Identifies the primary metric: Log RMSE.
-3. Downloads the data via `kaggle competitions download -c house-prices-advanced-regression-techniques` (or provides the Kaggle API command if credentials are required).
-4. Unpacks `train.csv` and `test.csv`, writes `configs/task.yaml`, and trains a LightGBM/Ridge regression baseline.
+The agent searches competition guidelines, locates the data source, fetches/unpacks it into the workspace, creates the configuration, and launches the baseline.
 
-### Scenario C: You have both data and task instructions
+### Scenario C: Both Provided
+When you provide both the dataset location and problem statement:
 ```text
-- Task Context: Predicting customer churn with AUC-ROC optimization
-- Dataset: data/raw/customer_churn.csv
+- Task Context: Multi-label toxic comment classification optimizing Macro-F1
+- Dataset: data/train.tsv
 ```
-**What the Agent does:**
-1. Validates the columns against the problem description.
-2. Checks for class imbalance and missing value patterns.
-3. Sets up Stratified 5-Fold CV, configures `configs/task.yaml`, runs `tools/inject_skill.py`, and trains the baseline model.
-
----
-
-## Manual Fallback (For Terminal Enthusiasts)
-
-If you prefer executing the bootstrap manually without prompting an assistant:
-
-```bash
-# 1. Unzip your dataset archive into your chosen directory
-tar -xf dataset/my_competition_data.zip -C dataset/
-
-# 2. Pick a preset matching your task type
-cp configs/tasks/kaggle_tabular_regression.yaml configs/task.yaml
-# (Or kaggle_titanic.yaml, stereoqueereval.yaml, etc.)
-
-# 3. Inject task specifications into the agent skill
-python tools/inject_skill.py
-
-# 4. Run a fast smoke test (single fold debug probe)
-python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0
-
-# 5. Run full cross-validation
-python train.py --config configs/exp001_tfidf_baseline.yaml
-```
+The agent cross-validates schema consistency, establishes stratified cross-validation, and runs the baseline.
