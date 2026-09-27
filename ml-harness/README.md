@@ -110,21 +110,56 @@ cd ml-harness
 # Install Python dependencies
 pip install -r requirements.txt
 
-# (Optional) If you want to modify or rebuild the React dashboard:
+# (Optional) If modifying the React dashboard frontend:
 cd dashboard && pnpm install && pnpm build && cd ..
 ```
 
-### 2. Configure Your Task
+### 2. Dataset Acquisition
 
-Set up `configs/task.yaml` with your dataset details and target metric. You can copy one of the presets to get started:
+If starting fresh without a dataset, download your competition data into a `dataset/` directory:
 
+- **Kaggle CLI**:
+  ```bash
+  kaggle competitions download -c <competition-name> -p dataset/
+  tar -xf dataset/<competition-name>.zip -C dataset/
+  ```
+- **Direct Download / URL**:
+  ```bash
+  curl -L "<download-url>" -o dataset/data.zip
+  tar -xf dataset/data.zip -C dataset/
+  ```
+- **Hugging Face Datasets**:
+  ```bash
+  python -c "from datasets import load_dataset; ds = load_dataset('<dataset_name>'); ds['train'].to_pandas().to_csv('dataset/train.csv', index=False)"
+  ```
+
+---
+
+### 3. Choose Your Workflow: Agent vs. Manual
+
+#### Option A: Agent-Driven (Zero Configuration)
+If using an AI coding assistant (Antigravity IDE, Claude Code, OpenAI Codex):
+1. Open the repository in your editor.
+2. Prompt the assistant:
+   > *"Initialize the harness for my dataset in `dataset/train.csv`, configure `configs/task.yaml`, inject the skill, and run a smoke test."*
+3. The assistant auto-detects columns, generates the configuration, updates `.agents/skills/`, and verifies convergence on a debug probe.
+
+#### Option B: Manual Setup (3 Commands)
 ```bash
-# Example: Kaggle Tabular Regression
+# 1. Select a task preset matching your problem
 cp configs/tasks/kaggle_tabular_regression.yaml configs/task.yaml
+# (Or kaggle_binary_classification.yaml, stereoqueereval.yaml, etc.)
 
-# Example: Kaggle Binary Classification
-cp configs/tasks/kaggle_binary_classification.yaml configs/task.yaml
+# 2. Inject competition skill into .agents/skills/
+python tools/inject_skill.py
+
+# 3. Run a fast smoke test (single fold debug probe)
+python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0
 ```
+
+---
+
+### 4. Task Configuration Reference (`configs/task.yaml`)
 
 A minimal `configs/task.yaml` looks like this:
 

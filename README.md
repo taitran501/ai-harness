@@ -69,15 +69,64 @@ semeval_2027/
 
 ## 3. Quick Start
 
-### Installation
+### 1. Installation
 
 ```bash
-# 1. Install dependencies
+# Clone and enter the repository
+git clone https://github.com/taitran501/ml-harness.git
+cd semeval_2027
+
+# Install dependencies
 pip install -r requirements.txt
 pip install -r ml-harness/requirements.txt
 ```
 
-### Running Experiments
+### 2. Dataset Setup
+
+If you cloned a fresh repository and do not have the dataset yet, obtain it using one of the methods below:
+
+- **SemEval (This Benchmark)**:
+  ```bash
+  # Files are included in dataset/ or extract from the archive:
+  tar -xf dataset/StereoQueerEval_training.zip -C dataset/
+  ```
+- **Kaggle Competition**:
+  ```bash
+  kaggle competitions download -c <competition-name> -p dataset/
+  tar -xf dataset/<competition-name>.zip -C dataset/
+  ```
+- **Direct Download / URL**:
+  ```bash
+  curl -L "<download-url>" -o dataset/data.zip
+  tar -xf dataset/data.zip -C dataset/
+  ```
+
+---
+
+### 3. Choose Your Workflow: Agent vs. Manual
+
+#### Option A: Agent-Driven (Zero Configuration)
+If working with Antigravity IDE, Claude Code, or Codex:
+1. Open the project folder in your agent editor.
+2. Prompt the agent:
+   > *"Initialize the task with the dataset in `dataset/`, configure `configs/task.yaml`, inject the skill, and run a smoke test."*
+3. The agent inspects the data, writes the schema, runs `python tools/inject_skill.py`, and validates the initial baseline probe automatically.
+
+#### Option B: Manual Setup (3 Commands)
+```bash
+# 1. Select a task preset (or configure configs/task.yaml)
+cp ml-harness/configs/tasks/stereoqueereval.yaml configs/task.yaml
+
+# 2. Inject competition skill into .agents/skills/
+python tools/inject_skill.py
+
+# 3. Run a fast smoke test (single fold debug probe)
+python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0
+```
+
+---
+
+### 4. Running Experiments
 
 ```bash
 # Fast smoke test (single fold debug probe)
@@ -90,7 +139,7 @@ python train.py --config configs/exp001_tfidf_baseline.yaml
 python train.py --config configs/exp001_tfidf_baseline.yaml --force
 ```
 
-### Inspecting Solution Tree & UCB Recommendations
+### 5. Inspecting Solution Tree & UCB Recommendations
 
 ```bash
 # View all experiments and performance in the solution DAG
@@ -100,7 +149,7 @@ python tools/journal_tool.py --summary
 python tools/journal_tool.py --recommend
 ```
 
-### Starting the Web Dashboard
+### 6. Starting the Web Dashboard
 
 ```bash
 # Launch local web dashboard (serves on http://localhost:8000)
