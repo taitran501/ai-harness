@@ -181,6 +181,8 @@ export interface DataConfig {
   seed?: number;
   id_column?: string;
   target_column?: string;
+  split_file?: string;
+  fold_file?: string;
   missing_data_policy?: string;
   external_data_policy?: string;
 }

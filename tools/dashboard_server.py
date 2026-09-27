@@ -88,44 +88,42 @@ def get_next_experiment_id(branch: str = "feat", descriptor: str = "run") -> Dic
 
 DEFAULT_STRATEGY_CARDS = [
     {
-        "id": "feat_video_title",
+        "id": "feat_representation",
         "branch": "feat",
-        "title": "Video Title Context Injection",
-        "problem_addressed": "Baseline TF-IDF on raw comments misses topical cues needed for implicit hate speech.",
-        "hypothesis": "Prepending YouTube video title (yt_title) to comment text provides topical context to improve Subtask B implicit hate Macro-F1.",
-        "intervention": "Prepend yt_title to raw comment text before vectorization: '[TITLE] ' + yt_title + ' [COMMENT] ' + text.",
+        "title": "Input Representation & Feature Pipeline",
+        "problem_addressed": "Raw feature representations miss higher-order interactions and domain signals.",
+        "hypothesis": "Composing structured feature representations and n-gram/polynomial features improves baseline score.",
+        "intervention": "Compose enriched input representation and normalize numerical/text features.",
         "approach_type": "ml",
         "model_family": "linear",
         "model_name": "logistic_regression",
-        "descriptor": "video_title_ctx",
-        "rationale": "YouTube comments frequently reference video topics implicitly. Injecting yt_title bridges the lexical knowledge gap.",
-        "target_tasks": ["Subtask A (Stereotype)", "Subtask B (Hate Speech)"],
+        "descriptor": "feat_pipeline",
+        "rationale": "Structured representation engineering exposes predictive feature interactions directly to the classifier.",
+        "target_tasks": ["Primary Task Metric"],
         "uncertainty_level": "low",
         "source_type": "verified_baseline",
-        "source_id": "sklearn_tfidf_with_context",
+        "source_id": "feature_pipeline",
         "model_params": {
             "C": 1.0,
             "max_iter": 1000,
-            "ngram_range": [1, 2],
-            "max_features": 25000,
         },
     },
     {
-        "id": "model_xlmr_base",
+        "id": "model_pretrained_encoder",
         "branch": "model",
-        "title": "Multilingual Transformer (XLM-RoBERTa)",
-        "problem_addressed": "Classical n-grams cannot capture semantic nuances and transfer learning across EN, IT, and NL comments.",
-        "hypothesis": "Fine-tuning xlm-roberta-base with shared multilingual representations will improve cross-lingual transfer across non-English splits.",
-        "intervention": "Replace TF-IDF + LogisticRegression backbone with fine-tuned xlm-roberta-base with pooled classification heads.",
+        "title": "Pretrained Transformer Backbone",
+        "problem_addressed": "Classical shallow models lack contextual representations across challenging test slices.",
+        "hypothesis": "Fine-tuning a modern pretrained encoder backbone captures deep context and improves validation performance.",
+        "intervention": "Replace shallow baseline with fine-tuned pretrained transformer encoder.",
         "approach_type": "dl",
         "model_family": "transformer",
-        "model_name": "xlm-roberta-base",
-        "descriptor": "xlmr_multilingual",
-        "rationale": "Cross-lingual pretraining transfers toxic lexical knowledge learned in English directly to low-resource Italian and Dutch subsets.",
-        "target_tasks": ["All Subtasks (A, B, C)"],
+        "model_name": "pretrained_encoder_base",
+        "descriptor": "transformer_backbone",
+        "rationale": "Pretrained representations transfer rich semantic abstractions directly to the competition dataset.",
+        "target_tasks": ["All Prediction Targets"],
         "uncertainty_level": "medium",
         "source_type": "huggingface_hub",
-        "source_id": "FacebookAI/xlm-roberta-base",
+        "source_id": "pretrained_encoder",
         "model_params": {
             "learning_rate": 2e-5,
             "batch_size": 16,
@@ -135,18 +133,18 @@ DEFAULT_STRATEGY_CARDS = [
         },
     },
     {
-        "id": "loss_focal_identities",
+        "id": "loss_focal_balanced",
         "branch": "loss",
-        "title": "Class-Balanced Focal Loss for Subtask C",
-        "problem_addressed": "Extreme class imbalance in Subtask C target identities ('a', 'i', 'nb' have <20 positive samples), resulting in near-zero recall.",
-        "hypothesis": "Replacing standard Binary Cross-Entropy with Focal Loss (gamma=2.0, alpha=0.25) will penalize easy negatives and improve rare identity recall.",
-        "intervention": "Switch Subtask C identity loss objective from BCE to SigmoidFocalLoss(gamma=2.0, alpha=0.25).",
+        "title": "Class-Balanced / Focal Loss Optimization",
+        "problem_addressed": "Severe class imbalance and label skew degrade recall on minority classes.",
+        "hypothesis": "Employing focal loss with dynamically adjusted alpha focuses gradient updates on hard minority examples.",
+        "intervention": "Switch cross-entropy objective to Class-Balanced Focal Loss (gamma=2.0, alpha=0.25).",
         "approach_type": "dl",
         "model_family": "transformer",
-        "model_name": "xlm-roberta-base",
-        "descriptor": "focal_rare_identities",
+        "model_name": "pretrained_encoder_base",
+        "descriptor": "focal_balanced_loss",
         "rationale": "Focal Loss dynamically scales cross-entropy down for easy negatives, focusing gradients squarely on hard rare minority classes.",
-        "target_tasks": ["Subtask C (Identities: l, g, b, t, q, i, a, nb)"],
+        "target_tasks": ["Minority Target Classes"],
         "uncertainty_level": "medium",
         "source_type": "verified_literature",
         "source_id": "lin2017focal",
@@ -159,38 +157,37 @@ DEFAULT_STRATEGY_CARDS = [
     {
         "id": "ens_threshold_opt",
         "branch": "ens",
-        "title": "Language-Specific Threshold Optimization",
-        "problem_addressed": "Static 0.5 decision thresholds are suboptimal because label priors and classifier calibration diverge significantly across EN, IT, and NL.",
-        "hypothesis": "Optimizing decision thresholds per language on out-of-fold validation probabilities via Nelder-Mead will improve Macro-F1 calibration without extra training.",
-        "intervention": "Apply harness/tuning_engine.py ThresholdOptimizer per language split on out-of-fold validation logits.",
+        "title": "Out-of-Fold Threshold Calibration & Ensembling",
+        "problem_addressed": "Static decision thresholds produce miscalibrated confidence scores across validation partitions.",
+        "hypothesis": "Optimizing decision thresholds per slice on out-of-fold validation probabilities via Nelder-Mead maximizes primary metric.",
+        "intervention": "Apply harness ThresholdOptimizer on out-of-fold validation probabilities.",
         "approach_type": "ml",
         "model_family": "ensemble",
         "model_name": "threshold_optimizer",
-        "descriptor": "threshold_tuning_per_lang",
+        "descriptor": "threshold_tuning",
         "rationale": "Threshold search shifts the precision-recall trade-off to maximize Macro-F1 directly on validation folds without retraining.",
-        "target_tasks": ["Subtask A", "Subtask B", "Subtask C"],
+        "target_tasks": ["All Targets"],
         "uncertainty_level": "low",
         "source_type": "verified_baseline",
         "source_id": "harness.tuning_engine",
         "model_params": {
             "method": "nelder-mead",
             "metric": "macro_f1",
-            "per_language": True,
         },
     },
     {
         "id": "model_unsloth_qwen_7b",
         "branch": "model",
-        "title": "Unsloth Fast QLoRA (Qwen2.5 7B Instruct)",
-        "problem_addressed": "Encoder transformers struggle with subtle implicit toxicity and complex sarcasm across multilingual comments.",
-        "hypothesis": "Fine-tuning unsloth/Qwen2.5-7B-Instruct with 4-bit QLoRA (r=16, alpha=32) unlocks generative world knowledge for implicit hate classification.",
-        "intervention": "Execute Unsloth fast LoRA fine-tuning on 4-bit quantized Qwen-2.5-7B with custom classification instruction formatting.",
+        "title": "Fast QLoRA Fine-Tuning (Qwen2.5 7B)",
+        "problem_addressed": "Full fine-tuning large language models exceeds single-GPU memory and compute limits.",
+        "hypothesis": "Fine-tuning with 4-bit QLoRA adapts generative knowledge to the competition format with minimal compute.",
+        "intervention": "Execute 4-bit QLoRA fine-tuning on quantized base LLM with custom classification formatting.",
         "approach_type": "llm",
         "model_family": "llm_peft",
         "model_name": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
         "descriptor": "unsloth_qwen_7b_qlora",
-        "rationale": "4-bit quantized Qwen 7B consumes <9GB VRAM with Unsloth Triton kernels while capturing multilingual context.",
-        "target_tasks": ["Subtask A (Stereotype)", "Subtask B (Implicit Hate)", "Subtask C (Target Type)"],
+        "rationale": "4-bit quantized Qwen 7B consumes <9GB VRAM with Unsloth Triton kernels while capturing domain context.",
+        "target_tasks": ["Primary Targets"],
         "param_size": "7B",
         "uncertainty_level": "low",
         "source_type": "unsloth_hub",
@@ -202,8 +199,6 @@ DEFAULT_STRATEGY_CARDS = [
             "lora_r": 16,
             "lora_alpha": 32,
             "lora_dropout": 0.05,
-            "target_modules": "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
-            "context_length": 8192,
             "epochs": 3,
             "learning_rate": 2e-4,
         },
@@ -212,15 +207,15 @@ DEFAULT_STRATEGY_CARDS = [
         "id": "model_deepseek_r1_cot_14b",
         "branch": "model",
         "title": "DeepSeek-R1 Distill 14B Chain-of-Thought",
-        "problem_addressed": "Implicit hate comments rely on coded linguistic framing that requires multi-step deductive reasoning to detect.",
-        "hypothesis": "Deploying distilled reasoning traces with DeepSeek-R1-Distill-Qwen-14B will deconstruct subtle derogatory tropes and improve minority class recall.",
-        "intervention": "Apply zero-shot chain-of-thought prompting with DeepSeek-R1-Distill-Qwen-14B and structured JSON classification parsing.",
+        "problem_addressed": "Complex classification tasks require structured reasoning steps prior to emitting categorical labels.",
+        "hypothesis": "Few-shot Chain-of-Thought prompting unpacks subtle nuances and establishes a strong zero-training baseline.",
+        "intervention": "Apply structured Chain-of-Thought prompting with JSON classification schema parsing.",
         "approach_type": "llm",
         "model_family": "llm_reasoning",
         "model_name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
         "descriptor": "deepseek_r1_cot_14b",
-        "rationale": "Reasoning-specialized distillation models excel at unpacking implicit subtext and multi-lingual metaphors without task-specific retraining.",
-        "target_tasks": ["Subtask B (Hate Speech)", "Subtask C (Target Type & Identity)"],
+        "rationale": "Reasoning models excel at unpacking implicit subtext and domain tropes without task-specific retraining.",
+        "target_tasks": ["Target Classifications"],
         "param_size": "14B",
         "uncertainty_level": "medium",
         "source_type": "huggingface_hub",
@@ -395,31 +390,30 @@ def save_task_config(task_data: Dict[str, Any]) -> None:
 TASK_PRESETS: List[Dict[str, Any]] = [
     {
         "id": "codabench_nlp_multitask",
-        "preset_name": "Codabench / SemEval NLP (Multi-Task)",
+        "preset_name": "Multi-Task NLP Classification Benchmark",
         "platform": "codabench",
-        "name": "StereoQueerEval",
+        "name": "Multi-Task Text Classification",
         "type": "Multi-Task Text Classification",
         "modality": "text",
         "primary_metric": "Macro-F1",
         "direction": "maximize",
-        "primary_metric_baseline": 0.6459,
-        "primary_metric_target": 0.85,
+        "primary_metric_baseline": 0.6500,
+        "primary_metric_target": 0.8500,
         "metrics": [
-            {"id": "subtask_a", "name": "Stereotype Detection", "metric": "Macro-F1", "direction": "maximize", "baseline_score": 0.6962, "target_score": 0.88, "weight": 0.333, "description": "Binary stereotype detection"},
-            {"id": "subtask_b", "name": "Hate Speech", "metric": "Macro-F1", "direction": "maximize", "baseline_score": 0.5238, "target_score": 0.80, "weight": 0.333, "description": "3-class classification"},
-            {"id": "subtask_c", "name": "Target Type & Identity", "metric": "Macro-F1", "direction": "maximize", "baseline_score": 0.7178, "target_score": 0.85, "weight": 0.334, "description": "Conditional oracle_hate evaluation"},
+            {"id": "subtask_1", "name": "Primary Classification", "metric": "Macro-F1", "direction": "maximize", "baseline_score": 0.7000, "target_score": 0.8800, "weight": 0.5, "description": "Primary binary/multiclass target"},
+            {"id": "subtask_2", "name": "Fine-Grained Classification", "metric": "Macro-F1", "direction": "maximize", "baseline_score": 0.6000, "target_score": 0.8200, "weight": 0.5, "description": "Secondary multi-label/fine-grained target"},
         ],
-        "languages": ["EN", "IT", "NL"],
-        "description": "Cross-lingual analysis of YouTube comments conditioned on video metadata.",
+        "languages": ["EN"],
+        "description": "Multi-task textual classification benchmark with grouped validation splits.",
         "data_config": {
             "train_path": "dataset/",
             "test_path": "dataset/test/",
             "split_strategy": "GroupKFold",
-            "group_column": "yt_title",
+            "group_column": "group_id",
             "n_folds": 5,
             "seed": 42,
-            "id_column": "StereoQueerEval_id",
-            "target_column": "stereotype,hate_speech,target_type,target_identities",
+            "id_column": "id",
+            "target_column": "target_1,target_2",
             "missing_data_policy": "drop_invalid_rows",
         },
         "competition_rules": {
@@ -669,31 +663,32 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
 
     # Extract latest Competition Submissions & Codabench Leaderboard feedback
     submission_feedback_lines = []
+    platform_name = str(task.get("platform", "Leaderboard")).title()
     try:
         sub_entries = SubmissionManager().get_all_submissions()
         if sub_entries:
             for s in sub_entries[-5:]:
-                cv_val = s.cv_scores.get("primary_metric") or s.cv_scores.get("subtask_a_macro") or "N/A"
-                lb_val = "Pending on Codabench"
+                cv_val = s.cv_scores.get("primary_metric") or s.cv_scores.get(primary_metric) or next(iter(s.cv_scores.values()), "N/A") if s.cv_scores else "N/A"
+                lb_val = f"Pending on {platform_name}"
                 if s.official_scores:
                     lb_num = (
                         s.official_scores.get("primary_metric")
-                        or s.official_scores.get("subtask_a_macro")
+                        or s.official_scores.get(primary_metric)
                         or s.official_scores.get("score")
                     )
                     if lb_num is not None:
                         lb_val = f"{float(lb_num):.4f}"
                 note_str = f" — Note: {s.notes}" if s.notes else ""
                 submission_feedback_lines.append(
-                    f"- **`{s.id}` (`{s.exp_id}`)**: Local CV = `{cv_val}` | Official Codabench LB = `{lb_val}`{note_str}"
+                    f"- **`{s.id}` (`{s.exp_id}`)**: Local CV = `{cv_val}` | Official {platform_name} LB = `{lb_val}`{note_str}"
                 )
     except Exception:
         pass
     if not submission_feedback_lines:
-        submission_feedback_lines.append("- No Codabench submissions recorded yet.")
+        submission_feedback_lines.append(f"- No {platform_name} submissions recorded yet.")
 
     diagnostics_notes.append("")
-    diagnostics_notes.append("### Competition Leaderboard (Codabench LB vs Local CV) Feedback")
+    diagnostics_notes.append(f"### Competition Leaderboard ({platform_name} LB vs Local CV) Feedback")
     diagnostics_notes.extend(submission_feedback_lines)
 
     # Normalize template_id / aliases
@@ -1765,7 +1760,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_api_create_config(self, data: Dict[str, Any]) -> None:
         exp_id = data.get("exp_id", "").strip()
-        parent_id = data.get("parent_id", "exp001_baseline_tfidf").strip()
+        parent_id = data.get("parent_id", "exp000_template").strip()
         branch = data.get("branch", "feat").strip()
         hypothesis = data.get("hypothesis", "").strip()
         intervention = data.get("intervention", "").strip()
@@ -1796,8 +1791,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "intervention": intervention or f"Controlled intervention for {exp_id}.",
             },
             "task": {
-                "name": task_cfg.get("name", "StereoQueerEval"),
-                "type": task_cfg.get("type", "Multi-Task Text Classification"),
+                "name": task_cfg.get("name", "Competition Task"),
+                "type": task_cfg.get("type", "Standard Classification"),
                 "primary_metric": task_cfg.get("primary_metric", "Macro-F1"),
                 "direction": task_cfg.get("direction", "maximize"),
                 "approach_type": approach_type,
@@ -1859,8 +1854,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "lora_dropout": m_params.get("lora_dropout", 0.05),
                 "target_modules": m_params.get("target_modules", "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"),
                 "use_cot": m_params.get("use_cot", True),
-                "system_prompt": "You are an expert NLP classifier for hate speech, stereotype, and target identity detection.",
-                "prompt_template": "Classify the following comment conditioned on YouTube context.\nTitle: {yt_title}\nComment: {text}",
+                "system_prompt": "You are an expert classification model specializing in nuance, semantic context, and robust reasoning.",
+                "prompt_template": "Classify the following input:\n\n{text}",
             }
 
         yaml_content = yaml.dump(new_cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)

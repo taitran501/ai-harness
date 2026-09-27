@@ -73,7 +73,24 @@ export const CustomExperimentNode = memo(({ id, data, selected }: NodeProps<Expe
             {data?.branch || 'exp'}
           </span>
           {data?.approach_type === 'llm' && (
-            <Sparkles className="w-2.5 h-2.5 text-purple-400 shrink-0" />
+            <span className="text-[8px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1 py-0.2 rounded font-mono font-semibold">
+              LLM
+            </span>
+          )}
+          {data?.approach_type === 'dl' && (
+            <span className="text-[8px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-1 py-0.2 rounded font-mono font-semibold">
+              DL
+            </span>
+          )}
+          {data?.approach_type === 'ml' && (
+            <span className="text-[8px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1 py-0.2 rounded font-mono font-semibold">
+              ML
+            </span>
+          )}
+          {data?.approach_type === 'hybrid' && (
+            <span className="text-[8px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1 py-0.2 rounded font-mono font-semibold">
+              HYBRID
+            </span>
           )}
           {data?.model_family && (
             <span

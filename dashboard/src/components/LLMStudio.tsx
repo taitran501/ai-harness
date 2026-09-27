@@ -29,11 +29,11 @@ import {
 } from '../types/experiment';
 
 const DEFAULT_PROMPT_TAGS = [
-  'StereoQueerEval_id',
-  'yt_title',
-  'yt_description',
-  'yt_comment',
-  'stereotype',
+  'id',
+  'text',
+  'prompt',
+  'context',
+  'label',
 ];
 
 const FALLBACK_UNSLOTH_MODELS: UnslothModelInfo[] = [
@@ -246,10 +246,10 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
   const [maxTokens, setMaxTokens] = useState<number>(512);
   const [useCot, setUseCot] = useState<boolean>(true);
   const [systemPrompt, setSystemPrompt] = useState<string>(
-    'You are an expert NLP classification model specializing in nuance, social context, and hate speech analysis.'
+    'You are an expert NLP classification model specializing in nuance, semantic context, and robust reasoning.'
   );
   const [promptTemplate, setPromptTemplate] = useState<string>(
-    'Analyze the following content:\n\nVideo Title: "{yt_title}"\nComment: "{yt_comment}"\n\nDetermine whether this comment contains stereotype or hate speech. Provide your final classification label strictly as requested.'
+    'Analyze the following input:\n\n{text}\n\nProvide your final classification prediction strictly as requested.'
   );
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -271,8 +271,8 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
   // Unsloth & LoRA Fine-Tuning state
   const [fineTuningFramework, setFineTuningFramework] = useState<'unsloth' | 'peft'>('unsloth');
   const [peftModelName, setPeftModelName] = useState('unsloth/Qwen2.5-7B-Instruct-bnb-4bit');
-  const [peftTextCol, setPeftTextCol] = useState('yt_comment');
-  const [peftTargetCol, setPeftTargetCol] = useState('stereotype');
+  const [peftTextCol, setPeftTextCol] = useState('text');
+  const [peftTargetCol, setPeftTargetCol] = useState('target');
   const [peftLoraR, setPeftLoraR] = useState(16);
   const [peftLoraAlpha, setPeftLoraAlpha] = useState(32);
   const [peftMaxSeqLength, setPeftMaxSeqLength] = useState(2048);
@@ -550,11 +550,11 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
 
     let rowData: Record<string, any> = {};
     if (useCustomInput) {
-      rowData = { text: customInputText || 'Sample test input', yt_comment: customInputText || 'Sample test input' };
+      rowData = { text: customInputText || 'Sample test input' };
     } else if (sampleData && sampleData.rows.length > selectedSampleIndex) {
       rowData = sampleData.rows[selectedSampleIndex];
     } else {
-      rowData = { text: 'Test input comment', yt_comment: 'Test input comment' };
+      rowData = { text: 'Test input sample' };
     }
 
     const validClasses: string[] = [];
@@ -1346,7 +1346,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     value={peftTextCol}
                     onChange={(e) => setPeftTextCol(e.target.value)}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200"
-                    placeholder="e.g. yt_comment"
+                    placeholder="e.g. text"
                   />
                 </div>
 
@@ -1357,7 +1357,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     value={peftTargetCol}
                     onChange={(e) => setPeftTargetCol(e.target.value)}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200"
-                    placeholder="e.g. stereotype"
+                    placeholder="e.g. target"
                   />
                 </div>
               </div>

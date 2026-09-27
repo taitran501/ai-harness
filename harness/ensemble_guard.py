@@ -84,10 +84,22 @@ class EnsembleGuard:
         target_col = col
         if not target_col:
             first_df = constituent_dfs[0]
-            target_col = next(
-                (c for c in first_df.columns if c.startswith("pred_")),
-                "pred_stereotype" if "pred_stereotype" in first_df.columns else first_df.columns[0],
-            )
+            try:
+                from harness.task_spec import load_active_task_spec
+                spec = load_active_task_spec()
+                if spec.primary_target:
+                    pred_cand = f"pred_{spec.primary_target}"
+                    if pred_cand in first_df.columns:
+                        target_col = pred_cand
+                    elif spec.primary_target in first_df.columns:
+                        target_col = spec.primary_target
+            except Exception:
+                pass
+            if not target_col:
+                target_col = next(
+                    (c for c in first_df.columns if c.startswith("pred_")),
+                    first_df.columns[0],
+                )
 
         errors = []
         pairwise_stats = []

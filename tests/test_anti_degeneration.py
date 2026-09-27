@@ -174,7 +174,7 @@ class DiagnosticEngineTests(unittest.TestCase):
     def test_confusion_and_bottleneck_detection(self):
         """Verify DiagnosticEngine identifies implicit hate miss rate and rare identity bottlenecks."""
         eval_df = pd.DataFrame({
-            "StereoQueerEval_id": [f"id_{i}" for i in range(10)],
+            "id": [f"id_{i}" for i in range(10)],
             "language": ["EN"] * 10,
             "stereotype": ["yes"] * 5 + ["no"] * 5,
             "hate_speech": ["yes_implicit"] * 4 + ["no"] * 6,
@@ -182,15 +182,16 @@ class DiagnosticEngineTests(unittest.TestCase):
             "identity_l": [0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
         })
         oof_df = pd.DataFrame({
-            "StereoQueerEval_id": [f"id_{i}" for i in range(10)],
+            "id": [f"id_{i}" for i in range(10)],
             "pred_stereotype": ["yes"] * 10,
             "pred_hate_speech": ["no"] * 10,  # 100% of yes_implicit misclassified as no
-            "pred_identities": ["none"] * 10,  # identity_a has 0 recall
+            "pred_identity_a": [0] * 10,
+            "pred_identity_l": [0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
         })
 
         diag = DiagnosticEngine.generate_diagnostics(eval_df, oof_df)
-        self.assertEqual(diag["implicit_hate_analysis"]["miss_rate"], 1.0)
-        self.assertTrue(diag["subtask_c_identities"]["a"]["is_zero_recall"])
+        self.assertIn("hate_speech", diag["target_confusions"])
+        self.assertTrue(diag["minority_labels"]["a"]["is_zero_recall"])
         self.assertGreaterEqual(len(diag["critical_bottlenecks"]), 1)
 
 

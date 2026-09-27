@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI tool for managing StereoQueerEval competition submissions and score tracking.
+"""CLI tool for managing competition submissions and score tracking.
 
 Enables agents and human engineers to:
 1. Register verified submissions through the statistical audit gate into submissions/.
@@ -22,7 +22,7 @@ from harness.submission_manager import SubmissionManager
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="StereoQueerEval Submission Lifecycle & Score Tracking CLI"
+        description="Competition Submission Lifecycle & Score Tracking CLI"
     )
     subparsers = parser.add_subparsers(dest="action", help="Action to perform")
 
@@ -51,13 +51,11 @@ def main() -> None:
     # 3. Record Score Action
     score_parser = subparsers.add_parser("record-score", help="Record official scores from competition leaderboard")
     score_parser.add_argument("--sub-id", required=True, help="Submission ID to update (e.g., sub_001_exp001)")
-    score_parser.add_argument("--macro-a", type=float, default=None, help="Official Subtask A Macro-F1")
-    score_parser.add_argument("--macro-b", type=float, default=None, help="Official Subtask B Macro-F1")
-    score_parser.add_argument("--macro-c-type", type=float, default=None, help="Official Subtask C Target Type Macro-F1")
-    score_parser.add_argument("--macro-c-id", type=float, default=None, help="Official Subtask C Identity Micro/Macro-F1")
+    score_parser.add_argument("--score", type=float, default=None, help="Official primary metric score")
     score_parser.add_argument("--split-type", choices=["public", "private"], default="public", help="Leaderboard split")
     score_parser.add_argument("--notes", default="", help="Additional feedback or notes from competition portal")
-    score_parser.add_argument("--scores-json", default=None, help="JSON string of arbitrary custom scores (e.g. '{\"f1\": 0.85}')")
+    score_parser.add_argument("--scores-json", default=None, help="JSON string of arbitrary custom scores (e.g. '{\"macro_f1\": 0.85, \"rmse\": 0.12}')")
+    score_parser.add_argument("--metric", nargs=2, action="append", metavar=("KEY", "VAL"), help="Additional metric key-value pair, e.g. --metric f1 0.85")
 
     # 4. Mark Submitted Action
     sub_parser = subparsers.add_parser("mark-submitted", help="Mark submission as uploaded to competition portal")
@@ -94,23 +92,28 @@ def main() -> None:
 
     elif args.action == "record-score":
         try:
-            custom_scores = None
+            custom_scores = {}
+            if getattr(args, "metric", None):
+                for k, v in args.metric:
+                    try:
+                        custom_scores[k] = float(v)
+                    except ValueError:
+                        custom_scores[k] = v
             if getattr(args, "scores_json", None):
                 import json
                 try:
-                    custom_scores = json.loads(args.scores_json)
+                    parsed = json.loads(args.scores_json)
+                    if isinstance(parsed, dict):
+                        custom_scores.update(parsed)
                 except Exception as e:
                     print(f"Error parsing --scores-json: {e}", file=sys.stderr)
                     sys.exit(1)
             entry = mgr.record_official_score(
                 sub_id=args.sub_id,
-                macro_a=args.macro_a,
-                macro_b=args.macro_b,
-                macro_c_type=args.macro_c_type,
-                macro_c_id=args.macro_c_id,
+                primary_score=args.score,
+                scores=custom_scores,
                 split_type=args.split_type,
                 notes=args.notes,
-                custom_scores=custom_scores,
             )
             print(f"===========================================================")
             print(f"🎯 RECORDED OFFICIAL SCORES FOR: {entry.id}")

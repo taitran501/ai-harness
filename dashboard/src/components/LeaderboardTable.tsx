@@ -160,6 +160,21 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                           LLM
                         </span>
                       )}
+                      {exp.approach_type === 'dl' && (
+                        <span className="text-[9px] bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-1 py-0.2 rounded font-mono font-semibold">
+                          DL
+                        </span>
+                      )}
+                      {exp.approach_type === 'ml' && (
+                        <span className="text-[9px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1 py-0.2 rounded font-mono font-semibold">
+                          ML
+                        </span>
+                      )}
+                      {exp.approach_type === 'hybrid' && (
+                        <span className="text-[9px] bg-purple-500/15 text-purple-300 border border-purple-500/30 px-1 py-0.2 rounded font-mono font-semibold">
+                          HYBRID
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="py-2.5 px-3 text-zinc-500">{exp.parent_id}</td>

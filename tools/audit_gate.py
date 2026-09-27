@@ -65,7 +65,7 @@ def audit_prediction_integrity(
         resolved_id = id_col or spec.id_column
         data_checks = getattr(spec, "data_checks", [])
     except Exception:
-        resolved_id = id_col or "StereoQueerEval_id"
+        resolved_id = id_col or "id"
         data_checks = []
 
     if resolved_id in df.columns and df[resolved_id].isnull().any():
@@ -89,10 +89,13 @@ def audit_prediction_integrity(
     checked_cols = set()
     try:
         from harness.task_spec import load_active_task_spec
-        spec = load_active_task_spec()
-        for subtask in getattr(spec, "subtasks", []):
-            col_name = getattr(subtask, "column", None)
-            classes = getattr(subtask, "classes", [])
+        subtasks_iterable = spec.subtasks.values() if isinstance(getattr(spec, "subtasks", None), dict) else getattr(spec, "subtasks", [])
+        for subtask in subtasks_iterable:
+            col_name = getattr(subtask, "column", None) or getattr(subtask, "target_column", None) or getattr(subtask, "id", None)
+            classes = list(getattr(subtask, "classes", []))
+            cond = getattr(subtask, "condition", None)
+            if cond and getattr(cond, "fallback_value", None) and cond.fallback_value not in classes:
+                classes.append(cond.fallback_value)
             if col_name and classes:
                 target_col = f"pred_{col_name}" if f"pred_{col_name}" in df.columns else (col_name if col_name in df.columns else None)
                 if target_col:
@@ -102,28 +105,6 @@ def audit_prediction_integrity(
                         errors.append(f"Subtask '{subtask.id}' column '{target_col}' has {len(invalid)} invalid values (expected {classes}).")
     except Exception:
         pass
-
-    # Check Subtask A valid values (backward compatible fallback)
-    if "pred_stereotype" in df.columns and "pred_stereotype" not in checked_cols:
-        invalid = df[~df["pred_stereotype"].isin(["yes", "no"])]
-        if len(invalid) > 0:
-            errors.append(f"Subtask A has {len(invalid)} invalid values (expected 'yes' or 'no').")
-
-    # Check Subtask B valid values (backward compatible fallback)
-    if "pred_hate_speech" in df.columns and "pred_hate_speech" not in checked_cols:
-        valid_b = ["no", "yes_explicit", "yes_implicit"]
-        invalid = df[~df["pred_hate_speech"].isin(valid_b)]
-        if len(invalid) > 0:
-            errors.append(f"Subtask B has {len(invalid)} invalid values (expected {valid_b}).")
-
-    # Check Subtask C conditioning (backward compatible if not already caught)
-    if "pred_hate_speech" in df.columns and "pred_target_type" in df.columns and not data_checks:
-        non_hate = df["pred_hate_speech"] == "no"
-        unconditioned = df[non_hate & (df["pred_target_type"] != "none")]
-        if len(unconditioned) > 0:
-            errors.append(
-                f"Oracle Hate rule violated: {len(unconditioned)} non-hateful rows have target_type != 'none'."
-            )
 
     return errors
 
@@ -140,7 +121,7 @@ def compute_diff_metrics(
             spec = load_active_task_spec()
             resolved_id = spec.id_column
         except Exception:
-            resolved_id = "StereoQueerEval_id"
+            resolved_id = "id"
     else:
         resolved_id = id_col
 
@@ -328,10 +309,12 @@ def main() -> None:
                 sys.exit(1)
             comp_dfs.append(pd.read_csv(p))
 
-        # Check diversity on Subtask A and Subtask B
+        # Check diversity on primary prediction column
+        pred_cols = [c for c in cand_df.columns if c.startswith("pred_")]
+        primary_col = pred_cols[0] if pred_cols else (cand_df.columns[1] if len(cand_df.columns) > 1 else cand_df.columns[0])
         passed_a, errs_a, details_a = EnsembleGuard.audit_constituent_diversity(
             comp_dfs,
-            col="pred_stereotype" if "pred_stereotype" in cand_df.columns else cand_df.columns[1],
+            col=primary_col,
             max_kappa=args.max_kappa,
             min_disagreement_pct=args.min_disagreement_pct,
         )
@@ -402,22 +385,40 @@ def main() -> None:
             gt_path = Path(args.ground_truth)
             if gt_path.exists():
                 gt_df = pd.read_csv(gt_path, sep="\t" if gt_path.suffix == ".tsv" else ",")
-                if "StereoQueerEval_id" in gt_df.columns and "stereotype" in gt_df.columns:
+                # Dynamically resolve ID column
+                resolved_id = None
+                for cid in ["id", "ID", "sample_id", "row_id", "uid"]:
+                    if cid in gt_df.columns and cid in cand_df.columns and cid in base_df.columns:
+                        resolved_id = cid
+                        break
+                if not resolved_id and getattr(args, "id_column", None):
+                    resolved_id = args.id_column if args.id_column in gt_df.columns else None
+
+                # Dynamically detect primary classification target
+                target_col = None
+                for col in gt_df.columns:
+                    pred_col = f"pred_{col}"
+                    if pred_col in cand_df.columns and pred_col in base_df.columns:
+                        target_col = col
+                        break
+
+                if resolved_id and target_col:
+                    pred_t = f"pred_{target_col}"
                     merged = pd.merge(
                         gt_df,
-                        cand_df[["StereoQueerEval_id", "pred_stereotype"]],
-                        on="StereoQueerEval_id",
+                        cand_df[[resolved_id, pred_t]],
+                        on=resolved_id,
                     )
                     merged = pd.merge(
                         merged,
-                        base_df[["StereoQueerEval_id", "pred_stereotype"]],
-                        on="StereoQueerEval_id",
+                        base_df[[resolved_id, pred_t]],
+                        on=resolved_id,
                         suffixes=("_cand", "_base"),
                     )
                     mcnemar_data = compute_mcnemar_significance(
-                        merged["stereotype"],
-                        merged["pred_stereotype_cand"],
-                        merged["pred_stereotype_base"],
+                        merged[target_col],
+                        merged[f"{pred_t}_cand"],
+                        merged[f"{pred_t}_base"],
                     )
                     print(
                         f"✔ McNemar's Test    : p-value = {mcnemar_data['p_value']} "

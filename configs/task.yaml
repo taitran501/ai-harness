@@ -9,7 +9,6 @@ task:
   direction: maximize
   primary_metric_baseline: 0.6459
   primary_metric_target: 0.85
-  min_meaningful_improvement: 0.002
   inputs:
   - name: comment
     type: text

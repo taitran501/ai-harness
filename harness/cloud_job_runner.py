@@ -97,12 +97,16 @@ class CloudJobManager:
             except Exception:
                 pass
 
-        # If baseline_csv not provided, try to find the best completed node's oof
+        # If baseline_csv not provided, try to find the best completed node's predictions/oof
         if not baseline_csv:
             journal = TreeJournal()
             best = journal.get_best_node()
-            if best and (PROJECT_ROOT / "artifacts" / best.id / "oof_predictions.csv").exists():
-                baseline_csv = str(PROJECT_ROOT / "artifacts" / best.id / "oof_predictions.csv")
+            if best:
+                for candidate_name in ("predictions.csv", "oof_predictions.csv"):
+                    candidate_file = PROJECT_ROOT / "artifacts" / best.id / candidate_name
+                    if candidate_file.exists():
+                        baseline_csv = str(candidate_file)
+                        break
 
         timestamp_str = time.strftime("%Y%m%d_%H%M%S")
         job_id = f"job_{timestamp_str}_{exp_id}"
@@ -135,11 +139,15 @@ class CloudJobManager:
             if backend == "modal" and gpu:
                 cmd.extend(["--gpu", gpu])
         elif backend == "local":
-            cmd.extend([
-                str(PROJECT_ROOT / "train.py"),
-                "--config",
-                config_path,
-            ])
+            if config_path.endswith(".py"):
+                script_path = PROJECT_ROOT / config_path if not Path(config_path).is_absolute() else Path(config_path)
+                cmd.append(str(script_path))
+            else:
+                cmd.extend([
+                    str(PROJECT_ROOT / "train.py"),
+                    "--config",
+                    config_path,
+                ])
         else:
             raise ValueError(f"Unsupported execution backend: {backend}")
 
@@ -214,7 +222,9 @@ class CloudJobManager:
     def _handle_post_run(self, job: CloudJob) -> None:
         """Run deterministic audit gate and solution tree synchronization."""
         exp_dir = PROJECT_ROOT / "artifacts" / job.exp_id
-        candidate_csv = exp_dir / "oof_predictions.csv"
+        candidate_csv = exp_dir / "predictions.csv"
+        if not candidate_csv.exists():
+            candidate_csv = exp_dir / "oof_predictions.csv"
         log_path = PROJECT_ROOT / job.log_file
 
         with open(log_path, "a", encoding="utf-8") as f:

@@ -50,20 +50,21 @@ const MODALITIES = [
 ];
 
 const DATA_STRATEGIES = [
-  { id: 'title_comment_concat', name: 'Context Concatenation ([yt_title] + [yt_comment])' },
-  { id: 'full_context_concat', name: 'Full Video Context ([yt_title] + [yt_description] + [yt_comment])' },
-  { id: 'comment_only', name: 'Comment Text Only ([yt_comment])' },
-  { id: 'lang_routed_context', name: 'Language-Routed Context (EN / IT / NL specific formatting)' },
+  { id: 'full_feature_concat', name: 'Concatenate All Input Columns' },
+  { id: 'primary_text_only', name: 'Primary Feature Column Only' },
+  { id: 'multimodal_fusion', name: 'Multimodal / Tabular + Text Concatenation' },
+  { id: 'standard_normalized', name: 'Standard Scaling & Normalization' },
 ];
 
 const IMBALANCE_STRATEGIES = [
-  { id: 'hierarchical_conditional', name: 'Hierarchical Filtering (Subtask C trained only on hate_speech != no)' },
-  { id: 'class_weighted', name: 'Inverse Frequency Class Weighting / Focal Loss' },
+  { id: 'class_weighted', name: 'Inverse Frequency Class Weighting' },
+  { id: 'focal_loss', name: 'Focal Loss / Hard Negative Mining' },
+  { id: 'resampling', name: 'Stratified Resampling (Oversample / Undersample)' },
   { id: 'none', name: 'Standard Empirical Distribution (No Resampling)' },
 ];
 
 const SPLIT_STRATEGIES = [
-  { id: 'GroupKFold', name: 'GroupKFold (Grouped by Video / Entity ID)' },
+  { id: 'GroupKFold', name: 'GroupKFold (Grouped by Entity / Group ID)' },
   { id: 'StratifiedKFold', name: 'StratifiedKFold (Stratified by Target Class)' },
   { id: 'KFold', name: 'Standard KFold (Random Split)' },
   { id: 'TimeSeriesSplit', name: 'TimeSeriesSplit (Temporal Forward Split)' },
@@ -97,19 +98,19 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [trainPath, setTrainPath] = useState<string>('dataset/');
   const [testPath, setTestPath] = useState<string>('dataset/test/');
   const [sampleSubPath, setSampleSubPath] = useState<string>('submissions/sample_submission.csv');
-  const [idColumn, setIdColumn] = useState<string>('StereoQueerEval_id');
-  const [featureColumns, setFeatureColumns] = useState<string>('yt_title, yt_description, yt_comment');
-  const [targetColumn, setTargetColumn] = useState<string>('stereotype, hate_speech, target_type, target_identities');
-  const [dataStrategy, setDataStrategy] = useState<string>('title_comment_concat');
-  const [imbalanceStrategy, setImbalanceStrategy] = useState<string>('hierarchical_conditional');
-  const [missingDataPolicy, setMissingDataPolicy] = useState<string>('fill_empty_context');
+  const [idColumn, setIdColumn] = useState<string>('id');
+  const [featureColumns, setFeatureColumns] = useState<string>('text, context');
+  const [targetColumn, setTargetColumn] = useState<string>('target');
+  const [dataStrategy, setDataStrategy] = useState<string>('full_feature_concat');
+  const [imbalanceStrategy, setImbalanceStrategy] = useState<string>('class_weighted');
+  const [missingDataPolicy, setMissingDataPolicy] = useState<string>('fill_empty');
 
   // Tab 3: Validation Protocol (CV)
   const [splitStrategy, setSplitStrategy] = useState<string>('GroupKFold');
-  const [groupColumn, setGroupColumn] = useState<string>('yt_title');
+  const [groupColumn, setGroupColumn] = useState<string>('group_id');
   const [nFolds, setNFolds] = useState<number>(5);
   const [seed, setSeed] = useState<number>(42);
-  const [foldFilePath, setFoldFilePath] = useState<string>('splits/fold_assignments.tsv');
+  const [foldFilePath, setFoldFilePath] = useState<string>('splits/folds.csv');
 
   // Tab 4: Competition Rules & Constraints
   const [allowLlm, setAllowLlm] = useState<boolean>(false);
@@ -523,7 +524,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. StereoQueerEval, House Prices, Titanic"
+                    placeholder="e.g. Kaggle Competition, House Prices, Titanic"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                   />
                 </div>
@@ -858,7 +859,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       type="text"
                       value={idColumn}
                       onChange={(e) => setIdColumn(e.target.value)}
-                      placeholder="e.g. StereoQueerEval_id"
+                      placeholder="e.g. id, row_id, item_id"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
                     />
                   </div>
@@ -869,7 +870,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       type="text"
                       value={featureColumns}
                       onChange={(e) => setFeatureColumns(e.target.value)}
-                      placeholder="e.g. yt_title, yt_description, yt_comment"
+                      placeholder="e.g. text, context, title"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
                     />
                   </div>
@@ -880,7 +881,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       type="text"
                       value={targetColumn}
                       onChange={(e) => setTargetColumn(e.target.value)}
-                      placeholder="e.g. stereotype, hate_speech, target_type, target_identities"
+                      placeholder="e.g. target, label, class"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
                     />
                   </div>
@@ -964,7 +965,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       type="text"
                       value={groupColumn}
                       onChange={(e) => setGroupColumn(e.target.value)}
-                      placeholder="e.g. yt_title, video_id"
+                      placeholder="e.g. group_id, user_id, entity_id"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs font-mono text-zinc-100"
                     />
                   </div>

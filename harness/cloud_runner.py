@@ -130,10 +130,12 @@ def run_via_kaggle(
 
 
 def handle_auto_submit(exp_id: str, baseline_csv: Optional[str] = None) -> None:
-    """Register verified submission if oof_predictions.csv exists."""
-    oof_path = Path("artifacts") / exp_id / "oof_predictions.csv"
-    if not oof_path.exists():
-        print(f"⚠ Auto-submit skipped: '{oof_path}' not found on local disk.", file=sys.stderr)
+    """Register verified submission if predictions.csv or oof_predictions.csv exists."""
+    pred_path = Path("artifacts") / exp_id / "predictions.csv"
+    if not pred_path.exists():
+        pred_path = Path("artifacts") / exp_id / "oof_predictions.csv"
+    if not pred_path.exists():
+        print(f"⚠ Auto-submit skipped: neither predictions.csv nor oof_predictions.csv found on local disk.", file=sys.stderr)
         return
 
     print(f"\n--- Initiating Auto-Submit for '{exp_id}' ---")
@@ -141,7 +143,7 @@ def handle_auto_submit(exp_id: str, baseline_csv: Optional[str] = None) -> None:
     try:
         entry = mgr.register_submission(
             exp_id=exp_id,
-            candidate_csv=str(oof_path),
+            candidate_csv=str(pred_path),
             baseline_csv=baseline_csv,
             notes="Auto-submitted after cloud execution",
         )

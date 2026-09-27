@@ -62,8 +62,8 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
       status: dataCfg.train_path ? 'passed' : 'warning',
       summary: `Train: ${dataCfg.train_path || 'dataset/'} — Context + Target Schema Configured`,
       attributes: [
-        { label: 'ID Column', value: dataCfg.id_column || 'StereoQueerEval_id' },
-        { label: 'Target Columns', value: dataCfg.target_column || 'stereotype, hate_speech...' },
+        { label: 'ID Column', value: dataCfg.id_column || 'id' },
+        { label: 'Target Columns', value: dataCfg.target_column || 'target' },
         { label: 'Validation Split', value: `${dataCfg.split_strategy || 'GroupKFold'} (${dataCfg.n_folds || 5} folds)` },
       ],
       tabKey: 'data',
