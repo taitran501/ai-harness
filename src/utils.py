@@ -148,19 +148,22 @@ def render_experiment_card(
     ]
 
     if not summary_df.empty:
-        grouped = (
-            summary_df.groupby(["language", "input_variant"], sort=True)[metric_cols]
-            .mean()
-            .reset_index()
-        )
-        for _, row in grouped.iterrows():
-            lines.append(
-                f"| {row['language']} | {row['input_variant']} | "
-                f"{row['a_macro_f1']:.4f} | {row['b_macro_f1']:.4f} | "
-                f"{row['c_target_type_macro_f1_oracle_hate']:.4f} | "
-                f"{row['c_identity_macro_f1_oracle_hate']:.4f} | "
-                f"{row['c_identity_micro_f1_oracle_hate']:.4f} |"
+        if "language" in summary_df.columns and "input_variant" in summary_df.columns and all(c in summary_df.columns for c in metric_cols):
+            grouped = (
+                summary_df.groupby(["language", "input_variant"], sort=True)[metric_cols]
+                .mean()
+                .reset_index()
             )
+            for _, row in grouped.iterrows():
+                lines.append(
+                    f"| {row['language']} | {row['input_variant']} | "
+                    f"{row['a_macro_f1']:.4f} | {row['b_macro_f1']:.4f} | "
+                    f"{row['c_target_type_macro_f1_oracle_hate']:.4f} | "
+                    f"{row['c_identity_macro_f1_oracle_hate']:.4f} | "
+                    f"{row['c_identity_micro_f1_oracle_hate']:.4f} |"
+                )
+        else:
+            lines.append(summary_df.to_markdown(index=False))
 
     lines += [
         "",

@@ -119,6 +119,31 @@ class SubtaskSpec:
 
 
 @dataclass
+class ValidationSpec:
+    """Specification for validation strategy across ML, DL, and LLM approaches."""
+
+    strategy: str = "kfold"  # 'kfold', 'holdout', 'zero_shot_eval', 'sample_probe'
+    num_folds: int = 5
+    dev_split_name: str = "dev"
+    probe_samples: int = 200
+    split_column: Optional[str] = None
+    split_file: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> ValidationSpec:
+        if not data:
+            return cls()
+        return cls(
+            strategy=data.get("strategy", "kfold"),
+            num_folds=int(data.get("num_folds", 5)),
+            dev_split_name=data.get("dev_split_name", "dev"),
+            probe_samples=int(data.get("probe_samples", 200)),
+            split_column=data.get("split_column"),
+            split_file=data.get("split_file"),
+        )
+
+
+@dataclass
 class UniversalTaskSpec:
     """Complete specification of a competition/experiment task."""
 
@@ -128,7 +153,24 @@ class UniversalTaskSpec:
     direction: str = "maximize"
     inputs: List[InputVariantSpec] = field(default_factory=list)
     subtasks: Dict[str, SubtaskSpec] = field(default_factory=dict)
+    validation: ValidationSpec = field(default_factory=ValidationSpec)
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def platform(self) -> str:
+        """Competition platform (Kaggle, Codabench, etc.)."""
+        return self.metadata.get("platform", "")
+
+    @property
+    def id_column(self) -> Optional[str]:
+        """ID column from data config."""
+        data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
+        return data_cfg.get("id_column")
+
+    @property
+    def group_column(self) -> Optional[str]:
+        """Group column for leakage prevention."""
+        return self.metadata.get("group_column")
 
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> UniversalTaskSpec:
@@ -150,6 +192,9 @@ class UniversalTaskSpec:
             spec = SubtaskSpec.from_dict(st)
             subtasks_dict[spec.id] = spec
 
+        val_cfg = task_cfg.get("validation", cfg.get("validation", {}))
+        val_spec = ValidationSpec.from_dict(val_cfg)
+
         return cls(
             name=task_cfg.get("name", task_cfg.get("task_name", "universal_task")),
             task_type=task_cfg.get("task_type", task_cfg.get("type", "classification")),
@@ -157,6 +202,7 @@ class UniversalTaskSpec:
             direction=task_cfg.get("direction", "maximize"),
             inputs=inputs_list,
             subtasks=subtasks_dict,
+            validation=val_spec,
             metadata=task_cfg,
         )
 
@@ -229,6 +275,116 @@ class UniversalTaskSpec:
 
         return masks
 
+    def evaluate_predictions(
+        self,
+        ground_truth_df: pd.DataFrame,
+        predictions: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Compute metrics across all declared subtasks dynamically according to spec."""
+        from sklearn.metrics import accuracy_score, f1_score, classification_report
+
+        results: Dict[str, Any] = {}
+        masks = self.compute_evaluation_masks(ground_truth_df)
+        total_weight = 0.0
+        weighted_score_sum = 0.0
+
+        for subtask_id, spec in self.subtasks.items():
+            mask = masks.get(subtask_id, np.ones(len(ground_truth_df), dtype=bool))
+            df_eval = ground_truth_df[mask].reset_index(drop=True)
+
+            # Retrieve predictions for this subtask
+            pred_vals = None
+            cand_keys = [
+                subtask_id,
+                spec.column,
+                f"pred_{spec.column}" if spec.column else None,
+                f"pred_{subtask_id}",
+            ]
+            for k in cand_keys:
+                if k and k in predictions:
+                    pred_vals = predictions[k]
+                    break
+
+            if pred_vals is None or len(df_eval) == 0:
+                results[subtask_id] = {"macro_f1": 0.0, "accuracy": 0.0, "score": 0.0}
+                continue
+
+            # Apply mask to predictions if needed
+            if len(pred_vals) == len(ground_truth_df):
+                eval_preds = np.array(pred_vals)[mask]
+            else:
+                eval_preds = np.array(pred_vals)
+
+            if spec.task_type in ("binary_classification", "multiclass_classification"):
+                col = spec.column
+                if not col or col not in df_eval.columns:
+                    continue
+                y_true = df_eval[col].astype(str)
+                y_pred = pd.Series(eval_preds).astype(str)
+                labels = [str(c) for c in spec.classes] if spec.classes else sorted(list(y_true.unique()))
+                macro_f1 = float(f1_score(y_true, y_pred, labels=labels, average="macro", zero_division=0))
+                acc = float(accuracy_score(y_true, y_pred))
+                st_res = {
+                    "macro_f1": macro_f1,
+                    "accuracy": acc,
+                    "per_class": classification_report(y_true, y_pred, labels=labels, output_dict=True, zero_division=0),
+                }
+                results[subtask_id] = st_res
+                # Backward-compatible aliases for oracle condition
+                if subtask_id == "subtask_c_type":
+                    results["subtask_c_target_type_oracle_hate"] = st_res
+                elif spec.condition and spec.condition.eval_condition_only:
+                    results[f"{subtask_id}_oracle"] = st_res
+
+                primary = macro_f1 if spec.primary_metric == "macro_f1" else acc
+                weighted_score_sum += primary * spec.weight
+                total_weight += spec.weight
+
+            elif spec.task_type == "multilabel_classification":
+                label_cols = []
+                if spec.column_prefix:
+                    label_cols = [f"{spec.column_prefix}{l}" for l in spec.labels]
+                elif spec.column and spec.column in df_eval.columns:
+                    label_cols = [spec.column]
+
+                if label_cols and all(c in df_eval.columns for c in label_cols):
+                    y_true = df_eval[label_cols].to_numpy()
+                    y_pred = np.array(eval_preds)
+                    macro_f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
+                    micro_f1 = float(f1_score(y_true, y_pred, average="micro", zero_division=0))
+                    acc = float(accuracy_score(y_true, y_pred))
+                    st_res = {
+                        "macro_f1": macro_f1,
+                        "micro_f1": micro_f1,
+                        "exact_match": acc,
+                    }
+                    results[subtask_id] = st_res
+                    if subtask_id == "subtask_c_identity":
+                        results["subtask_c_identity_oracle_hate"] = st_res
+                    elif spec.condition and spec.condition.eval_condition_only:
+                        results[f"{subtask_id}_oracle"] = st_res
+
+                    primary = macro_f1 if spec.primary_metric == "macro_f1" else micro_f1
+                    weighted_score_sum += primary * spec.weight
+                    total_weight += spec.weight
+
+            elif spec.task_type == "regression":
+                from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+                col = spec.column
+                if col and col in df_eval.columns:
+                    y_true = df_eval[col].astype(float)
+                    y_pred = pd.Series(eval_preds).astype(float)
+                    rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
+                    mae = float(mean_absolute_error(y_true, y_pred))
+                    r2 = float(r2_score(y_true, y_pred))
+                    results[subtask_id] = {"rmse": rmse, "mae": mae, "r2": r2}
+                    primary = r2 if spec.primary_metric == "r2" else -rmse
+                    weighted_score_sum += primary * spec.weight
+                    total_weight += spec.weight
+
+        results["composite_score"] = float(weighted_score_sum / total_weight) if total_weight > 0 else 0.0
+        return results
+
     @property
     def id_column(self) -> str:
         """Resolve primary ID column declared in task data_config."""
@@ -248,6 +404,76 @@ class UniversalTaskSpec:
     def test_path(self) -> str:
         """Resolve raw test dataset directory or file."""
         return self.metadata.get("data_config", {}).get("test_path", "dataset/test/")
+
+    @property
+    def primary_target(self) -> Optional[str]:
+        """Resolve primary target column or subtask identifier."""
+        if not self.subtasks:
+            return None
+        # Highest weighted subtask
+        sorted_st = sorted(self.subtasks.values(), key=lambda s: s.weight, reverse=True)
+        primary = sorted_st[0]
+        return primary.column or primary.id
+
+    def load_dataset_split(
+        self,
+        split: str = "train",
+        project_root: Path | str = ".",
+    ) -> pd.DataFrame:
+        """Load tabular/text dataset for a given split in a completely task-agnostic manner."""
+        # 0. If 'split' is an absolute/valid file path, load directly
+        split_path = Path(split)
+        if split_path.is_absolute() or split_path.exists():
+            if split_path.is_file():
+                sep = "\t" if split_path.suffix.lower() in (".tsv", ".tab") else ","
+                return pd.read_csv(split_path, sep=sep)
+
+        root = Path(project_root)
+        # Support both 'data_config' and 'data' keys (universal task.yaml convention)
+        data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
+
+        # 1. Custom path override in data_config
+        custom_path = data_cfg.get(f"{split}_path")
+        if custom_path:
+            p = Path(custom_path)
+            if not p.is_absolute():
+                p = root / custom_path
+            if p.is_file() and p.exists():
+                sep = "\t" if p.suffix.lower() in (".tsv", ".tab") else ","
+                return pd.read_csv(p, sep=sep)
+            elif p.is_dir() and p.exists():
+                files = sorted(list(p.glob("*.tsv")) + list(p.glob("*.csv")))
+                if files:
+                    sep = "\t" if files[0].suffix.lower() in (".tsv", ".tab") else ","
+                    return pd.concat([pd.read_csv(f, sep=sep) for f in files], ignore_index=True)
+
+        # 2. Standard convention search
+        candidates = [
+            f"{split}.csv", f"{split}.tsv",
+            f"dataset/{split}.csv", f"dataset/{split}.tsv",
+            f"dataset/{split}_data.csv", f"dataset/{split}_data.tsv",
+        ]
+        if split == "train":
+            candidates.extend(["dataset/train/", "dataset/"])
+        elif split in ("dev", "val", "validation"):
+            candidates.extend(["val.csv", "val.tsv", "dev.csv", "dev.tsv", "dataset/val.csv", "dataset/dev.csv", "dataset/val/", "dataset/dev/"])
+        elif split == "test":
+            candidates.extend(["test.csv", "test.tsv", "dataset/test.csv", "dataset/test/", "dataset/test_data.csv"])
+
+        for cand in candidates:
+            cand_p = root / cand
+            if cand_p.is_file() and cand_p.exists():
+                sep = "\t" if cand_p.suffix.lower() in (".tsv", ".tab") else ","
+                return pd.read_csv(cand_p, sep=sep)
+            elif cand_p.is_dir() and cand_p.exists():
+                files = sorted(list(cand_p.glob("*.tsv")) + list(cand_p.glob("*.csv")))
+                if split == "train":
+                    files = [f for f in files if "test" not in f.name.lower() and "val" not in f.name.lower() and "dev" not in f.name.lower()]
+                if files:
+                    sep = "\t" if files[0].suffix.lower() in (".tsv", ".tab") else ","
+                    return pd.concat([pd.read_csv(f, sep=sep) for f in files], ignore_index=True)
+
+        raise FileNotFoundError(f"Could not locate dataset for split '{split}' in '{root}'.")
 
 
 _ACTIVE_TASK_SPEC: Optional[UniversalTaskSpec] = None

@@ -147,20 +147,6 @@ class SubmissionManager:
             for col in num_cols:
                 if col not in ("dev_fold", "train_rows", "dev_rows", "fold"):
                     local_cv[col] = round(float(sdf[col].mean()), 4)
-
-            # Preserve backward-compatible keys
-            if "a_macro_f1" in sdf.columns:
-                local_cv["subtask_a_macro"] = round(float(sdf["a_macro_f1"].mean()), 4)
-            if "b_macro_f1" in sdf.columns:
-                local_cv["subtask_b_macro"] = round(float(sdf["b_macro_f1"].mean()), 4)
-            if "c_target_type_macro_f1_oracle_hate" in sdf.columns:
-                local_cv["subtask_c_type_macro"] = round(
-                    float(sdf["c_target_type_macro_f1_oracle_hate"].mean()), 4
-                )
-            if "c_identity_macro_f1_oracle_hate" in sdf.columns:
-                local_cv["subtask_c_id_macro"] = round(
-                    float(sdf["c_identity_macro_f1_oracle_hate"].mean()), 4
-                )
         elif metrics_json.exists():
             try:
                 with open(metrics_json, "r", encoding="utf-8") as f:
@@ -201,13 +187,12 @@ class SubmissionManager:
     def record_official_score(
         self,
         sub_id: str,
-        macro_a: Optional[float] = None,
-        macro_b: Optional[float] = None,
-        macro_c_type: Optional[float] = None,
-        macro_c_id: Optional[float] = None,
+        primary_score: Optional[float] = None,
+        scores: Optional[Dict[str, Any]] = None,
         split_type: str = "public",
         notes: str = "",
         custom_scores: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> SubmissionEntry:
         """Record ground-truth evaluation returned from organizer / competition portal."""
         entry = self.submissions.get(sub_id)
@@ -215,19 +200,37 @@ class SubmissionManager:
             raise KeyError(f"Submission ID '{sub_id}' not found in registry.")
 
         scores_dict: Dict[str, Any] = {
-            "subtask_a_macro": round(macro_a, 4) if macro_a is not None else None,
-            "subtask_b_macro": round(macro_b, 4) if macro_b is not None else None,
-            "subtask_c_type_macro": round(macro_c_type, 4) if macro_c_type is not None else None,
-            "subtask_c_id_macro": round(macro_c_id, 4) if macro_c_id is not None else None,
             "split_type": split_type,
         }
+
+        # Resolve primary metric name dynamically from spec or local_cv_scores
+        primary_key = "score"
+        try:
+            from harness.task_spec import load_active_task_spec
+            spec = load_active_task_spec()
+            if getattr(spec, "primary_metric", None):
+                primary_key = getattr(spec.primary_metric, "name", str(spec.primary_metric))
+        except Exception:
+            pass
+
+        if primary_score is not None:
+            scores_dict[primary_key] = round(float(primary_score), 4)
+
+        all_custom: Dict[str, Any] = {}
         if custom_scores:
-            for k, v in custom_scores.items():
-                if v is not None and k not in scores_dict:
-                    try:
-                        scores_dict[k] = round(float(v), 4)
-                    except (ValueError, TypeError):
-                        scores_dict[k] = v
+            all_custom.update(custom_scores)
+        if scores:
+            all_custom.update(scores)
+        for k, v in kwargs.items():
+            if v is not None:
+                all_custom[k] = v
+
+        for k, v in all_custom.items():
+            if v is not None:
+                try:
+                    scores_dict[k] = round(float(v), 4)
+                except (ValueError, TypeError):
+                    scores_dict[k] = v
 
         entry.official_scores = scores_dict
 
@@ -331,43 +334,32 @@ class SubmissionManager:
                     status_icon += " ⚠️"
 
                 # CV string
-                if "subtask_a_macro" in s.local_cv_scores:
-                    cv_a = s.local_cv_scores.get("subtask_a_macro", "-")
-                    cv_b = s.local_cv_scores.get("subtask_b_macro", "-")
-                    cv_c = s.local_cv_scores.get("subtask_c_type_macro", "-")
-                    cv_str = f"A:{cv_a} / B:{cv_b} / C:{cv_c}"
-                elif primary_metric in s.local_cv_scores:
+                if primary_metric in s.local_cv_scores:
                     cv_str = f"{primary_metric}:{s.local_cv_scores.get(primary_metric)}"
                 elif s.local_cv_scores:
-                    first_k, first_v = next(iter(s.local_cv_scores.items()))
-                    cv_str = f"{first_k}:{first_v}"
+                    items = [f"{k}:{v}" for k, v in list(s.local_cv_scores.items())[:3]]
+                    cv_str = " / ".join(items)
                 else:
                     cv_str = "-"
 
                 # LB string
                 if s.status == "SCORED":
-                    if "subtask_a_macro" in s.official_scores:
-                        lb_a = s.official_scores.get("subtask_a_macro", "-")
-                        lb_b = s.official_scores.get("subtask_b_macro", "-")
-                        lb_c = s.official_scores.get("subtask_c_type_macro", "-")
-                        lb_str = f"A:{lb_a} / B:{lb_b} / C:{lb_c}"
-                    elif primary_metric in s.official_scores:
+                    if primary_metric in s.official_scores:
                         lb_str = f"{primary_metric}:{s.official_scores.get(primary_metric)}"
                     elif s.official_scores:
-                        first_k, first_v = next(iter(s.official_scores.items()))
-                        lb_str = f"{first_k}:{first_v}"
+                        items = [f"{k}:{v}" for k, v in list(s.official_scores.items())[:3] if k != "split_type"]
+                        lb_str = " / ".join(items) if items else "-"
                     else:
                         lb_str = "-"
                 else:
                     lb_str = "Pending"
 
                 # Delta string
-                if "subtask_a_macro" in s.score_deltas and "subtask_b_macro" in s.score_deltas:
-                    d_a = s.score_deltas.get("subtask_a_macro")
-                    d_b = s.score_deltas.get("subtask_b_macro")
-                    delta_str = f"A:{d_a:+.4f} / B:{d_b:+.4f}" if (d_a is not None and d_b is not None) else "-"
-                elif primary_metric in s.score_deltas and s.score_deltas[primary_metric] is not None:
+                if primary_metric in s.score_deltas and s.score_deltas[primary_metric] is not None:
                     delta_str = f"{s.score_deltas[primary_metric]:+.4f}"
+                elif s.score_deltas:
+                    items = [f"{k}:{v:+.4f}" for k, v in list(s.score_deltas.items())[:2] if isinstance(v, (int, float))]
+                    delta_str = " / ".join(items) if items else "-"
                 else:
                     delta_str = "-"
 

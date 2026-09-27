@@ -15,12 +15,6 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 
-try:
-    from src.data import IDENTITIES, TARGET_TYPES
-except Exception:
-    IDENTITIES = ["l", "g", "b", "t", "q", "i", "a", "lgbtqia+", "nb"]
-    TARGET_TYPES = ["individual", "group", "none"]
-
 
 class DiagnosticEngine:
     """Computes failure mode slices and generates diagnostic reports."""
@@ -41,18 +35,20 @@ class DiagnosticEngine:
         return {"labels": labels, "matrix": matrix_dict}
 
     @staticmethod
-    def analyze_minority_identities(
-        df_hateful: pd.DataFrame,
-        pred_identities: np.ndarray,
+    def analyze_minority_labels(
+        df_target: pd.DataFrame,
+        pred_labels: np.ndarray,
+        label_names: List[str],
+        column_prefix: str = "",
     ) -> Dict[str, Any]:
-        """Analyze support, recall, false positive, and false negative counts per identity."""
+        """Generic analysis of support, recall, false positive, and false negative counts per label."""
         results = {}
-        for idx, identity in enumerate(IDENTITIES):
-            col = f"identity_{identity}"
-            if col not in df_hateful.columns:
+        for idx, lbl in enumerate(label_names):
+            col = f"{column_prefix}{lbl}" if column_prefix else lbl
+            if col not in df_target.columns:
                 continue
-            y_true = df_hateful[col].astype(int).to_numpy()
-            y_pred = pred_identities[:, idx].astype(int)
+            y_true = df_target[col].astype(int).to_numpy()
+            y_pred = pred_labels[:, idx].astype(int) if idx < pred_labels.shape[1] else np.zeros(len(df_target), dtype=int)
 
             tp = int(((y_true == 1) & (y_pred == 1)).sum())
             fp = int(((y_true == 0) & (y_pred == 1)).sum())
@@ -67,7 +63,7 @@ class DiagnosticEngine:
                 else 0.0
             )
 
-            results[identity] = {
+            results[lbl] = {
                 "support": support,
                 "tp": tp,
                 "fp": fp,
@@ -78,6 +74,34 @@ class DiagnosticEngine:
                 "is_zero_recall": support > 0 and tp == 0,
             }
         return results
+
+    @classmethod
+    def analyze_minority_identities(
+        cls,
+        df_target: pd.DataFrame,
+        pred_matrix: np.ndarray,
+        labels: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Analyze support, recall, false positive, and false negative counts per rare label."""
+        # Resolve label list: explicit arg > infer from columns > TaskSpec > empty
+        if labels:
+            target_labels = labels
+        elif any(c.startswith("identity_") for c in df_target.columns):
+            target_labels = [c.replace("identity_", "") for c in df_target.columns if c.startswith("identity_")]
+        else:
+            # Dynamically load from active TaskSpec if available
+            try:
+                from harness.task_spec import load_active_task_spec
+                spec = load_active_task_spec()
+                target_labels = spec.metadata.get("labels", spec.metadata.get("identities", []))
+            except Exception:
+                target_labels = []
+        return cls.analyze_minority_labels(
+            df_target=df_target,
+            pred_labels=pred_matrix,
+            label_names=target_labels,
+            column_prefix="identity_",
+        )
 
     @classmethod
     def generate_diagnostics(
@@ -97,10 +121,14 @@ class DiagnosticEngine:
             pass
 
         if not id_col:
-            for candidate_id in ["id", "ID", "sample_id", "comment_id", "StereoQueerEval_id"]:
+            for candidate_id in ["id", "ID", "sample_id", "row_id", "uid", "item_id"]:
                 if candidate_id in eval_df.columns and candidate_id in oof_df.columns:
                     id_col = candidate_id
                     break
+        if not id_col:
+            common_id_cols = [c for c in eval_df.columns if c in oof_df.columns and c.lower().endswith("id")]
+            if common_id_cols:
+                id_col = common_id_cols[0]
         if not id_col:
             id_col = eval_df.columns[0]
 
@@ -114,107 +142,83 @@ class DiagnosticEngine:
         bottlenecks: List[str] = []
         target_confusions: Dict[str, Any] = {}
 
-        # 2. Generic Target Confusion & Accuracy
+        # 2. Generic Target Confusion & Accuracy for all categorical/classification targets
         for col in eval_df.columns:
             pred_col = f"pred_{col}"
-            if pred_col in merged.columns and merged[col].dtype == object and merged[col].nunique() <= 50:
+            # Support both pandas 2.x and pandas 3.x categorical/string types
+            col_is_categorical = (
+                merged[col].dtype == object
+                or merged[col].dtype.kind == "O"
+                or str(merged[col].dtype).lower() in ("object", "string", "str", "category")
+            )
+            if pred_col in merged.columns and col_is_categorical and merged[col].nunique() <= 50:
                 labels = sorted(list(merged[col].dropna().unique()))
                 cm = cls.compute_confusion_matrix(merged[col], merged[pred_col], labels)
                 target_confusions[col] = cm
 
-        # Backward compatibility for Subtask A
-        a_cm = target_confusions.get("stereotype")
-        if not a_cm and "stereotype" in merged.columns and "pred_stereotype" in merged.columns:
-            a_cm = cls.compute_confusion_matrix(merged["stereotype"], merged["pred_stereotype"], ["no", "yes"])
+                # Identify zero-recall or severely failing classes (recall < 40%)
+                for lbl, row_stats in cm.get("per_class", {}).items():
+                    if row_stats.get("is_zero_recall"):
+                        bottlenecks.append(f"Zero recall on class '{lbl}' in target '{col}'.")
+                    elif row_stats.get("support", 0) >= 5 and row_stats.get("recall", 1.0) < 0.40:
+                        bottlenecks.append(
+                            f"Low recall ({row_stats['recall']*100:.1f}%) on class '{lbl}' in target '{col}' "
+                            f"({row_stats['tp']}/{row_stats['support']} correct)."
+                        )
 
-        # Backward compatibility for Subtask B
-        b_cm = target_confusions.get("hate_speech")
-        if not b_cm and "hate_speech" in merged.columns and "pred_hate_speech" in merged.columns:
-            b_cm = cls.compute_confusion_matrix(
-                merged["hate_speech"], merged["pred_hate_speech"], ["no", "yes_explicit", "yes_implicit"]
-            )
+        # 3. Generic Multi-Label / Minority Label Scan
+        minority_labels: Dict[str, Any] = {}
+        for col in eval_df.columns:
+            if col.startswith("identity_") or col.startswith("label_") or col.startswith("tag_"):
+                pred_col = f"pred_{col}"
+                if pred_col in merged.columns:
+                    lbl_name = col.split("_", 1)[1]
+                    y_true = merged[col].astype(int).to_numpy()
+                    y_pred = merged[pred_col].astype(int).to_numpy()
+                    support = int((y_true == 1).sum())
+                    tp = int(((y_true == 1) & (y_pred == 1)).sum())
+                    fp = int(((y_true == 0) & (y_pred == 1)).sum())
+                    fn = int(((y_true == 1) & (y_pred == 0)).sum())
+                    recall = round(tp / support, 4) if support > 0 else 0.0
+                    precision = round(tp / (tp + fp), 4) if (tp + fp) > 0 else 0.0
+                    f1 = round(2 * precision * recall / (precision + recall), 4) if (precision + recall) > 0 else 0.0
+                    is_zero = support > 0 and tp == 0
+                    minority_labels[lbl_name] = {
+                        "support": support,
+                        "tp": tp,
+                        "fp": fp,
+                        "fn": fn,
+                        "precision": precision,
+                        "recall": recall,
+                        "f1": f1,
+                        "is_zero_recall": is_zero,
+                    }
+                    if is_zero:
+                        bottlenecks.append(f"Zero recall on rare label '{lbl_name}' in '{col}'.")
 
-        # 3. Domain or Generic Error Analysis (e.g. Implicit Hate if column exists)
-        imp_info = None
-        if "hate_speech" in merged.columns and "pred_hate_speech" in merged.columns:
-            implicit_true = merged["hate_speech"] == "yes_implicit"
-            implicit_total = int(implicit_true.sum())
-            implicit_called_no = int((implicit_true & (merged["pred_hate_speech"] == "no")).sum())
-            implicit_miss_rate = (
-                round(implicit_called_no / implicit_total, 4) if implicit_total > 0 else 0.0
-            )
-            imp_info = {
-                "total_implicit": implicit_total,
-                "misclassified_as_no": implicit_called_no,
-                "miss_rate": implicit_miss_rate,
-            }
-            if implicit_miss_rate >= 0.40:
-                bottlenecks.append(
-                    f"Severe implicit hate speech miss rate: {implicit_miss_rate * 100:.1f}% "
-                    f"of 'yes_implicit' misclassified as 'no'."
-                )
-
-        # 4. Minority Identity Analysis (if conditional multi-label identities exist)
-        c_identity_diag = {}
-        if "pred_identities" in merged.columns:
-            hateful_df = merged[merged["hate_speech"] != "no"].reset_index(drop=True) if "hate_speech" in merged.columns else merged
-            identity_preds = np.zeros((len(hateful_df), len(IDENTITIES)), dtype=int)
-            for i, val in enumerate(hateful_df["pred_identities"]):
-                if val and val != "none":
-                    assigned = [x.strip() for x in str(val).split(",")]
-                    for j, ident in enumerate(IDENTITIES):
-                        if ident in assigned:
-                            identity_preds[i, j] = 1
-
-            c_identity_diag = cls.analyze_minority_identities(hateful_df, identity_preds)
-            zero_recall_identities = [k for k, v in c_identity_diag.items() if v["is_zero_recall"]]
-            if zero_recall_identities:
-                bottlenecks.append(f"Zero recall on rare identity classes: {zero_recall_identities}.")
-
-        # 5. Generic Slice / Language Breakdown
+        # 4. Generic Slice Breakdown
         slice_col = None
-        for cand_slice in ["language", "group", "category", "split", "fold"]:
+        for cand_slice in ["group", "category", "split", "fold", "language", "segment", "cluster"]:
             if cand_slice in merged.columns and 1 < merged[cand_slice].nunique() <= 30:
                 slice_col = cand_slice
                 break
 
-        slice_breakdown = {}
+        slice_breakdown: Dict[str, Any] = {}
         if slice_col:
             for s_val, s_df in merged.groupby(slice_col):
-                stats = {"total_samples": len(s_df)}
+                stats: Dict[str, Any] = {"total_samples": len(s_df)}
                 for t_name in list(target_confusions.keys())[:3]:
                     pred_t = f"pred_{t_name}"
                     stats[f"{t_name}_acc"] = round(float((s_df[t_name] == s_df[pred_t]).mean()), 4)
-                if "stereotype" in s_df.columns and "pred_stereotype" in s_df.columns:
-                    stats["a_accuracy"] = round(float((s_df["stereotype"] == s_df["pred_stereotype"]).mean()), 4)
-                if "hate_speech" in s_df.columns and "pred_hate_speech" in s_df.columns:
-                    stats["b_accuracy"] = round(float((s_df["hate_speech"] == s_df["pred_hate_speech"]).mean()), 4)
-                if "hate_speech" in s_df.columns:
-                    stats["hateful_samples"] = int((s_df["hate_speech"] != "no").sum())
                 slice_breakdown[str(s_val)] = stats
 
-        # Generic bottleneck check on low recall classes
-        for t_name, cm in target_confusions.items():
-            for lbl, row_stats in cm.get("per_class", {}).items():
-                if row_stats.get("is_zero_recall"):
-                    bottlenecks.append(f"Zero recall on class '{lbl}' in target '{t_name}'.")
-
-        res = {
+        res: Dict[str, Any] = {
             "critical_bottlenecks": bottlenecks,
             "target_confusions": target_confusions,
+            "minority_labels": minority_labels,
             "slice_column": slice_col,
             "slice_breakdown": slice_breakdown,
-            "language_breakdown": slice_breakdown,  # Backward compatible alias
         }
-        if a_cm:
-            res["subtask_a_confusion"] = a_cm
-        if b_cm:
-            res["subtask_b_confusion"] = b_cm
-        if imp_info:
-            res["implicit_hate_analysis"] = imp_info
-        if c_identity_diag:
-            res["subtask_c_identities"] = c_identity_diag
-
         return res
 
     @classmethod
@@ -236,34 +240,11 @@ class DiagnosticEngine:
         else:
             lines.append("- 🟢 No critical zero-recall or severe failure bottlenecks detected.")
 
-        # 2. Confusion Matrices
         section_idx = 2
-        if diag.get("subtask_b_confusion"):
-            lines.extend([
-                "",
-                f"## {section_idx}. Subtask B (Hate Speech) Confusion Matrix",
-                "",
-                "| True Label \\ Predicted | `no` | `yes_explicit` | `yes_implicit` |",
-                "|---|---:|---:|---:|",
-            ])
-            b_mat = diag["subtask_b_confusion"]["matrix"]
-            for true_lbl in ["no", "yes_explicit", "yes_implicit"]:
-                row = b_mat.get(true_lbl, {})
-                lines.append(
-                    f"| **{true_lbl}** | {row.get('no', 0)} | {row.get('yes_explicit', 0)} | {row.get('yes_implicit', 0)} |"
-                )
-            section_idx += 1
 
-            if diag.get("implicit_hate_analysis"):
-                imp_info = diag["implicit_hate_analysis"]
-                lines.extend([
-                    "",
-                    f"> **Implicit Hate Miss Rate**: {imp_info['miss_rate'] * 100:.1f}% "
-                    f"({imp_info['misclassified_as_no']} / {imp_info['total_implicit']} misclassified as `no`).",
-                ])
-
-        elif diag.get("target_confusions"):
-            for t_name, cm in list(diag["target_confusions"].items())[:2]:
+        # 2. Confusion Matrices
+        if diag.get("target_confusions"):
+            for t_name, cm in list(diag["target_confusions"].items()):
                 labels = list(cm.get("matrix", {}).keys())
                 lines.extend([
                     "",
@@ -277,27 +258,27 @@ class DiagnosticEngine:
                     lines.append(f"| **{t_lbl}** | " + " | ".join([str(row.get(l, 0)) for l in labels]) + " |")
                 section_idx += 1
 
-        # 3. Subtask C Minority Identity Analysis
-        if diag.get("subtask_c_identities"):
+        # 3. Minority / Rare Label Analysis
+        if diag.get("minority_labels"):
             lines.extend([
                 "",
-                f"## {section_idx}. Subtask C Minority Identity Analysis",
+                f"## {section_idx}. Rare & Minority Label Analysis",
                 "",
-                "| Identity | Support | TP | FP | FN | Precision | Recall | F1 | Status |",
+                "| Label | Support | TP | FP | FN | Precision | Recall | F1 | Status |",
                 "|---|---:|---:|---:|---:|---:|---:|---:|---|",
             ])
-            for ident, stats in diag["subtask_c_identities"].items():
+            for lbl, stats in diag["minority_labels"].items():
                 badge = "❌ ZERO RECALL" if stats["is_zero_recall"] else ("⚠️ LOW" if stats["recall"] < 0.3 else "✅ OK")
                 lines.append(
-                    f"| `{ident}` | {stats['support']} | {stats['tp']} | {stats['fp']} | {stats['fn']} | "
+                    f"| `{lbl}` | {stats['support']} | {stats['tp']} | {stats['fp']} | {stats['fn']} | "
                     f"{stats['precision']:.4f} | {stats['recall']:.4f} | {stats['f1']:.4f} | {badge} |"
                 )
             section_idx += 1
 
-        # 4. Slice Breakdown (e.g. Language / Group)
-        slice_data = diag.get("slice_breakdown") or diag.get("language_breakdown")
+        # 4. Slice Breakdown
+        slice_data = diag.get("slice_breakdown")
         if slice_data:
-            slice_name = diag.get("slice_column", "Slice").capitalize()
+            slice_name = str(diag.get("slice_column", "Slice")).capitalize()
             lines.extend([
                 "",
                 f"## {section_idx}. Per-{slice_name} Breakdown",
@@ -332,3 +313,6 @@ class DiagnosticEngine:
         atomic_write_text(output_dir / "DIAGNOSTICS.md", md_content, encoding="utf-8")
 
         return diag
+
+
+DiagnosticsEngine = DiagnosticEngine

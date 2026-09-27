@@ -426,7 +426,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               <div className="space-y-1.5 text-xs font-mono">
                 <div>
                   <span className="text-zinc-500">Task: </span>
-                  <span className="text-zinc-200">{taskInfo?.name || 'StereoQueerEval'}</span>
+                  <span className="text-zinc-200">{taskInfo?.name || 'Competition Task'}</span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Platform: </span>
@@ -466,12 +466,12 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </div>
                 <div>
                   <span className="text-zinc-500">ID Column: </span>
-                  <span className="text-zinc-200">{dataCfg.id_column || 'StereoQueerEval_id'}</span>
+                  <span className="text-zinc-200">{dataCfg.id_column || 'id'}</span>
                 </div>
                 <div className="truncate" title={dataCfg.target_column}>
                   <span className="text-zinc-500">Target Columns: </span>
                   <span className="text-zinc-200">
-                    {dataCfg.target_column || 'stereotype, hate_speech, target_type, target_identities'}
+                    {dataCfg.target_column || 'target'}
                   </span>
                 </div>
                 <div>
@@ -500,7 +500,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </div>
                 <div>
                   <span className="text-zinc-500">Group Column: </span>
-                  <span className="text-amber-300">{dataCfg.group_column || 'yt_title'}</span>
+                  <span className="text-amber-300">{dataCfg.group_column || 'group_id'}</span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Folds / Seed: </span>
@@ -510,7 +510,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </div>
                 <div>
                   <span className="text-zinc-500">Fold File: </span>
-                  <span className="text-zinc-200">splits/fold_assignments.tsv</span>
+                  <span className="text-zinc-200">{dataCfg.split_file || dataCfg.fold_file || 'splits/folds.csv'}</span>
                 </div>
               </div>
             </div>
@@ -881,7 +881,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 1. Package Submission for {taskInfo?.platform?.toUpperCase() || 'CODABENCH'}
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Formats predictions from <code>artifacts/{currentExpId}/</code> using Step 1 schema (<code>{dataCfg.id_column || 'StereoQueerEval_id'}</code>, <code>.{subSpec.archive_format || 'zip'}</code>) and runs Audit Gate.
+                Formats predictions from <code>artifacts/{currentExpId}/</code> using Step 1 schema (<code>{dataCfg.id_column || 'id'}</code>, <code>.{subSpec.archive_format || 'zip'}</code>) and runs Audit Gate.
               </p>
             </div>
 

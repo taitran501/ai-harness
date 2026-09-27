@@ -86,8 +86,15 @@ class KaggleKernelManager:
         if Path("splits").exists():
             shutil.copytree("splits", stage_dir / "splits", dirs_exist_ok=True)
 
+        spec_name = "Competition"
+        try:
+            from harness.task_spec import load_active_task_spec
+            spec_name = load_active_task_spec().name
+        except Exception:
+            pass
+
         metadata = {
-            "title": f"SQE Competition Dataset ({slug_name})",
+            "title": f"{spec_name} Dataset ({slug_name})",
             "id": full_slug,
             "licenses": [{"name": "CC0-1.0"}],
         }
@@ -192,6 +199,8 @@ class KaggleKernelManager:
 
         if Path("train.py").exists():
             shutil.copy2("train.py", bundle_base / "train.py")
+        if Path("harness").exists():
+            shutil.copytree("harness", bundle_base / "harness", dirs_exist_ok=True)
         if Path("src").exists():
             shutil.copytree("src", bundle_base / "src", dirs_exist_ok=True)
         if Path("configs").exists():
@@ -253,6 +262,7 @@ essential_files = [
     "metrics.json",
     "summary.csv",
     "summary.md",
+    "predictions.csv",
     "oof_predictions.csv",
     "test_predictions.csv",
     "submission.csv",
@@ -381,6 +391,7 @@ print("Training completed. Lightweight output artifacts copied to working root."
             "metrics.json",
             "summary.csv",
             "summary.md",
+            "predictions.csv",
             "oof_predictions.csv",
             "test_predictions.csv",
             "submission.csv",

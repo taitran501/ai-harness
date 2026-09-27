@@ -498,7 +498,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const promptText = llmSpec?.system_prompt || 'You are an expert NLP classifier for StereoQueerEval.';
+                      const promptText = llmSpec?.system_prompt || 'You are an expert AI competition classifier.';
                       navigator.clipboard.writeText(promptText);
                       setCopiedLlmPrompt(true);
                       setTimeout(() => setCopiedLlmPrompt(false), 2000);
@@ -515,7 +515,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                 <div className="text-[10px] text-slate-400">System Instruction:</div>
                 <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800/80 font-mono text-[11px] text-slate-300 leading-relaxed max-h-28 overflow-y-auto">
                   {llmSpec?.system_prompt ||
-                    'You are an expert NLP judge for StereoQueerEval. Classify comments conditioned on video metadata for Stereotype, Hate Speech, and Target Identity.'}
+                    'You are an expert AI competition classifier. Predict target classes with calibrated confidence.'}
                 </div>
               </div>
 

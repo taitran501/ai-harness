@@ -39,7 +39,8 @@ class DataAuditConfig:
     auto_scan_mode: str = "deep"  # "manual" | "light" | "deep"
     check_label_distribution: bool = True
     check_group_leakage: bool = True
-    check_subtask_c_conditioning: bool = True
+    check_conditional_labels: bool = True
+    check_subtask_c_conditioning: bool = True  # Backward-compatible alias
     check_text_length_outliers: bool = True
     check_missing_nulls: bool = True
 
@@ -287,7 +288,7 @@ class CompetitionStateMachine:
         cfg = DataAuditConfig(**self.state["data_audit_config"])
         declared_checks = self.spec.get("data_checks", [])
         data_cfg = self.spec.get("data_config", {})
-        group_col = data_cfg.get("group_column") or ("yt_title" if Path("splits/fold_assignments.tsv").exists() else "group")
+        group_col = data_cfg.get("group_column") or "group"
 
         report: Dict[str, Any] = {
             "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -314,13 +315,42 @@ class CompetitionStateMachine:
             return report
 
         try:
-            from src.data import load_dataset, load_splits, merge_data_and_splits
+            merged = None
+            try:
+                from harness.task_spec import load_active_task_spec
+                spec = load_active_task_spec()
+                merged = spec.load_dataset_split("train", project_root=self.project_root)
+            except Exception:
+                pass
 
-            data_dir = self.project_root / data_cfg.get("train_path", "dataset")
+            if merged is None:
+                data_dir = self.project_root / data_cfg.get("train_path", "dataset")
+                if data_dir.is_file():
+                    sep = "\t" if data_dir.suffix == ".tsv" else ","
+                    merged = pd.read_csv(data_dir, sep=sep)
+                elif data_dir.is_dir():
+                    dfs = []
+                    for f in sorted(data_dir.glob("*.tsv")) + sorted(data_dir.glob("*.csv")):
+                        sep = "\t" if f.suffix == ".tsv" else ","
+                        try:
+                            dfs.append(pd.read_csv(f, sep=sep))
+                        except Exception:
+                            pass
+                    if dfs:
+                        merged = pd.concat(dfs, ignore_index=True)
+
+            if merged is None:
+                merged = pd.DataFrame()
+
             split_path = self.project_root / "splits" / "fold_assignments.tsv"
-            df, _ = load_dataset(str(data_dir))
-            splits_df = load_splits(str(split_path))
-            merged = merge_data_and_splits(df, splits_df)
+            if split_path.exists() and "fold" not in merged.columns and len(merged) > 0:
+                try:
+                    splits_df = pd.read_csv(split_path, sep="\t")
+                    common_cols = [c for c in merged.columns if c in splits_df.columns and c != "fold"]
+                    if common_cols:
+                        merged = merged.merge(splits_df[common_cols + ["fold"]], on=common_cols[0], how="left")
+                except Exception:
+                    pass
 
             lang_counts = merged["language"].value_counts().to_dict() if "language" in merged.columns else {}
             fold_counts = merged["fold"].value_counts().sort_index().to_dict() if "fold" in merged.columns else {}
@@ -371,7 +401,7 @@ class CompetitionStateMachine:
                                 }
                             )
 
-                elif chk_type == "conditional_label" and cfg.check_subtask_c_conditioning:
+                elif chk_type == "conditional_label" and (cfg.check_conditional_labels or cfg.check_subtask_c_conditioning):
                     if_col = chk.get("if_column")
                     if_val = chk.get("if_equals")
                     req_col = chk.get("require_column")
@@ -581,35 +611,42 @@ class CompetitionStateMachine:
             declared = self.spec.get("data_config", {}).get("id_column")
             if declared and declared in df_in.columns:
                 return declared
-            for candidate in ["id", "ID", "sample_id", "comment_id", "StereoQueerEval_id"]:
+            for candidate in ["id", "ID", "sample_id", "row_id", "uid", "item_id"]:
                 if candidate in df_in.columns:
                     return candidate
+            common_id = [c for c in df_in.columns if c.lower().endswith("id")]
+            if common_id:
+                return common_id[0]
             return df_in.columns[0]
 
         def _load_oof(exp_id_or_path: str, preferred_variant: Optional[str] = None) -> pd.DataFrame:
             p = Path(exp_id_or_path)
             if not p.exists():
+                p = self.artifacts_dir / exp_id_or_path / "predictions.csv"
+            if not p.exists():
                 p = self.artifacts_dir / exp_id_or_path / "oof_predictions.csv"
             if not p.exists():
-                for base_folder in [baseline_id, "exp001_baseline_tfidf", "baseline_v1", "baseline"]:
-                    alt = self.artifacts_dir / base_folder / "oof_predictions.csv"
+                for base_folder in [baseline_id, "baseline_v1", "baseline"]:
+                    alt = self.artifacts_dir / base_folder / "predictions.csv"
+                    if not alt.exists():
+                        alt = self.artifacts_dir / base_folder / "oof_predictions.csv"
                     if alt.exists():
                         p = alt
                         if not preferred_variant and exp_id_or_path.startswith("baseline_v1_"):
                             preferred_variant = exp_id_or_path[len("baseline_v1_") :]
                         break
             if not p.exists():
-                for cand_oof in sorted(self.artifacts_dir.glob("*/oof_predictions.csv")):
+                for cand_oof in sorted(list(self.artifacts_dir.glob("*/predictions.csv")) + list(self.artifacts_dir.glob("*/oof_predictions.csv"))):
                     if cand_oof.parent.name != cand_id:
                         p = cand_oof
                         break
             if not p.exists():
-                raise FileNotFoundError(f"Cannot locate oof_predictions.csv for '{exp_id_or_path}'")
+                raise FileNotFoundError(f"Cannot locate predictions.csv or oof_predictions.csv for '{exp_id_or_path}'")
 
             df = pd.read_csv(p)
             if "input_variant" in df.columns:
                 variants = df["input_variant"].unique()
-                chosen_var = preferred_variant if (preferred_variant in variants) else ("comment" if "comment" in variants else variants[0])
+                chosen_var = preferred_variant if (preferred_variant in variants) else variants[0]
                 df = df[df["input_variant"] == chosen_var].copy()
 
             id_col = _get_id_col(df)
@@ -622,20 +659,11 @@ class CompetitionStateMachine:
             src_exp = source_map.get("source_exp") or source_map.get("subtask_a_exp") or source_map.get("model_exp") or baseline_id
             merged = _load_oof(src_exp)
             merged.to_csv(out_csv, index=False)
+            merged.to_csv(out_dir / "predictions.csv", index=False)
             audit_notes = {"strategy": mode, "source_exp": src_exp}
         elif mode == "specialist_router":
             routing = source_map.get("routing", {}) or source_map.get("target_routing", {})
-            if not routing and "subtask_a_exp" in source_map:
-                exp_a = source_map.get("subtask_a_exp") or baseline_id
-                exp_b = source_map.get("subtask_b_exp") or baseline_id
-                exp_c = source_map.get("subtask_c_exp") or baseline_id
-                routing = {
-                    "pred_stereotype": exp_a,
-                    "pred_hate_speech": exp_b,
-                    "pred_target_type": exp_c,
-                    "pred_identities": exp_c,
-                }
-            elif not routing:
+            if not routing:
                 subtasks = self.spec.get("subtasks", [])
                 if subtasks:
                     for st in subtasks:
@@ -644,14 +672,19 @@ class CompetitionStateMachine:
                         st_exp = source_map.get(f"{st_id}_exp") or source_map.get(st_id) or baseline_id
                         routing[f"pred_{col}"] = st_exp
                 else:
-                    routing = {"pred_target": source_map.get("source_exp") or baseline_id}
+                    for k, v in source_map.items():
+                        if k.endswith("_exp"):
+                            target_key = k[:-4]
+                            routing[f"pred_{target_key}"] = v
+                    if not routing:
+                        routing = {"pred_target": source_map.get("source_exp") or baseline_id}
 
             distinct_exps = {exp for exp in routing.values() if exp}
             loaded_dfs = {exp: _load_oof(exp) for exp in distinct_exps}
             first_df = next(iter(loaded_dfs.values()))
             id_col = _get_id_col(first_df)
 
-            meta_cols = [c for c in [id_col, "language", "fold"] if c in first_df.columns]
+            meta_cols = [c for c in [id_col, "language", "group", "fold"] if c in first_df.columns]
             merged = first_df[meta_cols].copy()
             merged["input_variant"] = "specialist_router"
 
@@ -662,19 +695,33 @@ class CompetitionStateMachine:
                 elif exp_id in loaded_dfs and target_col in loaded_dfs[exp_id].columns:
                     merged[col_name] = loaded_dfs[exp_id][target_col].values
 
-            # Apply conditional rules declared in CompetitionSpec
+            # Apply conditional rules declared in UniversalTaskSpec or CompetitionSpec
+            try:
+                from harness.task_spec import load_active_task_spec
+                task_spec = load_active_task_spec()
+                raw_preds = {c.replace("pred_", ""): merged[c].values for c in merged.columns if c.startswith("pred_")}
+                routed_preds = task_spec.apply_routing(raw_preds, n_samples=len(merged))
+                for k, v in routed_preds.items():
+                    if f"pred_{k}" in merged.columns:
+                        merged[f"pred_{k}"] = v
+            except Exception:
+                pass
+
             for chk in self.spec.get("data_checks", []):
                 if chk.get("type") == "conditional_label":
-                    parent_col = f"pred_{chk.get('parent_target', 'hate_speech')}"
-                    if parent_col in merged.columns:
-                        non_cond_mask = merged[parent_col] == chk.get("if_equals", "no")
-                        child_type_col = f"pred_{chk.get('child_target', 'target_type')}"
-                        if child_type_col in merged.columns:
-                            merged.loc[non_cond_mask, child_type_col] = chk.get("require_value", "none")
-                        if "pred_identities" in merged.columns:
-                            merged.loc[non_cond_mask, "pred_identities"] = "none"
+                    p_name = chk.get("parent_target")
+                    if p_name:
+                        parent_col = f"pred_{p_name}"
+                        if parent_col in merged.columns:
+                            non_cond_mask = merged[parent_col] == chk.get("if_equals", "no")
+                            c_name = chk.get("child_target")
+                            if c_name:
+                                child_type_col = f"pred_{c_name}"
+                                if child_type_col in merged.columns:
+                                    merged.loc[non_cond_mask, child_type_col] = chk.get("require_value", "none")
 
             merged.to_csv(out_csv, index=False)
+            merged.to_csv(out_dir / "predictions.csv", index=False)
             audit_notes = {"routing": routing}
         else:
             comp_ids: List[str] = source_map.get("components", [])
@@ -1221,10 +1268,11 @@ class CompetitionStateMachine:
                     "id": overall_best["id"] if overall_best else pool["baseline_id"],
                     "score": overall_best["composite_score"] if overall_best else pool["baseline_score"],
                     "delta": overall_best["delta_vs_baseline"] if overall_best else 0.0,
-                    "subtask_a": overall_best["subtask_a"] if overall_best else 0.0,
-                    "subtask_b": overall_best["subtask_b"] if overall_best else 0.0,
-                    "subtask_c_type": overall_best["subtask_c_type"] if overall_best else 0.0,
-                    "subtask_c_id": overall_best["subtask_c_id"] if overall_best else 0.0,
+                    "subtasks": overall_best.get("subtasks", {}) if overall_best else {},
+                    "subtask_a": overall_best.get("subtask_a", 0.0) if overall_best else 0.0,
+                    "subtask_b": overall_best.get("subtask_b", 0.0) if overall_best else 0.0,
+                    "subtask_c_type": overall_best.get("subtask_c_type", 0.0) if overall_best else 0.0,
+                    "subtask_c_id": overall_best.get("subtask_c_id", 0.0) if overall_best else 0.0,
                 },
                 "public_lb_best": {
                     "enabled": has_public_lb,

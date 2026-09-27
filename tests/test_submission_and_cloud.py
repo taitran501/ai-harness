@@ -48,8 +48,7 @@ class SubmissionManagerTests(unittest.TestCase):
         # Case 1: Normal score (LB = 0.7100, delta = +0.0100)
         updated = self.mgr.record_official_score(
             sub_id="sub_001_exp001",
-            macro_a=0.7100,
-            macro_b=0.5400,
+            scores={"subtask_a_macro": 0.7100, "subtask_b_macro": 0.5400},
             split_type="public",
         )
         self.assertEqual(updated.status, "SCORED")
@@ -60,8 +59,7 @@ class SubmissionManagerTests(unittest.TestCase):
         # Case 2: Divergence (LB drops to 0.6200, delta = -0.0800 < -0.05)
         updated_div = self.mgr.record_official_score(
             sub_id="sub_001_exp001",
-            macro_a=0.6200,
-            macro_b=0.5400,
+            scores={"subtask_a_macro": 0.6200, "subtask_b_macro": 0.5400},
         )
         self.assertTrue(updated_div.divergence_warning)
         self.assertEqual(updated_div.score_deltas["subtask_a_macro"], -0.0800)

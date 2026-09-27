@@ -56,9 +56,14 @@ class ExperimentValidator:
         if group_column is None:
             from harness.task_spec import load_active_task_spec
             spec = load_active_task_spec()
-            group_column = spec.group_column or ("yt_title" if "yt_title" in train_df.columns else "group")
+            group_column = spec.group_column
+            if not group_column:
+                for candidate in ["group", "group_id", "cluster_id", "session_id"]:
+                    if candidate in train_df.columns:
+                        group_column = candidate
+                        break
 
-        if group_column not in train_df.columns or group_column not in val_df.columns:
+        if not group_column or group_column not in train_df.columns or group_column not in val_df.columns:
             return  # Column not available in this view
 
         train_groups: Set[Any] = set(train_df[group_column].dropna().unique())
@@ -70,7 +75,7 @@ class ExperimentValidator:
             raise AssertionError(
                 f"[CRITICAL DATA LEAKAGE DETECTED] {len(intersection)} '{group_column}' groups leaked between "
                 f"train and validation splits! Sample leaked: {leaked_sample}. "
-                f"Pipelines MUST strictly use 'splits/fold_assignments.tsv'."
+                f"Pipelines MUST strictly use valid grouped split assignments without cross-fold leakage."
             )
 
     @classmethod
@@ -81,15 +86,6 @@ class ExperimentValidator:
         group_column: Optional[str] = None,
     ) -> None:
         """Backward-compatible alias for assert_no_group_data_leakage."""
-        if group_column is None:
-            try:
-                from harness.task_spec import load_active_task_spec
-                spec = load_active_task_spec()
-                group_column = spec.group_column or ("yt_title" if "yt_title" in train_df.columns else None)
-            except Exception:
-                group_column = "yt_title" if "yt_title" in train_df.columns else None
-        if not group_column or group_column not in train_df.columns:
-            return
         return cls.assert_no_group_data_leakage(train_df, val_df, group_column=group_column)
 
     @classmethod
@@ -113,14 +109,31 @@ class ExperimentValidator:
             )
 
     @classmethod
+    def assert_task_conditional_integrity(cls, df: pd.DataFrame, spec: Optional[Any] = None) -> None:
+        """Assert all conditional rules declared in UniversalTaskSpec across subtasks."""
+        if spec is None:
+            from harness.task_spec import load_active_task_spec
+            spec = load_active_task_spec()
+
+        for subtask_id, st in getattr(spec, "subtasks", {}).items():
+            if st.condition is not None:
+                cond = st.condition
+                parent_subtask = spec.subtasks.get(cond.parent_target)
+                parent_col = parent_subtask.column if parent_subtask else cond.parent_target
+                child_col = st.column or subtask_id
+
+                if parent_col in df.columns and child_col in df.columns:
+                    active_mask = cond.evaluate_condition(df[parent_col])
+                    inactive_mask = ~active_mask
+                    if cond.fallback_value is not None:
+                        invalid = df[inactive_mask & (df[child_col] != cond.fallback_value)]
+                        if len(invalid) > 0:
+                            raise AssertionError(
+                                f"[CONDITIONAL CONSTRAINT VIOLATION] Found {len(invalid)} rows where '{child_col}' "
+                                f"violates conditional dependency on '{parent_col}'! Expected '{cond.fallback_value}'."
+                            )
+
+    @classmethod
     def assert_subtask_c_oracle_conditioning(cls, df: pd.DataFrame) -> None:
-        """Assert that Subtask C targets are strictly conditioned on hate_speech != 'no'."""
-        if "hate_speech" not in df.columns or "target_type" not in df.columns:
-            return
-        cls.assert_conditional_integrity(
-            df=df,
-            parent_col="hate_speech",
-            cond_val="no",
-            child_col="target_type",
-            req_val="none",
-        )
+        """Backward-compatible alias for task conditional assertions."""
+        cls.assert_task_conditional_integrity(df)

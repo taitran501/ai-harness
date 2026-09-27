@@ -70,12 +70,48 @@ class Node:
 class TreeJournal:
     """The central registry and tree search manager for all experiments."""
 
-    def __init__(self, storage_path: str = "artifacts/journal.json", auto_sync: bool = False):
-        self.storage_path = Path(storage_path)
+    def __init__(
+        self,
+        storage_path: Optional[str | Path] = None,
+        auto_sync: bool = False,
+        task_spec: Optional[Any] = None,
+        journal_path: Optional[str | Path] = None,
+    ):
+        path = journal_path or storage_path or "artifacts/journal.json"
+        self.storage_path = Path(path)
+        self.task_spec = task_spec
         self.nodes: Dict[str, Node] = {}
         self.load()
         if auto_sync:
             self.sync_from_artifacts()
+
+    def add_node(
+        self,
+        node_id: str,
+        parent_id: Optional[str] = None,
+        branch: str = "baseline",
+        hypothesis: str = "",
+        score: float = 0.0,
+        metrics: Optional[Dict[str, Any]] = None,
+        model_family: str = "linear",
+        approach_type: str = "ml",
+    ) -> Node:
+        """Helper to programmatically create, register, and save a node."""
+        m = metrics or {}
+        if "overall_composite" not in m:
+            m["overall_composite"] = score
+        node = Node(
+            id=node_id,
+            parent_id=parent_id,
+            branch=branch,
+            approach_type=approach_type,
+            model_family=model_family,
+            atomic_hypothesis=hypothesis,
+            metrics=m,
+            status="COMPLETED",
+        )
+        self.append(node)
+        return node
 
     def load(self) -> None:
         """Load the journal from disk if it exists."""
@@ -177,16 +213,26 @@ class TreeJournal:
                             metrics_dict["macro_f1"] = calculated_score
                             break
 
-                    if calculated_score == 0.0 and "a_macro_f1" in df_sum.columns:
-                        a_score = round(float(df_sum["a_macro_f1"].mean()), 4)
-                        b_score = round(float(df_sum["b_macro_f1"].mean()), 4) if "b_macro_f1" in df_sum.columns else 0.0
-                        c_score = round(float(df_sum["c_target_type_macro_f1_oracle_hate"].mean()), 4) if "c_target_type_macro_f1_oracle_hate" in df_sum.columns else 0.0
-                        calculated_score = round((a_score + b_score + c_score) / 3, 4)
-                        metrics_dict["overall_composite"] = calculated_score
-                        metrics_dict["macro_f1"] = calculated_score
-                        metrics_dict["subtask_a"] = {"macro_f1": a_score}
-                        metrics_dict["subtask_b"] = {"macro_f1": b_score}
-                        metrics_dict["subtask_c"] = {"type_macro_f1": c_score}
+                    if calculated_score == 0.0:
+                        try:
+                            from harness.task_spec import load_active_task_spec
+                            task_spec = load_active_task_spec()
+                            st_scores = []
+                            total_weight = 0.0
+                            for st_id, st in task_spec.subtasks.items():
+                                for cand_col in [f"{st_id}_macro_f1", f"{st_id}_f1", f"{st.column}_f1", st_id]:
+                                    if cand_col in df_sum.columns:
+                                        sc = float(df_sum[cand_col].mean())
+                                        st_scores.append(sc * st.weight)
+                                        total_weight += st.weight
+                                        metrics_dict[st_id] = round(sc, 4)
+                                        break
+                            if st_scores and total_weight > 0:
+                                calculated_score = round(sum(st_scores) / total_weight, 4)
+                                metrics_dict["overall_composite"] = calculated_score
+                                metrics_dict["macro_f1"] = calculated_score
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -201,16 +247,30 @@ class TreeJournal:
                                 calculated_score = round(float(first_m[candidate]), 4)
                                 metrics_dict["overall_composite"] = calculated_score
                                 break
-                        if calculated_score == 0.0 and "subtask_a" in first_m:
-                            a_score = first_m.get("subtask_a", {}).get("macro_f1", 0.0)
-                            b_score = first_m.get("subtask_b", {}).get("macro_f1", 0.0)
-                            c_score = first_m.get("subtask_c_target_type_oracle_hate", {}).get("macro_f1", 0.0)
-                            calculated_score = round((a_score + b_score + c_score) / 3, 4) if (a_score + b_score + c_score) > 0 else 0.0
-                            metrics_dict["overall_composite"] = calculated_score
-                            metrics_dict["macro_f1"] = calculated_score
-                            metrics_dict["subtask_a"] = {"macro_f1": round(a_score, 4)}
-                            metrics_dict["subtask_b"] = {"macro_f1": round(b_score, 4)}
-                            metrics_dict["subtask_c"] = {"type_macro_f1": round(c_score, 4)}
+                        if calculated_score == 0.0:
+                            try:
+                                from harness.task_spec import load_active_task_spec
+                                task_spec = load_active_task_spec()
+                                st_scores = []
+                                total_weight = 0.0
+                                for st_id, st in task_spec.subtasks.items():
+                                    val = first_m.get(st_id)
+                                    if isinstance(val, (int, float)):
+                                        sc = float(val)
+                                    elif isinstance(val, dict):
+                                        sc = float(val.get("macro_f1") or val.get("score") or val.get("f1", 0.0))
+                                    else:
+                                        sc = None
+                                    if sc is not None:
+                                        st_scores.append(sc * st.weight)
+                                        total_weight += st.weight
+                                        metrics_dict[st_id] = round(sc, 4)
+                                if st_scores and total_weight > 0:
+                                    calculated_score = round(sum(st_scores) / total_weight, 4)
+                                    metrics_dict["overall_composite"] = calculated_score
+                                    metrics_dict["macro_f1"] = calculated_score
+                            except Exception:
+                                pass
                     elif isinstance(m_data, dict):
                         for candidate in [primary_metric_name, "overall_composite", "macro_f1", "score", "accuracy"]:
                             if candidate in m_data:

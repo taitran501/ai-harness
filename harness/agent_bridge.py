@@ -55,6 +55,7 @@ class TypedActionName(str, Enum):
     INSPECT_DIAGNOSTICS = "inspect_diagnostics"
     CREATE_EXPERIMENT = "create_experiment"
     RUN_SMOKE_TEST = "run_smoke_test"
+    RUN_PROBE = "run_probe"
     RUN_FULL_VALIDATION = "run_full_validation"
     SYNTHESIZE_CANDIDATE = "synthesize_candidate"
     PROMOTE_CANDIDATE = "promote_candidate"
@@ -72,6 +73,7 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.INSPECT_DIAGNOSTICS.value: ApprovalTier.AUTO.value,
     TypedActionName.CREATE_EXPERIMENT.value: ApprovalTier.AUTO.value,
     TypedActionName.RUN_SMOKE_TEST.value: ApprovalTier.AUTO.value,
+    TypedActionName.RUN_PROBE.value: ApprovalTier.AUTO.value,
     TypedActionName.ESTABLISH_BASELINE_ANCHOR.value: ApprovalTier.AUTO_WITH_LIMIT.value,
     TypedActionName.RUN_FULL_VALIDATION.value: ApprovalTier.AUTO_WITH_LIMIT.value,
     TypedActionName.SYNTHESIZE_CANDIDATE.value: ApprovalTier.AUTO_WITH_LIMIT.value,
@@ -176,13 +178,21 @@ class AgentBridge:
     Motto: Antigravity thinks. AgentBridge coordinates. Harness verifies and executes.
     """
 
-    def __init__(self, project_root: Path | str = "."):
+    def __init__(self, project_root: Path | str = ".", task_spec_path: Optional[str | Path] = None):
         self.project_root = Path(project_root).resolve()
         self.sessions_dir = self.project_root / "artifacts" / "agent_sessions"
         self.legacy_runs_dir = self.project_root / "artifacts" / "agent_runs"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.legacy_runs_dir.mkdir(parents=True, exist_ok=True)
         self.comp_state = CompetitionStateMachine(self.project_root)
+        # Support custom task.yaml injection (e.g. for tests or plugin scenarios)
+        if task_spec_path:
+            try:
+                import yaml
+                raw = yaml.safe_load(Path(task_spec_path).read_text(encoding="utf-8")) or {}
+                self.comp_state.spec = raw.get("task", raw)
+            except Exception:
+                pass
 
     def _get_spec_min_improvement(self, session_or_budget: Optional[Any] = None) -> float:
         """Resolve min_meaningful_improvement from SessionBudget or CompetitionSpec (`configs/task.yaml`)."""
@@ -621,11 +631,24 @@ class AgentBridge:
 
         # 2. Try loading ground truth from dataset
         df_gt = None
+        task_spec = None
         try:
-            from src.data import IDENTITIES, load_dataset
-            df_gt, _ = load_dataset(str(self.project_root / "dataset"))
+            from harness.task_spec import load_active_task_spec
+            task_spec = load_active_task_spec()
+            df_gt = task_spec.load_dataset_split("train", project_root=self.project_root)
         except Exception:
             pass
+
+        if df_gt is None and (self.project_root / "dataset").is_dir():
+            dfs = []
+            for f in sorted((self.project_root / "dataset").glob("*.tsv")) + sorted((self.project_root / "dataset").glob("*.csv")):
+                sep = "\t" if f.suffix == ".tsv" else ","
+                try:
+                    dfs.append(pd.read_csv(f, sep=sep))
+                except Exception:
+                    pass
+            if dfs:
+                df_gt = pd.concat(dfs, ignore_index=True)
 
         if df_gt is None:
             for fname in ["train.csv", "train.tsv", "dataset/train.csv", "dataset/train.tsv"]:
@@ -658,10 +681,14 @@ class AgentBridge:
         if declared_id and declared_id in df_gt.columns and declared_id in df_oof.columns:
             id_col = declared_id
         else:
-            for candidate_id in ["id", "ID", "sample_id", "comment_id", "StereoQueerEval_id"]:
+            for candidate_id in ["id", "ID", "sample_id", "row_id", "uid", "item_id"]:
                 if candidate_id in df_gt.columns and candidate_id in df_oof.columns:
                     id_col = candidate_id
                     break
+        if not id_col:
+            common_ids = [c for c in df_gt.columns if c in df_oof.columns and c.lower().endswith("id")]
+            if common_ids:
+                id_col = common_ids[0]
         if not id_col:
             id_col = df_gt.columns[0]
 
@@ -674,44 +701,45 @@ class AgentBridge:
         if len(merged) == 0:
             return 0.0, {}
 
-        # 3. Domain-specific evaluator if available and columns match
-        try:
-            if "pred_stereotype" in merged.columns and "pred_hate_speech" in merged.columns and "pred_identities" in merged.columns:
-                from src.data import IDENTITIES
-                from src.metrics import evaluate_predictions
-                id_matrix = np.zeros((len(merged), len(IDENTITIES)), dtype=int)
-                for idx, raw_val in enumerate(merged["pred_identities"].fillna("none")):
-                    if str(raw_val) != "none":
-                        parts = [p.strip() for p in str(raw_val).split(",")]
-                        for j, ident in enumerate(IDENTITIES):
-                            if ident in parts:
-                                id_matrix[idx, j] = 1
-
-                metrics = evaluate_predictions(
-                    merged,
-                    merged["pred_stereotype"].tolist(),
-                    merged["pred_hate_speech"].tolist(),
-                    merged["pred_target_type"].tolist() if "pred_target_type" in merged.columns else ["none"] * len(merged),
-                    id_matrix,
-                )
-                a_f1 = float(metrics["subtask_a"]["macro_f1"])
-                b_f1 = float(metrics["subtask_b"]["macro_f1"])
-                c_type_f1 = float(metrics.get("subtask_c_target_type_oracle_hate", {}).get("macro_f1", 0.0))
-                c_id_f1 = float(metrics.get("subtask_c_identity_oracle_hate", {}).get("macro_f1", 0.0))
-                composite = round((a_f1 + b_f1 + c_type_f1) / 3.0, 4)
-
-                return composite, {
-                    "composite_score": composite,
-                    "subtask_a": round(a_f1, 4),
-                    "subtask_b": round(b_f1, 4),
-                    "subtask_c_type": round(c_type_f1, 4),
-                    "subtask_c_id": round(c_id_f1, 4),
-                }
-        except Exception:
-            pass
-
-        # 4. Generic Task Evaluation Fallback
+        # 3. Dynamic Subtask Evaluation via TaskSpec if configured
         from sklearn.metrics import f1_score, accuracy_score
+        if task_spec and getattr(task_spec, "subtasks", None):
+            scores_by_target = {}
+            weighted_sum = 0.0
+            total_weight = 0.0
+            for st_id, st in task_spec.subtasks.items():
+                col = st.column or st_id
+                pred_col = f"pred_{col}" if f"pred_{col}" in merged.columns else f"pred_{st_id}"
+                if col in merged.columns and pred_col in merged.columns:
+                    eval_mask = np.ones(len(merged), dtype=bool)
+                    if st.condition is not None and st.condition.eval_condition_only:
+                        parent_st = task_spec.subtasks.get(st.condition.parent_target)
+                        parent_col = parent_st.column if parent_st else st.condition.parent_target
+                        if parent_col in merged.columns:
+                            eval_mask = st.condition.evaluate_condition(merged[parent_col])
+                    
+                    eval_sub = merged[eval_mask]
+                    if len(eval_sub) > 0:
+                        try:
+                            if st.primary_metric in ("macro_f1", "f1"):
+                                sc = float(f1_score(eval_sub[col].astype(str), eval_sub[pred_col].astype(str), average="macro"))
+                            elif st.primary_metric == "accuracy":
+                                sc = float(accuracy_score(eval_sub[col], eval_sub[pred_col]))
+                            else:
+                                sc = float(f1_score(eval_sub[col].astype(str), eval_sub[pred_col].astype(str), average="macro"))
+                        except Exception:
+                            sc = float(accuracy_score(eval_sub[col], eval_sub[pred_col]))
+
+                        scores_by_target[st_id] = round(sc, 4)
+                        weighted_sum += sc * st.weight
+                        total_weight += st.weight
+
+            if scores_by_target and total_weight > 0:
+                composite = round(weighted_sum / total_weight, 4)
+                scores_by_target["composite_score"] = composite
+                return composite, scores_by_target
+
+        # 5. Generic Task Evaluation Fallback
         scores_by_target = {}
         for col in df_gt.columns:
             pred_col = f"pred_{col}"
@@ -934,7 +962,7 @@ class AgentBridge:
 
             elif act == TypedActionName.INSPECT_DIAGNOSTICS.value:
                 pool = self.comp_state.compute_candidate_pool(journal)
-                default_exp_id = (pool.get("overall_best") or {}).get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "exp001_baseline_tfidf"
+                default_exp_id = (pool.get("overall_best") or {}).get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
                 exp_id = params.get("exp_id", default_exp_id)
                 diag_file = self.project_root / "artifacts" / exp_id / "DIAGNOSTICS.md"
                 node = journal.nodes.get(exp_id)
@@ -1035,7 +1063,7 @@ class AgentBridge:
                     },
                     "data": {
                         "folds": params.get("folds", [0, 1, 2, 3, 4]),
-                        "input_variants": params.get("input_variants", ["title_comment"]),
+                        "input_variants": params.get("input_variants", ["default"]),
                     },
                     "model": {
                         "name": params.get("model_name", "tfidf_logistic_regression"),
@@ -1066,7 +1094,10 @@ class AgentBridge:
                 )
 
             elif act == TypedActionName.RUN_SMOKE_TEST.value:
-                cfg_path = params.get("config_path", "configs/exp001_tfidf_baseline.yaml")
+                cfg_path = params.get("config_path")
+                if not cfg_path:
+                    available = sorted(list((self.project_root / "configs").glob("exp*.yaml")))
+                    cfg_path = str(available[0].relative_to(self.project_root)).replace("\\", "/") if available else "configs/baseline.yaml"
                 fold = str(params.get("fold", 0))
                 cmd = [
                     sys.executable,
@@ -1086,6 +1117,38 @@ class AgentBridge:
                     action=act,
                     status="SUCCESS" if passed else "FAILED",
                     summary=f"Smoke test on Fold {fold} ({cfg_path}): {'PASSED' if passed else 'FAILED'}.",
+                    artifact_path=cfg_path,
+                    data={"returncode": retcode, "tail": out_text[-500:]},
+                    elapsed_seconds=elapsed,
+                )
+
+            elif act == TypedActionName.RUN_PROBE.value:
+                cfg_path = params.get("config_path")
+                if not cfg_path:
+                    available = sorted(list((self.project_root / "configs").glob("exp*.yaml")))
+                    cfg_path = str(available[0].relative_to(self.project_root)).replace("\\", "/") if available else "configs/baseline.yaml"
+                probe_samples = str(params.get("probe_samples", 100))
+                fold = str(params.get("fold", 0))
+                cmd = [
+                    sys.executable,
+                    "train.py",
+                    "--config",
+                    cfg_path,
+                    "--debug",
+                    "--fold",
+                    fold,
+                    "--probe-samples",
+                    probe_samples,
+                    "--force",
+                    "--skip-leaderboard",
+                ]
+                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=120.0)
+                session.compute_usage["smoke_runs"] = int(session.compute_usage.get("smoke_runs", 0)) + 1
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS" if passed else "FAILED",
+                    summary=f"Fast Probe run ({probe_samples} samples, Fold {fold}, {cfg_path}): {'PASSED' if passed else 'FAILED'}.",
                     artifact_path=cfg_path,
                     data={"returncode": retcode, "tail": out_text[-500:]},
                     elapsed_seconds=elapsed,
@@ -1242,11 +1305,33 @@ class AgentBridge:
                 )
 
             elif act == TypedActionName.PREPARE_SUBMISSION.value:
-                cand_csv = params.get(
-                    "candidate_csv", "artifacts/cand_router_ab_comment_c_fullctx/oof_predictions.csv"
-                )
-                base_csv = params.get("baseline_csv", "artifacts/exp001_baseline_tfidf/oof_predictions.csv")
-                exp_id = params.get("exp_id", "cand_router_ab_comment_c_fullctx")
+                pool = self.comp_state.compute_candidate_pool(journal)
+                best_cand = pool.get("overall_best") or {}
+                default_exp = best_cand.get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
+                exp_id = params.get("exp_id", default_exp)
+                cand_csv = params.get("candidate_csv")
+                if not cand_csv:
+                    for cand_opt in [
+                        self.project_root / "artifacts" / exp_id / "predictions.csv",
+                        self.project_root / "artifacts" / exp_id / "oof_predictions.csv",
+                    ]:
+                        if cand_opt.exists():
+                            cand_csv = str(cand_opt)
+                            break
+                    if not cand_csv:
+                        cand_csv = str(self.project_root / "artifacts" / exp_id / "predictions.csv")
+
+                base_exp = self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
+                base_csv = params.get("baseline_csv")
+                if not base_csv:
+                    for base_opt in [
+                        self.project_root / "artifacts" / base_exp / "predictions.csv",
+                        self.project_root / "artifacts" / base_exp / "oof_predictions.csv",
+                    ]:
+                        if base_opt.exists():
+                            base_csv = str(base_opt)
+                            break
+
                 entry = sub_mgr.register_submission(exp_id=exp_id, candidate_csv=cand_csv, baseline_csv=base_csv)
                 session.compute_usage["submissions_used"] = int(session.compute_usage.get("submissions_used", 0)) + 1
                 return ActionObservation(
@@ -1265,13 +1350,10 @@ class AgentBridge:
                     raise ValueError("Parameter 'sub_id' is required for 'record_external_score'.")
                 entry = sub_mgr.record_official_score(
                     sub_id=sub_id,
-                    macro_a=params.get("macro_a"),
-                    macro_b=params.get("macro_b"),
-                    macro_c_type=params.get("macro_c_type"),
-                    macro_c_id=params.get("macro_c_id"),
+                    primary_score=params.get("primary_score") or params.get("score"),
+                    scores=params.get("scores") or params.get("custom_scores"),
                     split_type=params.get("split_type", "public"),
                     notes=params.get("notes", ""),
-                    custom_scores=params.get("custom_scores") or params.get("scores"),
                 )
                 blockers = (
                     ["CV vs LB Divergence detected (significant score delta between LB and Local CV)!"]

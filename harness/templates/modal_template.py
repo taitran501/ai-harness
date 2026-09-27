@@ -175,6 +175,7 @@ def run_training_remote(config_path: str, exp_id: str):
         "metrics.json",
         "summary.csv",
         "summary.md",
+        "predictions.csv",
         "oof_predictions.csv",
         "test_predictions.csv",
         "submission.csv",
