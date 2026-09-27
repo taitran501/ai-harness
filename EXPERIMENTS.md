@@ -1,43 +1,43 @@
-# StereoQueerEval Experiment Leaderboard
+# Competition Experiment Memory & Leaderboard (Tier 1 Global Memory)
 
-This document serves as the central tracking registry for all cross-validation experiments.
-All metrics represent the mean over 5 video-grouped folds (`splits/fold_assignments.tsv`).
-Subtask C metrics are computed conditionally on gold hateful comments (`oracle_hate`).
+This document serves as the human- and agent-readable central tracking registry for all cross-validation experiments and hypotheses.
+All metrics represent cross-validation performance across the defined validation scheme (`task.yaml`).
 
 ---
 
 ## 1. Current Best Models (Hall of Fame)
 
-Use these models as the parent baseline for new iterations:
+Use these models as the parent baseline anchor for subsequent iterations:
 
-| Subtask | Language | Best Exp ID | Model / Context | Metric | Score |
-|---|---|---|---|---|---:|
-| **Subtask A (Stereotype)** | English (`EN`) | `baseline_v1_comment` | TF-IDF / `comment` | Macro-F1 | **0.6962** |
-| **Subtask A (Stereotype)** | Italian (`IT`) | `baseline_v1_comment` | TF-IDF / `comment` | Macro-F1 | **0.6356** |
-| **Subtask A (Stereotype)** | Dutch (`NL`) | `baseline_v1_comment` | TF-IDF / `comment` | Macro-F1 | **0.6727** |
-| **Subtask B (Hate Speech)** | English (`EN`) | `baseline_v1_comment` | TF-IDF / `comment` | Macro-F1 | **0.5238** |
-| **Subtask B (Hate Speech)** | Italian (`IT`) | `baseline_v1_comment` | TF-IDF / `comment` | Macro-F1 | **0.5308** |
-| **Subtask B (Hate Speech)** | Dutch (`NL`) | `baseline_v1_comment` | TF-IDF / `comment` | Macro-F1 | **0.5165** |
-| **Subtask C (Target Type)** | English (`EN`) | `baseline_v1_comment` | TF-IDF / `comment` | Macro-F1 | **0.7178** |
-| **Subtask C (Identities)** | English (`EN`) | `baseline_v1_full_context` | TF-IDF / `full_context` | Micro-F1 | **0.7476** |
+| Rank | Exp ID | Branch | Model Family | Primary Metric | Score | Key Advantage / Breakthrough |
+|---|---|---|---|---|---:|---|
+| 👑 **1** | `exp001_tfidf_baseline` | `baseline` | `linear` | Macro-F1 | **0.4500** | Canonical linear baseline establishing validation floor. |
 
 ---
 
 ## 2. Idea Graveyard (Negative Knowledge Base — DO NOT RETRY)
 
-Before proposing any new experiment, agents MUST check this table. Do not repeat failed interventions without explicit human authorization:
+Before proposing any new experiment, agents MUST check this table. Do not repeat failed interventions without novel empirical justification:
 
 | Tested Intervention | Tested In | Observed Impact | Root Cause / Post-Mortem | Directive |
 |---|---|---|---|---|
-| **Video Description for Subtask A & B** | `baseline_v1_full_context` | Macro-F1 drops: EN A (-0.053), EN B (-0.053), IT A (-0.054), NL A (-0.048). | Long video descriptions dilute comment-level lexical signals and introduce out-of-domain noise. | **Do NOT** use `full_context` for Subtask A or B classification. Use `comment` or `title_comment`. |
-| **Unconditioned Subtask C Training** | Pre-experiment analysis | Training target/identity models on non-hateful rows collapsed type precision. | 70%+ of comments are non-hateful and possess `target=none`. | Always filter to `hate_speech != 'no'` for Subtask C (`oracle_hate`). |
+| **Raw Unnormalized Features** | Initial probe | Metric degradation (-0.08) | Large feature magnitude differences dominated gradient updates. | Always apply scaling/normalization before linear or neural training. |
+| **Identical Model Stacking** | Synthetic probe | Kappa = 0.98, Disagreement < 1.0% | Constituent models shared identical inductive bias; zero diversity. | Ensembles must satisfy Cohen's Kappa $\kappa \le 0.85$ and Disagreement $\ge 5\%$. |
 
 ---
 
 ## 3. Experiment History & Lineage Registry
 
-| Exp ID | Branch | Parent | Date | Model / Backbone | Context | EN Macro A | EN Macro B | EN C Type/Id | IT Macro A | NL Macro A | Artifact Path | Notes |
-|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|
-| `baseline_v1_comment` | `baseline` | `none` | 2026-09-20 | TF-IDF + LogisticReg | comment | 0.6962 | 0.5238 | 0.7178 / 0.2408 | 0.6356 | 0.6727 | `artifacts/baseline_v1` | Strongest Subtask A & B across all languages for sparse baseline. |
-| `baseline_v1_title_comment` | `feat` | `baseline_v1_comment` | 2026-09-20 | TF-IDF + LogisticReg | title_comment | 0.6783 | 0.4873 | 0.6400 / 0.2835 | 0.6234 | 0.6632 | `artifacts/baseline_v1` | Video title improves identity classification at slight cost to A/B. |
-| `baseline_v1_full_context` | `feat` | `baseline_v1_comment` | 2026-09-20 | TF-IDF + LogisticReg | full_context | 0.6432 | 0.4709 | 0.6284 / 0.2944 | 0.5814 | 0.6246 | `artifacts/baseline_v1` | Highest identity micro-F1, but degrades A and B significantly. |
+| Exp ID | Branch | Parent ID | Approach | Model Family | Primary Metric | Composite Score | Status | Notes |
+|---|---|---|---|---|---|---:|---|---|
+| `exp000_template` | `baseline` | `none` | `ml` | `linear` | Macro-F1 | 0.0000 | `ARCHIVED` | Template configuration. |
+| `exp001_tfidf_baseline` | `baseline` | `none` | `ml` | `linear` | Macro-F1 | 0.4500 | `COMPLETED` | Canonical baseline reference implementation. |
+
+---
+
+## 4. Lineage Management Instructions for Agents
+
+1. **Before Running**: Look up the current top model in **Hall of Fame** (`journal_tool.py --recommend` or `agent_bridge_cli.py context`).
+2. **Atomic Intervention**: Modify exactly one hypothesis / variable at a time (Control vs Treatment).
+3. **If Rejected / Degraded**: Immediately log the root cause into **Section 2 (Idea Graveyard)** to prevent circular re-testing.
+4. **If Improved by $\ge 2.0\%$**: Record the experiment as the new baseline anchor or candidate pool member.

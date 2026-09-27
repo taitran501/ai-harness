@@ -79,38 +79,42 @@ Competition & Execution Harness (Layer 3)
 
 ---
 
-## 3. Current Competition Adapter: StereoQueerEval (SemEval-2027 Task 8)
+## 3. Declarative Task Contracts & Competition Adapters
 
-*This section captures domain-specific rules configured via `configs/task.yaml` and competition datasets.*
+The Core Harness is 100% domain-agnostic. All competition-specific rules, schemas, and metrics are declared declaratively in `configs/task.yaml`:
 
-- **Tasks & Evaluation Metrics**:
-  - **Subtask A (Stereotype)**: Binary classification (`yes` / `no`). Metric: **Macro-F1**.
-  - **Subtask B (Hate Speech)**: 3-class classification (`yes_explicit`, `yes_implicit`, `no`). Metric: **Macro-F1**.
-  - **Subtask C (Target & Identity)**: Conditional on hateful comments (`hate_speech != "no"`):
-    - Target Type: `individual` vs `group`. Metric: **Macro-F1**.
-    - Target Identities: 9 binary codes (`l`, `g`, `b`, `t`, `q`, `i`, `a`, `lgbtqia+`, `nb`). Metrics: **Macro-F1**, **Micro-F1**.
-  - **Languages**: English (`EN`), Italian (`IT`), Dutch (`NL`). Metrics reported per language and overall.
-- **Cross-Validation Split Strategy**:
-  - Grouped by `yt_title` to prevent comment cross-video leakage (`splits/fold_assignments.tsv`).
-- **Composition Strategy**:
-  - `specialist_router`: Routes Subtask A/B to comment-focused models and Subtask C to context-aware models.
-- **External Evaluation Platform**: Codabench.
+- **Universal Task Specification (`configs/task.yaml`)**:
+  - `name`: Competition / benchmark identifier.
+  - `platform`: `kaggle`, `codabench`, `drivendata`, `custom`.
+  - `task_type`: `classification`, `regression`, `multi_label`, `ranking`.
+  - `modality`: `text`, `tabular`, `vision`, `multimodal`.
+  - `primary_metric`: Primary evaluation metric (e.g. `Macro-F1`, `ROC-AUC`, `RMSE`, `LogLoss`).
+  - `direction`: Optimization direction (`maximize` | `minimize`).
+  - `subtasks`: Optional array of subtasks with weights, metric formulas, and conditional filtering.
+- **Validation Protocols**:
+  - `holdout`: Fast evaluation against a designated dev set (`dev_split_name`).
+  - `kfold` / `GroupKFold` / `StratifiedKFold`: Cross-validation with anti-leakage grouping (`group_column`).
+  - `probe_samples`: Low-cost debug slice for rapid syntactic and convergence verification.
+- **Predefined Presets (`configs/tasks/`)**:
+  - `configs/tasks/kaggle_tabular_regression.yaml`
+  - `configs/tasks/kaggle_binary_classification.yaml`
+  - `configs/tasks/stereoqueereval.yaml` (SemEval Multi-Task NLP Reference)
 
 ---
 
 ## 4. Standard Operating Procedure (SOP) via Agent Bridge
 
 ```powershell
-# 1. Inspect Context Packet
+# 1. Inspect Context Packet (HUD, TreeJournal UCB, Diagnostics Bottlenecks)
 python tools/agent_bridge_cli.py context
 
 # 2. Start / Configure Session with Budgets
-python tools/agent_bridge_cli.py start-session --goal "Improve Subtask C Macro-F1" --max-experiments 3
+python tools/agent_bridge_cli.py start-session --goal "Improve primary validation metric" --max-experiments 3
 
 # 3. Create Grounded Config (In-memory verification -> Persist)
-python tools/agent_bridge_cli.py act --action create_experiment --params '{"branch": "feat", "descriptor": "title_ctx_balanced"}'
+python tools/agent_bridge_cli.py act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_pipeline_v1"}'
 
-# 4. Smoke Test (Fold 0 Probe)
+# 4. Smoke Test (Fold 0 or Debug Probe)
 python tools/agent_bridge_cli.py act --action run_smoke_test --params '{"config_path": "configs/<exp_config>.yaml"}'
 
 # 5. Full Validation (Local / Modal / Kaggle)

@@ -1,54 +1,51 @@
-# Experiment Configuration Template for StereoQueerEval
+# Universal Experiment Configuration Template
+# Format: configs/exp<NNN>_<branch>_<descriptor>.yaml
 experiment:
   id: "exp000_template"
-  branch: "model"                  # Options: baseline, feat, model, loss, mtl, ens
-  parent_id: "exp001_baseline_tfidf" # Must point to an existing parent node in journal.json
-  date: "2026-09-24"
-  problem_addressed: "Severe class imbalance on rare Subtask C identities and poor semantic transfer in IT/NL."
-  hypothesis: "Switching from TF-IDF to pretrained mDeBERTa-v3 with Focal Loss will improve rare identity Macro-F1 by +0.08."
-  intervention: "Replace TF-IDF with microsoft/mdeberta-v3-base and apply FocalLoss(gamma=2.0) on Subtask C."
+  branch: "feat"                  # Options: baseline, feat, model, loss, ens
+  parent_id: "exp000_baseline"    # Points to parent experiment node in journal.json
+  date: "2026-09-27"
+  problem_addressed: "Baseline performance is limited by unoptimized input representation."
+  hypothesis: "Applying structured feature engineering and regularization will improve primary validation metric by >=2.0%."
+  intervention: "Add n-gram / polynomial feature transforms and tune L2 regularization."
 
-# Universal Task Specification (Task-Agnostic ML/DL Standard)
+# Universal Task Specification (Declarative Contract)
 task:
-  name: "StereoQueerEval"
+  name: "Competition_Benchmark"
   type: "classification"           # classification | regression | multi_label | ranking
   primary_metric: "macro_f1"       # Primary optimization objective
   direction: "maximize"            # maximize | minimize
-  approach_type: "dl"              # ml (classical tabular/n-gram) | dl (deep learning/transformers) | hybrid
-  model_family: "transformer"      # linear | tree | transformer | cnn | rnn | ensemble | other
+  approach_type: "ml"              # ml (classical tabular/n-gram) | dl (deep learning/transformers) | llm
+  model_family: "linear"           # linear | tree | transformer | llm_peft | ensemble
 
 grounding:
-  source_type: "huggingface_hub"   # Options: huggingface_hub, arxiv, paperswithcode, empirical_journal, verified_baseline
-  source_id: "microsoft/mdeberta-v3-base"
-  retrieval_summary: "Multilingual disentangled attention backbone covering EN, IT, and NL; superior representation for social media hate speech."
-  verified_via: "huggingface_hub"  # Tool or registry: search_web, read_url_content, mcp_gemini-docs, local_registry
+  source_type: "verified_baseline" # Options: huggingface_hub, arxiv, empirical_journal, verified_baseline
+  source_id: "feature_pipeline_baseline"
+  retrieval_summary: "Canonical baseline pipeline for feature representation and regularization."
+  verified_via: "local_registry"   # search_web, read_url_content, huggingface_hub, local_registry
 
 # Assumption Register: Explicit separation of established facts from assumptions (Edwards & Schuster, 2026)
 assumption_register:
   known_facts:
-    - "TF-IDF baseline achieves 0.62 Macro-F1 on Subtask A but collapses (0.00) on rare identities 'a' and 'i'."
-    - "Grouped cross-validation on fold_assignments.tsv prevents video title leakage."
+    - "Validation split follows evaluation scheme defined in task.yaml."
   assumptions:
-    - "Disentangled attention in mDeBERTa-v3 captures subtle implicit derogatory framing better than n-grams."
-  uncertainty_level: "low"          # Options: low, medium, high (if high, verification_probe is required)
-  verification_probe: "Run --debug --fold 0 smoke test to verify loss convergence before full 5-fold training."
+    - "Feature scaling and regularization prevents overfitting on validation holdouts."
+  uncertainty_level: "low"         # Options: low, medium, high (if high, verification_probe is required)
+  verification_probe: "Execute single-fold probe or smoke test before full validation."
 
 constraints:
-  max_params_limit: 150000000      # 150M parameter ceiling for standard models
-  strict_video_split: true         # Enforce splits/fold_assignments.tsv
-  oracle_hate_c: true              # Filter Subtask C to hate_speech != 'no'
+  max_params_limit: 150000000
 
 data:
-  train_path: "dataset/train.tsv"
-  splits_path: "splits/fold_assignments.tsv"
-  text_representation: "title_comment" # Options: comment, title_comment, full_context
-  max_length: 256
+  train_path: "dataset/"
+  feature_columns: ["text"]
+  target_column: "target"
 
 model:
-  backbone: "microsoft/mdeberta-v3-base"
-  subtask_a_head: "classification"
-  subtask_b_head: "classification"
-  subtask_c_head: "classification"
+  name: "logistic_regression"
+  params:
+    C: 1.0
+    max_iter: 1000
 
 training:
   seed: 42
