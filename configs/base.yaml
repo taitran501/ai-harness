@@ -1,7 +1,7 @@
 # Universal Base Runtime Configuration for ML-Harness
 paths:
   data_dir: "dataset"
-  split_path: "splits/folds.csv"
+  split_path: "splits/fold_assignments.tsv"
   artifacts_dir: "artifacts"
   leaderboard_path: "EXPERIMENTS.md"
 

@@ -31,7 +31,7 @@ auditing predictions, or registering verified submissions for **StereoQueerEval*
 
 ### Data & Cross-Validation Strategy:
 - **Validation Scheme**: `GroupKFold` (5 folds, seed 42)
-- **Anti-Leakage Group Column**: `yt_title`
+- **Anti-Leakage Group Column**: `video_key`
 - **Dataset Paths**: Train: `dataset/` | Test: `dataset/test/`
 - **Key Columns**: ID: `StereoQueerEval_id` | Target: `stereotype,hate_speech,target_type,target_identities`
 

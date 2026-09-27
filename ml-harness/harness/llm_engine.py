@@ -23,7 +23,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from harness.io_utils import get_project_root
+PROJECT_ROOT = get_project_root()
 
 _CACHE: Dict[str, Tuple[float, Any]] = {}
 

@@ -31,9 +31,15 @@ pnpm-debug.log*
 checkpoints/
 **/*.zip
 
-# Task-specific raw data & old artifacts
-dataset/
-splits/
+# ml-harness subfolder dependencies & build outputs
+ml-harness/dashboard/node_modules/
+ml-harness/dashboard/dist/
+ml-harness/**/__pycache__/
+
+# Allow dataset zip
+!dataset/*.zip
+
+# Legacy and scratch artifacts
 legacy/
 docs/specs/
 artifacts/baseline_v1/

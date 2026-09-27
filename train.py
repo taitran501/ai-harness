@@ -8,6 +8,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
+HARNESS_DIR = Path(__file__).resolve().parent / "ml-harness"
+if HARNESS_DIR.exists() and str(HARNESS_DIR) not in sys.path:
+    sys.path.insert(0, str(HARNESS_DIR))
+
 from harness.runner import UniversalRunner, main as runner_main, merge_configs
 from src.utils import load_yaml_config
 

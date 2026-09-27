@@ -52,3 +52,24 @@ def atomic_write_json(
     """Atomically serialize data to a JSON file on disk."""
     dumped = json.dumps(data, indent=indent, ensure_ascii=ensure_ascii)
     atomic_write_text(path, dumped, encoding=encoding)
+
+
+def get_project_root() -> Path:
+    """Finds the root directory of the active project or competition workspace.
+
+    Handles both standalone execution and subfolder plugin installation
+    (e.g., when the harness is inside an 'ml-harness/' subfolder of a competition).
+    """
+    if "HARNESS_PROJECT_ROOT" in os.environ:
+        return Path(os.environ["HARNESS_PROJECT_ROOT"]).resolve()
+
+    cwd = Path.cwd().resolve()
+    if (cwd / "configs" / "task.yaml").exists() or (cwd / "dataset").exists() or (cwd / "artifacts").exists():
+        return cwd
+
+    file_dir = Path(__file__).resolve().parent.parent
+    if file_dir.name in ("ml-harness", "ml_harness"):
+        parent = file_dir.parent
+        if (parent / "configs" / "task.yaml").exists() or (parent / "dataset").exists():
+            return parent
+    return file_dir

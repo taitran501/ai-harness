@@ -13,7 +13,8 @@ from harness.grounding_gate import GroundingGate
 
 class TestAgentBridge(unittest.TestCase):
     def setUp(self) -> None:
-        self.project_root = Path(__file__).resolve().parent.parent
+        from harness.io_utils import get_project_root
+        self.project_root = get_project_root()
         self.bridge = AgentBridge(self.project_root)
 
     def test_context_packet_and_markdown(self) -> None:
