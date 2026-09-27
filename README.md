@@ -1,118 +1,104 @@
-# ML-Harness: Universal Agentic ML/DL Experimentation Platform
+# ML-Harness
+
+A modular experimentation harness and dashboard for competitive machine learning and data science projects (Kaggle, Codabench, DrivenData, and academic benchmarks).
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Dashboard: React+Vite](https://img.shields.io/badge/Dashboard-React%20%2B%20Vite%20%2B%20Tailwind-purple.svg)](dashboard/)
-[![Audit Gate: SWE--Agent](https://img.shields.io/badge/Audit%20Gate-SWE--Agent%20Verified-emerald.svg)](tools/audit_gate.py)
-[![Cloud: Modal + Kaggle](https://img.shields.io/badge/Cloud-Modal%20%7C%20Kaggle%20CLI-orange.svg)](harness/cloud_runner.py)
-[![Models: ML + DL + LLMs](https://img.shields.io/badge/Modeling-Classical%20%7C%20Transformers%20%7C%20QLoRA%20%7C%20CoT-red.svg)](harness/runner.py)
-
-**ML-Harness** is an autonomous, pluggable experimentation framework and execution harness designed for competitive data science (Kaggle, Codabench, DrivenData, SemEval) and machine learning research. It bridges AI coding agents (**Antigravity**, **OpenAI Codex**, **SWE-agent**, **AIDE**) and human researchers with deterministic guardrails that eliminate heuristic degeneration, confabulation, data leakage, and premature convergence.
-
-> **Operating Boundary**:  
-> **“Antigravity thinks. AgentBridge coordinates. Harness executes and verifies.”**  
-> Core harness primitives (OOF evaluation, solution tree DAGs, deterministic audit gates, candidate pools) are 100% decoupled from competition domains. Any competition can be attached simply by providing a declarative `configs/task.yaml`.
+[![Dashboard](https://img.shields.io/badge/Dashboard-React%20%2B%20Vite-purple.svg)](dashboard/)
+[![Tests](https://img.shields.io/badge/Tests-145%20passing-brightgreen.svg)](tests/)
 
 ---
 
-## Key Capabilities
+## Overview
 
-```text
-Antigravity IDE (Layer 1)
-   │  Scientific Reasoning / Hypothesis / Observe -> Decide -> Act
-   ▼
-AgentBridge (Layer 2)
-   │  Context Packet / Budget Guards / Typed Actions / Human Approval
-   ▼
-Universal Execution Harness (Layer 3)
-   ├─ Universal Runner (ML / DL / Unsloth QLoRA / Reasoning LLMs)
-   ├─ Dynamic TaskSpec (Holdout Dev / GroupKFold / Probe Validation)
-   ├─ MCTS Solution Tree & UCB Lineage (AIDE-style DAG)
-   ├─ Deterministic Guardrails (GroundingGate, EnsembleGuard, AuditGate)
-   └─ Execution Backends (Local / Modal Serverless GPU / Kaggle API)
-```
+**ML-Harness** is a Python framework designed to streamline running, tracking, and evaluating machine learning experiments. It works for standard data science workflows whether you run models locally, dispatch heavy training jobs to cloud GPUs (Modal or Kaggle), or collaborate with AI coding assistants (such as Antigravity or Codex).
 
-### 1. Full Modeling Spectrum Supported
-- **Classical ML & Gradient Boosting**: Native support for `scikit-learn`, `LightGBM`, `XGBoost`, and `CatBoost` with automated hyperparameter pipelines.
-- **Deep Learning Transformers**: Pretrained encoder fine-tuning (`DeBERTa-v3`, `XLM-RoBERTa`, `ModernBERT`) with custom heads, cosine schedules, and mixed precision.
-- **Fast QLoRA (Local / Open-Weights)**: Integrated 4-bit NormalFloat (NF4) parameter-efficient fine-tuning via `Unsloth` and Hugging Face PEFT with Triton kernels (<9GB VRAM footprint).
-- **Reasoning LLMs & Prompting**: Zero-shot and few-shot Chain-of-Thought (CoT) prompting with structured JSON classification schema parsing (Gemini, OpenAI, DeepSeek-R1).
+The harness is **task-agnostic**. The core runtime (cross-validation, experiment lineage tracking, ensembling checks, submission verification, and web UI) is decoupled from any specific competition. You can adapt it to a new tabular, text, vision, or multi-task problem by editing a single configuration file (`configs/task.yaml`).
+
+---
+
+## Features
+
+### 1. Broad Modeling Support
+- **Classical ML & Gradient Boosting**: Native support for `scikit-learn`, `LightGBM`, `XGBoost`, and `CatBoost` with tabular preprocessing pipelines.
+- **Deep Learning Transformers**: Fine-tuning pretrained text encoders (`DeBERTa`, `RoBERTa`, `ModernBERT`, etc.) via Hugging Face with customizable heads, learning rate schedules, and mixed precision.
+- **PEFT / QLoRA**: Script generation and execution for 4-bit quantized LoRA fine-tuning using `Unsloth` and Hugging Face PEFT for consumer-grade GPU memory footprints.
+- **LLM Prompting & Reasoning**: Support for zero-shot, few-shot, and Chain-of-Thought (CoT) prompting with structured JSON output parsing across OpenAI, Gemini, and DeepSeek backends.
 
 ### 2. Flexible Validation Protocols
-- **Holdout Dev Split**: Fast evaluation against a single dedicated validation file (`dev_split_name`).
-- **Grouped / Stratified Cross-Validation**: $k$-fold cross-validation with anti-leakage grouping (`GroupKFold`, `StratifiedKFold`, `TimeSeriesSplit`).
-- **Low-Cost Sample Probes**: Instant single-fold or sampled-row verification probes to prove gradient convergence and schema validity before spending GPU compute.
+- **Holdout Validation**: Fast validation against a designated evaluation dataset (`dev_split_name`).
+- **Cross-Validation**: $k$-fold cross-validation with anti-leakage grouping (`GroupKFold`, `StratifiedKFold`, `TimeSeriesSplit`).
+- **Debug Probes**: Low-cost, sampled-row smoke tests (`--debug --fold 0`) to verify syntax, pipeline wiring, and convergence before launching long runs.
 
-### 3. MCTS Solution Tree & UCB Exploration (AIDE-Style)
-- Formulates experiment lineage as a directed acyclic graph (DAG) in `artifacts/journal.json`.
-- Implements **Upper Confidence Bound (UCB)** exploration:
-  $$\text{Score}_{\text{UCB}}(N) = \mu(N) + c \cdot \sqrt{\frac{\ln(\text{Total Visits})}{\text{Visits}(N) + 1}}$$
-- Balances exploiting the current top model vs. exploring under-sampled model families, preventing agents from myopically giving up on promising branches.
+### 3. Experiment Tracking & Solution Tree
+- **Lineage DAG**: Experiments are tracked in `artifacts/journal.json` with parent-child relationships, hypotheses, and evaluation metrics.
+- **Upper Confidence Bound (UCB) Search**: Recommends next steps by balancing exploitation of the current best model with exploration of under-tested model families.
+- **Human-Readable Logs**: Summaries and notes are maintained in `EXPERIMENTS.md` (tracking best models and an idea graveyard of approaches that did not pan out).
 
-### 4. Deterministic SWE-Agent Guardrails
-- **GroundingGate**: Requires literature/empirical citations and explicit assumption registers (Edwards & Schuster, 2026) before any configuration is persisted.
-- **EnsembleGuard**: Rejects pseudo-ensembles. Enforces **Cohen's Kappa ($\kappa \le 0.85$)** and **Disagreement Rate ($\ge 5.0\%$)** to ensure candidate diversity.
-- **AuditGate**: Mandates a **Minimum Meaningful Effect Size (MMES $\ge 2.0\%$)**, SHA-256 duplicate detection, and McNemar significance testing before signing cryptographic `AUDIT_RECEIPT.json` packages.
+### 4. Verification & Guardrails
+- **Epistemic Grounding**: Optional metadata verification ensuring configurations specify their rationale, reference sources, and assumptions before running.
+- **Ensemble Diversity Guard**: Rejects pseudo-ensembles by enforcing prediction divergence thresholds (Cohen's Kappa $\kappa \le 0.85$ and minimum disagreement $\ge 5.0\%$) between models before blending.
+- **Pre-Submission Audit**: Validates submission files against baselines (checking for duplicate predictions, minimum effect size $\ge 2.0\%$, and format errors) before packaging `submission.zip` or `submission.csv`.
 
-### 5. Multi-Cloud Execution Hub (Modal & Kaggle)
-- **Modal.com**: Serverless execution with persistent volume caching (`modal volume`) and GPU selection (A10G, A100, H100, T4, L4).
-- **Kaggle CLI**: Automated kernel generation (`run_kaggle.py` + `kernel-metadata.json`), dataset push, execution dispatch, and artifact synchronization.
-- **Local Pre-Flight Checks**: Static syntactic and schema verification via `CloudPreflightInspector` prior to remote dispatch.
+### 5. Multi-Backend Execution
+- **Local**: Run directly on your development machine (`python train.py`).
+- **Modal.com**: Serverless GPU execution with persistent volume caching and GPU selection (A10G, A100, H100, T4, L4).
+- **Kaggle API / CLI**: Automated script packaging, kernel push, remote execution monitoring, and artifact download.
 
-### 6. Interactive Minimalist WebApp & Dashboard
-- Modern responsive dashboard built with **React, Vite, Tailwind CSS, and Vis-Network**.
-- **Competition Journey Workspace**: Visual tracking across all 8 phases of competition lifecycle.
-- **Execution Runner**: One-click configuration generator, command launcher, and console log viewer.
-- **LLM Studio**: Interactive model playground, prompt engineering with variable interpolation, Hugging Face Hub live search, and 1-click Unsloth training script generation.
-- **Solution Tree Canvas**: Interactive DAG visualization with metric deltas, model family tags, and node inspectors.
-- **Dynamic Task Configurator**: Built-in presets for Kaggle tabular regression, binary classification, Codabench multi-task NLP, and custom benchmarks.
+### 6. Interactive Web Dashboard
+A local web UI built with React, Vite, and Tailwind CSS provides:
+- **Solution Tree View**: Interactive graph of all experiment iterations and their performance deltas.
+- **Leaderboard**: Compare validation scores, parameters, and training logs across models.
+- **Execution Runner**: Configure and trigger runs directly from the browser.
+- **LLM Studio**: Test prompts against sample data, search Hugging Face Hub models, and generate Unsloth training scripts.
+- **Task Configurator**: Switch between task presets (e.g., Kaggle house prices regression, binary classification, Codabench multi-task NLP) or edit task definitions interactively.
+- **Submissions Hub**: Track generated submission files and audit receipts.
 
 ---
 
-## Directory Layout
+## Directory Structure
 
 ```text
 ml-harness/
-├── .agents/                    # Universal AI agent skill definitions & prompt contracts
-├── configs/                    # Declarative task & experiment specifications
-│   ├── base.yaml               # Universal runtime defaults
-│   ├── task.yaml               # Active competition declarative contract
-│   ├── tasks/                  # Predefined competition presets (Kaggle, Codabench, Vision)
-│   ├── exp000_template.yaml    # Universal experiment template with grounding registers
-│   └── exp001_tfidf_baseline.yaml # Reference baseline configuration
-├── dashboard/                  # React + TypeScript + Vite + Tailwind CSS web dashboard
-├── docs/                       # Architectural documentation & empirical knowledge base
-│   ├── AIDE_SWE_ARCHITECTURE.md# Research paper analysis (AIDE MCTS & SWE-agent ACI)
-│   └── KNOWLEDGE_BASE.md       # Empirical catalog of backbones, loss functions & prior benchmarks
-├── harness/                    # Core experimentation platform engines
-│   ├── runner.py               # Universal ML/DL/LLM execution runner
-│   ├── task_spec.py            # Universal declarative task contract & dynamic evaluator
-│   ├── agent_bridge.py         # 3-Layer Agent Bridge, stateful sessions & typed actions
-│   ├── competition_state.py    # 8-Phase Journey, Candidate Pool & Freeze governance
-│   ├── tree_journal.py         # MCTS Solution Tree & UCB exploration algorithm
-│   ├── diagnostics.py          # Universal failure diagnostics & slice analysis
-│   ├── ensemble_guard.py       # Candidate diversity & pseudo-ensemble prevention
-│   ├── grounding_gate.py       # Epistemic grounding & assumption register validation
-│   └── cloud_runner.py         # Cloud execution orchestrator (Modal & Kaggle)
-├── submissions/                # Official submissions registry, metadata & audit receipts
-├── tests/                      # Comprehensive unit and integration test suite (145 tests)
-├── tools/                      # CLI utilities & high-performance dashboard server
-│   ├── agent_bridge_cli.py     # Typed action execution & session telemetry CLI
-│   ├── audit_gate.py           # Pre-submission statistical verification & SHA-256 audit gate
-│   ├── dashboard_server.py     # REST API server & web application host
-│   ├── journal_tool.py         # Solution Tree operations & UCB recommendation CLI
-│   ├── submission_tool.py      # Registration tool for verified competition submissions
-│   └── web/                    # Production-built web dashboard assets
-├── train.py                    # Universal CLI entrypoint delegating to harness.runner
-├── AGENTS.md                   # Operating contract & scientific guidelines for AI agents
-├── EXPERIMENTS.md              # Tier 1 Global Memory: Hall of Fame & Idea Graveyard
+├── configs/                    # Declarative configuration files
+│   ├── base.yaml               # Default runtime and path settings
+│   ├── task.yaml               # Active competition/benchmark definition
+│   ├── tasks/                  # Task presets (Kaggle tabular, NLP, etc.)
+│   ├── exp000_template.yaml    # Starter experiment template
+│   └── exp001_tfidf_baseline.yaml # Baseline configuration
+├── dashboard/                  # React + Vite frontend source code
+├── docs/                       # Reference documentation
+│   ├── AIDE_SWE_ARCHITECTURE.md# Background on MCTS tree search and SWE-agent patterns
+│   └── KNOWLEDGE_BASE.md       # Modeling reference guide (NLP, Tabular, Loss functions)
+├── harness/                    # Core Python library
+│   ├── runner.py               # Universal experiment execution engine
+│   ├── task_spec.py            # Task definition parsing and metric evaluation
+│   ├── agent_bridge.py         # Session management and assistant bridge
+│   ├── tree_journal.py         # Solution tree and UCB recommendation
+│   ├── diagnostics.py          # Error slice analysis and confusion matrices
+│   ├── ensemble_guard.py       # Candidate diversity validation
+│   ├── grounding_gate.py       # Configuration and assumption checks
+│   ├── submission_manager.py   # Submission registration and tracking
+│   └── cloud_runner.py         # Modal and Kaggle execution dispatch
+├── submissions/                # Packaged submissions and audit records
+├── tests/                      # Unit and integration test suite
+├── tools/                      # CLI utilities and dashboard server
+│   ├── dashboard_server.py     # Local dashboard HTTP API server
+│   ├── agent_bridge_cli.py     # CLI for assistant session management
+│   ├── journal_tool.py         # CLI for inspecting solution tree & UCB suggestions
+│   ├── audit_gate.py           # Pre-submission verification tool
+│   ├── submission_tool.py      # Submission packaging CLI
+│   └── web/                    # Built static dashboard assets served by Python
+├── train.py                    # Main CLI entrypoint for running experiments
+├── AGENTS.md                   # Assistant operating guidelines and command reference
+├── EXPERIMENTS.md              # Experiment log and idea graveyard
 ├── requirements.txt            # Python dependencies
 └── README.md
 ```
 
 ---
 
-## Quickstart
+## Getting Started
 
 ### 1. Installation
 
@@ -124,65 +110,88 @@ cd ml-harness
 # Install Python dependencies
 pip install -r requirements.txt
 
-# (Optional) Install dashboard frontend dependencies if customizing React components
-cd dashboard && pnpm install && cd ..
+# (Optional) If you want to modify or rebuild the React dashboard:
+cd dashboard && pnpm install && pnpm build && cd ..
 ```
 
-### 2. Configure Your Competition Task
+### 2. Configure Your Task
 
-Point `configs/task.yaml` to your competition dataset, or select one of the built-in presets:
+Set up `configs/task.yaml` with your dataset details and target metric. You can copy one of the presets to get started:
 
 ```bash
-# Example: Use a built-in Kaggle tabular regression preset
+# Example: Kaggle Tabular Regression
 cp configs/tasks/kaggle_tabular_regression.yaml configs/task.yaml
 
-# Or inject dynamically via CLI
-python tools/inject_skill.py --preset kaggle_binary_classification
+# Example: Kaggle Binary Classification
+cp configs/tasks/kaggle_binary_classification.yaml configs/task.yaml
 ```
 
-### 3. Launch the WebApp Dashboard
+A minimal `configs/task.yaml` looks like this:
+
+```yaml
+task:
+  name: "MyCompetition"
+  platform: "kaggle"
+  task_type: "classification"
+  primary_metric: "macro_f1"
+  direction: "maximize"
+
+data:
+  train_path: "dataset/train.csv"
+  id_column: "id"
+  target_column: "target"
+
+validation:
+  strategy: "kfold"
+  n_folds: 5
+  seed: 42
+  probe_samples: 50
+```
+
+### 3. Launch the Web Dashboard
 
 ```bash
 python tools/dashboard_server.py --port 8080
 ```
-Open **[http://localhost:8080](http://localhost:8080)** to access the Solution Tree, inspect error slices, launch runs via the Execution Runner, or explore the LLM Studio.
+Open **[http://localhost:8080](http://localhost:8080)** in your browser. You can inspect your solution tree, edit task parameters, generate new configs, or test prompts in the LLM Studio.
 
-### 4. Run Baseline & Verification Probes
+### 4. Run an Experiment
+
+Use `train.py` to run models. Use `--debug --fold 0` for a fast smoke test:
 
 ```bash
-# Fast smoke test on a single fold or debug slice (Fold 0)
+# Fast smoke test on fold 0 with sample probe
 python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0 --force
 
-# Full validation execution
+# Full validation run across all folds
 python train.py --config configs/exp001_tfidf_baseline.yaml --force
 ```
 
-### 5. Solution Tree Lineage & UCB Recommendations
+### 5. Inspect the Solution Tree
 
 ```bash
-# View Solution Tree summary and top models
+# View current experiment tree summary
 python tools/journal_tool.py --summary
 
-# Query optimal branch recommendation via UCB
+# Ask for the next recommended branch using UCB
 python tools/journal_tool.py --recommend
 ```
 
-### 6. Audit & Package a Submission
+### 6. Verify and Package a Submission
+
+Before submitting to a competition platform, check your predictions with `audit_gate.py`:
 
 ```bash
-# Verify candidate predictions against parent baseline (enforces MMES >= 2.0%)
+# Compare candidate predictions against your baseline
 python tools/audit_gate.py \
-  --candidate artifacts/exp002_feat_pipeline/oof_predictions.csv \
+  --candidate artifacts/exp002_my_model/oof_predictions.csv \
   --baseline artifacts/exp001_tfidf_baseline/oof_predictions.csv \
   --output-zip submissions/sub002.zip
-
-# Register verified submission in the local registry
-python tools/submission_tool.py register \
-  --exp-id exp002_feat_pipeline \
-  --candidate artifacts/exp002_feat_pipeline/oof_predictions.csv
 ```
 
-### 7. Run Full Test Suite
+If the checks pass (non-duplicate predictions, formatting verified), the script packages your submission and saves an `AUDIT_RECEIPT.json`.
+
+### 7. Run Tests
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
@@ -190,26 +199,18 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ---
 
-## AI Agent Collaboration & Priming
+## Working with AI Assistants
 
-To prime an autonomous coding agent (Antigravity inside IDE, Codex CLI, Claude Code, AIDE), copy the formatted prompt from the **Priming** tab on the web dashboard or fetch it programmatically:
+If you use an AI coding assistant (such as Antigravity, OpenAI Codex, or Claude Code), the assistant can interact with ML-Harness using the CLI tools:
 
-```bash
-# Get priming prompt for Antigravity IDE
-curl http://localhost:8080/api/priming_prompt?ide=antigravity&intent=iterate
+- **Context Overview**: `python tools/agent_bridge_cli.py context` returns a structured summary of the current task, top models, recommended branches, and recent bottlenecks.
+- **Session Tracking**: `python tools/agent_bridge_cli.py start-session --goal "Improve F1 score" --max-experiments 3` tracks progress and resource usage.
+- **Typed Actions**: The assistant can invoke actions like `create_experiment`, `run_smoke_test`, `run_full_validation`, or `promote_candidate` through `agent_bridge_cli.py act`.
 
-# Get priming prompt for OpenAI Codex CLI
-curl http://localhost:8080/api/priming_prompt?ide=codex&intent=attach
-```
-
-Supported priming templates:
-- **`antigravity`**: Multi-agent collaborative reasoning with mandatory Epistemic Grounding and Assumption Register.
-- **`codex`**: Autonomous terminal coding agents adhering strictly to `AGENTS.md` and typed action contracts.
-- **`aide`**: MCTS/UCB tree exploration and atomic hypothesis formulation.
-- **`minimal`**: Compact prompt for rapid debugging and single-variable probing.
+Detailed guidelines and action contracts are documented in [AGENTS.md](AGENTS.md).
 
 ---
 
 ## License
 
-MIT License. Designed for robust, reproducible, and verifiable competitive data science and machine learning research.
+This project is licensed under the [MIT License](LICENSE).
