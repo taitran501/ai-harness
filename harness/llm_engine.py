@@ -134,6 +134,20 @@ class LLMEngine:
             "default_model": "deepseek/deepseek-r1",
             "base_url": "https://openrouter.ai/api/v1",
         },
+        "ollama": {
+            "name": "Ollama (Local)",
+            "models": ["llama3.2", "qwen2.5:7b", "mistral", "deepseek-r1:7b"],
+            "env_key": None,
+            "default_model": "llama3.2",
+            "base_url": "http://localhost:11434/v1",
+        },
+        "vllm": {
+            "name": "vLLM (Local / Self-hosted)",
+            "models": ["default"],
+            "env_key": None,
+            "default_model": "default",
+            "base_url": "http://localhost:8000/v1",
+        },
     }
 
     @classmethod

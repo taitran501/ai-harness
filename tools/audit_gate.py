@@ -54,29 +54,52 @@ def get_git_commit() -> str:
 
 
 def audit_prediction_integrity(
-    df: pd.DataFrame, id_col: str = "StereoQueerEval_id"
+    df: pd.DataFrame, id_col: Optional[str] = None
 ) -> List[str]:
     """Verify structural validity and constraints of the predictions DataFrame."""
     errors = []
 
-    if id_col in df.columns and df[id_col].isnull().any():
-        errors.append(f"Column '{id_col}' contains null values.")
+    try:
+        from harness.task_spec import load_active_task_spec
+        spec = load_active_task_spec()
+        resolved_id = id_col or spec.id_column
+        data_checks = getattr(spec, "data_checks", [])
+    except Exception:
+        resolved_id = id_col or "StereoQueerEval_id"
+        data_checks = []
 
-    # Check Subtask A valid values
+    if resolved_id in df.columns and df[resolved_id].isnull().any():
+        errors.append(f"Column '{resolved_id}' contains null values.")
+
+    # Apply declarative conditional checks from task spec
+    for chk in data_checks:
+        if chk.get("type") == "conditional_label":
+            parent = f"pred_{chk.get('parent_target', '')}"
+            child = f"pred_{chk.get('child_target', '')}"
+            if parent in df.columns and child in df.columns:
+                cond_val = chk.get("if_equals", "no")
+                req_val = chk.get("require_value", "none")
+                violated = df[(df[parent] == cond_val) & (df[child] != req_val)]
+                if len(violated) > 0:
+                    errors.append(
+                        f"Conditional constraint violated: {len(violated)} rows where {parent}=='{cond_val}' have {child} != '{req_val}'."
+                    )
+
+    # Check Subtask A valid values (backward compatible)
     if "pred_stereotype" in df.columns:
         invalid = df[~df["pred_stereotype"].isin(["yes", "no"])]
         if len(invalid) > 0:
             errors.append(f"Subtask A has {len(invalid)} invalid values (expected 'yes' or 'no').")
 
-    # Check Subtask B valid values
+    # Check Subtask B valid values (backward compatible)
     if "pred_hate_speech" in df.columns:
         valid_b = ["no", "yes_explicit", "yes_implicit"]
         invalid = df[~df["pred_hate_speech"].isin(valid_b)]
         if len(invalid) > 0:
             errors.append(f"Subtask B has {len(invalid)} invalid values (expected {valid_b}).")
 
-    # Check Subtask C conditioning
-    if "pred_hate_speech" in df.columns and "pred_target_type" in df.columns:
+    # Check Subtask C conditioning (backward compatible if not already caught)
+    if "pred_hate_speech" in df.columns and "pred_target_type" in df.columns and not data_checks:
         non_hate = df["pred_hate_speech"] == "no"
         unconditioned = df[non_hate & (df["pred_target_type"] != "none")]
         if len(unconditioned) > 0:
@@ -90,12 +113,22 @@ def audit_prediction_integrity(
 def compute_diff_metrics(
     cand_df: pd.DataFrame,
     base_df: pd.DataFrame,
-    id_col: str = "StereoQueerEval_id",
+    id_col: Optional[str] = None,
 ) -> Tuple[int, Dict[str, Any]]:
     """Compute exact row-by-row prediction deltas between candidate and baseline."""
-    if id_col in cand_df.columns and id_col in base_df.columns:
-        cand = cand_df.sort_values(id_col).reset_index(drop=True)
-        base = base_df.sort_values(id_col).reset_index(drop=True)
+    if id_col is None:
+        try:
+            from harness.task_spec import load_active_task_spec
+            spec = load_active_task_spec()
+            resolved_id = spec.id_column
+        except Exception:
+            resolved_id = "StereoQueerEval_id"
+    else:
+        resolved_id = id_col
+
+    if resolved_id in cand_df.columns and resolved_id in base_df.columns:
+        cand = cand_df.sort_values(resolved_id).reset_index(drop=True)
+        base = base_df.sort_values(resolved_id).reset_index(drop=True)
     else:
         cand = cand_df.reset_index(drop=True)
         base = base_df.reset_index(drop=True)
@@ -415,9 +448,8 @@ def main() -> None:
     }
 
     receipt_path = Path(args.receipt)
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(receipt_path, "w", encoding="utf-8") as f:
-        json.dump(receipt_data, f, indent=2)
+    from harness.io_utils import atomic_write_json
+    atomic_write_json(receipt_path, receipt_data, indent=2)
 
     print(f"✔ Audit Receipt     : {receipt_path}")
     print(f"===========================================================")

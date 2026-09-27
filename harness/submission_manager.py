@@ -68,8 +68,8 @@ class SubmissionManager:
             "total_submissions": len(self.submissions),
             "submissions": [asdict(s) for s in self.submissions.values()],
         }
-        with open(self.registry_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        from harness.io_utils import atomic_write_json
+        atomic_write_json(self.registry_file, data, indent=2, ensure_ascii=False)
         self.render_submissions_markdown()
 
     def get_next_submission_id(self) -> str:
@@ -131,9 +131,24 @@ class SubmissionManager:
         local_cv: Dict[str, float] = {}
         artifact_dir = Path("artifacts") / exp_id
         summary_csv = artifact_dir / "summary.csv"
+        metrics_json = artifact_dir / "metrics.json"
+
+        try:
+            from harness.task_spec import load_active_task_spec
+            spec = load_active_task_spec()
+            primary_metric = spec.primary_metric
+        except Exception:
+            primary_metric = "macro_f1"
+
         if summary_csv.exists():
             import pandas as pd
             sdf = pd.read_csv(summary_csv)
+            num_cols = sdf.select_dtypes(include=["number"]).columns
+            for col in num_cols:
+                if col not in ("dev_fold", "train_rows", "dev_rows", "fold"):
+                    local_cv[col] = round(float(sdf[col].mean()), 4)
+
+            # Preserve backward-compatible keys
             if "a_macro_f1" in sdf.columns:
                 local_cv["subtask_a_macro"] = round(float(sdf["a_macro_f1"].mean()), 4)
             if "b_macro_f1" in sdf.columns:
@@ -146,6 +161,21 @@ class SubmissionManager:
                 local_cv["subtask_c_id_macro"] = round(
                     float(sdf["c_identity_macro_f1_oracle_hate"].mean()), 4
                 )
+        elif metrics_json.exists():
+            try:
+                with open(metrics_json, "r", encoding="utf-8") as f:
+                    m_data = json.load(f)
+                if isinstance(m_data, list) and len(m_data) > 0:
+                    m_dict = m_data[0]
+                elif isinstance(m_data, dict):
+                    m_dict = m_data
+                else:
+                    m_dict = {}
+                for k, v in m_dict.items():
+                    if isinstance(v, (int, float)):
+                        local_cv[k] = round(float(v), 4)
+            except Exception:
+                pass
 
         entry = SubmissionEntry(
             id=sub_id,
@@ -160,9 +190,9 @@ class SubmissionManager:
             notes=notes,
         )
 
-        # Write metadata.json in sub_dir
-        with open(target_dir / "metadata.json", "w", encoding="utf-8") as f:
-            json.dump(asdict(entry), f, indent=2)
+        # Write metadata.json in sub_dir atomically
+        from harness.io_utils import atomic_write_json
+        atomic_write_json(target_dir / "metadata.json", asdict(entry), indent=2)
 
         self.submissions[sub_id] = entry
         self.save()
@@ -244,8 +274,17 @@ class SubmissionManager:
 
     def render_submissions_markdown(self) -> str:
         """Render high-density submissions tracker table into SUBMISSIONS.md."""
+        try:
+            from harness.task_spec import load_active_task_spec
+            spec = load_active_task_spec()
+            spec_name = spec.name
+            primary_metric = spec.primary_metric
+        except Exception:
+            spec_name = "Competition"
+            primary_metric = "macro_f1"
+
         lines = [
-            "# StereoQueerEval Submissions & Leaderboard Registry",
+            f"# {spec_name} Submissions & Leaderboard Registry",
             "",
             "This registry tracks all verified competition packages, submission statuses,",
             "and compares Local Cross-Validation against official Leaderboard scores.",
@@ -256,7 +295,7 @@ class SubmissionManager:
             "> - 🎯 `SCORED`: Official scores recorded with CV vs LB delta analysis.",
             "> - ⚠️ `DIVERGENCE`: Local CV significantly over-estimated performance (LB - CV < -0.05).",
             "",
-            "| Sub ID | Exp ID | Status | Local CV (A/B/C) | Official LB (A/B/C) | Delta (LB - CV) | Package | Notes |",
+            f"| Sub ID | Exp ID | Status | Local CV | Official LB | Delta (LB - CV) | Package | Notes |",
             "|---|---|---|---|---|---|---|---|",
         ]
 
@@ -277,22 +316,43 @@ class SubmissionManager:
                     status_icon += " ⚠️"
 
                 # CV string
-                cv_a = s.local_cv_scores.get("subtask_a_macro", "-")
-                cv_b = s.local_cv_scores.get("subtask_b_macro", "-")
-                cv_c = s.local_cv_scores.get("subtask_c_type_macro", "-")
-                cv_str = f"A:{cv_a} / B:{cv_b} / C:{cv_c}"
+                if "subtask_a_macro" in s.local_cv_scores:
+                    cv_a = s.local_cv_scores.get("subtask_a_macro", "-")
+                    cv_b = s.local_cv_scores.get("subtask_b_macro", "-")
+                    cv_c = s.local_cv_scores.get("subtask_c_type_macro", "-")
+                    cv_str = f"A:{cv_a} / B:{cv_b} / C:{cv_c}"
+                elif primary_metric in s.local_cv_scores:
+                    cv_str = f"{primary_metric}:{s.local_cv_scores.get(primary_metric)}"
+                elif s.local_cv_scores:
+                    first_k, first_v = next(iter(s.local_cv_scores.items()))
+                    cv_str = f"{first_k}:{first_v}"
+                else:
+                    cv_str = "-"
 
                 # LB string
-                lb_a = s.official_scores.get("subtask_a_macro", "-")
-                lb_b = s.official_scores.get("subtask_b_macro", "-")
-                lb_c = s.official_scores.get("subtask_c_type_macro", "-")
-                lb_str = f"A:{lb_a} / B:{lb_b} / C:{lb_c}" if s.status == "SCORED" else "Pending"
+                if s.status == "SCORED":
+                    if "subtask_a_macro" in s.official_scores:
+                        lb_a = s.official_scores.get("subtask_a_macro", "-")
+                        lb_b = s.official_scores.get("subtask_b_macro", "-")
+                        lb_c = s.official_scores.get("subtask_c_type_macro", "-")
+                        lb_str = f"A:{lb_a} / B:{lb_b} / C:{lb_c}"
+                    elif primary_metric in s.official_scores:
+                        lb_str = f"{primary_metric}:{s.official_scores.get(primary_metric)}"
+                    elif s.official_scores:
+                        first_k, first_v = next(iter(s.official_scores.items()))
+                        lb_str = f"{first_k}:{first_v}"
+                    else:
+                        lb_str = "-"
+                else:
+                    lb_str = "Pending"
 
                 # Delta string
-                d_a = s.score_deltas.get("subtask_a_macro")
-                d_b = s.score_deltas.get("subtask_b_macro")
-                if d_a is not None and d_b is not None:
-                    delta_str = f"A:{d_a:+.4f} / B:{d_b:+.4f}"
+                if "subtask_a_macro" in s.score_deltas and "subtask_b_macro" in s.score_deltas:
+                    d_a = s.score_deltas.get("subtask_a_macro")
+                    d_b = s.score_deltas.get("subtask_b_macro")
+                    delta_str = f"A:{d_a:+.4f} / B:{d_b:+.4f}" if (d_a is not None and d_b is not None) else "-"
+                elif primary_metric in s.score_deltas and s.score_deltas[primary_metric] is not None:
+                    delta_str = f"{s.score_deltas[primary_metric]:+.4f}"
                 else:
                     delta_str = "-"
 
@@ -305,5 +365,6 @@ class SubmissionManager:
 
         content = "\n".join(lines) + "\n"
         out_file = self.submissions_dir / "SUBMISSIONS.md"
-        out_file.write_text(content, encoding="utf-8")
+        from harness.io_utils import atomic_write_text
+        atomic_write_text(out_file, content, encoding="utf-8")
         return content

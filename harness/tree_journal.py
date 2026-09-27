@@ -285,8 +285,8 @@ class TreeJournal:
             "total_experiments": len(self.nodes),
             "nodes": [asdict(n) for n in self.nodes.values()],
         }
-        with open(self.storage_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        from harness.io_utils import atomic_write_json
+        atomic_write_json(self.storage_path, data, indent=2, ensure_ascii=False)
 
     def append(self, node: Node) -> None:
         """Register or update a node in the journal."""
@@ -449,13 +449,26 @@ class TreeJournal:
 
         total_runs = len(self.nodes)
 
+        # Compute scores and range for UCB normalization across candidates
+        raw_scores = [n.get_score() for n in valid_nodes]
+        min_s = min(raw_scores) if raw_scores else 0.0
+        max_s = max(raw_scores) if raw_scores else 1.0
+        range_s = (max_s - min_s) if (max_s - min_s) > 1e-6 else 1.0
+
         # Compute UCB scores for each valid candidate node as parent
         scored_candidates = []
         for n in valid_nodes:
             if max_params and n.param_count and n.param_count > max_params:
                 continue
 
-            exploit = n.get_score()
+            raw_score = n.get_score()
+            direction = getattr(n, "direction", "maximize")
+            if direction == "minimize":
+                # Lower raw_score is better -> map to higher exploit [0, 1]
+                exploit = (max_s - raw_score) / range_s if len(valid_nodes) > 1 else (1.0 / (1.0 + max(0.0, raw_score)))
+            else:
+                exploit = raw_score
+
             visits = parent_visits.get(n.id, 0)
             explore = exploration_weight * math.sqrt(math.log(total_runs + 1) / (visits + 1))
             ucb_score = exploit + explore
@@ -477,14 +490,17 @@ class TreeJournal:
         num_families = self.count_distinct_model_families()
         all_branches = ["feat", "model", "loss", "mtl", "ens"]
 
-        # If bottlenecks exist, prioritize relevant branches
+        # If bottlenecks exist, prioritize relevant branches dynamically
         b_text = " ".join(bottlenecks).lower()
-        if "zero recall" in b_text or "rare identity" in b_text:
+        if any(k in b_text for k in ["imbalance", "rare", "zero recall", "low recall", "focal"]):
             prioritized = ["loss", "feat", "model", "mtl", "ens"]
-            diagnostic_cue = "Parent diagnostics indicate zero-recall on rare identity classes. Prioritize class-balancing or Focal Loss."
-        elif "implicit hate" in b_text:
+            diagnostic_cue = "Parent diagnostics indicate class imbalance or low recall on minority slices. Prioritize class re-weighting, threshold tuning, or Focal Loss."
+        elif any(k in b_text for k in ["representation", "implicit", "context", "underfitting", "high bias"]):
             prioritized = ["model", "feat", "loss", "mtl", "ens"]
-            diagnostic_cue = "Parent diagnostics indicate high miss rate on implicit hate speech. Prioritize pretrained transformer backbone or contextual representations."
+            diagnostic_cue = "Parent diagnostics indicate complex semantic or contextual underfitting. Prioritize richer pretrained model backbones or augmented feature representations."
+        elif any(k in b_text for k in ["overfitting", "high variance", "generalization"]):
+            prioritized = ["feat", "ens", "loss", "model", "mtl"]
+            diagnostic_cue = "Parent diagnostics indicate overfitting or variance across folds. Prioritize regularization, feature pruning, or ensembling."
         else:
             prioritized = all_branches
 

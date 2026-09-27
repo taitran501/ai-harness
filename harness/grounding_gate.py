@@ -114,11 +114,17 @@ class GroundingGate:
         grounding = config.get("grounding")
         if not grounding:
             if is_root_baseline:
+                try:
+                    from harness.task_spec import load_active_task_spec
+                    spec = load_active_task_spec()
+                    task_name = spec.name
+                except Exception:
+                    task_name = "competition"
                 # Provide standard fallback for root baseline if not declared
                 grounding = {
                     "source_type": "verified_baseline",
                     "source_id": "sklearn_tfidf_logreg_canonical",
-                    "retrieval_summary": "Initial canonical sparse baseline for StereoQueerEval control.",
+                    "retrieval_summary": f"Initial canonical baseline for {task_name} invariant control.",
                 }
             else:
                 errors.append(
@@ -156,9 +162,15 @@ class GroundingGate:
         assumption_reg = config.get("assumption_register") or exp_meta.get("assumption_register")
         if not assumption_reg:
             if is_root_baseline:
+                try:
+                    from harness.task_spec import load_active_task_spec
+                    spec = load_active_task_spec()
+                    task_name = spec.name
+                except Exception:
+                    task_name = "competition"
                 assumption_reg = {
-                    "known_facts": ["StereoQueerEval dataset has 3 languages: EN, IT, NL with extreme identity imbalance."],
-                    "assumptions": ["Word (1-2) and char (3-5) n-grams provide a stable competitive baseline floor."],
+                    "known_facts": [f"{task_name} dataset validated through active CompetitionSpec."],
+                    "assumptions": ["Standard baseline provides an empirical anchor for downstream iterations."],
                     "uncertainty_level": "low",
                 }
             else:
@@ -237,11 +249,9 @@ class GroundingGate:
 
     @classmethod
     def write_receipt(cls, receipt: Dict[str, Any], output_path: str | Path) -> None:
-        """Write JSON grounding receipt to disk."""
-        target = Path(output_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "w", encoding="utf-8") as f:
-            json.dump(receipt, f, indent=2)
+        """Write JSON grounding receipt to disk atomically."""
+        from harness.io_utils import atomic_write_json
+        atomic_write_json(output_path, receipt, indent=2)
 
 
 def main() -> None:

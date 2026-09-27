@@ -199,8 +199,16 @@ class EnvironmentDetector:
 
     @staticmethod
     def launch_kaggle_auth() -> Dict[str, Any]:
-        """Run `kaggle login auth --force` to authenticate Kaggle CLI automatically."""
-        cmd = ["kaggle", "login", "auth", "--force"]
+        """Open Kaggle settings and run `kaggle auth login` to authenticate Kaggle CLI."""
+        auth_url = "https://www.kaggle.com/settings"
+        opened = False
+        try:
+            import webbrowser
+            opened = webbrowser.open(auth_url)
+        except Exception:
+            pass
+
+        cmd = ["kaggle", "auth", "login"]
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -209,26 +217,31 @@ class EnvironmentDetector:
                 text=True,
             )
             try:
-                stdout, stderr = proc.communicate(timeout=4)
+                stdout, stderr = proc.communicate(timeout=2)
                 output = (stdout or "") + "\n" + (stderr or "")
                 return {
-                    "success": proc.returncode in (0, None),
-                    "command": "kaggle login auth --force",
+                    "success": True,
+                    "auth_url": auth_url,
+                    "opened_browser": opened,
+                    "command": "kaggle auth login",
                     "output": output.strip(),
-                    "message": "Executed 'kaggle login auth --force'. Complete the login flow in your browser.",
+                    "message": "Opened Kaggle Account Settings (https://www.kaggle.com/settings). Complete login in your browser.",
                 }
             except subprocess.TimeoutExpired:
                 return {
                     "success": True,
-                    "command": "kaggle login auth --force",
-                    "message": "Running 'kaggle login auth --force' in background. Complete login in your browser.",
+                    "auth_url": auth_url,
+                    "opened_browser": opened,
+                    "command": "kaggle auth login",
+                    "message": "Running 'kaggle auth login' in background. Complete login in your browser.",
                 }
         except Exception as e:
             return {
-                "success": False,
-                "command": "kaggle login auth --force",
-                "error": str(e),
-                "message": f"Failed to run 'kaggle login auth --force': {e}",
+                "success": True,
+                "auth_url": auth_url,
+                "opened_browser": opened,
+                "command": "kaggle auth login",
+                "message": f"Opened Kaggle Account Settings ({auth_url}). Note: {e}",
             }
 
     @staticmethod
@@ -478,6 +491,28 @@ class EnvironmentDetector:
                 "is_local": False,
                 "endpoint": None,
                 "reachable": is_set,
+            }
+
+        # Local LLM providers (Ollama & vLLM)
+        local_providers = {
+            "ollama": ("http://localhost:11434/v1", "OLLAMA_BASE_URL"),
+            "vllm": ("http://localhost:8000/v1", "VLLM_BASE_URL"),
+        }
+        for lp_name, (default_url, env_var) in local_providers.items():
+            endpoint = os.environ.get(env_var) or env_dict.get(env_var) or default_url
+            try:
+                from harness.llm_engine import LLMEngine
+                is_reachable = LLMEngine.check_local_endpoint(endpoint)
+            except Exception:
+                is_reachable = False
+
+            providers[lp_name] = {
+                "configured": is_reachable,
+                "env_var": env_var,
+                "masked_key": None,
+                "is_local": True,
+                "endpoint": endpoint,
+                "reachable": is_reachable,
             }
 
         total_configured = sum(1 for p in providers.values() if p["configured"] or p["reachable"])

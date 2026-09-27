@@ -253,7 +253,8 @@ class CompetitionStateMachine:
 
     def _save_raw(self, data: Dict[str, Any]) -> None:
         data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        self.state_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        from harness.io_utils import atomic_write_json
+        atomic_write_json(self.state_file, data, indent=2, ensure_ascii=False)
 
     def save(self) -> None:
         self._save_raw(self.state)
@@ -305,7 +306,8 @@ class CompetitionStateMachine:
                     "detail": "Bạn có thể chạy kiểm tra tự động theo Competition Spec hoặc bấm xác nhận trực tiếp.",
                 }
             )
-            self.data_report_file.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+            from harness.io_utils import atomic_write_json
+            atomic_write_json(self.data_report_file, report, indent=2, ensure_ascii=False)
             return report
 
         try:
@@ -440,7 +442,8 @@ class CompetitionStateMachine:
             report["status"] = "WARN"
             report["error"] = str(e)
 
-        self.data_report_file.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        from harness.io_utils import atomic_write_json
+        atomic_write_json(self.data_report_file, report, indent=2, ensure_ascii=False)
         return report
 
     def get_data_readiness_report(self) -> Dict[str, Any]:
@@ -670,19 +673,46 @@ class CompetitionStateMachine:
             if not pred_cols:
                 pred_cols = [c for c in dfs[0].columns if c not in [id_col, "fold", "language", "input_variant"]]
 
-            audit_col = "pred_stereotype" if "pred_stereotype" in pred_cols else pred_cols[0]
+            audit_col = next((c for c in pred_cols if "pred_" in c), pred_cols[0])
             passed, errs, div_details = EnsembleGuard.audit_constituent_diversity(
                 dfs, col=audit_col, max_kappa=0.85, min_disagreement_pct=5.0
             )
             meta_cols = [c for c in [id_col, "language", "fold"] if c in dfs[0].columns]
             merged = dfs[0][meta_cols].copy()
-            merged["input_variant"] = "ensemble_vote"
-            for col in pred_cols:
-                stacked = pd.DataFrame({f"m_{i}": d[col] for i, d in enumerate(dfs)})
-                merged[col] = stacked.mode(axis=1)[0]
+
+            if mode in ("weighted_blend", "probability_blend"):
+                raw_weights = source_map.get("weights") or [1.0] * len(dfs)
+                if len(raw_weights) != len(dfs) or sum(raw_weights) <= 0:
+                    raw_weights = [1.0] * len(dfs)
+                total_w = sum(raw_weights)
+                weights = [w / total_w for w in raw_weights]
+
+                merged["input_variant"] = "weighted_blend"
+                for col in pred_cols:
+                    if pd.api.types.is_numeric_dtype(dfs[0][col]):
+                        merged[col] = sum(weights[i] * dfs[i][col] for i in range(len(dfs)))
+                    else:
+                        def weighted_choice(row):
+                            acc = {}
+                            for i, val in enumerate(row):
+                                acc[val] = acc.get(val, 0.0) + weights[i]
+                            return max(acc.items(), key=lambda x: x[1])[0]
+                        stacked = pd.DataFrame({f"m_{i}": d[col] for i, d in enumerate(dfs)})
+                        merged[col] = stacked.apply(weighted_choice, axis=1)
+                audit_notes = {"components": comp_ids, "weights": weights, "diversity_passed": passed, "diversity_errors": errs}
+            else:
+                merged["input_variant"] = "ensemble_vote"
+                for col in pred_cols:
+                    if pd.api.types.is_numeric_dtype(dfs[0][col]):
+                        merged[col] = pd.DataFrame({f"m_{i}": d[col] for i, d in enumerate(dfs)}).mean(axis=1)
+                    else:
+                        stacked = pd.DataFrame({f"m_{i}": d[col] for i, d in enumerate(dfs)})
+                        modes = stacked.mode(axis=1)
+                        # Fair tie-breaking: modes[0] is primary mode (first mode encountered)
+                        merged[col] = modes[0]
+                audit_notes = {"components": comp_ids, "diversity_passed": passed, "diversity_errors": errs}
 
             merged.to_csv(out_csv, index=False)
-            audit_notes = {"components": comp_ids, "diversity_passed": passed, "diversity_errors": errs}
 
         entry = {
             "id": cand_id,
@@ -738,7 +768,8 @@ class CompetitionStateMachine:
             "slot_2_aggressive_lb": {"id": slot_2_id if max_cands >= 2 else None},
             "notes": notes,
         }
-        self.freeze_lock_file.write_text(json.dumps(lock_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        from harness.io_utils import atomic_write_json
+        atomic_write_json(self.freeze_lock_file, lock_payload, indent=2, ensure_ascii=False)
 
         self.state["mode"] = "FROZEN"
         self.state["gates"]["freeze_locked"] = True
@@ -1285,3 +1316,7 @@ class CompetitionStateMachine:
             )
 
         return "\n\n".join(sections)
+
+
+# Backward-compatible alias
+CompetitionState = CompetitionStateMachine

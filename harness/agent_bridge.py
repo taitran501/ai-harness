@@ -243,7 +243,8 @@ class AgentBridge:
         session.updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         payload = asdict(session)
         path = self.sessions_dir / f"{session.session_id}.json"
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        from harness.io_utils import atomic_write_json
+        atomic_write_json(path, payload, indent=2, ensure_ascii=False)
 
         # Mirror into legacy agent_runs dir (`run_XXXX.json`) for UI/backward compatibility
         run_num = session.session_id.split("_")[-1]
@@ -261,8 +262,11 @@ class AgentBridge:
                 for idx, o in enumerate(session.observations)
             ],
         }
-        (self.legacy_runs_dir / f"{legacy_id}.json").write_text(
-            json.dumps(legacy_payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        atomic_write_json(
+            self.legacy_runs_dir / f"{legacy_id}.json",
+            legacy_payload,
+            indent=2,
+            ensure_ascii=False,
         )
         self._sync_to_dashboard_state(session)
 

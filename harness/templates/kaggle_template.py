@@ -52,11 +52,23 @@ class KaggleKernelManager:
         return "antigravity"
 
     @classmethod
+    def _get_task_slug(cls) -> str:
+        """Derive a URL/API-safe slug from active TaskSpec."""
+        try:
+            from harness.task_spec import load_active_task_spec
+            spec = load_active_task_spec()
+            slug = "".join(c if c.isalnum() else "-" for c in spec.name.lower()).strip("-")
+            return slug or "competition"
+        except Exception:
+            return "competition"
+
+    @classmethod
     def push_dataset_to_kaggle(cls, dataset_slug: Optional[str] = None) -> Dict[str, Any]:
         """Package `dataset/` and `splits/` and push to Kaggle Datasets (create or new version)."""
         username = cls.get_authenticated_username()
+        default_name = f"{cls._get_task_slug()}-dataset"
         if not dataset_slug or "/" not in dataset_slug:
-            slug_name = (dataset_slug or "sqe-competition-dataset").split("/")[-1]
+            slug_name = (dataset_slug or default_name).split("/")[-1]
             slug_name = slug_name.replace("_", "-").lower()
             full_slug = f"{username}/{slug_name}"
         else:
@@ -158,10 +170,11 @@ class KaggleKernelManager:
         stage.mkdir(parents=True, exist_ok=True)
 
         username = cls.get_authenticated_username()
-        slug = f"sqe-{exp_id.replace('_', '-')}"
+        t_slug = cls._get_task_slug()
+        slug = f"{t_slug}-{exp_id.replace('_', '-')}"
         resolved_dataset = dataset_slug
         if not resolved_dataset or resolved_dataset == "antigravity/dataset":
-            resolved_dataset = f"{username}/sqe-competition-dataset"
+            resolved_dataset = f"{username}/{t_slug}-dataset"
 
         meta = cls.generate_kernel_metadata(
             kernel_slug=slug,
@@ -264,7 +277,8 @@ print("Training completed. Lightweight output artifacts copied to working root."
     def get_kernel_status(cls, exp_id: str, kernel_slug: Optional[str] = None) -> Dict[str, Any]:
         """Check status of a Kaggle kernel via `kaggle kernels status <slug>`."""
         username = cls.get_authenticated_username()
-        slug = kernel_slug or f"{username}/sqe-{exp_id.replace('_', '-')}"
+        t_slug = cls._get_task_slug()
+        slug = kernel_slug or f"{username}/{t_slug}-{exp_id.replace('_', '-')}"
         if "/" not in slug:
             slug = f"{username}/{slug}"
 
@@ -303,7 +317,8 @@ print("Training completed. Lightweight output artifacts copied to working root."
     def pull_kernel_output(cls, exp_id: str, kernel_slug: Optional[str] = None) -> Dict[str, Any]:
         """Download lightweight artifacts from Kaggle Kernel into `artifacts/<exp_id>/`."""
         username = cls.get_authenticated_username()
-        slug = kernel_slug or f"{username}/sqe-{exp_id.replace('_', '-')}"
+        t_slug = cls._get_task_slug()
+        slug = kernel_slug or f"{username}/{t_slug}-{exp_id.replace('_', '-')}"
         if "/" not in slug:
             slug = f"{username}/{slug}"
 

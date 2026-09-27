@@ -128,7 +128,8 @@ class KaggleKernelManagerTests(unittest.TestCase):
 
     def test_metadata_generation(self):
         meta = KaggleKernelManager.generate_kernel_metadata("test-kernel", enable_gpu=True)
-        self.assertEqual(meta["id"], "antigravity/test-kernel")
+        uname = KaggleKernelManager.get_authenticated_username()
+        self.assertEqual(meta["id"], f"{uname}/test-kernel")
         self.assertEqual(meta["enable_gpu"], "true")
         self.assertEqual(meta["enable_internet"], "true")
 
