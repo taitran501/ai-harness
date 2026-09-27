@@ -369,7 +369,9 @@ class TreeJournal:
                 families.add(n.model_family)
             else:
                 model_name = n.metrics.get("model", "")
-                if "tfidf" in n.id.lower() or "tfidf" in model_name.lower() or "baseline_v1" in n.id:
+                if "tfidf" in n.id.lower() or "tfidf" in model_name.lower():
+                    families.add("sparse_tfidf")
+                elif "baseline" in n.id.lower() and ("linear" in model_name.lower() or "logreg" in model_name.lower() or "tfidf" in model_name.lower()):
                     families.add("sparse_tfidf")
                 elif "xlmr" in n.id.lower() or "xlm-roberta" in model_name.lower():
                     families.add("xlm_roberta")

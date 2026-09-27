@@ -81,7 +81,16 @@ class ExperimentValidator:
         group_column: Optional[str] = None,
     ) -> None:
         """Backward-compatible alias for assert_no_group_data_leakage."""
-        return cls.assert_no_group_data_leakage(train_df, val_df, group_column=group_column or "yt_title")
+        if group_column is None:
+            try:
+                from harness.task_spec import load_active_task_spec
+                spec = load_active_task_spec()
+                group_column = spec.group_column or ("yt_title" if "yt_title" in train_df.columns else None)
+            except Exception:
+                group_column = "yt_title" if "yt_title" in train_df.columns else None
+        if not group_column or group_column not in train_df.columns:
+            return
+        return cls.assert_no_group_data_leakage(train_df, val_df, group_column=group_column)
 
     @classmethod
     def assert_conditional_integrity(

@@ -87,10 +87,10 @@ class CompetitionStateMachine:
                 pass
         return {
             "name": "ML Competition Benchmark",
-            "primary_metric": "Macro-F1",
+            "primary_metric": "score",
             "direction": "maximize",
-            "primary_metric_baseline": 0.6459,
-            "primary_metric_target": 0.85,
+            "primary_metric_baseline": 0.0,
+            "primary_metric_target": 1.0,
             "subtasks": [],
             "evaluation_protocol": {
                 "evaluation_mode": "public_private_leaderboard",
@@ -191,7 +191,7 @@ class CompetitionStateMachine:
                 "spec_confirmed": True,
                 "data_risks_confirmed": False,
                 "baseline_locked": False,
-                "baseline_exp_id": "baseline_v1_comment",
+                "baseline_exp_id": self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline",
                 "freeze_locked": False,
                 "finalized": False,
             },
@@ -232,10 +232,13 @@ class CompetitionStateMachine:
     def _load_or_init_state(self) -> Dict[str, Any]:
         default = self._default_state()
         if not self.state_file.exists():
-            if (self.artifacts_dir / "baseline_v1" / "metrics.json").exists():
-                default["gates"]["data_risks_confirmed"] = True
-                default["gates"]["baseline_locked"] = True
-                default["gates"]["baseline_exp_id"] = "baseline_v1_comment"
+            default_base_id = self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
+            for base_candidate in [default_base_id, "baseline", "exp001_baseline", "baseline_v1"]:
+                if (self.artifacts_dir / base_candidate / "metrics.json").exists():
+                    default["gates"]["data_risks_confirmed"] = True
+                    default["gates"]["baseline_locked"] = True
+                    default["gates"]["baseline_exp_id"] = base_candidate
+                    break
             self._save_raw(default)
             return default
         try:
@@ -460,9 +463,9 @@ class CompetitionStateMachine:
     def compute_candidate_pool(self, journal: TreeJournal) -> Dict[str, Any]:
         """Classify completed runs and list supported candidate synthesis strategies from Spec."""
         completed = [n for n in journal.nodes.values() if not n.is_buggy and n.status == "COMPLETED"]
-        baseline_id = self.state["gates"].get("baseline_exp_id") or "baseline_v1_comment"
+        baseline_id = self.state["gates"].get("baseline_exp_id") or self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
         baseline_node = journal.nodes.get(baseline_id) or (completed[0] if completed else None)
-        base_score = baseline_node.get_score() if baseline_node else float(self.spec.get("primary_metric_baseline", 0.6459))
+        base_score = baseline_node.get_score() if baseline_node else float(self.spec.get("primary_metric_baseline", 0.0))
 
         candidates_list: List[Dict[str, Any]] = []
         criteria = self.spec.get("evaluation_criteria", {})
@@ -572,12 +575,13 @@ class CompetitionStateMachine:
         out_dir = self.artifacts_dir / cand_id
         out_dir.mkdir(parents=True, exist_ok=True)
         out_csv = out_dir / "oof_predictions.csv"
+        baseline_id = self.state["gates"].get("baseline_exp_id") or self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
 
         def _get_id_col(df_in: pd.DataFrame) -> str:
             declared = self.spec.get("data_config", {}).get("id_column")
             if declared and declared in df_in.columns:
                 return declared
-            for candidate in ["StereoQueerEval_id", "id", "ID", "sample_id", "comment_id"]:
+            for candidate in ["id", "ID", "sample_id", "comment_id", "StereoQueerEval_id"]:
                 if candidate in df_in.columns:
                     return candidate
             return df_in.columns[0]
@@ -587,7 +591,7 @@ class CompetitionStateMachine:
             if not p.exists():
                 p = self.artifacts_dir / exp_id_or_path / "oof_predictions.csv"
             if not p.exists():
-                for base_folder in ["exp001_baseline_tfidf", "baseline_v1"]:
+                for base_folder in [baseline_id, "exp001_baseline_tfidf", "baseline_v1", "baseline"]:
                     alt = self.artifacts_dir / base_folder / "oof_predictions.csv"
                     if alt.exists():
                         p = alt
@@ -615,13 +619,13 @@ class CompetitionStateMachine:
 
         audit_notes: Dict[str, Any] = {}
         if mode in ("single_model", "checkpoint_selection"):
-            src_exp = source_map.get("source_exp") or source_map.get("subtask_a_exp") or baseline_id
+            src_exp = source_map.get("source_exp") or source_map.get("subtask_a_exp") or source_map.get("model_exp") or baseline_id
             merged = _load_oof(src_exp)
             merged.to_csv(out_csv, index=False)
             audit_notes = {"strategy": mode, "source_exp": src_exp}
         elif mode == "specialist_router":
             routing = source_map.get("routing", {}) or source_map.get("target_routing", {})
-            if not routing:
+            if not routing and "subtask_a_exp" in source_map:
                 exp_a = source_map.get("subtask_a_exp") or baseline_id
                 exp_b = source_map.get("subtask_b_exp") or baseline_id
                 exp_c = source_map.get("subtask_c_exp") or baseline_id
@@ -631,6 +635,16 @@ class CompetitionStateMachine:
                     "pred_target_type": exp_c,
                     "pred_identities": exp_c,
                 }
+            elif not routing:
+                subtasks = self.spec.get("subtasks", [])
+                if subtasks:
+                    for st in subtasks:
+                        st_id = st.get("id") if isinstance(st, dict) else getattr(st, "id", "subtask")
+                        col = (st.get("column") if isinstance(st, dict) else getattr(st, "column", None)) or st_id
+                        st_exp = source_map.get(f"{st_id}_exp") or source_map.get(st_id) or baseline_id
+                        routing[f"pred_{col}"] = st_exp
+                else:
+                    routing = {"pred_target": source_map.get("source_exp") or baseline_id}
 
             distinct_exps = {exp for exp in routing.values() if exp}
             loaded_dfs = {exp: _load_oof(exp) for exp in distinct_exps}
@@ -845,14 +859,17 @@ class CompetitionStateMachine:
             steps_log.append({"step": "Comparing candidate branches in Solution Tree", "status": "completed"})
             steps_log.append({"step": "Synthesizing multi-task candidate in Candidate Pool", "status": "completed"})
             try:
+                subtasks = self.spec.get("subtasks", [])
+                pool = snap["candidate_pool"]
+                best_id = (pool.get("overall_best") or {}).get("id") or self.state["gates"].get("baseline_exp_id") or "baseline"
+                if subtasks:
+                    src_map = {f"{st.get('id', 'subtask')}_exp": best_id for st in subtasks if isinstance(st, dict)}
+                else:
+                    src_map = {"model_exp": best_id}
                 self.synthesize_candidate(
                     name="agent_copilot_candidate",
                     mode="specialist_router",
-                    source_map={
-                        "subtask_a_exp": "baseline_v1_comment",
-                        "subtask_b_exp": "baseline_v1_comment",
-                        "subtask_c_exp": "baseline_v1_full_context",
-                    },
+                    source_map=src_map,
                 )
                 steps_log.append({"step": "Verified candidate artifact created (`cand_agent_copilot_candidate`)", "status": "completed"})
             except Exception as err:
@@ -860,8 +877,8 @@ class CompetitionStateMachine:
 
         elif action_id == "FREEZE_FOR_PRIVATE_LB":
             pool = snap["candidate_pool"]
-            best_id = (pool.get("overall_best") or {}).get("id", "baseline_v1_comment")
-            second_id = (pool.get("synthesized_candidates") or [{}])[0].get("id") or "baseline_v1_full_context"
+            best_id = (pool.get("overall_best") or {}).get("id") or self.state["gates"].get("baseline_exp_id") or "baseline"
+            second_id = (pool.get("synthesized_candidates") or [{}])[0].get("id") or (pool.get("pinned_candidates") or [{}, {}])[1].get("id") if len(pool.get("pinned_candidates", [])) > 1 else None
             steps_log.append({"step": "Auditing candidate variance and diversity across folds", "status": "completed"})
             self.freeze_final_candidates(slot_1_id=best_id, slot_2_id=second_id, notes="Frozen via Agent Co-Pilot")
             steps_log.append({"step": f"Locked final selection portfolio ({best_id}, {second_id})", "status": "completed"})
@@ -901,7 +918,7 @@ class CompetitionStateMachine:
 
         pool = self.compute_candidate_pool(journal)
         best_cand = pool.get("overall_best") or {}
-        slot1_id = self.state["freeze_selection"].get("slot_1_safe_cv") or best_cand.get("id", "baseline_v1_comment")
+        slot1_id = self.state["freeze_selection"].get("slot_1_safe_cv") or best_cand.get("id") or self.state["gates"].get("baseline_exp_id") or "baseline"
         slot2_id = self.state["freeze_selection"].get("slot_2_aggressive_lb") or "none"
 
         public_scores = [
@@ -910,7 +927,7 @@ class CompetitionStateMachine:
             if s.official_scores.get("primary") is not None
         ]
         best_pub = max(public_scores) if public_scores else None
-        cv_score = best_cand.get("composite_score", 0.6459)
+        cv_score = best_cand.get("composite_score", float(self.spec.get("primary_metric_baseline", 0.0)))
         priv_1 = fin.get("private_score_slot_1")
         priv_2 = fin.get("private_score_slot_2")
         rank_str = f"#{fin.get('final_rank')} / {fin.get('total_teams')}" if fin.get("final_rank") else "Pending Official Release"
@@ -1238,10 +1255,10 @@ class CompetitionStateMachine:
             "spec_summary": {
                 "name": self.spec.get("name", "Benchmark"),
                 "task_type": self.spec.get("task_type", "Predictive Modeling"),
-                "primary_metric": self.spec.get("primary_metric", "Macro-F1"),
+                "primary_metric": self.spec.get("primary_metric", "Score"),
                 "direction": self.spec.get("direction", "maximize"),
-                "baseline_goal": self.spec.get("primary_metric_baseline", 0.6459),
-                "target_goal": self.spec.get("primary_metric_target", 0.85),
+                "baseline_goal": float(self.spec.get("primary_metric_baseline", 0.0)),
+                "target_goal": float(self.spec.get("primary_metric_target", 1.0)),
                 "subtasks": self.spec.get("subtasks", []),
                 "competition_rules": self.spec.get("competition_rules", {}),
                 "evaluation_protocol": eval_proto,

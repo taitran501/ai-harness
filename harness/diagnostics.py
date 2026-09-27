@@ -1,7 +1,7 @@
-"""Diagnostic and Error Slicing Engine for StereoQueerEval.
+"""Diagnostic and Error Slicing Engine for ML-Harness.
 
-Extracts rich diagnostic signals (confusion matrices, minority identity recall,
-per-language error slices, top confident failures) so AI agents have actionable,
+Extracts rich diagnostic signals (confusion matrices, minority class recall,
+subgroup error slices, top confident failures) so AI agents have actionable,
 ground-truth failure modes to target instead of guessing or pseudo-ensembling.
 """
 
@@ -86,19 +86,23 @@ class DiagnosticEngine:
         oof_df: pd.DataFrame,
     ) -> Dict[str, Any]:
         """Produce full structured diagnostic dictionary dynamically adapted to task schema."""
-        # 1. Dynamically resolve ID column
+        # 1. Dynamically resolve ID column from TaskSpec first
         id_col = None
-        for candidate_id in ["StereoQueerEval_id", "id", "ID", "comment_id", "sample_id"]:
-            if candidate_id in eval_df.columns and candidate_id in oof_df.columns:
-                id_col = candidate_id
-                break
-        if not id_col:
+        try:
             from harness.task_spec import load_active_task_spec
             spec = load_active_task_spec()
-            if spec.id_column in eval_df.columns and spec.id_column in oof_df.columns:
+            if spec.id_column and spec.id_column in eval_df.columns and spec.id_column in oof_df.columns:
                 id_col = spec.id_column
-            else:
-                id_col = eval_df.columns[0]
+        except Exception:
+            pass
+
+        if not id_col:
+            for candidate_id in ["id", "ID", "sample_id", "comment_id", "StereoQueerEval_id"]:
+                if candidate_id in eval_df.columns and candidate_id in oof_df.columns:
+                    id_col = candidate_id
+                    break
+        if not id_col:
+            id_col = eval_df.columns[0]
 
         merged = pd.merge(
             eval_df,

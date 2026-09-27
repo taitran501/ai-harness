@@ -1,10 +1,10 @@
 """Submission Lifecycle and Score Tracking Manager.
 
-Manages all competition submissions for StereoQueerEval:
+Manages all competition submissions across local validation and remote leaderboard evaluation:
 1. Tracks verification status (LOCAL_VERIFIED, SUBMITTED_PENDING, SCORED, DISQUALIFIED).
 2. Maintains central registry (submissions/registry.json) and visual table (submissions/SUBMISSIONS.md).
 3. Records official remote leaderboard scores (Public / Private LB) and compares against Local CV.
-4. Alerts on CV vs LB divergence (overfit detection when delta < -0.05).
+4. Alerts on CV vs LB divergence (direction-aware overfit detection when delta exceeds threshold).
 """
 
 from __future__ import annotations

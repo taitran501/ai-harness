@@ -203,42 +203,35 @@ class AgentRuntime:
                 session_id=sess.session_id,
             )
 
+        default_base = self.bridge.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
         sess, _ = self.bridge.execute_action(
             TypedActionName.INSPECT_DIAGNOSTICS.value,
-            params={"exp_id": "exp001_baseline_tfidf"},
+            params={"exp_id": default_base},
             rationale=f"Extract failure modes for goal: {goal}",
             session_id=sess.session_id,
         )
 
         sess, _ = self.bridge.execute_action(
             TypedActionName.CREATE_EXPERIMENT.value,
-            params={"parent_id": "baseline_v1_comment", "branch": "feat", "descriptor": "title_ctx_balanced"},
-            rationale="Draft GroundingGate-verified config targeting Subtask C sparsity.",
+            params={"parent_id": default_base, "branch": "feat", "descriptor": "feature_pipeline"},
+            rationale=f"Draft GroundingGate-verified config for goal: {goal}.",
             session_id=sess.session_id,
         )
 
         sess, _ = self.bridge.execute_action(
             TypedActionName.SYNTHESIZE_CANDIDATE.value,
             params={
-                "name": f"{sess.session_id}_specialist_router",
+                "name": f"{sess.session_id}_router",
                 "mode": "specialist_router",
-                "source_map": {
-                    "subtask_a_exp": "baseline_v1_comment",
-                    "subtask_b_exp": "baseline_v1_comment",
-                    "subtask_c_exp": "baseline_v1_full_context",
-                },
             },
-            rationale="Synthesize specialist router combining comment (A/B) and full_context (C).",
+            rationale="Synthesize specialist candidate portfolio.",
             session_id=sess.session_id,
         )
 
         sess, _ = self.bridge.execute_action(
             TypedActionName.FREEZE_CANDIDATE.value,
-            params={
-                "slot_1_id": "baseline_v1_comment",
-                "slot_2_id": f"cand_{sess.session_id}_specialist_router",
-            },
-            rationale="Propose freezing 2-slot portfolio (gated by USER_APPROVAL).",
+            params={},
+            rationale="Propose freezing candidate portfolio (gated by USER_APPROVAL).",
             session_id=sess.session_id,
             user_approved=auto_approve_all,
         )
