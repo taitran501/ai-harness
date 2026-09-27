@@ -690,6 +690,34 @@ class AgentBridge:
         scores_by_target["composite_score"] = composite
         return composite, scores_by_target
 
+    def _run_subprocess_safe(
+        self, cmd: List[str], timeout: float = 1800.0
+    ) -> Tuple[bool, int, str, float]:
+        """Execute subprocess with strict process tree cleanup on timeout (preventing orphan GPU processes)."""
+        t0 = time.time()
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(self.project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            stdout, _ = proc.communicate(timeout=timeout)
+            elapsed = round(time.time() - t0, 3)
+            return proc.returncode == 0, proc.returncode or 0, stdout or "", elapsed
+        except subprocess.TimeoutExpired:
+            elapsed = round(time.time() - t0, 3)
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], check=False, stderr=subprocess.DEVNULL)
+            else:
+                proc.kill()
+            try:
+                stdout, _ = proc.communicate(timeout=5)
+            except Exception:
+                stdout = ""
+            return False, -1, f"Execution timed out after {timeout}s (PID {proc.pid} terminated).\n{stdout or ''}", elapsed
+
     def execute_action(
         self,
         action: str,
@@ -1009,8 +1037,7 @@ class AgentBridge:
                     "--force",
                     "--skip-leaderboard",
                 ]
-                proc = subprocess.run(cmd, cwd=self.project_root, capture_output=True, text=True, timeout=180)
-                passed = proc.returncode == 0
+                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=180.0)
                 session.compute_usage["smoke_runs"] = int(session.compute_usage.get("smoke_runs", 0)) + 1
                 return ActionObservation(
                     step_index=call.step_index,
@@ -1018,8 +1045,8 @@ class AgentBridge:
                     status="SUCCESS" if passed else "FAILED",
                     summary=f"Smoke test on Fold {fold} ({cfg_path}): {'PASSED' if passed else 'FAILED'}.",
                     artifact_path=cfg_path,
-                    data={"returncode": proc.returncode, "tail": (proc.stdout or proc.stderr)[-500:]},
-                    elapsed_seconds=round(time.time() - t0, 3),
+                    data={"returncode": retcode, "tail": out_text[-500:]},
+                    elapsed_seconds=elapsed,
                 )
 
             elif act == TypedActionName.RUN_FULL_VALIDATION.value:
@@ -1050,9 +1077,7 @@ class AgentBridge:
                     if force:
                         cmd.append("--force")
 
-                proc = subprocess.run(cmd, cwd=self.project_root, capture_output=True, text=True, timeout=1800)
-                elapsed = round(time.time() - t0, 3)
-                passed = proc.returncode == 0
+                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=1800.0)
 
                 # Update compute usage
                 session.compute_usage["experiments_used"] = int(session.compute_usage.get("experiments_used", 0)) + 1

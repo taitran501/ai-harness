@@ -15,7 +15,11 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 
-from src.data import IDENTITIES, TARGET_TYPES
+try:
+    from src.data import IDENTITIES, TARGET_TYPES
+except Exception:
+    IDENTITIES = ["l", "g", "b", "t", "q", "i", "a", "lgbtqia+", "nb"]
+    TARGET_TYPES = ["individual", "group", "none"]
 
 
 class DiagnosticEngine:
@@ -317,10 +321,10 @@ class DiagnosticEngine:
 
         diag = cls.generate_diagnostics(eval_df, oof_df)
 
-        with open(output_dir / "diagnostics.json", "w", encoding="utf-8") as f:
-            json.dump(diag, f, indent=2, ensure_ascii=False)
+        from harness.io_utils import atomic_write_json, atomic_write_text
+        atomic_write_json(output_dir / "diagnostics.json", diag, indent=2, ensure_ascii=False)
 
         md_content = cls.render_markdown_report(diag, exp_id)
-        (output_dir / "DIAGNOSTICS.md").write_text(md_content, encoding="utf-8")
+        atomic_write_text(output_dir / "DIAGNOSTICS.md", md_content, encoding="utf-8")
 
         return diag

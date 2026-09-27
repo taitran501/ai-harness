@@ -83,16 +83,35 @@ class ExperimentValidator:
         """Backward-compatible alias for assert_no_group_data_leakage."""
         return cls.assert_no_group_data_leakage(train_df, val_df, group_column=group_column or "yt_title")
 
-    @staticmethod
-    def assert_subtask_c_oracle_conditioning(df: pd.DataFrame) -> None:
+    @classmethod
+    def assert_conditional_integrity(
+        cls,
+        df: pd.DataFrame,
+        parent_col: str,
+        cond_val: Any,
+        child_col: str,
+        req_val: Any,
+    ) -> None:
+        """Assert that if parent_col == cond_val then child_col == req_val."""
+        if parent_col not in df.columns or child_col not in df.columns:
+            return
+        cond_mask = df[parent_col] == cond_val
+        invalid = df[cond_mask & (df[child_col] != req_val)]
+        if len(invalid) > 0:
+            raise AssertionError(
+                f"[CONDITIONAL CONSTRAINT VIOLATION] Found {len(invalid)} rows where {parent_col} == '{cond_val}' "
+                f"but {child_col} != '{req_val}'."
+            )
+
+    @classmethod
+    def assert_subtask_c_oracle_conditioning(cls, df: pd.DataFrame) -> None:
         """Assert that Subtask C targets are strictly conditioned on hate_speech != 'no'."""
         if "hate_speech" not in df.columns or "target_type" not in df.columns:
             return
-
-        non_hateful_mask = df["hate_speech"] == "no"
-        invalid_type = df[non_hateful_mask & (df["target_type"] != "none")]
-        if len(invalid_type) > 0:
-            raise AssertionError(
-                f"[ORACLE HATE VIOLATION] Found {len(invalid_type)} rows where hate_speech == 'no' "
-                f"but target_type != 'none'. Comments labeled 'no' MUST default to target_type='none'."
-            )
+        cls.assert_conditional_integrity(
+            df=df,
+            parent_col="hate_speech",
+            cond_val="no",
+            child_col="target_type",
+            req_val="none",
+        )

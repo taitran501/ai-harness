@@ -1676,6 +1676,16 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json({"configs": cfg_files})
 
     def handle_api_strategy_cards(self) -> None:
+        cards_file = PROJECT_ROOT / "configs" / "strategy_cards.yaml"
+        if cards_file.exists():
+            try:
+                raw_cards = yaml.safe_load(cards_file.read_text(encoding="utf-8")) or {}
+                if isinstance(raw_cards, list):
+                    return self.send_json({"strategies": raw_cards})
+                elif isinstance(raw_cards, dict) and "strategies" in raw_cards:
+                    return self.send_json({"strategies": raw_cards["strategies"]})
+            except Exception:
+                pass
         self.send_json({"strategies": DEFAULT_STRATEGY_CARDS})
 
     def handle_api_get_config(self, query: str) -> None:
