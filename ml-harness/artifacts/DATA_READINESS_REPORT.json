@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-09-27T10:54:06.526807+00:00",
+  "config_used": {
+    "auto_scan_mode": "deep",
+    "check_label_distribution": true,
+    "check_group_leakage": true,
+    "check_conditional_labels": true,
+    "check_subtask_c_conditioning": true,
+    "check_text_length_outliers": true,
+    "check_missing_nulls": true
+  },
+  "declared_checks_count": 0,
+  "dataset_overview": {
+    "total_rows": 0,
+    "partitions": {},
+    "folds": {},
+    "unique_groups": 0,
+    "group_column": "group"
+  },
+  "checks_performed": [],
+  "warnings": [],
+  "status": "READY"
+}

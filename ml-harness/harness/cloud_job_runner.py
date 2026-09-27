@@ -21,8 +21,24 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+HARNESS_DIR = Path(__file__).resolve().parent.parent
+from harness.io_utils import get_project_root
+PROJECT_ROOT = get_project_root()
+if str(HARNESS_DIR) not in sys.path:
+    sys.path.insert(0, str(HARNESS_DIR))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _find_script(rel_path: str) -> Path:
+    """Finds script path either at competition project root or in ml-harness folder."""
+    p_root = PROJECT_ROOT / rel_path
+    if p_root.exists():
+        return p_root
+    p_harness = HARNESS_DIR / rel_path
+    if p_harness.exists():
+        return p_harness
+    return p_root
 
 from harness.tree_journal import TreeJournal
 
@@ -130,7 +146,7 @@ class CloudJobManager:
         cmd: List[str] = [sys.executable]
         if backend in ("modal", "kaggle"):
             cmd.extend([
-                str(PROJECT_ROOT / "harness" / "cloud_runner.py"),
+                str(_find_script("harness/cloud_runner.py")),
                 "--backend",
                 backend,
                 "--config",
@@ -144,7 +160,7 @@ class CloudJobManager:
                 cmd.append(str(script_path))
             else:
                 cmd.extend([
-                    str(PROJECT_ROOT / "train.py"),
+                    str(_find_script("train.py")),
                     "--config",
                     config_path,
                 ])
@@ -239,7 +255,7 @@ class CloudJobManager:
                 try:
                     audit_cmd = [
                         sys.executable,
-                        str(PROJECT_ROOT / "tools" / "audit_gate.py"),
+                        str(_find_script("tools/audit_gate.py")),
                         "--candidate",
                         str(candidate_csv),
                     ]

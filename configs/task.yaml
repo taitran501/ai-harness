@@ -195,7 +195,7 @@ task:
     test_path: dataset/test/
     sample_submission_path: submissions/sample_submission.csv
     split_strategy: GroupKFold
-    group_column: yt_title
+    group_column: video_key
     n_folds: 5
     seed: 42
     id_column: StereoQueerEval_id

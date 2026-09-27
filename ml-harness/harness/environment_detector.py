@@ -23,7 +23,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from harness.io_utils import get_project_root
+PROJECT_ROOT = get_project_root()
 
 KEY_TO_PROVIDER: Dict[str, str] = {
     "GEMINI_API_KEY": "gemini",

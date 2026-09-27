@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from harness.io_utils import get_project_root
+
+PROJECT_ROOT = get_project_root()
 SKILL_DIR = PROJECT_ROOT / ".agents" / "skills" / "ml-experiment-harness"
 SKILL_FILE = SKILL_DIR / "SKILL.md"
 TASK_CONFIG_FILE = PROJECT_ROOT / "configs" / "task.yaml"

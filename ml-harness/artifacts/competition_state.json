@@ -1,0 +1,201 @@
+{
+  "version": "3.0_universal",
+  "updated_at": "2026-09-27T10:55:19.813824+00:00",
+  "mode": "OPTIMIZE",
+  "manual_phase_override": null,
+  "gates": {
+    "spec_confirmed": true,
+    "data_risks_confirmed": true,
+    "baseline_locked": true,
+    "baseline_exp_id": "baseline",
+    "freeze_locked": false,
+    "finalized": false
+  },
+  "data_audit_config": {
+    "auto_scan_mode": "deep",
+    "check_label_distribution": true,
+    "check_group_leakage": true,
+    "check_conditional_labels": true,
+    "check_subtask_c_conditioning": true,
+    "check_text_length_outliers": true,
+    "check_missing_nulls": true
+  },
+  "agent_context_config": {
+    "inject_phase_hud": true,
+    "inject_current_best_anchors": true,
+    "inject_active_blockers": true,
+    "inject_next_action": true,
+    "inject_data_risk_warnings": true,
+    "inject_candidate_pool": true,
+    "inject_submission_quota_and_divergence": true,
+    "inject_idea_graveyard": true
+  },
+  "candidate_pool": {
+    "pinned_candidates": [],
+    "synthesized_candidates": []
+  },
+  "freeze_selection": {
+    "selected_slots": {
+      "slot_1": "baseline_v1_comment"
+    },
+    "slot_1_safe_cv": "baseline_v1_comment",
+    "slot_2_aggressive_lb": null,
+    "frozen_at": "2026-09-27T10:54:43.851640+00:00",
+    "freeze_notes": "Frozen via AgentBridge session session_0007",
+    "lock_receipt_path": "submissions/FROZEN_FINAL_LOCK.json",
+    "git_commit": "f32a2110c295acd64f6ac04f477f962f9657a3b1",
+    "unfreeze_reason": "Unit test cleanup"
+  },
+  "audit_trail": [
+    {
+      "timestamp": "2026-09-27T10:54:43.886255+00:00",
+      "event_type": "EMERGENCY_UNFREEZE",
+      "summary": "Freeze lock broken! Reason: Unit test cleanup",
+      "details": {
+        "reason": "Unit test cleanup",
+        "previous_freeze": "2026-09-27T10:54:43.851640+00:00"
+      }
+    },
+    {
+      "timestamp": "2026-09-27T10:54:43.853261+00:00",
+      "event_type": "COMPETITION_FROZEN",
+      "summary": "Locked 1/2 final candidate slots at commit f32a2110",
+      "details": {
+        "freeze_version": "2.0_policy_driven",
+        "status": "FROZEN_FOR_FINAL_EVALUATION",
+        "max_candidates_allowed": 2,
+        "selection_strategy": "risk_balanced_portfolio",
+        "frozen_at": "2026-09-27T10:54:43.851640+00:00",
+        "git_commit": "f32a2110c295acd64f6ac04f477f962f9657a3b1",
+        "selected_slots": {
+          "slot_1": "baseline_v1_comment"
+        },
+        "slot_1_safe_cv": {
+          "id": "baseline_v1_comment"
+        },
+        "slot_2_aggressive_lb": {
+          "id": null
+        },
+        "notes": "Frozen via AgentBridge session session_0007"
+      }
+    },
+    {
+      "timestamp": "2026-09-27T10:54:07.337019+00:00",
+      "event_type": "EMERGENCY_UNFREEZE",
+      "summary": "Freeze lock broken! Reason: Unit test cleanup",
+      "details": {
+        "reason": "Unit test cleanup",
+        "previous_freeze": "2026-09-27T10:54:07.273518+00:00"
+      }
+    },
+    {
+      "timestamp": "2026-09-27T10:54:07.277256+00:00",
+      "event_type": "COMPETITION_FROZEN",
+      "summary": "Locked 1/2 final candidate slots at commit f32a2110",
+      "details": {
+        "freeze_version": "2.0_policy_driven",
+        "status": "FROZEN_FOR_FINAL_EVALUATION",
+        "max_candidates_allowed": 2,
+        "selection_strategy": "risk_balanced_portfolio",
+        "frozen_at": "2026-09-27T10:54:07.273518+00:00",
+        "git_commit": "f32a2110c295acd64f6ac04f477f962f9657a3b1",
+        "selected_slots": {
+          "slot_1": "baseline_v1_comment"
+        },
+        "slot_1_safe_cv": {
+          "id": "baseline_v1_comment"
+        },
+        "slot_2_aggressive_lb": {
+          "id": null
+        },
+        "notes": "Frozen via AgentBridge session session_0003"
+      }
+    }
+  ],
+  "agent_copilot": {
+    "last_run_id": "session_0009",
+    "session_id": "session_0009",
+    "last_run_at": "2026-09-27T10:55:19.808822+00:00",
+    "goal": "test",
+    "status": "ACTIVE",
+    "stop_reason": null,
+    "reassess_recommended": false,
+    "experiments_run": [],
+    "compute_usage": {
+      "experiments_used": 0,
+      "local_runs": 0,
+      "cloud_runs": 0,
+      "smoke_runs": 0,
+      "wall_seconds_used": 0.001,
+      "gpu_hours_used": 0.0,
+      "submissions_used": 0
+    },
+    "consecutive_rejections": 0,
+    "budget": {
+      "max_experiments": null,
+      "max_gpu_hours": null,
+      "max_cloud_runs": null,
+      "max_wall_seconds": null,
+      "max_submissions": null,
+      "max_consecutive_rejections": 3,
+      "hard_stop_on_consecutive_rejections": false,
+      "min_meaningful_improvement": 0.002,
+      "experiments_used": 0,
+      "local_runs": 0,
+      "cloud_runs": 0,
+      "smoke_runs": 0,
+      "wall_seconds_used": 0.001,
+      "gpu_hours_used": 0.0,
+      "submissions_used": 0
+    },
+    "pending_approval_action": null,
+    "steps": [
+      {
+        "step": "[synthesize_candidate] Action 'synthesize_candidate' raised exception: Cannot locate predictions.csv or oof_predictions.csv for 'baseline_v1_comment'",
+        "status": "failed"
+      }
+    ],
+    "actions": [
+      {
+        "step_index": 1,
+        "action": "synthesize_candidate",
+        "approval_tier": "AUTO_WITH_LIMIT",
+        "params": {
+          "name": "test_router",
+          "mode": "specialist_router"
+        },
+        "rationale": "Invoked 'synthesize_candidate' via AgentBridge",
+        "user_approved": false,
+        "timestamp": "2026-09-27T10:55:19.801838+00:00"
+      }
+    ],
+    "observations": [
+      {
+        "step_index": 1,
+        "action": "synthesize_candidate",
+        "status": "FAILED",
+        "summary": "Action 'synthesize_candidate' raised exception: Cannot locate predictions.csv or oof_predictions.csv for 'baseline_v1_comment'",
+        "advisory": null,
+        "metric_delta": null,
+        "composite_score": null,
+        "fold_variance": null,
+        "regressions": [],
+        "diagnostics_bottlenecks": [],
+        "new_blockers": [],
+        "artifact_path": null,
+        "data": {},
+        "elapsed_seconds": 0.001
+      }
+    ]
+  },
+  "finalization": {
+    "private_score_slot_1": null,
+    "private_score_slot_2": null,
+    "winning_slot": "slot_1",
+    "final_rank": null,
+    "total_teams": null,
+    "lessons_learned": "",
+    "paper_title": "ML Competition Benchmark System Description & Reproducibility Report",
+    "report_generated_at": null
+  }
+}

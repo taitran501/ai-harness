@@ -25,6 +25,7 @@ import yaml
 
 from harness.diagnostics import DiagnosticEngine
 from harness.grounding_gate import GroundingGate
+from harness.io_utils import get_project_root
 from harness.task_spec import UniversalTaskSpec, load_active_task_spec
 from harness.tree_journal import Node, TreeJournal
 from harness.validator import ExperimentValidator
@@ -57,7 +58,7 @@ class UniversalRunner:
         self.cfg = cfg
         self.config_path = config_path
         self.args = args
-        self.project_root = Path(__file__).resolve().parent.parent
+        self.project_root = get_project_root()
 
         exp_info = cfg.get("experiment", {})
         self.exp_id = exp_info.get("id", Path(config_path).stem)
@@ -126,13 +127,18 @@ class UniversalRunner:
                 if hasattr(src_data, "load_dataset"):
                     df_res, _ = src_data.load_dataset(str(self.project_root / "dataset"))
                     split_path = self.project_root / self.cfg.get("paths", {}).get("split_path", "splits/fold_assignments.tsv")
+                    if not split_path.exists():
+                        for cand in ["splits/fold_assignments.tsv", "splits/folds.csv", "splits/splits.csv"]:
+                            if (self.project_root / cand).exists():
+                                split_path = self.project_root / cand
+                                break
                     if hasattr(src_data, "load_splits") and hasattr(src_data, "merge_data_and_splits") and split_path.exists():
                         splits_df = src_data.load_splits(str(split_path))
                         df = src_data.merge_data_and_splits(df_res, splits_df)
                     else:
                         df = df_res
-            except Exception:
-                pass
+            except Exception as e:
+                self.logger.error(f"DATA LOADER ERROR in src.data: {e}", exc_info=True)
 
         if df is None:
             df = self.task_spec.load_dataset_split("train", project_root=self.project_root)
@@ -151,11 +157,26 @@ class UniversalRunner:
 
         self.logger.info(f"Loaded {len(df):,} training instances.")
 
-        # Subsample for debug/probe
+        # Subsample for debug/probe (group-aware to guarantee anti-leakage invariant)
         if self.args.debug or getattr(self.args, "probe_samples", None):
             sample_n = getattr(self.args, "probe_samples", None) or 50
             self.logger.warning(f"Probe/Debug mode enabled: sampling {sample_n} instances.")
-            if "language" in df.columns:
+            group_col = self.task_spec.group_column
+            if group_col in df.columns:
+                sampled_groups = set()
+                if "language" in df.columns:
+                    for _, lang_df in df.groupby("language"):
+                        for grp in lang_df[group_col].dropna().unique():
+                            sampled_groups.add(grp)
+                            if len(lang_df[lang_df[group_col].isin(sampled_groups)]) >= sample_n:
+                                break
+                else:
+                    for grp in df[group_col].dropna().unique():
+                        sampled_groups.add(grp)
+                        if len(df[df[group_col].isin(sampled_groups)]) >= sample_n:
+                            break
+                df = df[df[group_col].isin(sampled_groups)].reset_index(drop=True)
+            elif "language" in df.columns:
                 df = df.groupby("language").head(sample_n).reset_index(drop=True)
             else:
                 df = df.head(sample_n).reset_index(drop=True)

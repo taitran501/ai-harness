@@ -55,11 +55,17 @@ class ExperimentValidator:
         """Assert that no groups exist in both training and validation folds."""
         if group_column is None:
             from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec()
-            group_column = spec.group_column
-            if not group_column:
-                for candidate in ["group", "group_id", "cluster_id", "session_id"]:
-                    if candidate in train_df.columns:
+            try:
+                spec = load_active_task_spec()
+                group_column = spec.group_column
+            except Exception:
+                group_column = None
+            if not group_column or group_column not in train_df.columns:
+                group_candidates = ["group", "group_id", "cluster_id", "session_id", "video_key"] + [
+                    c for c in train_df.columns if "title" in c.lower() or "group" in c.lower()
+                ]
+                for candidate in group_candidates:
+                    if candidate in train_df.columns and candidate in val_df.columns:
                         group_column = candidate
                         break
 
