@@ -114,52 +114,62 @@ pip install -r requirements.txt
 cd dashboard && pnpm install && pnpm build && cd ..
 ```
 
-### 2. Dataset Acquisition
+### 2. Competition Setup & 2-Stage Agentic Workflow
 
-If starting fresh without a dataset, download your competition data into a `dataset/` directory:
+Competitions and benchmarks vary widely in their file structures: from local `.zip` archives and multi-language TSVs to separated feature/label tables. Rather than enforcing rigid dataset paths, ML-Harness leverages the reasoning and code-execution abilities of modern AI coding assistants (Antigravity IDE, Claude Code, OpenAI Codex) through a **2-Stage Workflow**:
 
-- **Kaggle CLI**:
-  ```bash
-  kaggle competitions download -c <competition-name> -p dataset/
-  tar -xf dataset/<competition-name>.zip -C dataset/
-  ```
-- **Direct Download / URL**:
-  ```bash
-  curl -L "<download-url>" -o dataset/data.zip
-  tar -xf dataset/data.zip -C dataset/
-  ```
-- **Hugging Face Datasets**:
-  ```bash
-  python -c "from datasets import load_dataset; ds = load_dataset('<dataset_name>'); ds['train'].to_pandas().to_csv('dataset/train.csv', index=False)"
-  ```
+```text
+Raw Competition Data (.zip / folder / URLs)
+                  │
+                  ▼
+┌────────────────────────────────────────────────────────┐
+│  STAGE 1: Exploration, Research & Harness Alignment    │
+│  • Extract & inspect archive (columns, types, targets) │
+│  • Web search competition rules & metric if low-context│
+│  • Configure configs/task.yaml                         │
+│  • Run python tools/inject_skill.py                    │
+└─────────────────────────┬──────────────────────────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────┐
+│  STAGE 2: Validation Strategy, Baseline & Execution    │
+│  • Set up leak-free CV split (Stratified/Group/Time)   │
+│  • Create configs/exp001_baseline.yaml                 │
+│  • Fast smoke test (--debug --fold 0)                  │
+│  • Full CV run & Solution Tree DAG anchor              │
+└────────────────────────────────────────────────────────┘
+```
 
----
+#### Option A: Agent-Driven (Prompt Your Assistant)
+Place your dataset or `.zip` file in the workspace, then prompt your assistant:
 
-### 3. Choose Your Workflow: Agent vs. Manual
+1. **Stage 1 Prompt (Discovery & Alignment)**:
+   > *"I have placed my competition archive in `dataset/`. Please extract and inspect the files, search for the official competition rules/metric if needed, configure `configs/task.yaml`, and run `python tools/inject_skill.py`."*
+2. **Stage 2 Prompt (Baseline & Execution)**:
+   > *"Stage 1 is complete. Now configure an atomic baseline in `configs/exp001_baseline.yaml`, run a fast smoke test (`--debug --fold 0`), and train the full baseline."*
 
-#### Option A: Agent-Driven (Zero Configuration)
-If using an AI coding assistant (Antigravity IDE, Claude Code, OpenAI Codex):
-1. Open the repository in your editor.
-2. Prompt the assistant:
-   > *"Initialize the harness for my dataset in `dataset/train.csv`, configure `configs/task.yaml`, inject the skill, and run a smoke test."*
-3. The assistant auto-detects columns, generates the configuration, updates `.agents/skills/`, and verifies convergence on a debug probe.
+👉 **See [`docs/COMPETITION_ONBOARDING.md`](docs/COMPETITION_ONBOARDING.md) for full copy-pasteable prompt templates and detailed stage deliverables.**
 
-#### Option B: Manual Setup (3 Commands)
+#### Option B: Manual Setup (3 Terminal Commands)
+If setting up manually without an assistant:
 ```bash
-# 1. Select a task preset matching your problem
+# 1. Extract your dataset into your preferred location (e.g., dataset/ or data/)
+tar -xf dataset/competition_data.zip -C dataset/
+
+# 2. Select a preset or customize configs/task.yaml
 cp configs/tasks/kaggle_tabular_regression.yaml configs/task.yaml
 # (Or kaggle_binary_classification.yaml, stereoqueereval.yaml, etc.)
 
-# 2. Inject competition skill into .agents/skills/
+# 3. Inject competition skill into .agents/skills/
 python tools/inject_skill.py
 
-# 3. Run a fast smoke test (single fold debug probe)
+# 4. Run a fast smoke test (single fold debug probe)
 python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0
 ```
 
 ---
 
-### 4. Task Configuration Reference (`configs/task.yaml`)
+### 3. Task Configuration Reference (`configs/task.yaml`)
 
 A minimal `configs/task.yaml` looks like this:
 

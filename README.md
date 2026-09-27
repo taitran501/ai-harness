@@ -81,46 +81,55 @@ pip install -r requirements.txt
 pip install -r ml-harness/requirements.txt
 ```
 
-### 2. Dataset Setup
+### 2. Competition Setup & 2-Stage Agentic Workflow
 
-If you cloned a fresh repository and do not have the dataset yet, obtain it using one of the methods below:
+Whether starting fresh with this SemEval benchmark or bringing a new competition dataset (e.g. from Kaggle or Codabench), ML-Harness leverages modern AI coding assistants (Antigravity IDE, Claude Code, OpenAI Codex) through a **2-Stage Workflow**:
 
-- **SemEval (This Benchmark)**:
-  ```bash
-  # Files are included in dataset/ or extract from the archive:
-  tar -xf dataset/StereoQueerEval_training.zip -C dataset/
-  ```
-- **Kaggle Competition**:
-  ```bash
-  kaggle competitions download -c <competition-name> -p dataset/
-  tar -xf dataset/<competition-name>.zip -C dataset/
-  ```
-- **Direct Download / URL**:
-  ```bash
-  curl -L "<download-url>" -o dataset/data.zip
-  tar -xf dataset/data.zip -C dataset/
-  ```
+```text
+Raw Competition Data (.zip / folder / URLs)
+                  │
+                  ▼
+┌────────────────────────────────────────────────────────┐
+│  STAGE 1: Exploration, Research & Harness Alignment    │
+│  • Extract & inspect archive (columns, types, targets) │
+│  • Web search competition rules & metric if low-context│
+│  • Configure configs/task.yaml                         │
+│  • Run python tools/inject_skill.py                    │
+└─────────────────────────┬──────────────────────────────┘
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────┐
+│  STAGE 2: Validation Strategy, Baseline & Execution    │
+│  • Set up leak-free CV split (Stratified/Group/Time)   │
+│  • Create configs/exp001_baseline.yaml                 │
+│  • Fast smoke test (--debug --fold 0)                  │
+│  • Full CV run & Solution Tree DAG anchor              │
+└────────────────────────────────────────────────────────┘
+```
 
----
+#### Option A: Agent-Driven (Prompt Your Assistant)
+Place your dataset or `.zip` file in the workspace, then prompt your assistant:
 
-### 3. Choose Your Workflow: Agent vs. Manual
+1. **Stage 1 Prompt (Discovery & Alignment)**:
+   > *"I have placed my competition archive in `dataset/`. Please extract and inspect the files, search for the official competition rules/metric if needed, configure `configs/task.yaml`, and run `python tools/inject_skill.py`."*
+2. **Stage 2 Prompt (Baseline & Execution)**:
+   > *"Stage 1 is complete. Now configure an atomic baseline in `configs/exp001_baseline.yaml`, run a fast smoke test (`--debug --fold 0`), and train the full baseline."*
 
-#### Option A: Agent-Driven (Zero Configuration)
-If working with Antigravity IDE, Claude Code, or Codex:
-1. Open the project folder in your agent editor.
-2. Prompt the agent:
-   > *"Initialize the task with the dataset in `dataset/`, configure `configs/task.yaml`, inject the skill, and run a smoke test."*
-3. The agent inspects the data, writes the schema, runs `python tools/inject_skill.py`, and validates the initial baseline probe automatically.
+👉 **See [`ml-harness/docs/COMPETITION_ONBOARDING.md`](ml-harness/docs/COMPETITION_ONBOARDING.md) for full copy-pasteable prompt templates and detailed stage deliverables.**
 
-#### Option B: Manual Setup (3 Commands)
+#### Option B: Manual Setup (3 Terminal Commands)
+If setting up manually without an assistant:
 ```bash
-# 1. Select a task preset (or configure configs/task.yaml)
+# 1. Unzip or place your dataset (e.g., in dataset/ or data/)
+tar -xf dataset/StereoQueerEval_training.zip -C dataset/
+
+# 2. Select a preset or customize configs/task.yaml
 cp ml-harness/configs/tasks/stereoqueereval.yaml configs/task.yaml
 
-# 2. Inject competition skill into .agents/skills/
+# 3. Inject competition skill into .agents/skills/
 python tools/inject_skill.py
 
-# 3. Run a fast smoke test (single fold debug probe)
+# 4. Run a fast smoke test (single fold debug probe)
 python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0
 ```
 
