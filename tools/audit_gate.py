@@ -85,14 +85,32 @@ def audit_prediction_integrity(
                         f"Conditional constraint violated: {len(violated)} rows where {parent}=='{cond_val}' have {child} != '{req_val}'."
                     )
 
-    # Check Subtask A valid values (backward compatible)
-    if "pred_stereotype" in df.columns:
+    # Dynamic class validation from TaskSpec subtasks if available
+    checked_cols = set()
+    try:
+        from harness.task_spec import load_active_task_spec
+        spec = load_active_task_spec()
+        for subtask in getattr(spec, "subtasks", []):
+            col_name = getattr(subtask, "column", None)
+            classes = getattr(subtask, "classes", [])
+            if col_name and classes:
+                target_col = f"pred_{col_name}" if f"pred_{col_name}" in df.columns else (col_name if col_name in df.columns else None)
+                if target_col:
+                    checked_cols.add(target_col)
+                    invalid = df[~df[target_col].isin(classes)]
+                    if len(invalid) > 0:
+                        errors.append(f"Subtask '{subtask.id}' column '{target_col}' has {len(invalid)} invalid values (expected {classes}).")
+    except Exception:
+        pass
+
+    # Check Subtask A valid values (backward compatible fallback)
+    if "pred_stereotype" in df.columns and "pred_stereotype" not in checked_cols:
         invalid = df[~df["pred_stereotype"].isin(["yes", "no"])]
         if len(invalid) > 0:
             errors.append(f"Subtask A has {len(invalid)} invalid values (expected 'yes' or 'no').")
 
-    # Check Subtask B valid values (backward compatible)
-    if "pred_hate_speech" in df.columns:
+    # Check Subtask B valid values (backward compatible fallback)
+    if "pred_hate_speech" in df.columns and "pred_hate_speech" not in checked_cols:
         valid_b = ["no", "yes_explicit", "yes_implicit"]
         invalid = df[~df["pred_hate_speech"].isin(valid_b)]
         if len(invalid) > 0:
@@ -138,9 +156,9 @@ def compute_diff_metrics(
             f"Row count mismatch! Candidate has {len(cand)} rows, baseline has {len(base)} rows."
         )
 
-    common_cols = [c for c in cand.columns if c in base.columns and c != id_col]
+    common_cols = [c for c in cand.columns if c in base.columns and c != resolved_id]
     if not common_cols:
-        common_cols = [c for c in cand.columns if c != id_col]
+        common_cols = [c for c in cand.columns if c != resolved_id]
 
     diff_per_col = {}
     any_diff_mask = pd.Series([False] * len(cand))

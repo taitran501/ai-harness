@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 def push_dataset_to_modal(volume_name: Optional[str] = None) -> Dict[str, Any]:

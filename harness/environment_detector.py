@@ -435,13 +435,18 @@ class EnvironmentDetector:
             except Exception:
                 pass
 
-        # Also test torch cuda if available
+        # Also test torch cuda or mps if available
         try:
             import torch
             result["cuda_available"] = torch.cuda.is_available()
             if result["cuda_available"] and not result["gpu_name"]:
                 result["detected"] = True
                 result["gpu_name"] = torch.cuda.get_device_name(0)
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                result["mps_available"] = True
+                if not result["gpu_name"]:
+                    result["detected"] = True
+                    result["gpu_name"] = "Apple Silicon GPU (MPS)"
         except Exception:
             pass
 

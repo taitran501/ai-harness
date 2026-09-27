@@ -234,6 +234,17 @@ class SubmissionManager:
         # Calculate deltas (LB - CV) across all matched keys
         deltas = {}
         divergence = False
+        opt_direction = "maximize"
+        try:
+            from harness.task_spec import load_active_task_spec
+            spec = load_active_task_spec()
+            if hasattr(spec, "primary_metric") and hasattr(spec.primary_metric, "direction"):
+                opt_direction = str(spec.primary_metric.direction).lower()
+            else:
+                opt_direction = str(getattr(spec, "direction", "maximize")).lower()
+        except Exception:
+            pass
+
         all_metric_keys = set(entry.local_cv_scores.keys()).union(entry.official_scores.keys())
         for k in all_metric_keys:
             if k == "split_type":
@@ -243,8 +254,12 @@ class SubmissionManager:
             if isinstance(cv_val, (int, float)) and isinstance(lb_val, (int, float)):
                 d = round(float(lb_val) - float(cv_val), 4)
                 deltas[k] = d
-                if d < -0.05:  # Significant drop indicates potential CV leak or overfit
-                    divergence = True
+                if opt_direction == "minimize":
+                    if d > 0.05:  # Error increased on LB
+                        divergence = True
+                else:
+                    if d < -0.05:  # Score dropped on LB
+                        divergence = True
 
         entry.score_deltas = deltas
         entry.divergence_warning = divergence

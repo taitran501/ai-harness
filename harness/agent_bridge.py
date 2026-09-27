@@ -1227,9 +1227,10 @@ class AgentBridge:
                     macro_c_id=params.get("macro_c_id"),
                     split_type=params.get("split_type", "public"),
                     notes=params.get("notes", ""),
+                    custom_scores=params.get("custom_scores") or params.get("scores"),
                 )
                 blockers = (
-                    ["CV vs LB Divergence detected (LB dropped > 0.05 below Local CV)!"]
+                    ["CV vs LB Divergence detected (significant score delta between LB and Local CV)!"]
                     if entry.divergence_warning
                     else []
                 )
@@ -1244,8 +1245,16 @@ class AgentBridge:
                 )
 
             elif act == TypedActionName.FREEZE_CANDIDATE.value:
-                s1 = params.get("slot_1_id", "baseline_v1_comment")
-                s2 = params.get("slot_2_id", "cand_router_ab_comment_c_fullctx")
+                s1 = params.get("slot_1_id")
+                s2 = params.get("slot_2_id")
+                if not s1:
+                    candidates = self.comp_state.candidates
+                    if candidates:
+                        s1 = candidates[0].get("id")
+                        if len(candidates) > 1 and not s2:
+                            s2 = candidates[1].get("id")
+                    else:
+                        raise ValueError("Parameter 'slot_1_id' is required for 'freeze_candidate' when candidate pool is empty.")
                 lock = self.comp_state.freeze_final_candidates(
                     slot_1_id=s1,
                     slot_2_id=s2,

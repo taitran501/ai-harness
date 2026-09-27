@@ -57,6 +57,7 @@ def main() -> None:
     score_parser.add_argument("--macro-c-id", type=float, default=None, help="Official Subtask C Identity Micro/Macro-F1")
     score_parser.add_argument("--split-type", choices=["public", "private"], default="public", help="Leaderboard split")
     score_parser.add_argument("--notes", default="", help="Additional feedback or notes from competition portal")
+    score_parser.add_argument("--scores-json", default=None, help="JSON string of arbitrary custom scores (e.g. '{\"f1\": 0.85}')")
 
     # 4. Mark Submitted Action
     sub_parser = subparsers.add_parser("mark-submitted", help="Mark submission as uploaded to competition portal")
@@ -93,6 +94,14 @@ def main() -> None:
 
     elif args.action == "record-score":
         try:
+            custom_scores = None
+            if getattr(args, "scores_json", None):
+                import json
+                try:
+                    custom_scores = json.loads(args.scores_json)
+                except Exception as e:
+                    print(f"Error parsing --scores-json: {e}", file=sys.stderr)
+                    sys.exit(1)
             entry = mgr.record_official_score(
                 sub_id=args.sub_id,
                 macro_a=args.macro_a,
@@ -101,6 +110,7 @@ def main() -> None:
                 macro_c_id=args.macro_c_id,
                 split_type=args.split_type,
                 notes=args.notes,
+                custom_scores=custom_scores,
             )
             print(f"===========================================================")
             print(f"🎯 RECORDED OFFICIAL SCORES FOR: {entry.id}")
