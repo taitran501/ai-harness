@@ -1,6 +1,6 @@
 # Báo Cáo Nghiên Cứu & Kiến Trúc: Chuyển Giao Tinh Hoa AIDE ML và SWE-agent vào Antigravity IDE
 
-Tài liệu này ghi lại toàn bộ quá trình nghiên cứu, bóc tách tài liệu/mã nguồn của hai công trình nghiên cứu nổi tiếng thế giới: **AIDE ML** (arXiv:2502.13138) và **SWE-agent** (NeurIPS 2024, arXiv:2405.15793), đồng thời lý giải chi tiết kiến trúc của hệ thống Harness vừa được thiết lập trong workspace `semeval_2027`.
+Tài liệu này ghi lại toàn bộ quá trình nghiên cứu, bóc tách tài liệu/mã nguồn của hai công trình nghiên cứu nổi tiếng thế giới: **AIDE ML** (arXiv:2502.13138) và **SWE-agent** (NeurIPS 2024, arXiv:2405.15793), đồng thời lý giải chi tiết kiến trúc của hệ thống Universal ML-Harness.
 
 ---
 
@@ -63,7 +63,7 @@ Trong mã nguồn bạn vừa clone về:
 Nếu bê nguyên xi 2 repo đó vào:
 1. Bạn sẽ phải trả tiền API OpenAI riêng (vô nghĩa khi đang dùng Brain Antigravity).
 2. Xung đột môi trường trên Windows (Docker symlinks, thư viện Linux).
-3. Làm rối loạn cấu trúc thư mục của bài thi SemEval-2027.
+3. Làm rối loạn cấu trúc thư mục của dự án thi đấu ML.
 
 Do đó, chúng ta đã thực hiện một ca **"Phẫu thuật trích xuất tinh hoa" (Architectural Distillation)**: Chắt lọc đúng 4 hạt nhân mạnh nhất của họ và viết lại thành 4 module chuẩn mực trong workspace của bạn:
 
@@ -110,13 +110,13 @@ Do đó, chúng ta đã thực hiện một ca **"Phẫu thuật trích xuất t
 * **Cơ chế hoạt động:**
   1. Tính mã băm SHA-256 của file ứng viên so với baseline. Nếu trùng 100% -> **Crash ngay lập tức, từ chối nộp.**
   2. So sánh từng dòng dự đoán. Nếu số lượng câu khác biệt $= 0$ -> **Crash ngay lập tức.**
-  3. Kiểm tra tính toàn vẹn: Không được có `NaN`, ID phải hợp lệ, tuân thủ luật Oracle Hate.
-  4. Nếu vượt qua 100% bài test: Đóng gói `submission.zip` và ký file `AUDIT_RECEIPT.json`.
+  3. Kiểm tra tính toàn vẹn: Không được có `NaN`, ID phải hợp lệ theo định dạng task.
+  4. Nếu vượt qua 100% bài test: Đóng gói file nộp (`submission.zip` hoặc `submission.csv`) và ký file `AUDIT_RECEIPT.json`.
 
 ### 4. `harness/validator.py` (Guardrail as Code)
 * **Chức năng:** Biến các luật văn bản thành các câu lệnh `assert` trong Python:
-  * `assert_parameter_limit()`: Đếm tham số PyTorch thật, nếu $> 150\text{M}$ thì văng lỗi, ép Agent phải giảm kích thước mô hình.
-  * `assert_no_video_data_leakage()`: Kiểm tra giao thoa giữa tập train và val. Nếu trùng video title -> Crash để chống rò rỉ dữ liệu.
+  * `assert_parameter_limit()`: Đếm tham số PyTorch thật, nếu vượt trần thì văng lỗi, ép Agent phải giảm kích thước mô hình.
+  * `assert_no_group_leakage()`: Kiểm tra giao thoa giữa tập train và validation. Nếu trùng group/entity -> Crash để chống rò rỉ dữ liệu.
 
 ### 5. `harness/cloud_runner.py` (Cầu nối GPU)
 * **Chức năng:** Cho phép Antigravity trên máy Windows gửi job huấn luyện các mô hình nặng (XLM-R, DeBERTa 5 folds) lên **Modal.com** hoặc **Kaggle API**, tự động tải kết quả về thư mục artifacts mà không làm treo máy local.

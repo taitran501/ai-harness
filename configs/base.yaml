@@ -1,14 +1,10 @@
-# Base configuration for StereoQueerEval experiments
+# Universal Base Runtime Configuration for ML-Harness
 paths:
   data_dir: "dataset"
-  split_path: "splits/fold_assignments.tsv"
+  split_path: "splits/folds.csv"
   artifacts_dir: "artifacts"
   leaderboard_path: "EXPERIMENTS.md"
 
 runtime:
   seed: 42
-  languages:
-    - "EN"
-    - "IT"
-    - "NL"
   n_splits: 5
