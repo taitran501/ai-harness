@@ -199,6 +199,7 @@ class CompetitionStateMachine:
                 "data_risks_confirmed": False,
                 "baseline_locked": False,
                 "baseline_exp_id": self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline",
+                "baseline_evidence": None,
                 "freeze_locked": False,
                 "finalized": False,
             },
@@ -962,10 +963,24 @@ class CompetitionStateMachine:
             steps_log.append({"step": "Waiting for explicit user approval to confirm the reviewed data risks", "status": "pending_approval"})
 
         elif action_id == "LOCK_BASELINE_ANCHOR":
-            steps_log.append({"step": "Inspecting initial baseline validation metrics across folds", "status": "completed"})
-            steps_log.append({"step": "Verifying reproducibility seed & commit hash", "status": "completed"})
+            from harness.baseline import validate_baseline_artifact
+            if not self.state["gates"].get("spec_confirmed") or not self.state["gates"].get("data_risks_confirmed"):
+                raise ValueError("Review the task contract and confirm data risks before establishing the baseline.")
+            base_id = (
+                snap.get("candidate_pool", {}).get("baseline_id")
+                or self.state["gates"].get("baseline_exp_id")
+                or "baseline"
+            )
+            evidence = validate_baseline_artifact(
+                self.artifacts_dir,
+                str(base_id),
+                str(self.spec.get("primary_metric") or "score"),
+            )
+            self.state["gates"]["baseline_exp_id"] = base_id
             self.state["gates"]["baseline_locked"] = True
-            steps_log.append({"step": "Official Baseline Anchor established — unlocking parallel iteration tracks", "status": "completed"})
+            self.state["gates"]["baseline_evidence"] = evidence
+            steps_log.append({"step": f"Verified run metrics for baseline `{base_id}` ({evidence['score']})", "status": "completed"})
+            steps_log.append({"step": "Official Baseline Anchor established from measured validation output", "status": "completed"})
 
         elif action_id in ("BUILD_SPECIALIST_ROUTER", "ITERATE_EXPERIMENTS"):
             steps_log.append({"step": "Inspecting parent diagnostics & failure slices", "status": "completed"})

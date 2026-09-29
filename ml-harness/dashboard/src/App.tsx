@@ -15,6 +15,7 @@ import { ExperimentConfigModal } from './components/ExperimentConfigModal';
 import { CloudEnvironmentModal } from './components/CloudEnvironmentModal';
 import { CompetitionPipelineHub } from './components/CompetitionPipelineHub';
 import { CompetitionJourneyWorkspace } from './components/CompetitionJourneyWorkspace';
+import { WorkspaceHub } from './components/WorkspaceHub';
 import { LanguageProvider, useLanguage } from './constants/i18n';
 import {
   TreeGraphResponse,
@@ -28,7 +29,7 @@ import {
 
 const DashboardContent: React.FC = () => {
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'journey' | 'pipeline' | 'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('journey');
+  const [activeTab, setActiveTab] = useState<'journey' | 'workspace' | 'pipeline' | 'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('journey');
   const [compState, setCompState] = useState<any>(null);
   const [graphData, setGraphData] = useState<TreeGraphResponse>({ nodes: [], edges: [], best_id: null });
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
@@ -147,6 +148,18 @@ const DashboardContent: React.FC = () => {
             </button>
 
             <button
+              onClick={() => setActiveTab('workspace')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                activeTab === 'workspace'
+                  ? 'bg-zinc-800 text-zinc-100'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>Agent workspace</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('pipeline')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
                 activeTab === 'pipeline'
@@ -231,6 +244,10 @@ const DashboardContent: React.FC = () => {
             onOpenEnvModal={() => setIsEnvModalOpen(true)}
             onRefreshAll={loadData}
           />
+        )}
+
+        {activeTab === 'workspace' && (
+          <WorkspaceHub onOpenEnvironmentModal={() => setIsEnvModalOpen(true)} />
         )}
 
         {/* Unified 4-Step Competition Pipeline Hub */}

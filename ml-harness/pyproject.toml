@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cloud = ["modal>=0.62.0", "kaggle>=1.6.0"]
+cloud = ["modal>=1.5.0", "kaggle>=1.6.0"]
 
 [project.scripts]
 ml-harness = "harness.cli:main"

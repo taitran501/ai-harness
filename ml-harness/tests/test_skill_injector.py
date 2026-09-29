@@ -50,7 +50,8 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("microsoft/deberta-v3-base", content)
         self.assertIn("Focal Loss", content)
         self.assertIn("SWE-Agent Physical & Statistical Audit Gate", content)
-        self.assertIn("Minimum Meaningful Effect Size (MMES >= 2.0%)", content)
+        self.assertIn("Task Contract and Approval Gates", content)
+        self.assertNotIn("MMES >= 2.0%", content)
 
     def test_generate_skill_tabular(self):
         """Verify dynamic skill generation for Tabular regression competition."""

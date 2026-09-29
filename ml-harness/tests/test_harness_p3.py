@@ -52,7 +52,17 @@ class TestAuditGateRefinements(unittest.TestCase):
             "pred_hate_speech": ["no", "yes_explicit"],
             "pred_target_type": ["none", "individual"],
         })
-        errors = audit_prediction_integrity(valid_df)
+        spec = UniversalTaskSpec(
+            name="Stereo fixture",
+            task_type="multi_task_classification",
+            primary_metric="macro_f1",
+            subtasks={
+                "stereotype": SubtaskSpec("stereotype", "Stereotype", "binary_classification", column="stereotype", classes=["yes", "no"]),
+                "hate_speech": SubtaskSpec("hate_speech", "Hate Speech", "multiclass_classification", column="hate_speech", classes=["no", "yes_explicit"]),
+                "target_type": SubtaskSpec("target_type", "Target Type", "multiclass_classification", column="target_type", classes=["none", "individual"]),
+            },
+        )
+        errors = audit_prediction_integrity(valid_df, spec=spec)
         self.assertEqual(errors, [])
 
         # Invalid stereotype value
@@ -60,7 +70,7 @@ class TestAuditGateRefinements(unittest.TestCase):
             "sample_id": ["id_1"],
             "pred_stereotype": ["maybe"],
         })
-        bad_errors = audit_prediction_integrity(bad_df)
+        bad_errors = audit_prediction_integrity(bad_df, spec=spec)
         self.assertTrue(any("invalid values" in err for err in bad_errors))
 
 

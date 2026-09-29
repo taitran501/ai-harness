@@ -26,6 +26,70 @@ import {
 const API_BASE = '/api';
 
 export const api = {
+  async getPhases(): Promise<any> {
+    const res = await fetch(`${API_BASE}/phases`);
+    if (!res.ok) throw new Error(`Failed to fetch phase workflow: ${res.statusText}`);
+    return res.json();
+  },
+
+  async getPhasePrompt(phase?: string): Promise<{ phase_id?: string; prompt: string }> {
+    const query = phase ? `?phase=${encodeURIComponent(phase)}` : '';
+    const res = await fetch(`${API_BASE}/phases/render${query}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Failed to render phase prompt: ${res.statusText}`);
+    return data;
+  },
+
+  async recordPhaseOutput(payload: {
+    phase_id: string;
+    response: string;
+    sources?: Array<{ url: string; title?: string; accessed_at?: string; note?: string }>;
+    artifacts?: string[];
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE}/phases/record`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Failed to record phase output: ${res.statusText}`);
+    return data;
+  },
+
+  async getLatestEda(): Promise<any> {
+    const res = await fetch(`${API_BASE}/eda/latest`);
+    if (!res.ok) throw new Error(`Failed to fetch EDA report: ${res.statusText}`);
+    return res.json();
+  },
+
+  async runEda(dataPath?: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/eda/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dataPath ? { data_path: dataPath } : {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `EDA failed: ${res.statusText}`);
+    return data;
+  },
+
+  async getCloudStatus(): Promise<any> {
+    const res = await fetch(`${API_BASE}/cloud/status`);
+    if (!res.ok) throw new Error(`Failed to fetch provider status: ${res.statusText}`);
+    return res.json();
+  },
+
+  async grantUploadConsent(provider: 'kaggle' | 'modal'): Promise<any> {
+    const res = await fetch(`${API_BASE}/cloud/consent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, confirm_upload: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Could not save upload consent: ${res.statusText}`);
+    return data;
+  },
+
   async getTree(): Promise<TreeGraphResponse> {
     const res = await fetch(`${API_BASE}/tree`);
     if (!res.ok) throw new Error(`Failed to fetch tree: ${res.statusText}`);
@@ -157,6 +221,7 @@ export const api = {
 
   async pullCloudOutput(params: {
     platform: 'kaggle' | 'modal';
+    job_id: string;
     config_path?: string;
     exp_id?: string;
     kernel_slug?: string;

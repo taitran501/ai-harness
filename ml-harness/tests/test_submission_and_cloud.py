@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -125,9 +126,9 @@ class KaggleKernelManagerTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_metadata_generation(self):
-        meta = KaggleKernelManager.generate_kernel_metadata("test-kernel", enable_gpu=True)
-        uname = KaggleKernelManager.get_authenticated_username()
-        self.assertEqual(meta["id"], f"{uname}/test-kernel")
+        with patch.object(KaggleKernelManager, "get_authenticated_username", return_value="fixture-user"):
+            meta = KaggleKernelManager.generate_kernel_metadata("test-kernel", enable_gpu=True)
+        self.assertEqual(meta["id"], "fixture-user/test-kernel")
         self.assertEqual(meta["enable_gpu"], "true")
         self.assertEqual(meta["enable_internet"], "true")
 

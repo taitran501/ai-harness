@@ -6,6 +6,7 @@ import time
 import unittest
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.dashboard_server import DashboardHandler, generate_priming_prompt
 from harness.tree_journal import Node, TreeJournal
@@ -223,21 +224,24 @@ class DashboardTests(unittest.TestCase):
     def test_api_cloud_generate_kaggle(self):
         """POST /api/cloud/generate for Kaggle should return kernel code and kaggle CLI commands."""
         import json
+        cand = "configs/exp001_tfidf_baseline.yaml" if Path("configs/exp001_tfidf_baseline.yaml").exists() else "configs/exp000_template.yaml"
         url = f"http://127.0.0.1:{self.port}/api/cloud/generate"
         payload = json.dumps({
             "platform": "kaggle",
-            "config_path": "configs/exp001_tfidf_baseline.yaml",
+            "config_path": cand,
             "kaggle_gpu": "T4 x 2",
         }).encode("utf-8")
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req) as resp:
-            self.assertEqual(resp.status, 200)
-            data = json.loads(resp.read().decode())
-            self.assertTrue(data.get("success"))
-            self.assertIn("code", data)
-            self.assertIn("metadata", data)
-            self.assertIn("commands", data)
-            self.assertTrue(any("kaggle kernels push" in cmd for cmd in data["commands"].values()))
+        from harness.templates.kaggle_template import KaggleKernelManager
+        with patch.object(KaggleKernelManager, "get_authenticated_username", return_value="fixture-user"):
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode())
+                self.assertTrue(data.get("success"))
+                self.assertIn("code", data)
+                self.assertIn("metadata", data)
+                self.assertIn("commands", data)
+                self.assertTrue(any("kaggle kernels push" in cmd for cmd in data["commands"].values()))
 
     def test_static_html_served(self):
         """Root GET / should return index.html with 200 OK."""

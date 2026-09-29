@@ -57,6 +57,10 @@ class TypedActionName(str, Enum):
     INSPECT_EXPERIMENT = "inspect_experiment"
     INSPECT_DIAGNOSTICS = "inspect_diagnostics"
     CREATE_EXPERIMENT = "create_experiment"
+    RUN_EDA = "run_eda"
+    RECORD_PHASE_OUTPUT = "record_phase_output"
+    INSPECT_CLOUD_JOB = "inspect_cloud_job"
+    WAIT_CLOUD_JOB = "wait_cloud_job"
     RUN_SMOKE_TEST = "run_smoke_test"
     RUN_PROBE = "run_probe"
     RUN_FULL_VALIDATION = "run_full_validation"
@@ -78,6 +82,10 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.INSPECT_EXPERIMENT.value: ApprovalTier.AUTO.value,
     TypedActionName.INSPECT_DIAGNOSTICS.value: ApprovalTier.AUTO.value,
     TypedActionName.CREATE_EXPERIMENT.value: ApprovalTier.AUTO.value,
+    TypedActionName.RUN_EDA.value: ApprovalTier.AUTO.value,
+    TypedActionName.RECORD_PHASE_OUTPUT.value: ApprovalTier.AUTO.value,
+    TypedActionName.INSPECT_CLOUD_JOB.value: ApprovalTier.AUTO.value,
+    TypedActionName.WAIT_CLOUD_JOB.value: ApprovalTier.AUTO.value,
     TypedActionName.RUN_SMOKE_TEST.value: ApprovalTier.AUTO.value,
     TypedActionName.RUN_PROBE.value: ApprovalTier.AUTO.value,
     TypedActionName.ESTABLISH_BASELINE_ANCHOR.value: ApprovalTier.AUTO_WITH_LIMIT.value,
@@ -205,6 +213,8 @@ class AgentBridge:
             plugin_id=self.project.plugin_id or "default",
         )
         self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
+        from harness.phase_workflow import PhaseWorkflow
+        self.phase_workflow = PhaseWorkflow(self.project_root, self.project.task_config_path)
 
     def _new_journal(self, auto_sync: bool = True) -> TreeJournal:
         return TreeJournal(
@@ -240,6 +250,8 @@ class AgentBridge:
             plugin_id=self.project.plugin_id or "default",
         )
         self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
+        from harness.phase_workflow import PhaseWorkflow
+        self.phase_workflow = PhaseWorkflow(self.project_root, self.project.task_config_path)
 
     def _get_spec_min_improvement(self, session_or_budget: Optional[Any] = None) -> float:
         """Resolve min_meaningful_improvement from SessionBudget or CompetitionSpec (`configs/task.yaml`)."""
@@ -511,6 +523,10 @@ class AgentBridge:
             },
             "available_typed_actions": DEFAULT_ACTION_APPROVAL_TIERS,
         }
+        try:
+            packet["phase_workflow"] = self.phase_workflow.phase_status()
+        except Exception as exc:
+            packet["phase_workflow"] = {"status": "not_configured", "detail": str(exc)}
         return packet
 
     def render_context_markdown(self, session_id: Optional[str] = None) -> str:
@@ -585,8 +601,9 @@ class AgentBridge:
         lines.extend([
             "",
             "## 🛠️ Typed Bridge Actions (`ml-harness-agent act --action <name> ...`)",
-            "- **AUTO**: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
-            "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (`--backend local|modal|kaggle`), `synthesize_candidate`, `build_ensemble`",
+            "- **AUTO**: `inspect_data_readiness`, `run_eda`, `record_phase_output`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
+            "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (dispatches a tracked local/Kaggle/Modal job), `synthesize_candidate`, `build_ensemble`",
+            "- **AUTO (Job lifecycle)**: `inspect_cloud_job`, `wait_cloud_job`",
             "- **USER_APPROVAL (Requires Human Sign-off / `--user-approved`)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
         ])
         return "\n".join(lines) + "\n"
@@ -978,6 +995,48 @@ class AgentBridge:
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
+            elif act == TypedActionName.RUN_EDA.value:
+                from harness.eda import run_eda
+                result = run_eda(self.project_root, data_path=params.get("data_path"))
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=f"EDA profiled {len(result.get('reports', []))} dataset file(s) without copying raw rows.",
+                    artifact_path=result["paths"]["markdown"],
+                    data={"json_report": result["paths"]["json"], "reports": result.get("reports", [])},
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            elif act == TypedActionName.RECORD_PHASE_OUTPUT.value:
+                from harness.phase_workflow import PhaseWorkflow
+                phase_id = params.get("phase_id")
+                response = params.get("response")
+                response_file = params.get("response_file")
+                if response is None and response_file:
+                    response_path = (self.project_root / response_file).resolve()
+                    response_path.relative_to(self.project_root)
+                    response = response_path.read_text(encoding="utf-8")
+                if not isinstance(response, str):
+                    raise ValueError("Provide `response` or a workspace-relative `response_file`.")
+                workflow = PhaseWorkflow(self.project_root, self.project.task_config_path)
+                record = workflow.record(
+                    str(phase_id or ""),
+                    response,
+                    sources=params.get("sources", []),
+                    artifacts=params.get("artifacts", []),
+                    metadata=params.get("metadata", {}),
+                )
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=f"Recorded phase `{record['phase_id']}` response with {len(record['sources'])} source(s) and {len(record['artifacts'])} artifact(s).",
+                    artifact_path=record["response_path"],
+                    data=record,
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
             if act == TypedActionName.BOOTSTRAP_TASK.value:
                 from tools.bootstrap_task import bootstrap_competition_task
                 dataset_dir = params.get("dataset_dir", "dataset")
@@ -1040,12 +1099,22 @@ class AgentBridge:
                 )
 
             elif act == TypedActionName.ESTABLISH_BASELINE_ANCHOR.value:
+                gates = self.comp_state.state.get("gates", {})
+                if not gates.get("spec_confirmed") or not gates.get("data_risks_confirmed"):
+                    raise ValueError("Review the task contract and confirm data risks before establishing the baseline.")
                 pool = self.comp_state.compute_candidate_pool(journal)
                 default_base_id = self.comp_state.state["gates"].get("baseline_exp_id") or self.comp_state.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
                 base_id = params.get("baseline_id") or pool.get("baseline_id", default_base_id)
-                base_score = float(pool.get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
+                from harness.baseline import validate_baseline_artifact
+                baseline = validate_baseline_artifact(
+                    self.artifacts_dir,
+                    str(base_id),
+                    str(self.comp_state.spec.get("primary_metric") or "score"),
+                )
+                base_score = float(baseline["score"])
                 self.comp_state.state["gates"]["baseline_locked"] = True
                 self.comp_state.state["gates"]["baseline_exp_id"] = base_id
+                self.comp_state.state["gates"]["baseline_evidence"] = baseline
                 self.comp_state.save()
                 return ActionObservation(
                     step_index=call.step_index,
@@ -1055,7 +1124,8 @@ class AgentBridge:
                     composite_score=base_score,
                     metric_delta=0.0,
                     fold_variance=0.012,
-                    data={"baseline_id": base_id, "baseline_score": base_score},
+                    artifact_path=str(Path(baseline["metrics_path"]).relative_to(self.project_root)).replace("\\", "/"),
+                    data={"baseline_id": base_id, "baseline_score": base_score, "evidence": baseline},
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
@@ -1289,10 +1359,6 @@ class AgentBridge:
                     raise ValueError("Parameter 'config_path' is required for 'run_full_validation'.")
 
                 backend = str(params.get("backend", "local")).lower()
-                if backend in ("modal", "kaggle") and self.project.plugin_id not in (None, "default"):
-                    raise ValueError(
-                        f"Cloud execution for task plugin '{self.project.plugin_id}' is unavailable until its adapter is installed in the remote runtime."
-                    )
                 force = bool(params.get("force", True))
 
                 full_cfg_file = self.project_root / cfg_path
@@ -1300,43 +1366,51 @@ class AgentBridge:
                 exp_id = raw_cfg.get("experiment", {}).get("id", Path(cfg_path).stem)
 
                 if backend in ("modal", "kaggle"):
-                    cmd = [
-                        sys.executable,
-                        "-m",
-                        "harness.cloud_runner",
-                        "--backend",
-                        backend,
-                        "--config",
-                        cfg_path,
-                    ]
-                    if params.get("gpu"):
-                        cmd.extend(["--gpu", str(params["gpu"])])
-                else:
-                    cmd = [
-                        sys.executable,
-                        "-m",
-                        "harness.runner",
-                        "--project-root",
-                        str(self.project_root),
-                        "--task-config",
-                        str(self.project.task_config_path),
-                        "--config",
-                        cfg_path,
-                    ]
-                    if force:
-                        cmd.append("--force")
+                    from harness.cloud_job_runner import CloudJobManager
+                    manager = CloudJobManager(self.project_root)
+                    job = manager.start_job(
+                        backend=backend,
+                        config_path=cfg_path,
+                        gpu=str(params.get("gpu", "A10")),
+                        auto_audit=bool(params.get("auto_audit", True)),
+                        auto_sync=True,
+                        baseline_csv=params.get("baseline_csv"),
+                    )
+                    session.compute_usage["experiments_used"] = int(session.compute_usage.get("experiments_used", 0)) + 1
+                    session.compute_usage["cloud_runs"] = int(session.compute_usage.get("cloud_runs", 0)) + 1
+                    if exp_id not in session.experiments_run:
+                        session.experiments_run.append(exp_id)
+                    return ActionObservation(
+                        step_index=call.step_index,
+                        action=act,
+                        status="SUCCESS",
+                        summary=f"Dispatched {backend} job `{job.job_id}` for experiment `{exp_id}`; result import waits for a terminal provider state.",
+                        artifact_path=job.artifact_dir,
+                        data={"job_id": job.job_id, "backend": backend, "status": job.status, "provider_status": job.provider_status, "exp_id": exp_id},
+                        elapsed_seconds=round(time.time() - t0, 3),
+                    )
+
+                if backend != "local":
+                    raise ValueError(f"Unsupported execution backend: {backend}")
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "harness.runner",
+                    "--project-root",
+                    str(self.project_root),
+                    "--task-config",
+                    str(self.project.task_config_path),
+                    "--config",
+                    cfg_path,
+                ]
+                if force:
+                    cmd.append("--force")
 
                 passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=1800.0)
 
                 # Update compute usage
                 session.compute_usage["experiments_used"] = int(session.compute_usage.get("experiments_used", 0)) + 1
-                if backend in ("modal", "kaggle"):
-                    session.compute_usage["cloud_runs"] = int(session.compute_usage.get("cloud_runs", 0)) + 1
-                    session.compute_usage["gpu_hours_used"] = round(
-                        float(session.compute_usage.get("gpu_hours_used", 0.0)) + (elapsed / 3600.0), 4
-                    )
-                else:
-                    session.compute_usage["local_runs"] = int(session.compute_usage.get("local_runs", 0)) + 1
+                session.compute_usage["local_runs"] = int(session.compute_usage.get("local_runs", 0)) + 1
 
                 if exp_id not in session.experiments_run:
                     session.experiments_run.append(exp_id)
@@ -1416,6 +1490,44 @@ class AgentBridge:
                     artifact_path=str(oof_path.relative_to(self.project_root)).replace("\\", "/"),
                     data={"exp_id": exp_id, "backend": backend, "scores": detail_scores},
                     elapsed_seconds=elapsed,
+                )
+
+            elif act in (TypedActionName.INSPECT_CLOUD_JOB.value, TypedActionName.WAIT_CLOUD_JOB.value):
+                from harness.cloud_job_runner import CloudJobManager
+                job_id = params.get("job_id")
+                if not job_id:
+                    raise ValueError(f"Parameter `job_id` is required for `{act}`.")
+                manager = CloudJobManager(self.project_root)
+                wait_seconds = min(3600.0, max(0.0, float(params.get("timeout_seconds", 0))))
+                poll_seconds = min(30.0, max(0.25, float(params.get("poll_interval", 3))))
+                deadline = time.monotonic() + wait_seconds
+                job = manager.get_job(str(job_id))
+                if not job:
+                    raise ValueError(f"Cloud job `{job_id}` was not found in this task workspace.")
+                while act == TypedActionName.WAIT_CLOUD_JOB.value and job.get("status") in {"PENDING", "RUNNING"} and time.monotonic() < deadline:
+                    time.sleep(min(poll_seconds, max(0.0, deadline - time.monotonic())))
+                    job = manager.get_job(str(job_id)) or job
+                artifact_data: Dict[str, Any] = {}
+                if job.get("status") == "COMPLETED":
+                    artifact_dir = self.project_root / str(job.get("artifact_dir") or "")
+                    metrics_file = artifact_dir / "metrics.json"
+                    if metrics_file.is_file():
+                        try:
+                            artifact_data["metrics"] = json.loads(metrics_file.read_text(encoding="utf-8"))
+                        except json.JSONDecodeError:
+                            artifact_data["metrics_error"] = "metrics.json is not valid JSON"
+                    artifact_data["artifact_paths"] = [
+                        str(path.relative_to(self.project_root)).replace("\\", "/")
+                        for path in artifact_dir.iterdir() if path.is_file()
+                    ] if artifact_dir.is_dir() else []
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS" if job.get("status") not in {"FAILED", "CANCELLED"} else "FAILED",
+                    summary=f"Cloud job `{job_id}` is {job.get('status')}; artifact identity verified={job.get('artifact_identity_verified', False)}.",
+                    artifact_path=job.get("artifact_dir"),
+                    data={"job": job, **artifact_data},
+                    elapsed_seconds=round(time.time() - t0, 3),
                 )
 
             elif act in (

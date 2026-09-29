@@ -32,15 +32,23 @@ Implement `harness.plugins.TaskPlugin` and register it in your distribution's `p
 my_competition = "my_adapter:MyCompetitionPlugin"
 ```
 
-The public hooks cover task data loading and validation, model construction, prediction normalization, metric evaluation, submission validation, and submission building. The generic implementation delegates metrics to `UniversalTaskSpec` and raises `PluginCapabilityError` for submission operations until the adapter supplies those hooks.
+The public hooks cover task data loading and validation, model construction, prediction normalization, metric evaluation, validation split construction and checking, EDA extensions, submission validation, and submission building. The generic implementation delegates metrics to `UniversalTaskSpec` and raises `PluginCapabilityError` for submission operations until the adapter supplies those hooks.
 
 `ml-harness-agent context` reports the selected plugin ID and which capabilities it implements. Missing adapters fail with the installed entry-point list. A plugin that lacks official submission hooks cannot be treated as submission-ready.
+
+## Remote runtime, phases, and workspace ownership
+
+Remote execution requires a plugin to declare a runtime manifest with its exact installed distribution and version. The manifest can identify a wheel or a pinned package requirement, plus adapter-specific dependencies and workspace-contained bundle files. Kaggle and Modal receive the selected code and declared dependencies; credentials and task data are handled separately. Uploading local task data requires explicit consent for that provider and the current data fingerprint. Generated Kaggle datasets and Modal volumes remain private by default.
+
+The attached workspace owns `prompts/ml-harness/phase-pack.yaml`, its ordered phase Markdown files, and `.ml-harness/artifacts/<task-id>/phase_history.json`. The IDE agent performs reasoning and web search. ML-Harness renders a phase prompt with task configuration, EDA, run state, and prior responses, then records the response, cited URLs, and workspace artifact paths. The first pass is sequential; experiment, selection, and external-evaluation phases can repeat after evidence changes. A baseline phase result cannot be recorded until measured run metrics are locked as the baseline.
+
+Each dashboard process is bound to loopback and one task workspace. It rejects non-loopback Host headers and cross-origin requests; start a separate dashboard from a separate workspace to work on another task.
 
 ## StereoQueerEval adapter boundary
 
 `task_plugins/stereoqueereval` is an optional local adapter. It explicitly loads the selected task workspace's `src.data`, `src.models`, and `src.metrics`; those imports are absent from the core runner. The task-specific config example also lives inside that adapter.
 
-The adapter provides local training-data loading, deterministic grouped folds, and local evaluation. Remote execution also fails closed because it does not install the adapter in the remote runtime yet. Its official submission builder and validator deliberately remain unavailable because the current [official task page](https://stereoqueereval.github.io/) does not publish their formats or scorer contract. These limits are reported through plugin capabilities and submission operations fail closed.
+The adapter provides local training-data loading, deterministic grouped folds, and local evaluation. For cloud dispatch it builds a versioned wheel from the installed adapter module and includes that wheel in the remote code bundle. Extra runtime dependencies belong in the task's `runtime.requirements` list. Its official submission builder and validator deliberately remain unavailable because the current [official task page](https://stereoqueereval.github.io/) does not publish their formats or scorer contract. Submission operations therefore fail closed.
 
 ## Distribution layout
 

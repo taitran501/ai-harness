@@ -61,12 +61,18 @@ class HarnessProject:
         manifest_path = project_root / MANIFEST_RELATIVE_PATH
         manifest = _read_yaml(manifest_path)
 
-        config_value = (
-            task_config
-            or os.environ.get("HARNESS_TASK_CONFIG")
-            or manifest.get("task_config")
-            or str(DEFAULT_TASK_CONFIG)
-        )
+        # An explicit workspace root must not inherit another workspace's task-config
+        # environment override. The attachment manifest is authoritative for that root.
+        if task_config:
+            config_value = task_config
+        elif root is not None:
+            config_value = manifest.get("task_config") or str(DEFAULT_TASK_CONFIG)
+        else:
+            config_value = (
+                manifest.get("task_config")
+                or os.environ.get("HARNESS_TASK_CONFIG")
+                or str(DEFAULT_TASK_CONFIG)
+            )
         config_path = Path(config_value).expanduser()
         if not config_path.is_absolute():
             config_path = project_root / config_path
@@ -98,7 +104,7 @@ def attach_project(
     task_config: Path | str = DEFAULT_TASK_CONFIG,
     plugin_id: Optional[str] = None,
     force: bool = False,
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """Attach an installed harness to a task project and add an agent skill."""
     root = Path(project_root).expanduser().resolve()
     task_path = Path(task_config).expanduser()
@@ -130,12 +136,16 @@ def attach_project(
             and current.get("plugin_id", "default") == resolved_plugin
         )
         if same_attachment and skill_path.is_file():
+            from harness.phase_workflow import initialize_prompt_pack
+            prompt_pack = initialize_prompt_pack(root, force=False)
             return {
                 "status": "ALREADY_ATTACHED",
                 "project_root": str(root),
                 "manifest": str(manifest_path),
                 "agent_skill": str(skill_path),
                 "plugin_id": str(resolved_plugin),
+                "task_id": task_id,
+                "prompt_pack": prompt_pack,
             }
         if not same_attachment:
             raise FileExistsError(f"Harness manifest already exists: {manifest_path}; pass --force to replace it.")
@@ -143,8 +153,12 @@ def attach_project(
     if skill_path.exists() and not force:
         raise FileExistsError(f"Agent skill already exists: {skill_path}; pass --force to replace it.")
 
+    from harness.phase_workflow import initialize_prompt_pack
+    prompt_pack = initialize_prompt_pack(root, force=False)
+
     manifest = {
         "schema_version": 1,
+        "task_id": task_id,
         "task_config": task_rel,
         "plugin_id": str(resolved_plugin),
         "artifacts_dir": f".ml-harness/artifacts/{task_id}",
@@ -171,7 +185,12 @@ def attach_project(
         "- Inspect data: `ml-harness-agent --project-root . act --action inspect_data_readiness`\n"
         "- Confirm reviewed data risks: `ml-harness-agent --project-root . act --action confirm_data_risks --user-approved`\n"
         "- Start a bounded session: `ml-harness-agent --project-root . start-session --goal \"...\" --max-experiments 3`\n"
-        "- Run a smoke test before a full validation run.\n",
+        "- Run a smoke test before a full validation run.\n"
+        "- Render the next phase prompt: `ml-harness phase render`\n"
+        "- Validate the workspace prompt pack: `ml-harness phase validate`\n"
+        "- Record response, inspected source URLs, and artifact paths with `ml-harness phase record`.\n"
+        "- Run privacy-conscious EDA: `ml-harness eda run`\n"
+        "- Use the IDE agent's native web search and cite only sources actually inspected.\n",
         encoding="utf-8",
     )
     return {
@@ -180,5 +199,7 @@ def attach_project(
         "manifest": str(manifest_path),
         "agent_skill": str(skill_path),
         "plugin_id": str(resolved_plugin),
+        "task_id": task_id,
         "task_config": task_rel,
+        "prompt_pack": prompt_pack,
     }

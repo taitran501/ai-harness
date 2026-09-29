@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import importlib
+import base64
+import csv
+import hashlib
+import io
+import re
 from pathlib import Path
 import sys
 from typing import Any, Dict, Optional
+import zipfile
 
 import pandas as pd
+import yaml
 
 from harness.plugins import TaskPlugin, TaskPluginContext, TaskPluginError
 
@@ -15,6 +22,76 @@ from harness.plugins import TaskPlugin, TaskPluginContext, TaskPluginError
 class StereoQueerEvalPlugin(TaskPlugin):
     plugin_id = "stereoqueereval"
     version = "0.1.0"
+
+    @staticmethod
+    def _remote_wheel(context: TaskPluginContext) -> Path:
+        """Repackage the installed adapter module for an exact, dependency-free remote install."""
+        from importlib import metadata
+
+        module_path = Path(__file__).resolve()
+        distribution = metadata.distribution("ml-harness-stereoqueereval")
+        name = str(distribution.metadata["Name"])
+        version = distribution.version
+        normalized_name = re.sub(r"[-_.]+", "_", name)
+        source = module_path.read_bytes()
+        digest = hashlib.sha256(source + version.encode("utf-8")).hexdigest()[:16]
+        wheel_dir = context.project_root / ".ml-harness" / "runtime-wheels" / digest
+        wheel_dir.mkdir(parents=True, exist_ok=True)
+        wheel_path = wheel_dir / f"{normalized_name}-{version}-py3-none-any.whl"
+        if wheel_path.is_file():
+            return wheel_path
+
+        dist_info = f"{normalized_name}-{version}.dist-info"
+        metadata_bytes = distribution.metadata.as_bytes()
+        entry_points = distribution.read_text("entry_points.txt")
+        if not entry_points:
+            entry_points = (
+                "[ml_harness.task_plugins]\n"
+                "stereoqueereval = stereoqueereval_plugin:StereoQueerEvalPlugin\n"
+            )
+        entries = {
+            module_path.name: source,
+            f"{dist_info}/METADATA": metadata_bytes,
+            f"{dist_info}/WHEEL": (
+                "Wheel-Version: 1.0\n"
+                "Generator: ml-harness\n"
+                "Root-Is-Purelib: true\n"
+                "Tag: py3-none-any\n"
+            ).encode("utf-8"),
+            f"{dist_info}/entry_points.txt": entry_points.encode("utf-8"),
+            f"{dist_info}/top_level.txt": b"stereoqueereval_plugin\n",
+        }
+        record_path = f"{dist_info}/RECORD"
+        record_buffer = io.StringIO(newline="")
+        writer = csv.writer(record_buffer, lineterminator="\n")
+        for file_name, content in entries.items():
+            encoded = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode("ascii")
+            writer.writerow((file_name, f"sha256={encoded}", str(len(content))))
+        writer.writerow((record_path, "", ""))
+        entries[record_path] = record_buffer.getvalue().encode("utf-8")
+        with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for file_name, content in entries.items():
+                archive.writestr(file_name, content)
+        return wheel_path
+
+    def remote_runtime_requirements(self, context: TaskPluginContext) -> list[str]:
+        document = yaml.safe_load(context.task_config_path.read_text(encoding="utf-8")) or {}
+        task = document.get("task", document)
+        requirements = (task.get("runtime") or {}).get("requirements", [])
+        if not isinstance(requirements, list) or any(not isinstance(item, str) for item in requirements):
+            raise TaskPluginError("Task runtime requirements must be a list of pip requirement strings.")
+        return requirements
+
+    def remote_runtime_manifest(self, context: TaskPluginContext) -> Dict[str, Any]:
+        from importlib import metadata
+
+        distribution = metadata.distribution("ml-harness-stereoqueereval")
+        return {
+            "distribution": distribution.metadata["Name"],
+            "version": distribution.version,
+            "wheel": str(self._remote_wheel(context)),
+            "requirements": self.remote_runtime_requirements(context),
+        }
 
     def _task_module(self, context: TaskPluginContext, module_name: str):
         root = str(context.project_root)

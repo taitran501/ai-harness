@@ -69,6 +69,8 @@ See [Plugin architecture and lifecycle](docs/plugin_architecture.md) for the ent
 
 ### 6. Interactive Web Dashboard
 A local web UI built with React, Vite, and Tailwind CSS provides:
+- **Agent workspace**: Ordered, workspace-owned phase prompts; copied prompts go to the user's IDE agent, while responses, inspected source URLs, and artifacts are saved into task history. The dashboard does not run an LLM agent.
+- **EDA and provider readiness**: Local data profiling plus Kaggle/Modal CLI and account status, quota/cost caveats, and data-fingerprint scoped upload consent.
 - **Solution Tree View**: Interactive graph of all experiment iterations and their performance deltas.
 - **Leaderboard**: Compare validation scores, parameters, and training logs across models.
 - **Execution Runner**: Configure and trigger runs directly from the browser.
@@ -130,21 +132,48 @@ ml-harness-dashboard --project-root C:\path\to\competition
 
 All experiment output from an attached task is routed under `.ml-harness/artifacts/<task-id>/`, even if an experiment config contains an older `artifacts/` path. The task's dataset and declared split/config paths remain in that workspace.
 
+## Prompt phases, EDA, and cloud jobs
+
+Each attached task gets its own editable prompt pack under `prompts/ml-harness/`. The first pass follows the eight phases in order. The experiment, candidate selection, and external evaluation phases can be revisited after run or score evidence changes:
+
+```powershell
+ml-harness phase validate --project-root C:\path\to\competition
+ml-harness phase render --project-root C:\path\to\competition
+ml-harness eda run --project-root C:\path\to\competition
+ml-harness phase record --project-root C:\path\to\competition --phase setup --response-file notes\setup.md --sources-file notes\sources.json
+```
+
+Install the optional cloud tools and authenticate through their official CLIs. Review provider readiness before granting upload consent; consent is specific to this workspace, provider, and current data fingerprint:
+
+```powershell
+python -m pip install ".[cloud]"
+kaggle auth login
+modal setup
+ml-harness cloud preflight --project-root C:\path\to\competition --provider kaggle
+ml-harness cloud consent --project-root C:\path\to\competition --provider kaggle --confirm-upload
+ml-harness cloud preflight --project-root C:\path\to\competition --provider kaggle --config configs\exp001.yaml
+ml-harness-dashboard --project-root C:\path\to\competition
+```
+
+Dataset uploads are private by default and require a separate confirmation for each provider and data fingerprint. A changed dataset or split file requires new consent. Provider quotas, GPU availability, and charges depend on the account; the harness does not promise that a provider is always free. Kaggle jobs are polled to a terminal state, and results are imported only after task, job, experiment, config, and checksum validation. Modal cloud runs require Modal CLI/SDK 1.5.0 or newer.
+
+The browser only displays state and captures the IDE agent's output. Use the agent's native web search, experiments, and reasoning; ML-Harness records the results and supplies the next prompt with current task context.
+
 ## Task plugin contract
 
 A task adapter is a separate Python distribution registered under the `ml_harness.task_plugins` entry-point group. It can provide data loading and validation, a model factory, prediction normalization, task metrics, and official submission build/validation hooks. See [Plugin architecture and lifecycle](docs/plugin_architecture.md) and the [task specification template](docs/TASK_SPEC_TEMPLATE.md).
 
-The optional StereoQueerEval adapter loads the selected workspace's `src.data`, `src.models`, and `src.metrics` only when installed and selected. It supports local training-data loading, grouped validation, model creation, and task metrics. Its official submission hooks are unavailable until the organizers publish the required format and scorer contract, so the harness blocks package creation for that adapter. Remote runs with third-party plugins also remain disabled until that adapter is installed in the remote runtime.
+The optional StereoQueerEval adapter loads the selected workspace's `src.data`, `src.models`, and `src.metrics` only when installed and selected. It supports local training-data loading, grouped validation, model creation, and task metrics. Its official submission hooks are unavailable until the organizers publish the required format and scorer contract, so the harness blocks package creation for that adapter. It packages the installed adapter module into a versioned remote wheel; declare extra remote dependencies in `task.runtime.requirements`.
 
 ## Develop the dashboard
 
 ```powershell
 cd dashboard
-pnpm install
-pnpm run build
+npm install
+npm run build:package
 ```
 
-The built dashboard is served from `tools/web/` by the installed runtime. For release builds, copy the generated `dashboard/dist/` files into `tools/web/` before building the Python wheel.
+`build:package` type-checks and builds the UI, then copies the static files into `tools/web/` so the installed wheel serves the same dashboard.
 
 ## License
 

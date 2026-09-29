@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -68,6 +68,47 @@ class TaskPlugin:
     ) -> None:
         """Raise TaskPluginError if the task's data contract is invalid."""
 
+    def build_validation_splits(
+        self,
+        context: TaskPluginContext,
+        data: pd.DataFrame,
+        strategy: str,
+        validation_config: Dict[str, Any],
+    ) -> Optional[List[Tuple[Any, pd.DataFrame, pd.DataFrame]]]:
+        """Return task-specific ``(fold_id, train, validation)`` splits, or None for core defaults."""
+        return None
+
+    def validate_split(
+        self,
+        context: TaskPluginContext,
+        fold_id: Any,
+        train_data: pd.DataFrame,
+        validation_data: pd.DataFrame,
+    ) -> None:
+        """Raise when a task-specific split violates its data contract."""
+
+    def extend_eda_report(
+        self, context: TaskPluginContext, reports: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any] | List[Dict[str, Any]]]:
+        """Optionally add task-specific, value-safe checks to generic EDA reports."""
+        return None
+
+    def remote_runtime_requirements(self, context: TaskPluginContext) -> List[str]:
+        """Return pip requirements needed by this adapter in a remote runtime."""
+        return []
+
+    def remote_bundle_files(self, context: TaskPluginContext) -> List[Path]:
+        """Return adapter source/config files that must accompany a remote job."""
+        return []
+
+    def remote_runtime_manifest(self, context: TaskPluginContext) -> Optional[Dict[str, Any]]:
+        """Declare the installable adapter identity and remote dependencies, if supported.
+
+        Custom adapters must opt into this hook so the dispatcher never assumes that
+        a locally installed plugin also exists on Kaggle or Modal.
+        """
+        return None
+
     def validate_submission(self, context: TaskPluginContext, submission: Path) -> None:
         raise PluginCapabilityError(
             f"Task plugin '{self.plugin_id}' does not provide an official submission validator."
@@ -85,8 +126,17 @@ class TaskPlugin:
             "custom_data_loader": type(self).load_training_data is not TaskPlugin.load_training_data,
             "custom_model_factory": type(self).build_model is not TaskPlugin.build_model,
             "custom_metrics": type(self).evaluate_predictions is not TaskPlugin.evaluate_predictions,
+            "custom_validation_split": (
+                type(self).build_validation_splits is not TaskPlugin.build_validation_splits
+            ),
+            "custom_split_validation": type(self).validate_split is not TaskPlugin.validate_split,
             "submission_validator": type(self).validate_submission is not TaskPlugin.validate_submission,
             "submission_builder": type(self).build_submission is not TaskPlugin.build_submission,
+            "custom_eda": type(self).extend_eda_report is not TaskPlugin.extend_eda_report,
+            "remote_runtime": (
+                self.plugin_id == "default"
+                or type(self).remote_runtime_manifest is not TaskPlugin.remote_runtime_manifest
+            ),
         }
 
 

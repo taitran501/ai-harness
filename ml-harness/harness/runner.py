@@ -307,6 +307,65 @@ class UniversalRunner:
 
         return lambda name, **kwargs: GenericBaselineModel(self.task_spec, model_name=name, **kwargs)
 
+    def _resolve_validation_splits(
+        self, df: pd.DataFrame, val_strategy: str
+    ) -> List[Tuple[Any, pd.DataFrame, pd.DataFrame]]:
+        """Resolve plugin-defined splits first, then apply the generic tabular defaults."""
+        validation_config = self.cfg.get("validation", {})
+        custom_splits = self.task_plugin.build_validation_splits(
+            self.plugin_context, df, val_strategy, validation_config
+        )
+        if custom_splits is not None:
+            if not isinstance(custom_splits, (list, tuple)) or not custom_splits:
+                raise ValueError("Task plugin build_validation_splits() must return a non-empty list or None.")
+            normalized: List[Tuple[Any, pd.DataFrame, pd.DataFrame]] = []
+            for index, item in enumerate(custom_splits):
+                if not isinstance(item, (list, tuple)) or len(item) != 3:
+                    raise ValueError(
+                        f"Task plugin split {index + 1} must be (fold_id, train_dataframe, validation_dataframe)."
+                    )
+                fold_id, train_data, validation_data = item
+                if not isinstance(train_data, pd.DataFrame) or not isinstance(validation_data, pd.DataFrame):
+                    raise TypeError(f"Task plugin split {fold_id!r} must contain pandas DataFrames.")
+                if train_data.empty or validation_data.empty:
+                    raise ValueError(f"Task plugin split {fold_id!r} has an empty train or validation partition.")
+                self.task_plugin.validate_split(
+                    self.plugin_context, fold_id, train_data, validation_data
+                )
+                normalized.append((fold_id, train_data.reset_index(drop=True), validation_data.reset_index(drop=True)))
+            requested_fold = getattr(self.args, "fold", None)
+            if requested_fold is not None:
+                selected = [item for item in normalized if str(item[0]) == str(requested_fold)]
+                if not selected:
+                    raise ValueError(f"Task plugin did not return requested debug fold {requested_fold!r}.")
+                normalized = selected
+            return normalized
+
+        if val_strategy == "holdout" or "fold" not in df.columns:
+            dev_split_name = validation_config.get("dev_split_name", "dev")
+            try:
+                dev_df = self.task_spec.load_dataset_split(dev_split_name, project_root=self.project_root)
+                train_df = df
+            except Exception:
+                shuffled = df.sample(frac=1.0, random_state=42).reset_index(drop=True)
+                split_idx = int(len(shuffled) * 0.8)
+                train_df = shuffled.iloc[:split_idx].reset_index(drop=True)
+                dev_df = shuffled.iloc[split_idx:].reset_index(drop=True)
+            splits = [(0, train_df, dev_df)]
+        else:
+            target_folds = [self.args.fold] if self.args.fold is not None else self.cfg.get("data", {}).get("folds", [0, 1, 2, 3, 4])
+            splits = []
+            for fold_id in target_folds:
+                train_part = df[df["fold"] != fold_id].reset_index(drop=True)
+                dev_part = df[df["fold"] == fold_id].reset_index(drop=True)
+                splits.append((fold_id, train_part, dev_part))
+
+        for fold_id, train_data, validation_data in splits:
+            self.task_plugin.validate_split(
+                self.plugin_context, fold_id, train_data, validation_data
+            )
+        return splits
+
     def _run_model_training(self, df: pd.DataFrame, val_strategy: str, git_hash: str) -> Dict[str, Any]:
         """Execute classical ML or Deep Learning training loop."""
         model_factory = self._get_model_factory()
@@ -331,28 +390,7 @@ class UniversalRunner:
 
         partition_col = self.cfg.get("data", {}).get("partition_column")
 
-        # Setup folds or holdout splits
-        if val_strategy == "holdout" or "fold" not in df.columns:
-            # Single train / dev split
-            dev_split_name = self.cfg.get("validation", {}).get("dev_split_name", "dev")
-            try:
-                dev_df = self.task_spec.load_dataset_split(dev_split_name, project_root=self.project_root)
-                train_df = df
-            except Exception:
-                shuffled = df.sample(frac=1.0, random_state=42).reset_index(drop=True)
-                split_idx = int(len(shuffled) * 0.8)
-                train_df = shuffled.iloc[:split_idx].reset_index(drop=True)
-                dev_df = shuffled.iloc[split_idx:].reset_index(drop=True)
-
-            splits = [(0, train_df, dev_df)]
-        else:
-            # K-Fold Cross-Validation
-            target_folds = [self.args.fold] if self.args.fold is not None else self.cfg.get("data", {}).get("folds", [0, 1, 2, 3, 4])
-            splits = []
-            for f in target_folds:
-                train_part = df[df["fold"] != f].reset_index(drop=True)
-                dev_part = df[df["fold"] == f].reset_index(drop=True)
-                splits.append((f, train_part, dev_part))
+        splits = self._resolve_validation_splits(df, val_strategy)
 
         # Iteration Loop
         for fold_idx, train_fold, dev_fold in splits:
@@ -644,6 +682,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Universal Competition Experiment Runner")
     parser.add_argument("--project-root", type=str, default=None, help="Competition workspace root")
     parser.add_argument("--task-config", type=str, default=None, help="Task specification YAML")
+    parser.add_argument("--job-id", type=str, default=None, help="Persistent dashboard/Agent Bridge job ID")
     parser.add_argument("--config", type=str, required=True, help="Path to experiment config YAML")
     parser.add_argument("--base-config", type=str, default=None, help="Path to base config YAML")
     parser.add_argument("--fold", type=int, default=None, help="Target fold index to train (smoke test / probe)")
@@ -671,16 +710,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # If backend is modal or kaggle, delegate to cloud runner
     if args.backend == "modal":
-        if project.plugin_id not in (None, "default") or project.artifacts_dir != project.root / "artifacts":
-            parser.error("Remote backends do not install selected task adapters or route artifacts through the attached manifest yet; use --backend local.")
         from harness.cloud_runner import run_via_modal
-        run_via_modal(config_path=str(config_path))
+        run_via_modal(
+            config_path=str(config_path),
+            project_root=project.root,
+        )
         return 0
     elif args.backend == "kaggle":
-        if project.plugin_id not in (None, "default") or project.artifacts_dir != project.root / "artifacts":
-            parser.error("Remote backends do not install selected task adapters or route artifacts through the attached manifest yet; use --backend local.")
         from harness.cloud_runner import run_via_kaggle
-        run_via_kaggle(config_path=str(config_path))
+        run_via_kaggle(
+            config_path=str(config_path),
+            project_root=project.root,
+        )
         return 0
 
     # Local execution
@@ -703,6 +744,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         artifacts_root = project.root / artifacts_root
     exp_dir = artifacts_root / exp_id
     if exp_dir.exists() and (exp_dir / "metrics.json").exists() and not args.force:
+        if args.job_id:
+            from harness.job_state import update_worker_state
+            update_worker_state(
+                project.root, args.job_id, status="FAILED", provider_status="FAILED",
+                error_message=f"Experiment directory `{exp_dir}` already has completed metrics.",
+                exp_id=str(exp_id), config_sha256=__import__("hashlib").sha256(config_path.read_bytes()).hexdigest(),
+            )
         print(
             f"ERROR: Experiment directory '{exp_dir}' already exists with completed metrics.\n"
             f"Pass --force or define a new experiment ID in configs/.",
@@ -712,8 +760,34 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args.project_root = str(project.root)
     args.task_config = str(project.task_config_path)
-    runner = UniversalRunner(cfg=cfg, config_path=str(config_path), args=args)
-    runner.run()
+    try:
+        runner = UniversalRunner(cfg=cfg, config_path=str(config_path), args=args)
+        runner.run()
+    except Exception as exc:
+        if args.job_id:
+            from harness.job_state import update_worker_state
+            update_worker_state(
+                project.root, args.job_id, status="FAILED", provider_status="FAILED",
+                error_message=str(exc), exp_id=str(exp_id),
+                config_sha256=__import__("hashlib").sha256(config_path.read_bytes()).hexdigest(),
+            )
+        raise
+    if args.job_id:
+        import json
+        from harness.job_state import update_worker_state
+        metrics_path = exp_dir / "metrics.json"
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8")) if metrics_path.is_file() else {}
+        files = sorted(path for path in exp_dir.iterdir() if path.is_file()) if exp_dir.is_dir() else []
+        update_worker_state(
+            project.root,
+            args.job_id,
+            status="COMPLETED",
+            provider_status="COMPLETED",
+            result_metrics=metrics if isinstance(metrics, dict) else {"folds": metrics},
+            artifact_paths=[path.relative_to(project.root).as_posix() for path in files],
+            exp_id=str(exp_id),
+            config_sha256=__import__("hashlib").sha256(config_path.read_bytes()).hexdigest(),
+        )
     return 0
 
 

@@ -52,11 +52,9 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
 
   // Modal Settings
   const [modalGpu, setModalGpu] = useState<string>('A10G');
-  const [modalVolume, setModalVolume] = useState<string>('dataset-volume');
 
   // Kaggle Settings
   const [kaggleGpu, setKaggleGpu] = useState<string>('T4 x 2');
-  const [kaggleDatasetSlug, setKaggleDatasetSlug] = useState<string>('antigravity/dataset');
 
   // Execution & Audit Controls
   const [autoAudit, setAutoAudit] = useState<boolean>(true);
@@ -163,8 +161,6 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
         backend: platform,
         config_path: selectedConfig,
         gpu: platform === 'modal' ? modalGpu : kaggleGpu,
-        dataset_slug: kaggleDatasetSlug,
-        volume_name: modalVolume,
       });
       setGeneratedResult(res);
     } catch (err: any) {

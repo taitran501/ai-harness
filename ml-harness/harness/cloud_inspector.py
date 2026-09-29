@@ -50,17 +50,14 @@ class CloudPreflightInspector:
         """Verify presence of raw training data files."""
         d = Path(data_dir)
         errors = []
-        if not d.exists() or not d.is_dir():
-            return False, [f"Dataset directory '{d}' does not exist."]
-
-        data_files = (
-            list(d.glob("*.tsv"))
-            + list(d.glob("*.csv"))
-            + list(d.glob("*.parquet"))
-            + list(d.glob("*.json"))
-        )
+        if not d.exists():
+            return False, [f"Dataset path '{d}' does not exist."]
+        data_files = [d] if d.is_file() else [
+            path for path in d.iterdir()
+            if path.is_file() and path.suffix.lower() in {".tsv", ".tab", ".csv", ".parquet", ".pq", ".feather", ".json", ".jsonl", ".ndjson"}
+        ]
         if not data_files:
-            return False, [f"No dataset files (.tsv, .csv, .parquet, .json) found in '{d}'."]
+            return False, [f"No supported dataset files found at '{d}'."]
 
         for df_file in data_files:
             if df_file.stat().st_size == 0:
@@ -100,33 +97,59 @@ class CloudPreflightInspector:
         project_root: Optional[Path | str] = None,
     ) -> Tuple[bool, List[str], Dict[str, Any]]:
         """Run all pre-flight checks and return consolidated verdict."""
-        root = Path(project_root) if project_root else Path.cwd()
+        from harness.project import HarnessProject
+        from harness.plugins import TaskPluginContext, load_task_plugin
+        from harness.task_spec import load_active_task_spec
+
+        root = Path(project_root).expanduser().resolve() if project_root else Path.cwd().resolve()
+        project = HarnessProject.discover(root)
         all_errors = []
 
+        cfg_path = Path(config_path).expanduser()
+        if not cfg_path.is_absolute():
+            cfg_path = root / cfg_path
+
         # 1. Config Check
-        c_ok, c_errs, cfg = cls.inspect_config(config_path)
+        c_ok, c_errs, cfg = cls.inspect_config(cfg_path)
         all_errors.extend(c_errs)
 
-        # 2. Dataset Check
-        d_ok, d_errs = cls.inspect_datasets(root / "dataset")
-        all_errors.extend(d_errs)
+        # 2. Resolve data using task declarative path or the installed task adapter.
+        try:
+            task_doc = yaml.safe_load(project.task_config_path.read_text(encoding="utf-8")) or {}
+            task = task_doc.get("task", task_doc)
+            task_spec = load_active_task_spec(project.task_config_path)
+            data_cfg = task.get("data_config") or task.get("data") or {}
+            plugin_context = TaskPluginContext(
+                project_root=root,
+                task_config_path=project.task_config_path,
+                task_spec=task_spec,
+                plugin_id=project.plugin_id or "default",
+            )
+            plugin = load_task_plugin(project.plugin_id, plugin_context)
+            frame = plugin.load_training_data(plugin_context)
+            if frame is not None:
+                plugin.validate_training_data(plugin_context, frame)
+            else:
+                train_value = data_cfg.get("train_path") or "dataset"
+                train_path = Path(train_value).expanduser()
+                if not train_path.is_absolute():
+                    train_path = root / train_path
+                _, data_errors = cls.inspect_datasets(train_path)
+                all_errors.extend(data_errors)
 
-        # 3. Splits Check
-        split_cand = cfg.get("paths", {}).get("split_path")
-        split_path = root / split_cand if split_cand else None
-        if not split_path or not split_path.exists():
-            for p in [root / "splits/fold_assignments.tsv", root / "splits/folds.csv", root / "splits/splits.csv"]:
-                if p.exists():
-                    split_path = p
-                    break
-        if split_path and split_path.exists():
-            s_ok, s_errs = cls.inspect_splits(split_path)
-            all_errors.extend(s_errs)
+            split_value = data_cfg.get("split_path")
+            if split_value:
+                split_path = Path(split_value).expanduser()
+                if not split_path.is_absolute():
+                    split_path = root / split_path
+                if not split_path.is_file() or split_path.stat().st_size == 0:
+                    all_errors.append(f"Declared split file is missing or empty: {split_path}")
+        except Exception as exc:
+            all_errors.append(f"Task data preflight failed: {exc}")
 
         # 4. Syntax Pre-compile Check
         harness_dir = Path(__file__).resolve().parent
         core_scripts = [
-            root / "train.py",
             harness_dir / "runner.py",
             harness_dir / "diagnostics.py",
             harness_dir / "ensemble_guard.py",

@@ -64,8 +64,6 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const [smokeTestOnly, setSmokeTestOnly] = useState<boolean>(false);
   const [modalGpu, setModalGpu] = useState<string>('A10G');
   const [kaggleGpu, setKaggleGpu] = useState<string>('T4 x 2');
-  const [datasetSlug, setDatasetSlug] = useState<string>('competition-dataset');
-  const [modalVolume, setModalVolume] = useState<string>('competition-dataset-vol');
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
 
   // Dataset push state
@@ -114,12 +112,6 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   );
 
   useEffect(() => {
-    const taskSlug = (taskInfo?.name || 'competition').toLowerCase().replace(/[^a-z0-9]/g, '-');
-    setModalVolume(`${taskSlug}-dataset-vol`);
-    setDatasetSlug(`${taskSlug}-dataset`);
-  }, [taskInfo?.name]);
-
-  useEffect(() => {
     api
       .getConfigs()
       .then((res) => {
@@ -132,13 +124,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
 
     api
       .getEnvironmentStatus()
-      .then((st) => {
-        setEnvStatus(st);
-        const taskSlug = (taskInfo?.name || 'competition').toLowerCase().replace(/[^a-z0-9]/g, '-');
-        if (st.kaggle?.username) {
-          setDatasetSlug(`${st.kaggle.username}/${taskSlug}-dataset`);
-        }
-      })
+      .then((st) => setEnvStatus(st))
       .catch(() => {});
   }, [taskInfo?.name]);
 
@@ -167,8 +153,6 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
     try {
       const res = await api.pushDatasetToCloud({
         platform: targetPlatform,
-        dataset_slug: datasetSlug,
-        volume_name: modalVolume,
       });
       setDatasetPushLog(res.logs || `Dataset synced to ${res.dataset_slug || res.volume_name}`);
     } catch (err: any) {
@@ -263,6 +247,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
       const targetPlatform = execMode === 'modal' ? 'modal' : 'kaggle';
       const res = await api.pullCloudOutput({
         platform: targetPlatform,
+        job_id: activeJob?.job_id || '',
         config_path: selectedConfig,
         exp_id: currentExpId,
       });
@@ -662,25 +647,8 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </p>
               )}
               <p className="text-xs text-zinc-400">
-                Push <code>dataset/</code> and <code>splits/</code> once to Kaggle Datasets or Modal Volume. Every subsequent run automatically mounts this cloud dataset.
+                Push declared task data and splits to a private resource named from this task and its current data fingerprint. Every subsequent run mounts the matching resource.
               </p>
-
-              <div className="space-y-2">
-                <label className="block text-xs text-zinc-400">
-                  {execMode === 'modal' ? 'Modal Dataset Volume:' : 'Kaggle Dataset Slug:'}
-                </label>
-                <input
-                  type="text"
-                  value={execMode === 'modal' ? modalVolume : datasetSlug}
-                  disabled={isCustomTaskPlugin}
-                  onChange={(e) =>
-                    execMode === 'modal'
-                      ? setModalVolume(e.target.value)
-                      : setDatasetSlug(e.target.value)
-                  }
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-200"
-                />
-              </div>
 
               <button
                 type="button"

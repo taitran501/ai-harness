@@ -1,4 +1,4 @@
-"""Tests for Environment Detection, Cloud Job Runner, and Task Switcher."""
+"""Tests for environment detection, cloud jobs, and per-task workspace isolation."""
 
 import json
 import unittest
@@ -46,14 +46,11 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         active = [t for t in tasks if t.get("is_active")]
         self.assertTrue(len(active) >= 1)
 
-        # Test task switch
+        # A dashboard remains attached to one task; switching requires attaching a different workspace.
         first_id = tasks[0]["id"]
         switch_res = switch_task(first_id)
-        self.assertTrue(switch_res["success"])
-        self.assertEqual(switch_res["task_id"], first_id)
-
-        # Restore to original task
-        switch_task(first_id)
+        self.assertFalse(switch_res["success"])
+        self.assertIn("own workspace", switch_res["error"])
 
     def test_cloud_job_manager_lifecycle(self):
         manager = CloudJobManager()

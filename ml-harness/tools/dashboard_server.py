@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import http.server
+import ipaddress
 import json
 import os
 import re
@@ -50,7 +51,6 @@ from harness.cloud_job_runner import CloudJobManager, CloudJob
 from harness.llm_engine import LLMEngine, LLMConfig
 from harness.skill_injector import inject_skill_file
 from harness.competition_state import CompetitionStateMachine
-from harness.agent_runtime import AgentRuntime
 from harness.agent_bridge import AgentBridge
 
 
@@ -242,7 +242,6 @@ DEFAULT_STRATEGY_CARDS = [
     },
 ]
 
-
 def list_available_tasks() -> List[Dict[str, Any]]:
     """List all available competition tasks from configs/tasks/ and mark the active one."""
     tasks_dirs = [PROJECT_ROOT / "configs" / "tasks", HARNESS_DIR / "configs" / "tasks"]
@@ -298,92 +297,18 @@ def list_available_tasks() -> List[Dict[str, Any]]:
 
 
 def switch_task(task_id: str) -> Dict[str, Any]:
-    """Switch active project/competition task and re-inject skills and sync DAG."""
-    target_file = None
-    for td in [PROJECT_ROOT / "configs" / "tasks", HARNESS_DIR / "configs" / "tasks"]:
-        cand = td / f"{task_id}.yaml"
-        if cand.exists():
-            target_file = cand
-            break
-        if td.exists():
-            for f in td.glob("*.yaml"):
-                if f.stem.lower() == task_id.lower() or f.stem.lower() == task_id.replace(" ", "_").lower():
-                    target_file = f
-                    break
-            if target_file:
-                break
-
-    task_data = None
-    if target_file and target_file.exists():
-        with open(target_file, "r", encoding="utf-8") as f:
-            d = yaml.safe_load(f) or {}
-            task_data = d.get("task", d)
-    else:
-        # Check presets
-        for p in TASK_PRESETS:
-            if p.get("id") == task_id or p.get("name") == task_id or p.get("id", "").lower() == task_id.lower():
-                task_data = p
-                break
-    if not task_data:
-        active_task = load_task_config()
-        if (
-            task_id == active_task.get("id")
-            or task_id == active_task.get("name")
-            or task_id == active_task.get("task_name")
-            or (active_task.get("name") and task_id.lower() == active_task["name"].lower())
-            or (active_task.get("task_name") and task_id.lower() == active_task["task_name"].lower())
-        ):
-            task_data = active_task
-
-    if not task_data:
-        raise ValueError(f"Task specification '{task_id}' not found.")
-
-    # Save to configs/task.yaml
-    save_task_config(task_data)
-
-    # Auto-inject skill
-    try:
-        inject_skill_file(task_config=task_data)
-    except Exception as e:
-        print(f"⚠️ Warning: Auto-injecting skill on switch failed: {e}")
-
-    # Re-sync TreeJournal
-    journal = TreeJournal()
-    journal.sync_from_artifacts()
-
+    """A dashboard is attached to one immutable task workspace."""
     return {
-        "success": True,
-        "task_id": task_id,
-        "active_task": load_task_config(),
+        "success": False,
+        "error": "Each task needs its own workspace. Attach the harness from the task workspace you want to use.",
     }
 
 
 def create_and_activate_task(task_spec: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a new task specification in configs/tasks/ and activate it."""
-    task_name = task_spec.get("task_name") or task_spec.get("name", "custom_task")
-    task_id = task_spec.get("id") or re.sub(r"[^a-zA-Z0-9_]+", "_", task_name.lower()).strip("_")
-    task_spec["id"] = task_id
-
-    tasks_dir = PROJECT_ROOT / "configs" / "tasks"
-    tasks_dir.mkdir(parents=True, exist_ok=True)
-    task_file = tasks_dir / f"{task_id}.yaml"
-
-    with open(task_file, "w", encoding="utf-8") as f:
-        yaml.dump({"task": task_spec}, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-
-    # Also activate in configs/task.yaml
-    save_task_config(task_spec)
-
-    # Inject skill
-    try:
-        inject_skill_file(task_config=task_spec)
-    except Exception as e:
-        print(f"⚠️ Warning: Auto-injecting skill on task creation failed: {e}")
-
+    """A new task must be bootstrapped and attached in its own workspace."""
     return {
-        "success": True,
-        "task_id": task_id,
-        "task": load_task_config(),
+        "success": False,
+        "error": "Create or bootstrap the task in its own workspace, then run `ml-harness attach`.",
     }
 
 
@@ -631,6 +556,16 @@ TASK_PRESETS: List[Dict[str, Any]] = [
     },
 ]
 
+# Keep the historical Codabench preset ID while sharing the same generic,
+# task-configurable multi-task text contract.
+TASK_PRESETS.insert(1, {
+    **TASK_PRESETS[0],
+    "id": "codabench_nlp_multitask",
+    "preset_name": "Codabench NLP Multi-Task (generic)",
+    "platform": "codabench",
+    "name": "Codabench NLP Multi-Task",
+})
+
 
 def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex") -> Dict[str, Any]:
     """Generate dynamic prompt templates reflecting live solution tree state for various coding agents."""
@@ -855,7 +790,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             *graveyard_items,
             "",
             "## 5. Hard Operational Protocols (Physical Circuit Breakers)",
-            "1. **Epistemic Grounding**: State evidence and assumptions for each experiment; apply the grounding gate when required by the task configuration.",
+            "1. **Epistemic Grounding Gate**: State evidence and assumptions for each experiment; apply the grounding gate when required by the task configuration.",
             f"2. **Submission Contract**: {submission_guidance}",
             "3. **Atomic Modification**: Exactly ONE controlled variable per experiment (Control vs Treatment).",
             "",
@@ -905,7 +840,46 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.web_dir = next((p for p in candidates if p.exists() and (p / "index.html").exists()), candidates[0])
         super().__init__(*args, directory=str(self.web_dir), **kwargs)
 
+    @staticmethod
+    def _is_loopback_name(hostname: Optional[str]) -> bool:
+        if not hostname:
+            return False
+        hostname = hostname.rstrip(".").casefold()
+        if hostname == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            return False
+
+    def _reject_nonlocal_request(self) -> bool:
+        """Reject DNS rebinding hosts and cross-origin browser requests before dispatch."""
+        host_header = self.headers.get("Host", "")
+        try:
+            host_parts = urllib.parse.urlsplit("//" + host_header)
+            local_host = self._is_loopback_name(host_parts.hostname)
+        except ValueError:
+            local_host = False
+        origin = self.headers.get("Origin")
+        valid_origin = True
+        if origin:
+            try:
+                origin_parts = urllib.parse.urlsplit(origin)
+                valid_origin = (
+                    origin_parts.scheme in {"http", "https"}
+                    and self._is_loopback_name(origin_parts.hostname)
+                    and origin_parts.netloc.casefold() == host_header.casefold()
+                )
+            except ValueError:
+                valid_origin = False
+        if not local_host or not valid_origin:
+            self.send_error(403, "Dashboard API is restricted to the local same-origin workspace.")
+            return True
+        return False
+
     def do_GET(self) -> None:
+        if self._reject_nonlocal_request():
+            return
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
 
@@ -948,7 +922,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Disposition", f'attachment; filename="{fpath.name}"')
             self.send_header("Content-Length", str(len(data_bytes)))
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(data_bytes)
         elif path == "/api/task_info":
@@ -1001,18 +974,52 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         elif path == "/api/agent-bridge/sessions":
             bridge = AgentBridge(PROJECT_ROOT)
             self.send_json({"sessions": bridge.list_sessions()})
+        elif path == "/api/phases":
+            from harness.phase_workflow import PhaseWorkflow
+            self.send_json(PhaseWorkflow(PROJECT_ROOT, HARNESS_PROJECT.task_config_path).phase_status())
+        elif path == "/api/phases/render":
+            from harness.phase_workflow import PhaseWorkflow
+            params = urllib.parse.parse_qs(parsed_url.query)
+            phase_id = params.get("phase", [None])[0]
+            try:
+                self.send_json({"phase_id": phase_id, "prompt": PhaseWorkflow(PROJECT_ROOT, HARNESS_PROJECT.task_config_path).render(phase_id)})
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=400)
+        elif path == "/api/eda/latest":
+            eda_dir = ARTIFACTS_DIR / "eda"
+            reports = sorted(eda_dir.glob("eda_*.json"), reverse=True) if eda_dir.exists() else []
+            if reports:
+                try:
+                    self.send_json(json.loads(reports[0].read_text(encoding="utf-8")))
+                except Exception as exc:
+                    self.send_json({"error": f"Could not read EDA report: {exc}"}, status=500)
+            else:
+                self.send_json({"report": None})
+        elif path == "/api/cloud/status":
+            from harness.cloud_policy import UploadConsentStore, provider_preflight
+            self.send_json({
+                "providers": {name: provider_preflight(HARNESS_PROJECT, name) for name in ("kaggle", "modal")},
+                "upload_consent": UploadConsentStore(HARNESS_PROJECT).status(),
+            })
         else:
             # Fallback to serving static frontend
             super().do_GET()
 
     def do_OPTIONS(self) -> None:
+        if self._reject_nonlocal_request():
+            return
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
     def do_POST(self) -> None:
+        if self._reject_nonlocal_request():
+            return
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
 
@@ -1075,6 +1082,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
                 if action == "gate":
                     for gk, gv in data.get("gates", {}).items():
+                        if gk in {"baseline_locked", "baseline_evidence", "freeze_locked", "finalized"} and gv:
+                            self.send_json({"error": f"Gate `{gk}` can only be changed by its verified harness action."}, status=409)
+                            return
                         comp.state["gates"][gk] = gv
                     if "mode" in data:
                         comp.state["mode"] = data["mode"]
@@ -1112,15 +1122,11 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 elif action == "finalize":
                     comp.finalize_competition(data, TreeJournal(auto_sync=True), SubmissionManager())
                 elif action == "agent-run":
-                    rt = AgentRuntime(PROJECT_ROOT)
-                    goal = data.get("goal") or "Improve the declared primary metric without regressing protected metrics or constraints."
-                    max_exp = int(data.get("max_experiments", 3))
-                    rt.start_run(goal=goal, max_experiments=max_exp)
+                    self.send_json({"error": "The dashboard does not run an internal agent. Use the attached IDE agent with `ml-harness phase render` and the Agent Bridge."}, status=409)
+                    return
                 elif action == "agent-approve":
-                    rt = AgentRuntime(PROJECT_ROOT)
-                    run_id = data.get("run_id") or comp.state.get("agent_copilot", {}).get("last_run_id")
-                    if run_id:
-                        rt.approve_pending_action(run_id)
+                    self.send_json({"error": "Use the IDE agent's Agent Bridge session approval endpoint."}, status=409)
+                    return
 
                 snap = comp.evaluate_journey_snapshot(TreeJournal(auto_sync=True), SubmissionManager(), load_task_config())
                 self.send_json({"success": True, "state": snap})
@@ -1168,6 +1174,11 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 content_length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(content_length).decode("utf-8")
                 data = json.loads(body)
+                active_task = load_task_config()
+                for identity_key in ("id", "name", "task_name", "plugin_id", "plugin"):
+                    if identity_key in data and data.get(identity_key) != active_task.get(identity_key):
+                        self.send_json({"error": "Each task needs its own workspace. Attach another workspace to change task identity or plugin."}, status=409)
+                        return
                 save_task_config(data)
                 # Auto-inject updated agent skill for this task
                 try:
@@ -1178,21 +1189,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/tasks/switch":
-            try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length).decode("utf-8")
-                data = json.loads(body)
-                self.handle_api_switch_task(data)
-            except Exception as e:
-                self.send_json({"error": str(e)}, status=400)
+            self.send_json({"error": "Each task needs its own workspace. Run `ml-harness attach` from the task workspace you want to use."}, status=409)
         elif path == "/api/tasks/create":
-            try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length).decode("utf-8")
-                data = json.loads(body)
-                self.handle_api_create_task(data)
-            except Exception as e:
-                self.send_json({"error": str(e)}, status=400)
+            self.send_json({"error": "Create or bootstrap the task in its own workspace, then run `ml-harness attach`."}, status=409)
         elif path == "/api/environment/modal/activate":
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
@@ -1237,6 +1236,43 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.handle_api_cloud_run(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
+        elif path == "/api/cloud/consent":
+            try:
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
+                data = json.loads(body or "{}")
+                provider = data.get("provider")
+                if provider not in {"kaggle", "modal"} or data.get("confirm_upload") is not True:
+                    self.send_json({"error": "Choose Kaggle or Modal and explicitly confirm this task dataset upload."}, status=400)
+                    return
+                from harness.cloud_policy import UploadConsentStore, dataset_fingerprint
+                record = UploadConsentStore(HARNESS_PROJECT).grant(provider, dataset_fingerprint(HARNESS_PROJECT))
+                self.send_json({"success": True, "consent": record})
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=400)
+        elif path == "/api/phases/record":
+            try:
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
+                data = json.loads(body or "{}")
+                from harness.phase_workflow import PhaseWorkflow
+                record = PhaseWorkflow(PROJECT_ROOT, HARNESS_PROJECT.task_config_path).record(
+                    str(data.get("phase_id") or ""),
+                    str(data.get("response") or ""),
+                    sources=data.get("sources", []),
+                    artifacts=data.get("artifacts", []),
+                    metadata=data.get("metadata", {}),
+                )
+                self.send_json({"success": True, "record": record})
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=400)
+        elif path == "/api/eda/run":
+            try:
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
+                data = json.loads(body or "{}")
+                from harness.eda import run_eda
+                report = run_eda(PROJECT_ROOT, data_path=data.get("data_path"))
+                self.send_json({"success": True, "report": report})
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=400)
         elif path == "/api/cloud/stop":
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
@@ -1428,7 +1464,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -1952,44 +1987,94 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "parsed": new_cfg,
         })
 
+    def handle_api_sync(self) -> None:
+        """Discover completed experiment artifacts and persist the solution journal."""
+        try:
+            journal = TreeJournal(
+                journal_path=ARTIFACTS_DIR / "journal.json",
+                artifacts_dir=ARTIFACTS_DIR,
+            )
+            synced_count = journal.sync_from_artifacts(ARTIFACTS_DIR)
+            self.send_json({
+                "success": True,
+                "synced_count": synced_count,
+                "total_nodes": len(journal.nodes),
+            })
+        except Exception as exc:
+            self.send_json({"success": False, "error": str(exc)}, status=500)
+
     def handle_api_cloud_preflight(self, query: str) -> None:
         params = urllib.parse.parse_qs(query)
-        config_path = params.get("config", ["configs/exp001_tfidf_baseline.yaml"])[0]
-        full_path = PROJECT_ROOT / config_path
-        passed, errors, resolved_cfg = CloudPreflightInspector.run_full_preflight_check(full_path)
-        self.send_json({
-            "passed": passed,
-            "errors": errors,
-            "resolved_config": resolved_cfg,
-        })
+        backend = params.get("provider", params.get("backend", ["kaggle"]))[0]
+        config_path = params.get("config", [None])[0]
+        result: Dict[str, Any] = {}
+        try:
+            from harness.cloud_policy import provider_preflight
+            result["provider"] = provider_preflight(HARNESS_PROJECT, backend)
+            if config_path:
+                full_path = Path(config_path).expanduser()
+                if not full_path.is_absolute():
+                    full_path = PROJECT_ROOT / full_path
+                passed, errors, resolved_cfg = CloudPreflightInspector.run_full_preflight_check(
+                    full_path, project_root=PROJECT_ROOT
+                )
+                result["experiment"] = {"passed": passed, "errors": errors, "resolved_config": resolved_cfg}
+                result["errors"] = errors
+                result["resolved_config"] = resolved_cfg
+                result["passed"] = bool(passed and result["provider"].get("ready"))
+            else:
+                result["passed"] = bool(result["provider"].get("ready"))
+            self.send_json(result)
+        except Exception as exc:
+            self.send_json({"passed": False, "error": str(exc)}, status=400)
 
     def handle_api_cloud_generate(self, data: Dict[str, Any]) -> None:
-        if HARNESS_PROJECT.plugin_id not in (None, "default"):
-            self.send_json(
-                {"error": f"Remote execution is disabled for task plugin '{HARNESS_PROJECT.plugin_id}' until its adapter is installed in the remote runtime."},
-                status=400,
-            )
-            return
         backend = data.get("backend") or data.get("platform") or "modal"
         config_path = data.get("config_path")
         if not config_path:
             self.send_json({"error": "config_path is required."}, status=400)
             return
-        gpu = data.get("gpu", "A10G" if backend == "modal" else "T4 x 2")
-        task_slug = KaggleKernelManager._get_task_slug()
-        default_dataset_slug = f"antigravity/{task_slug}-dataset"
-        default_volume_name = f"{task_slug}-dataset-volume"
+        gpu = data.get("gpu", "A10" if backend == "modal" else "T4")
+        from harness.cloud_policy import dataset_fingerprint, private_upload_resource_names
+        fingerprint = dataset_fingerprint(HARNESS_PROJECT)
+        username = KaggleKernelManager.get_authenticated_username()
+        resources = private_upload_resource_names(
+            HARNESS_PROJECT, fingerprint_data=fingerprint, kaggle_username=username
+        )
+        task_id = HARNESS_PROJECT.manifest.get("task_id") or resources["task_slug"]
+        volume_name = resources["modal_volume_name"]
+        task_doc = yaml.safe_load(HARNESS_PROJECT.task_config_path.read_text(encoding="utf-8")) or {}
+        task_data = task_doc.get("task", task_doc)
+        data_config = task_data.get("data_config") or task_data.get("data") or {}
+        dataset_slug = data_config.get("kaggle_dataset_slug") or resources["kaggle_dataset_slug"]
+        if backend == "kaggle" and not dataset_slug:
+            self.send_json({"error": "Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry."}, status=409)
+            return
 
-        dataset_slug = data.get("dataset_slug") or default_dataset_slug
-        volume_name = data.get("volume_name") or default_volume_name
-
-        exp_id = Path(config_path).stem
+        config_file = Path(config_path)
+        if not config_file.is_absolute():
+            config_file = PROJECT_ROOT / config_file
+        exp_doc = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+        exp_id = exp_doc.get("experiment", {}).get("id", config_file.stem)
+        job_id = f"preview_{exp_id}"
+        try:
+            from harness.remote_runtime import resolve_remote_runtime
+            runtime = resolve_remote_runtime(HARNESS_PROJECT)
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, status=400)
+            return
 
         if backend == "modal":
-            stage_dir = PROJECT_ROOT / "tmp" / "modal"
+            stage_dir = PROJECT_ROOT / "tmp" / "modal" / job_id
             stage_dir.mkdir(parents=True, exist_ok=True)
             script_path = stage_dir / f"app_{exp_id}.py"
-            code_content = generate_modal_script(str(config_path), gpu=gpu, exp_id=exp_id)
+            code_content = generate_modal_script(
+                str(config_file.relative_to(PROJECT_ROOT)), gpu=gpu, exp_id=exp_id,
+                volume_name=volume_name, project_root=PROJECT_ROOT,
+                task_config_path=HARNESS_PROJECT.task_config_path, task_id=task_id,
+                job_id=job_id, runtime_manifest=runtime,
+                artifacts_rel=ARTIFACTS_DIR.relative_to(PROJECT_ROOT).as_posix(),
+            )
             script_path.write_text(code_content, encoding="utf-8")
 
             self.send_json({
@@ -1998,16 +2083,21 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "script_path": str(script_path.relative_to(PROJECT_ROOT)),
                 "code": code_content,
                 "commands": {
-                    "dataset_cmd": f"modal volume create {volume_name}\nmodal volume put {volume_name} dataset/ /data/",
-                    "push_cmd": f"modal run tmp/modal/app_{exp_id}.py  # Or: python harness/cloud_runner.py --backend modal --config {config_path}",
+                    "dataset_cmd": f"ml-harness cloud consent --provider modal --confirm-upload\n# then: python harness/cloud_runner.py --backend modal --project-root . --config {config_path}",
+                    "push_cmd": f"python -m harness.cloud_runner --backend modal --project-root . --config {config_path} --gpu {gpu}",
                     "status_cmd": "modal app list",
                     "output_cmd": f"modal volume ls {volume_name}",
                 }
             })
         else: # kaggle
-            stage_dir = PROJECT_ROOT / "tmp" / "kaggle" / exp_id
+            stage_dir = PROJECT_ROOT / "tmp" / "kaggle" / job_id
             stage_dir.mkdir(parents=True, exist_ok=True)
-            KaggleKernelManager.setup_kernel_package(stage_dir, config_path, exp_id)
+            KaggleKernelManager.setup_kernel_package(
+                stage_dir, str(config_file.relative_to(PROJECT_ROOT)), exp_id, dataset_slug,
+                project_root=PROJECT_ROOT, task_config_path=HARNESS_PROJECT.task_config_path,
+                task_id=task_id, job_id=job_id, runtime_manifest=runtime,
+                enable_internet=bool((task_data.get("runtime") or {}).get("enable_internet", False)),
+            )
             meta_file = stage_dir / "kernel-metadata.json"
             code_file = stage_dir / "run_kaggle.py"
             
@@ -2021,29 +2111,46 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "code": code_content,
                 "metadata": meta_json,
                 "commands": {
-                    "dataset_cmd": f"kaggle datasets init -p dataset/\nkaggle datasets create -p dataset/ -r zip --public",
-                    "push_cmd": f"kaggle kernels push -p tmp/kaggle/{exp_id}  # Or: python harness/cloud_runner.py --backend kaggle --config {config_path}",
+                    "dataset_cmd": f"ml-harness cloud consent --provider kaggle --confirm-upload\n# private by default; declare data_config.license before uploading a new dataset",
+                    "push_cmd": f"python -m harness.cloud_runner --backend kaggle --project-root . --config {config_path}",
+                    "kernel_cmd": f"kaggle kernels push -p {stage_dir}",
                     "status_cmd": f"kaggle kernels status {meta_json.get('id', 'antigravity/' + exp_id)}",
                     "output_cmd": f"kaggle kernels output {meta_json.get('id', 'antigravity/' + exp_id)} -p {ARTIFACTS_DIR / exp_id}",
                 }
             })
 
     def handle_api_cloud_push_dataset(self, data: Dict[str, Any]) -> None:
-        if HARNESS_PROJECT.plugin_id not in (None, "default"):
-            self.send_json(
-                {"error": f"Dataset upload is disabled for task plugin '{HARNESS_PROJECT.plugin_id}' until its adapter is installed in the remote runtime."},
-                status=400,
-            )
-            return
         platform = (data.get("platform") or data.get("backend") or "kaggle").lower()
-        dataset_slug = data.get("dataset_slug")
-        task_slug = KaggleKernelManager._get_task_slug()
-        volume_name = data.get("volume_name") or f"{task_slug}-dataset-volume"
+        if platform not in {"kaggle", "modal"}:
+            self.send_json({"error": f"Unsupported provider: {platform}"}, status=400)
+            return
+        from harness.cloud_policy import UploadConsentStore, dataset_fingerprint
+        from harness.cloud_policy import private_upload_resource_names
+        fingerprint = dataset_fingerprint(HARNESS_PROJECT)
+        if not UploadConsentStore(HARNESS_PROJECT).is_granted(platform, fingerprint["fingerprint"]):
+            self.send_json({
+                "error": f"Upload consent is required for this task, provider, and dataset fingerprint.",
+                "fingerprint": fingerprint["fingerprint"],
+                "consent_endpoint": "/api/cloud/consent",
+            }, status=409)
+            return
+        resources = private_upload_resource_names(
+            HARNESS_PROJECT,
+            fingerprint_data=fingerprint,
+            kaggle_username=KaggleKernelManager.get_authenticated_username() if platform == "kaggle" else None,
+        )
 
         if platform == "modal":
-            res = push_dataset_to_modal(volume_name=volume_name)
+            res = push_dataset_to_modal(volume_name=resources["modal_volume_name"], project_root=PROJECT_ROOT)
         else:
-            res = KaggleKernelManager.push_dataset_to_kaggle(dataset_slug=dataset_slug)
+            dataset_slug = resources["kaggle_dataset_slug"]
+            if not dataset_slug:
+                self.send_json({"error": "Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry."}, status=409)
+                return
+            res = KaggleKernelManager.push_dataset_to_kaggle(dataset_slug=dataset_slug, project_root=PROJECT_ROOT)
+
+        res.setdefault("dataset_fingerprint", fingerprint["fingerprint"])
+        res.setdefault("visibility", "private")
 
         self.send_json(res, status=200 if res.get("success") else 400)
 
@@ -2055,91 +2162,46 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json(res)
 
     def handle_api_cloud_pull_output(self, data: Dict[str, Any]) -> None:
-        platform = (data.get("platform") or data.get("backend") or "kaggle").lower()
-        config_path = data.get("config_path", "")
-        exp_id = data.get("exp_id") or Path(config_path).stem
-        kernel_slug = data.get("kernel_slug")
+        platform = (data.get("platform") or data.get("backend") or "").lower()
+        job_id = data.get("job_id")
+        if platform not in {"kaggle", "modal"}:
+            self.send_json({"error": "Choose a tracked Kaggle or Modal job."}, status=400)
+            return
+        if not job_id:
+            self.send_json({"error": "Pull output through the tracked cloud job so task/config/artifact identity can be verified."}, status=409)
+            return
 
-        if platform == "kaggle":
-            res = KaggleKernelManager.pull_kernel_output(exp_id=exp_id, kernel_slug=kernel_slug)
-        else:
-            # For Modal or Local, inspect local artifacts/<exp_id>/ directory
-            exp_dir = ARTIFACTS_DIR / exp_id
-            found_files = []
-            metrics_data = None
-            if exp_dir.exists():
-                found_files = [p.name for p in exp_dir.iterdir() if p.is_file()]
-                mp = exp_dir / "metrics.json"
-                if mp.exists():
-                    try:
-                        metrics_data = json.loads(mp.read_text(encoding="utf-8"))
-                    except Exception:
-                        pass
-            res = {
-                "success": len(found_files) > 0,
-                "exp_id": exp_id,
-                "artifacts_dir": str(exp_dir),
-                "migrated_files": found_files,
-                "metrics": metrics_data,
-                "raw_output": f"Verified {len(found_files)} artifact files in {exp_dir}/",
-            }
+        manager = CloudJobManager(PROJECT_ROOT)
+        job = manager.get_job(str(job_id))
+        if not job or job.get("backend") != platform:
+            self.send_json({"error": "The job does not belong to this provider and workspace."}, status=404)
+            return
+        if job.get("status") != "COMPLETED" or not job.get("artifact_identity_verified"):
+            self.send_json({"error": "Cloud job is not completed with a verified artifact identity.", "job": job}, status=409)
+            return
 
-        # Automatically sync Solution Tree DAG if outputs were pulled
-        if res.get("success"):
-            try:
-                journal = TreeJournal()
-                journal.sync_from_artifacts()
-            except Exception:
-                pass
-
-        self.send_json(res)
-
-    def handle_api_sync(self) -> None:
-        journal = TreeJournal()
-        newly_added = journal.sync_from_artifacts()
+        exp_dir = (PROJECT_ROOT / job["artifact_dir"]).resolve()
+        try:
+            exp_dir.relative_to(PROJECT_ROOT)
+        except ValueError:
+            self.send_json({"error": "The tracked artifact path is outside this task workspace."}, status=403)
+            return
+        metrics_path = exp_dir / "metrics.json"
+        try:
+            metrics_data = json.loads(metrics_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.send_json({"error": f"Verified job metrics are unavailable: {exc}"}, status=409)
+            return
+        found_files = [path.name for path in exp_dir.iterdir() if path.is_file()]
         self.send_json({
             "success": True,
-            "synced_count": newly_added,
-            "total_nodes": len(journal.nodes),
+            "job_id": job_id,
+            "exp_id": job["exp_id"],
+            "artifacts_dir": str(exp_dir),
+            "migrated_files": found_files,
+            "metrics": metrics_data,
+            "identity_verified": True,
         })
-
-    def handle_api_next_exp_id(self, query_str: str) -> None:
-        query = urllib.parse.parse_qs(query_str)
-        branch = query.get("branch", ["feat"])[0]
-        descriptor = query.get("descriptor", ["run"])[0]
-        res = get_next_experiment_id(branch=branch, descriptor=descriptor)
-        self.send_json(res)
-
-    def handle_api_switch_task(self, data: Dict[str, Any]) -> None:
-        task_id = data.get("task_id")
-        if not task_id:
-            self.send_json({"error": "task_id is required."}, status=400)
-            return
-        res = switch_task(task_id)
-        self.send_json(res)
-
-    def handle_api_create_task(self, data: Dict[str, Any]) -> None:
-        task_spec = data.get("task", data)
-        res = create_and_activate_task(task_spec)
-        self.send_json(res)
-
-    def handle_api_modal_activate(self, data: Dict[str, Any]) -> None:
-        profile = data.get("profile")
-        if not profile:
-            self.send_json({"error": "profile is required."}, status=400)
-            return
-        res = EnvironmentDetector.activate_modal_profile(profile)
-        self.send_json(res)
-
-    def handle_api_modal_token(self, data: Dict[str, Any]) -> None:
-        t_id = data.get("token_id")
-        t_sec = data.get("token_secret")
-        p_name = data.get("profile")
-        if not t_id or not t_sec:
-            self.send_json({"error": "token_id and token_secret are required."}, status=400)
-            return
-        res = EnvironmentDetector.set_modal_token(t_id, t_sec, p_name)
-        self.send_json(res)
 
     def handle_api_kaggle_profile(self, data: Dict[str, Any]) -> None:
         user = data.get("username")
@@ -2153,23 +2215,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_api_cloud_run(self, data: Dict[str, Any]) -> None:
         backend = data.get("backend", "modal")
-        if HARNESS_PROJECT.plugin_id not in (None, "default") and backend != "local":
-            self.send_json(
-                {"error": f"Remote execution is disabled for task plugin '{HARNESS_PROJECT.plugin_id}' until its adapter is installed in the remote runtime."},
-                status=400,
-            )
-            return
         config_path = data.get("config_path")
         if not config_path:
             self.send_json({"error": "config_path is required."}, status=400)
             return
 
-        gpu = data.get("gpu", "A10G")
+        gpu = data.get("gpu", "A10")
         auto_audit = bool(data.get("auto_audit", True))
         auto_sync = bool(data.get("auto_sync", True))
         baseline_csv = data.get("baseline_csv")
 
-        manager = CloudJobManager()
+        manager = CloudJobManager(PROJECT_ROOT)
         job = manager.start_job(
             backend=backend,
             config_path=config_path,
@@ -2212,7 +2268,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
         manager = CloudJobManager()
@@ -2561,7 +2616,7 @@ def run_server(port: int = 8080) -> None:
     max_retries = 5
     for attempt in range(max_retries):
         try:
-            with socketserver.ThreadingTCPServer(("", current_port), handler) as httpd:
+            with socketserver.ThreadingTCPServer(("127.0.0.1", current_port), handler) as httpd:
                 print(f"=" * 65)
                 print(f"🚀 ML/DL Experiment Dashboard & Priming Server Active")
                 print(f"📡 Web URL:  http://localhost:{current_port}")
