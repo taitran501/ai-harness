@@ -64,7 +64,7 @@ Your mission is to take this information, autonomously bridge any missing gaps, 
 When you have a local archive or dataset folder but no context:
 ```text
 - Task Context: None provided
-- Dataset: dataset/StereoQueerEval_training.zip
+- Dataset: dataset/my_competition_training.zip
 ```
 The agent inspects file names, reads schema headers, searches online for matches, discovers the competition rules, sets `configs/task.yaml`, and trains the baseline.
 
