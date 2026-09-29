@@ -54,9 +54,9 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const [configs, setConfigs] = useState<string[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<string>('configs/exp001_tfidf_baseline.yaml');
 
-  // Step 1: Codabench portal URL
+  // Step 1: Competition portal URL
   const [portalUrl, setPortalUrl] = useState<string>(
-    () => localStorage.getItem('sqe_competition_portal_url') || 'https://www.codabench.org/competitions/'
+    () => localStorage.getItem('competition_portal_url') || 'https://www.kaggle.com/competitions'
   );
 
   // Step 3: Execution & Cloud sync state
@@ -64,8 +64,8 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const [smokeTestOnly, setSmokeTestOnly] = useState<boolean>(false);
   const [modalGpu, setModalGpu] = useState<string>('A10G');
   const [kaggleGpu, setKaggleGpu] = useState<string>('T4 x 2');
-  const [datasetSlug, setDatasetSlug] = useState<string>('sqe-competition-dataset');
-  const [modalVolume, setModalVolume] = useState<string>('stereoqueer-dataset-vol');
+  const [datasetSlug, setDatasetSlug] = useState<string>('competition-dataset');
+  const [modalVolume, setModalVolume] = useState<string>('competition-dataset-vol');
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
 
   // Dataset push state
@@ -95,9 +95,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const [packageErr, setPackageErr] = useState<string | null>(null);
   const [activeSubmissionId, setActiveSubmissionId] = useState<string>('');
   const [lbPrimaryScore, setLbPrimaryScore] = useState<string>('');
-  const [lbSubtaskA, setLbSubtaskA] = useState<string>('');
-  const [lbSubtaskB, setLbSubtaskB] = useState<string>('');
-  const [lbSubtaskC, setLbSubtaskC] = useState<string>('');
+  const [subtaskScores, setSubtaskScores] = useState<Record<string, string>>({});
   const [lbNotes, setLbNotes] = useState<string>('');
   const [savingScore, setSavingScore] = useState<boolean>(false);
   const [scoreSavedMsg, setScoreSavedMsg] = useState<string | null>(null);
@@ -108,6 +106,12 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const currentExpId = selectedConfig
     .replace(/^configs\//, '')
     .replace(/\.ya?ml$/, '');
+
+  useEffect(() => {
+    const taskSlug = (taskInfo?.name || 'competition').toLowerCase().replace(/[^a-z0-9]/g, '-');
+    setModalVolume(`${taskSlug}-dataset-vol`);
+    setDatasetSlug(`${taskSlug}-dataset`);
+  }, [taskInfo?.name]);
 
   useEffect(() => {
     api
@@ -124,12 +128,13 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
       .getEnvironmentStatus()
       .then((st) => {
         setEnvStatus(st);
+        const taskSlug = (taskInfo?.name || 'competition').toLowerCase().replace(/[^a-z0-9]/g, '-');
         if (st.kaggle?.username) {
-          setDatasetSlug(`${st.kaggle.username}/sqe-competition-dataset`);
+          setDatasetSlug(`${st.kaggle.username}/${taskSlug}-dataset`);
         }
       })
       .catch(() => {});
-  }, []);
+  }, [taskInfo?.name]);
 
   useEffect(() => {
     if (submissions.length > 0 && !activeSubmissionId) {
@@ -145,7 +150,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
 
   const handleSavePortalUrl = (val: string) => {
     setPortalUrl(val);
-    localStorage.setItem('sqe_competition_portal_url', val);
+    localStorage.setItem('competition_portal_url', val);
   };
 
   // Step 3A: Push Dataset to Cloud
@@ -288,7 +293,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
     }
   };
 
-  // Step 4B: Record Official Codabench Score & Loop Back to Step 2
+  // Step 4B: Record Official Leaderboard Score & Loop Back to Step 2
   const handleSaveScoreAndLoop = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeSubmissionId) {
@@ -303,12 +308,17 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
         const val = parseFloat(lbPrimaryScore);
         if (!isNaN(val)) {
           payload.primary_metric = val;
-          payload.subtask_a_macro = val;
+          payload.score = val;
         }
       }
-      if (lbSubtaskA.trim() !== '') payload.subtask_a_macro = parseFloat(lbSubtaskA);
-      if (lbSubtaskB.trim() !== '') payload.subtask_b_macro = parseFloat(lbSubtaskB);
-      if (lbSubtaskC.trim() !== '') payload.subtask_c_id_macro = parseFloat(lbSubtaskC);
+      Object.entries(subtaskScores).forEach(([subtaskId, val]) => {
+        if (val.trim() !== '') {
+          const num = parseFloat(val);
+          if (!isNaN(num)) {
+            payload[subtaskId] = num;
+          }
+        }
+      });
 
       await api.recordOfficialScore(activeSubmissionId, payload, lbNotes.trim());
       await onRefreshAll();
@@ -949,23 +959,23 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   className="py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  <span>Open Codabench Portal</span>
+                  <span>Open {taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Competition'} Portal</span>
                 </a>
               </div>
             </div>
           </div>
 
-          {/* Right Card: Record Codabench Score & Note -> Loop Back to Step 2 */}
+          {/* Right Card: Record Official LB Score & Note -> Loop Back to Step 2 */}
           <form
             onSubmit={handleSaveScoreAndLoop}
             className="bg-zinc-950 border border-zinc-800 rounded-xl p-5 space-y-4 shadow-xl"
           >
             <div className="border-b border-zinc-800 pb-3">
               <h2 className="text-base font-semibold text-zinc-100">
-                2. Record Codabench LB Score & Loop to Next Proposal
+                2. Record {taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Official'} LB Score & Loop to Next Proposal
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Enter the score returned by Codabench and your observations. Saving updates <code>SUBMISSIONS.md</code> and immediately injects the feedback into Step 2 for the Agent's next proposal.
+                Enter the score returned by the evaluation platform and your observations. Saving updates <code>SUBMISSIONS.md</code> and immediately injects the feedback into Step 2 for the Agent's next proposal.
               </p>
             </div>
 
@@ -987,49 +997,33 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">Primary LB Score</label>
+                <label className="block text-xs text-zinc-400 mb-1">
+                  {taskInfo?.primary_metric || 'Primary Metric'} Score
+                </label>
                 <input
                   type="number"
                   step="0.0001"
                   value={lbPrimaryScore}
                   onChange={(e) => setLbPrimaryScore(e.target.value)}
-                  placeholder="0.6420"
+                  placeholder="0.0000"
                   className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400"
                 />
               </div>
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1">Subtask A (F1)</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  value={lbSubtaskA}
-                  onChange={(e) => setLbSubtaskA(e.target.value)}
-                  placeholder="Optional"
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-zinc-200"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1">Subtask B (F1)</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  value={lbSubtaskB}
-                  onChange={(e) => setLbSubtaskB(e.target.value)}
-                  placeholder="Optional"
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-zinc-200"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1">Subtask C (F1)</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  value={lbSubtaskC}
-                  onChange={(e) => setLbSubtaskC(e.target.value)}
-                  placeholder="Optional"
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-zinc-200"
-                />
-              </div>
+              {taskInfo?.subtasks?.map((st) => (
+                <div key={st.id}>
+                  <label className="block text-xs text-zinc-400 mb-1 truncate" title={st.name}>
+                    {st.name || st.id}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={subtaskScores[st.id] || ''}
+                    onChange={(e) => setSubtaskScores((prev) => ({ ...prev, [st.id]: e.target.value }))}
+                    placeholder="Optional"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-zinc-200"
+                  />
+                </div>
+              ))}
             </div>
 
             <div>
@@ -1040,7 +1034,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 rows={3}
                 value={lbNotes}
                 onChange={(e) => setLbNotes(e.target.value)}
-                placeholder="e.g. Codabench LB reached 0.642 (+0.018 vs baseline). Subtask B implicit hate still low recall — propose focal loss or title context weighting next."
+                placeholder="e.g. Leaderboard reached 0.842 (+0.018 vs baseline). Slices with rare classes still low recall — propose focal loss or feature weighting next."
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500"
               />
             </div>

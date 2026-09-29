@@ -319,6 +319,16 @@ def switch_task(task_id: str) -> Dict[str, Any]:
             if p.get("id") == task_id or p.get("name") == task_id or p.get("id", "").lower() == task_id.lower():
                 task_data = p
                 break
+    if not task_data:
+        active_task = load_task_config()
+        if (
+            task_id == active_task.get("id")
+            or task_id == active_task.get("name")
+            or task_id == active_task.get("task_name")
+            or (active_task.get("name") and task_id.lower() == active_task["name"].lower())
+            or (active_task.get("task_name") and task_id.lower() == active_task["task_name"].lower())
+        ):
+            task_data = active_task
 
     if not task_data:
         raise ValueError(f"Task specification '{task_id}' not found.")
@@ -1909,8 +1919,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         backend = data.get("backend") or data.get("platform") or "modal"
         config_path = data.get("config_path", "configs/exp001_tfidf_baseline.yaml")
         gpu = data.get("gpu", "A10G" if backend == "modal" else "T4 x 2")
-        dataset_slug = data.get("dataset_slug", "antigravity/stereoqueer-eval-data")
-        volume_name = data.get("volume_name", "stereoqueer-dataset-volume")
+        task_slug = KaggleKernelManager._get_task_slug()
+        default_dataset_slug = f"antigravity/{task_slug}-dataset"
+        default_volume_name = f"{task_slug}-dataset-volume"
+
+        dataset_slug = data.get("dataset_slug") or default_dataset_slug
+        volume_name = data.get("volume_name") or default_volume_name
 
         exp_id = Path(config_path).stem
 
@@ -1960,7 +1974,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def handle_api_cloud_push_dataset(self, data: Dict[str, Any]) -> None:
         platform = (data.get("platform") or data.get("backend") or "kaggle").lower()
         dataset_slug = data.get("dataset_slug")
-        volume_name = data.get("volume_name", "stereoqueer-dataset-vol")
+        task_slug = KaggleKernelManager._get_task_slug()
+        volume_name = data.get("volume_name") or f"{task_slug}-dataset-volume"
 
         if platform == "modal":
             res = push_dataset_to_modal(volume_name=volume_name)

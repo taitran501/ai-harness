@@ -78,25 +78,24 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
         });
       }
     } else {
-      // Check for common subtask keys or fallback to scanning metrics
-      if (metrics.subtask_a !== undefined) {
-        const val = metrics.subtask_a?.macro_f1 ?? (typeof metrics.subtask_a === 'number' ? metrics.subtask_a : null);
-        cards.push({ label: 'Subtask A (Stereotype)', value: val !== null ? val.toFixed(4) : '-', sublabel: 'Binary Macro-F1' });
-      }
-      if (metrics.subtask_b !== undefined) {
-        const val = metrics.subtask_b?.macro_f1 ?? (typeof metrics.subtask_b === 'number' ? metrics.subtask_b : null);
-        cards.push({ label: 'Subtask B (Hate Speech)', value: val !== null ? val.toFixed(4) : '-', sublabel: '3-class Macro-F1' });
-      }
-      if (metrics.subtask_c !== undefined) {
-        const valType = metrics.subtask_c?.type_macro_f1 ?? null;
-        cards.push({ label: 'Subtask C (Target Type)', value: valType !== null ? valType.toFixed(4) : '-', sublabel: 'Macro-F1' });
-        const valId = metrics.subtask_c?.id_micro_f1 ?? metrics.subtask_c?.id_macro_f1 ?? null;
-        cards.push({ label: 'Subtask C (Identities)', value: valId !== null ? valId.toFixed(4) : '-', sublabel: 'F1 Score' });
+      // Dynamic fallback for any nested subtask objects in metrics
+      for (const [k, v] of Object.entries(metrics)) {
+        if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+          const nestedVal = (v as any).macro_f1 ?? (v as any).f1 ?? (v as any).score ?? (v as any).accuracy ?? null;
+          if (nestedVal !== null && typeof nestedVal === 'number') {
+            const formattedLabel = k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+            cards.push({
+              label: formattedLabel,
+              value: nestedVal.toFixed(4),
+              sublabel: 'Subtask Metric',
+            });
+          }
+        }
       }
     }
 
     // Add any additional numeric top-level metrics not already covered
-    const standardKeys = new Set(['overall_composite', 'macro_f1', 'score', 'model', 'language_breakdown', 'subtask_a', 'subtask_b', 'subtask_c']);
+    const standardKeys = new Set(['overall_composite', 'macro_f1', 'score', 'model', 'language_breakdown']);
     for (const [k, v] of Object.entries(metrics)) {
       if (!standardKeys.has(k) && typeof v === 'number') {
         const formattedKey = k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());

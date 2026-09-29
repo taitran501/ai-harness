@@ -201,7 +201,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
   };
 
   const [agentGoal, setAgentGoal] = useState<string>(
-    agentCopilot.goal || 'Improve Subtask B and C without degrading Subtask A'
+    agentCopilot.goal || (taskInfo?.primary_metric ? `Improve ${taskInfo.primary_metric}` : 'Improve primary validation metric')
   );
   const [maxExpBudget, setMaxExpBudget] = useState<number>(
     agentCopilot.budget?.max_experiments || 3

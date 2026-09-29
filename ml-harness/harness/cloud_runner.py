@@ -121,8 +121,8 @@ def run_via_kaggle(
         print(f"❌ Kaggle push failed with code {ret.returncode}", file=sys.stderr)
         sys.exit(ret.returncode)
 
-    print(f"✔ Kernel pushed. Staging directory: {stage_dir}")
-    print(f"Monitor status with: `kaggle kernels status antigravity/sqe-{exp_id.replace('_', '-')}`")
+    task_slug = KaggleKernelManager._get_task_slug()
+    print(f"Monitor status with: `kaggle kernels status antigravity/{task_slug}-{exp_id.replace('_', '-')}`")
 
     # 4. Optional Auto-Submit
     if auto_submit:

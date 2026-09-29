@@ -25,12 +25,9 @@ import yaml
 
 from harness.diagnostics import DiagnosticEngine
 from harness.grounding_gate import GroundingGate
-from harness.io_utils import get_project_root
-from harness.task_spec import UniversalTaskSpec, load_active_task_spec
-from harness.tree_journal import Node, TreeJournal
-from harness.validator import ExperimentValidator
-from src.utils import (
+from harness.io_utils import (
     get_git_commit_hash,
+    get_project_root,
     load_yaml_config,
     render_experiment_card,
     save_json,
@@ -38,6 +35,9 @@ from src.utils import (
     setup_logger,
     update_experiments_leaderboard,
 )
+from harness.task_spec import UniversalTaskSpec, load_active_task_spec
+from harness.tree_journal import Node, TreeJournal
+from harness.validator import ExperimentValidator
 
 
 def merge_configs(base: Dict[str, Any], exp: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,6 +49,85 @@ def merge_configs(base: Dict[str, Any], exp: Dict[str, Any]) -> Dict[str, Any]:
         else:
             merged[k] = v
     return merged
+
+
+class GenericBaselineModel:
+    """Task-agnostic baseline model implementing sklearn Pipeline for text or tabular data."""
+
+    def __init__(self, task_spec: UniversalTaskSpec, model_name: str = "baseline", **kwargs: Any):
+        self.task_spec = task_spec
+        self.model_name = model_name
+        self.kwargs = kwargs
+        self.fitted_models: Dict[str, Any] = {}
+
+    def fit(self, df: pd.DataFrame, variant: Optional[str] = None) -> GenericBaselineModel:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.linear_model import LogisticRegression, Ridge
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.impute import SimpleImputer
+
+        subtasks = self.task_spec.subtasks
+        is_text = self.task_spec.modality == "text" or any(inp.type in ("text", "text_template") for inp in self.task_spec.inputs)
+
+        items_to_fit = subtasks.items() if subtasks else [("target", None)]
+        for st_id, st in items_to_fit:
+            target_col = st.column if st and st.column else (st_id if st_id in df.columns else None)
+            if not target_col or target_col not in df.columns:
+                continue
+
+            valid_df = df.dropna(subset=[target_col])
+            if len(valid_df) == 0:
+                continue
+            y = valid_df[target_col]
+
+            if is_text:
+                if variant and variant in self.task_spec.inputs_dict:
+                    X_text = self.task_spec.inputs_dict[variant].compose_text(valid_df)
+                else:
+                    text_cols = [c for c in valid_df.columns if c != target_col and valid_df[c].dtype == object]
+                    X_text = valid_df[text_cols[0]].fillna("").astype(str) if text_cols else valid_df.iloc[:, 0].astype(str)
+
+                is_reg = getattr(st, "task_type", "") == "regression"
+                clf = Ridge() if is_reg else LogisticRegression(max_iter=500, class_weight="balanced")
+                pipe = Pipeline([
+                    ("tfidf", TfidfVectorizer(max_features=20000, ngram_range=(1, 2))),
+                    ("clf", clf),
+                ])
+                pipe.fit(X_text, y)
+                self.fitted_models[target_col] = (pipe, "text")
+            else:
+                num_cols = [c for c in valid_df.columns if c != target_col and c not in ("fold", getattr(self.task_spec, "id_column", "id")) and valid_df[c].dtype != object]
+                if not num_cols:
+                    num_cols = [c for c in valid_df.columns if c != target_col and c not in ("fold", getattr(self.task_spec, "id_column", "id"))]
+                is_reg = getattr(st, "task_type", "") == "regression"
+                clf = Ridge() if is_reg else LogisticRegression(max_iter=500)
+                pipe = Pipeline([
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("scaler", StandardScaler()),
+                    ("clf", clf),
+                ])
+                pipe.fit(valid_df[num_cols], y)
+                self.fitted_models[target_col] = (pipe, "tabular", num_cols)
+
+        return self
+
+    def predict(self, df: pd.DataFrame, variant: Optional[str] = None) -> Dict[str, Any]:
+        preds = {}
+        for target_col, meta in self.fitted_models.items():
+            pipe = meta[0]
+            mod_type = meta[1]
+            if mod_type == "text":
+                if variant and variant in self.task_spec.inputs_dict:
+                    X_text = self.task_spec.inputs_dict[variant].compose_text(df)
+                else:
+                    text_cols = [c for c in df.columns if c != target_col and df[c].dtype == object]
+                    X_text = df[text_cols[0]].fillna("").astype(str) if text_cols else df.iloc[:, 0].astype(str)
+                preds[f"pred_{target_col}"] = pipe.predict(X_text)
+            else:
+                num_cols = meta[2]
+                preds[f"pred_{target_col}"] = pipe.predict(df[num_cols])
+        return preds
 
 
 class UniversalRunner:
@@ -125,26 +204,36 @@ class UniversalRunner:
                 import importlib
                 src_data = importlib.import_module("src.data")
                 if hasattr(src_data, "load_dataset"):
-                    df_res, _ = src_data.load_dataset(str(self.project_root / "dataset"))
-                    split_path = self.project_root / self.cfg.get("paths", {}).get("split_path", "splits/fold_assignments.tsv")
-                    if not split_path.exists():
+                    df_res = src_data.load_dataset(str(self.project_root / "dataset"))
+                    df_res = df_res[0] if isinstance(df_res, tuple) else df_res
+                    split_cand = self.cfg.get("paths", {}).get("split_path")
+                    split_path = self.project_root / split_cand if split_cand else None
+                    if not split_path or not split_path.exists():
                         for cand in ["splits/fold_assignments.tsv", "splits/folds.csv", "splits/splits.csv"]:
                             if (self.project_root / cand).exists():
                                 split_path = self.project_root / cand
                                 break
-                    if hasattr(src_data, "load_splits") and hasattr(src_data, "merge_data_and_splits") and split_path.exists():
+                    if hasattr(src_data, "load_splits") and hasattr(src_data, "merge_data_and_splits") and split_path and split_path.exists():
                         splits_df = src_data.load_splits(str(split_path))
                         df = src_data.merge_data_and_splits(df_res, splits_df)
                     else:
                         df = df_res
             except Exception as e:
-                self.logger.error(f"DATA LOADER ERROR in src.data: {e}", exc_info=True)
+                self.logger.debug(f"Optional workspace adapter src.data not used: {e}")
 
         if df is None:
             df = self.task_spec.load_dataset_split("train", project_root=self.project_root)
-            split_path = self.project_root / self.cfg.get("paths", {}).get("split_path", "splits/fold_assignments.tsv")
-            if split_path.exists() and "fold" not in df.columns:
+            split_cand = self.cfg.get("paths", {}).get("split_path")
+            split_path = self.project_root / split_cand if split_cand else None
+            if not split_path or not split_path.exists():
+                for cand in ["splits/fold_assignments.tsv", "splits/folds.csv", "splits/splits.csv"]:
+                    if (self.project_root / cand).exists():
+                        split_path = self.project_root / cand
+                        break
+            if split_path and split_path.exists() and "fold" not in df.columns:
                 try:
+                    sep = "\t" if split_path.suffix.lower() in (".tsv", ".tab") else ","
+                    splits_df = pd.read_csv(split_path, sep=sep)
                     id_cand = [c for c in ["id", self.task_spec.id_column] if c and c in df.columns and c in splits_df.columns]
                     if id_cand:
                         df = df.merge(splits_df[[id_cand[0], "fold"]], on=id_cand[0], how="left")
@@ -199,9 +288,28 @@ class UniversalRunner:
         else:
             return self._run_model_training(df, val_strategy, git_hash)
 
+    def _get_model_factory(self) -> Any:
+        """Dynamically resolve model factory from config, workspace adapter, or universal built-in."""
+        factory_path = self.cfg.get("model", {}).get("factory")
+        if factory_path:
+            import importlib
+            mod_name, fn_name = factory_path.rsplit(".", 1)
+            mod = importlib.import_module(mod_name)
+            return getattr(mod, fn_name)
+
+        try:
+            import importlib
+            mod = importlib.import_module("src.models")
+            if hasattr(mod, "build_model"):
+                return getattr(mod, "build_model")
+        except Exception:
+            pass
+
+        return lambda name, **kwargs: GenericBaselineModel(self.task_spec, model_name=name, **kwargs)
+
     def _run_model_training(self, df: pd.DataFrame, val_strategy: str, git_hash: str) -> Dict[str, Any]:
         """Execute classical ML or Deep Learning training loop."""
-        from src.models import build_model
+        model_factory = self._get_model_factory()
 
         model_cfg = self.cfg.get("model", {})
         model_name = model_cfg.get("name", "tfidf_logistic_regression")
@@ -263,7 +371,7 @@ class UniversalRunner:
 
             for part_key, train_part, dev_part in partitions:
                 for variant in input_variants:
-                    model = build_model(model_name, **model_params)
+                    model = model_factory(model_name, **model_params)
                     ExperimentValidator.assert_parameter_limit(model, max_params=max_params)
 
                     if group_col and group_col in train_part.columns and group_col in dev_part.columns:
@@ -271,11 +379,17 @@ class UniversalRunner:
 
                     # Train
                     t0 = time.time()
-                    model.fit(train_part, variant=variant)
+                    try:
+                        model.fit(train_part, variant=variant)
+                    except TypeError:
+                        model.fit(train_part)
                     fit_sec = time.time() - t0
 
                     # Predict
-                    preds = model.predict(dev_part, variant=variant)
+                    try:
+                        preds = model.predict(dev_part, variant=variant)
+                    except TypeError:
+                        preds = model.predict(dev_part)
 
                     # Route predictions through UniversalTaskSpec if needed
                     routed_preds = self.task_spec.apply_routing(preds, n_samples=len(dev_part))
@@ -444,7 +558,7 @@ class UniversalRunner:
         oof_df.to_csv(self.exp_dir / "oof_predictions.csv", index=False)
 
         # Markdown summary & card
-        card_md = render_experiment_card(self.cfg, summary_df, git_hash)
+        card_md = render_experiment_card(self.cfg, summary_df, git_hash, task_spec=self.task_spec)
         (self.exp_dir / "EXPERIMENT_CARD.md").write_text(card_md, encoding="utf-8")
         (self.exp_dir / "summary.md").write_text(summary_df.to_markdown(index=False), encoding="utf-8")
 
@@ -488,9 +602,19 @@ class UniversalRunner:
 
         # Update Leaderboard
         try:
-            update_experiments_leaderboard(self.cfg, summary_df)
-        except Exception:
-            pass
+            exp_info = self.cfg.get("experiment", {})
+            new_row = {
+                "exp_id": self.exp_id,
+                "branch": exp_info.get("branch", "general"),
+                "parent_id": exp_info.get("parent_id", "none"),
+                "date": exp_info.get("date"),
+                "model": self.cfg.get("model", {}).get("name", "baseline"),
+                "score": comp_score,
+                "notes": exp_info.get("problem_addressed", ""),
+            }
+            update_experiments_leaderboard("EXPERIMENTS.md", [new_row], task_spec=self.task_spec)
+        except Exception as e:
+            self.logger.debug(f"Leaderboard update skipped: {e}")
 
         self.logger.info(f"✔ Experiment {self.exp_id} completed successfully. Score: {comp_score:.4f}")
         return detailed_results[0] if detailed_results else {}

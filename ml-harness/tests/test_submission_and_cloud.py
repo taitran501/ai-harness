@@ -75,7 +75,7 @@ class SubmissionManagerTests(unittest.TestCase):
         self.mgr.submissions[entry.id] = entry
         md = self.mgr.render_submissions_markdown()
 
-        self.assertIn("# StereoQueerEval Submissions & Leaderboard Registry", md)
+        self.assertIn("Submissions & Leaderboard Registry", md)
         self.assertIn("sub_001_exp001", md)
         self.assertIn("LOCAL_VERIFIED", md)
         self.assertTrue((self.sub_dir / "SUBMISSIONS.md").exists())

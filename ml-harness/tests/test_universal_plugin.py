@@ -285,6 +285,8 @@ class TestUniversalPlugin(unittest.TestCase):
             'exp001_baseline_tfidf',
             'from src.data import IDENTITIES',
             'from src.metrics import evaluate_predictions',
+            'stereoqueereval.yaml',
+            'sqe-',
         ]
         for py_file in harness_dir.glob("*.py"):
             content = py_file.read_text(encoding="utf-8", errors="ignore")
@@ -299,7 +301,7 @@ class TestUniversalPlugin(unittest.TestCase):
         tools_dir = PROJECT_ROOT / "tools"
         for py_file in tools_dir.glob("*.py"):
             content = py_file.read_text(encoding="utf-8", errors="ignore")
-            for token in ["StereoQueerEval_id", "pred_stereotype", "pred_hate_speech", "yt_title"]:
+            for token in ["StereoQueerEval_id", "pred_stereotype", "pred_hate_speech", "yt_title", "stereoqueer", "sqe-"]:
                 self.assertNotIn(
                     token,
                     content,
@@ -311,7 +313,7 @@ class TestUniversalPlugin(unittest.TestCase):
         if dashboard_src.exists():
             for src_file in dashboard_src.rglob("*.tsx"):
                 content = src_file.read_text(encoding="utf-8", errors="ignore")
-                for token in ["StereoQueerEval", "yt_title", "yt_comment", "pred_stereotype"]:
+                for token in ["StereoQueerEval", "yt_title", "yt_comment", "pred_stereotype", "stereoqueer", "sqe-", "sqe_"]:
                     self.assertNotIn(
                         token,
                         content,

@@ -34,10 +34,6 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
 
   // Form State
   const [dynamicScores, setDynamicScores] = useState<Record<string, string>>({});
-  const [macroA, setMacroA] = useState<string>('');
-  const [macroB, setMacroB] = useState<string>('');
-  const [macroCType, setMacroCType] = useState<string>('');
-  const [macroCID, setMacroCID] = useState<string>('');
   const [splitType, setSplitType] = useState<string>('public');
   const [notes, setNotes] = useState<string>('');
 
@@ -92,21 +88,21 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
     const dyn: Record<string, string> = {};
     if (taskInfo?.metrics && taskInfo.metrics.length > 0) {
       for (const m of taskInfo.metrics) {
-        const val = sub.official_scores?.[m.id] ?? sub.official_scores?.[`${m.id}_macro`];
+        const val = sub.official_scores?.[m.id];
         dyn[m.id] = val !== undefined && val !== null ? String(val) : '';
+      }
+    } else if (taskInfo?.subtasks && taskInfo.subtasks.length > 0) {
+      for (const st of taskInfo.subtasks) {
+        const val = sub.official_scores?.[st.id];
+        dyn[st.id] = val !== undefined && val !== null ? String(val) : '';
       }
     } else {
       const primary =
         sub.official_scores?.primary_metric ??
-        sub.official_scores?.score ??
-        sub.official_scores?.subtask_a_macro;
+        sub.official_scores?.score;
       dyn['primary_metric'] = primary !== undefined && primary !== null ? String(primary) : '';
     }
     setDynamicScores(dyn);
-    setMacroA(sub.official_scores?.subtask_a_macro !== undefined && sub.official_scores?.subtask_a_macro !== null ? String(sub.official_scores.subtask_a_macro) : '');
-    setMacroB(sub.official_scores?.subtask_b_macro !== undefined && sub.official_scores?.subtask_b_macro !== null ? String(sub.official_scores.subtask_b_macro) : '');
-    setMacroCType(sub.official_scores?.subtask_c_type_macro !== undefined && sub.official_scores?.subtask_c_type_macro !== null ? String(sub.official_scores.subtask_c_type_macro) : '');
-    setMacroCID(sub.official_scores?.subtask_c_id_macro !== undefined && sub.official_scores?.subtask_c_id_macro !== null ? String(sub.official_scores.subtask_c_id_macro) : '');
     setSplitType(sub.official_scores?.split_type || 'public');
     setNotes(sub.notes || '');
     setFormError(null);
@@ -129,18 +125,13 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
         split_type: splitType,
       };
 
-      if (macroA !== '') scoresPayload.subtask_a_macro = parseFloat(macroA);
-      if (macroB !== '') scoresPayload.subtask_b_macro = parseFloat(macroB);
-      if (macroCType !== '') scoresPayload.subtask_c_type_macro = parseFloat(macroCType);
-      if (macroCID !== '') scoresPayload.subtask_c_id_macro = parseFloat(macroCID);
-
       for (const [k, v] of Object.entries(dynamicScores)) {
         if (v !== '') {
           const num = parseFloat(v);
           if (!isNaN(num)) {
             scoresPayload[k] = num;
-            if (k === 'subtask_a' && !scoresPayload.subtask_a_macro) {
-              scoresPayload.subtask_a_macro = num;
+            if (k === 'primary_metric') {
+              scoresPayload.score = num;
             }
           }
         }
@@ -174,23 +165,6 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
               </span>
             </React.Fragment>
           ))}
-        </div>
-      );
-    }
-    if (scores.subtask_a_macro !== undefined || scores.subtask_b_macro !== undefined) {
-      return (
-        <div className="space-x-1.5 font-mono">
-          <span className="text-slate-300 font-semibold" title="Subtask A">
-            {scores.subtask_a_macro !== undefined && scores.subtask_a_macro !== null ? Number(scores.subtask_a_macro).toFixed(4) : '-'}
-          </span>
-          <span className="text-slate-500">/</span>
-          <span className="text-slate-400" title="Subtask B">
-            {scores.subtask_b_macro !== undefined && scores.subtask_b_macro !== null ? Number(scores.subtask_b_macro).toFixed(4) : '-'}
-          </span>
-          <span className="text-slate-500">/</span>
-          <span className="text-slate-400" title="Subtask C Type">
-            {scores.subtask_c_type_macro !== undefined && scores.subtask_c_type_macro !== null ? Number(scores.subtask_c_type_macro).toFixed(4) : '-'}
-          </span>
         </div>
       );
     }
@@ -447,52 +421,40 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                     </div>
                   ))}
                 </div>
-              ) : (
+              ) : taskInfo?.subtasks && taskInfo.subtasks.length > 0 ? (
                 <div className="grid grid-cols-2 gap-3">
+                  {taskInfo.subtasks.map((st: any) => (
+                    <div key={st.id || st.name}>
+                      <label className="block text-slate-400 font-medium mb-1 truncate" title={st.name}>
+                        {st.name} ({st.metric || 'Score'})
+                      </label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        placeholder="e.g. 0.7500"
+                        value={dynamicScores[st.id] ?? ''}
+                        onChange={(e) =>
+                          setDynamicScores((prev) => ({ ...prev, [st.id]: e.target.value }))
+                        }
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3">
                   <div>
-                    <label className="block text-slate-400 font-medium mb-1">Subtask A Macro-F1</label>
+                    <label className="block text-slate-400 font-medium mb-1">
+                      {taskInfo?.primary_metric || 'Primary Metric'} Score
+                    </label>
                     <input
                       type="number"
                       step="0.0001"
-                      placeholder="e.g. 0.6850"
-                      value={macroA}
-                      onChange={(e) => setMacroA(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-400 font-medium mb-1">Subtask B Macro-F1</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      placeholder="e.g. 0.5340"
-                      value={macroB}
-                      onChange={(e) => setMacroB(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-400 font-medium mb-1">Subtask C Type Macro-F1</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      placeholder="e.g. 0.7200"
-                      value={macroCType}
-                      onChange={(e) => setMacroCType(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-400 font-medium mb-1">Subtask C Identities Macro-F1</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      placeholder="Optional"
-                      value={macroCID}
-                      onChange={(e) => setMacroCID(e.target.value)}
+                      placeholder="e.g. 0.8500"
+                      value={dynamicScores['primary_metric'] ?? ''}
+                      onChange={(e) => {
+                        setDynamicScores((prev) => ({ ...prev, primary_metric: e.target.value }));
+                      }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                     />
                   </div>

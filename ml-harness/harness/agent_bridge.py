@@ -923,7 +923,7 @@ class AgentBridge:
                 pool = self.comp_state.compute_candidate_pool(journal)
                 default_base_id = self.comp_state.state["gates"].get("baseline_exp_id") or self.comp_state.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
                 base_id = params.get("baseline_id") or pool.get("baseline_id", default_base_id)
-                base_score = float(pool.get("baseline_score", self.comp_state.spec.get("primary_metric_baseline", 0.0)))
+                base_score = float(pool.get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
                 self.comp_state.state["gates"]["data_risks_confirmed"] = True
                 self.comp_state.state["gates"]["baseline_locked"] = True
                 self.comp_state.state["gates"]["baseline_exp_id"] = base_id
@@ -947,7 +947,7 @@ class AgentBridge:
                 cand = next((c for c in pool["all_candidates"] if c["id"] == exp_id), None) or (
                     pool["overall_best"] if pool["overall_best"] else {}
                 )
-                cand_score = float(cand.get("composite_score", cand.get("score", self.comp_state.spec.get("primary_metric_baseline", 0.0))))
+                cand_score = float(cand.get("composite_score") or cand.get("score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
@@ -1011,7 +1011,7 @@ class AgentBridge:
                 task_name = self.comp_state.spec.get("name", "Competition Task")
                 primary_metric = self.comp_state.spec.get("primary_metric", "macro_f1")
                 parent_node = journal.get_node(parent_id) if hasattr(journal, "get_node") else journal.nodes.get(parent_id)
-                parent_score = parent_node.get_score() if parent_node else float(self.comp_state.spec.get("primary_metric_baseline", 0.0))
+                parent_score = parent_node.get_score() if parent_node else float(self.comp_state.spec.get("primary_metric_baseline") or 0.0)
 
                 # Strict GroundingGate-compliant YAML structure (task-agnostic defaults)
                 cfg_payload: Dict[str, Any] = {
@@ -1215,7 +1215,7 @@ class AgentBridge:
                 # Reload TreeJournal and evaluate metrics
                 journal.sync_from_artifacts()
                 pool = self.comp_state.compute_candidate_pool(journal)
-                base_score = float(pool.get("baseline_score", self.comp_state.spec.get("primary_metric_baseline", 0.0)))
+                base_score = float(pool.get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
                 oof_path = self.project_root / "artifacts" / exp_id / "oof_predictions.csv"
 
                 if oof_path.exists():
@@ -1279,7 +1279,7 @@ class AgentBridge:
 
                 oof_abs = self.project_root / entry["oof_path"]
                 synth_score, detail_scores = self._evaluate_oof_dataframe(oof_abs)
-                base_score = float(self.comp_state.compute_candidate_pool(journal).get("baseline_score", self.comp_state.spec.get("primary_metric_baseline", 0.0)))
+                base_score = float(self.comp_state.compute_candidate_pool(journal).get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
                 delta = round(synth_score - base_score, 4)
 
                 min_imp = self._get_spec_min_improvement(session)

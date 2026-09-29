@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from harness.runner import UniversalRunner, main as runner_main, merge_configs
-from src.utils import load_yaml_config
+from harness.io_utils import load_yaml_config
 
 
 def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:

@@ -140,6 +140,21 @@ class ExperimentValidator:
                             )
 
     @classmethod
-    def assert_subtask_c_oracle_conditioning(cls, df: pd.DataFrame) -> None:
+    def assert_subtask_c_oracle_conditioning(cls, df: pd.DataFrame, spec: Optional[Any] = None) -> None:
         """Backward-compatible alias for task conditional assertions."""
-        cls.assert_task_conditional_integrity(df)
+        if spec is None:
+            from harness.task_spec import load_active_task_spec
+            active = load_active_task_spec()
+            if any(st.condition is not None for st in getattr(active, "subtasks", {}).values()):
+                spec = active
+            elif "hate_speech" in df.columns and "target_type" in df.columns:
+                invalid = df[(df["hate_speech"] == "no") & (df["target_type"] != "none")]
+                if len(invalid) > 0:
+                    raise AssertionError(
+                        f"[CONDITIONAL CONSTRAINT VIOLATION] Found {len(invalid)} rows where 'target_type' "
+                        f"violates conditional dependency on 'hate_speech'! Expected 'none'."
+                    )
+                return
+            else:
+                spec = active
+        cls.assert_task_conditional_integrity(df, spec=spec)

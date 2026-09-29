@@ -352,7 +352,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 - Rule Invariant: Single Atomic Intervention (Control vs Treatment).
 
 ## MANDATORY STEPS:
-1. Failure Mode Analysis: Inspect \`artifacts/${selectedParentId}/run.log\` and diagnostics. Identify whether the primary error is implicit hate speech (Subtask B) or rare identities (Subtask C).
+1. Failure Mode Analysis: Inspect \`artifacts/${selectedParentId}/run.log\` and diagnostics. Identify the primary failure slice, confusion pattern, or high-loss segment.
 2. Formulate Target Config: Create \`configs/exp<NNN>_<branch>_<descriptor>.yaml\` declaring:
    - \`parent_id: "${selectedParentId}"\`
    - Single atomic intervention addressing the diagnosed bottleneck.
@@ -365,7 +365,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 5. Deterministic Audit Gate: Validate that validation delta achieves Min Prediction Delta >= 2.0% without regression.`
         : `# OPENAI CODEX CLI DIRECTIVE: ITERATE & ADDRESS FAILURE MODES
 
-- Parent Baseline: \`${selectedParentId}\` (Macro-F1: ${parentScore})
+- Parent Baseline: \`${selectedParentId}\` (Score: ${parentScore})
 - Repository Rules: Follow \`AGENTS.md\`. Raw data in \`dataset/\` is read-only.
 - Task: Implement ONE atomic modification to improve over \`${selectedParentId}\`.
 - Action:
@@ -379,11 +379,11 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
       return selectedIde === 'antigravity'
         ? `# ANTIGRAVITY DIRECTIVE: PARADIGM SHIFT & BRANCH EXPLORATION
 
-- Current Record: ${selectedParentId} (Macro-F1: ${parentScore})
+- Current Record: ${selectedParentId} (Score: ${parentScore})
 - Objective: Explore an un-sampled model family per solution tree search.
 
 ## SCIENTIFIC EXPLORATION PROTOCOL:
-1. Epistemic Grounding: Do not guess hyperparameters. Retrieve verified model architectures (e.g. \`xlm-roberta-base\` or \`microsoft/mdeberta-v3-base\`) that support multilingual text (EN, IT, NL).
+1. Epistemic Grounding: Do not guess hyperparameters. Retrieve verified model architectures and representations matching the dataset modality.
 2. Declare Experiment Config: Create \`configs/exp<NNN>_model_<backbone>.yaml\` specifying \`grounding:\` and \`assumption_register:\`.
 3. Pre-flight Verification Probe:
    \`\`\`powershell

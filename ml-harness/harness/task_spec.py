@@ -330,10 +330,7 @@ class UniversalTaskSpec:
                     "per_class": classification_report(y_true, y_pred, labels=labels, output_dict=True, zero_division=0),
                 }
                 results[subtask_id] = st_res
-                # Backward-compatible aliases for oracle condition
-                if subtask_id == "subtask_c_type":
-                    results["subtask_c_target_type_oracle_hate"] = st_res
-                elif spec.condition and spec.condition.eval_condition_only:
+                if spec.condition and spec.condition.eval_condition_only:
                     results[f"{subtask_id}_oracle"] = st_res
 
                 primary = macro_f1 if spec.primary_metric == "macro_f1" else acc
@@ -359,9 +356,7 @@ class UniversalTaskSpec:
                         "exact_match": acc,
                     }
                     results[subtask_id] = st_res
-                    if subtask_id == "subtask_c_identity":
-                        results["subtask_c_identity_oracle_hate"] = st_res
-                    elif spec.condition and spec.condition.eval_condition_only:
+                    if spec.condition and spec.condition.eval_condition_only:
                         results[f"{subtask_id}_oracle"] = st_res
 
                     primary = macro_f1 if spec.primary_metric == "macro_f1" else micro_f1

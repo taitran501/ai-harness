@@ -61,7 +61,7 @@ class AIDEOriginalNode(DataClassJsonMixin):
     metrics_dict: Dict[str, Any] = field(default_factory=dict, kw_only=True)
     is_buggy: bool = field(default=False, kw_only=True)
 
-    # ---- domain scientific constraints (SemEval adaptation) ----
+    # ---- domain scientific constraints (Universal adaptation) ----
     param_count: Optional[int] = field(default=None, kw_only=True)
     atomic_hypothesis: str = field(default="", kw_only=True)
     intervention: str = field(default="", kw_only=True)

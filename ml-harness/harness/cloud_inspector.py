@@ -112,19 +112,32 @@ class CloudPreflightInspector:
         all_errors.extend(d_errs)
 
         # 3. Splits Check
-        s_ok, s_errs = cls.inspect_splits(root / "splits/fold_assignments.tsv")
-        all_errors.extend(s_errs)
+        split_cand = cfg.get("paths", {}).get("split_path")
+        split_path = root / split_cand if split_cand else None
+        if not split_path or not split_path.exists():
+            for p in [root / "splits/fold_assignments.tsv", root / "splits/folds.csv", root / "splits/splits.csv"]:
+                if p.exists():
+                    split_path = p
+                    break
+        if split_path and split_path.exists():
+            s_ok, s_errs = cls.inspect_splits(split_path)
+            all_errors.extend(s_errs)
 
         # 4. Syntax Pre-compile Check
+        harness_dir = Path(__file__).resolve().parent
         core_scripts = [
             root / "train.py",
-            root / "src/data.py",
-            root / "src/metrics.py",
-            root / "src/utils.py",
-            root / "harness/diagnostics.py",
-            root / "harness/ensemble_guard.py",
+            harness_dir / "runner.py",
+            harness_dir / "diagnostics.py",
+            harness_dir / "ensemble_guard.py",
+            harness_dir / "task_spec.py",
+            harness_dir / "validator.py",
         ]
-        py_ok, py_errs = cls.inspect_python_syntax(core_scripts)
+        for optional_script in [root / "src/data.py", root / "src/metrics.py", root / "src/utils.py"]:
+            if optional_script.exists():
+                core_scripts.append(optional_script)
+
+        py_ok, py_errs = cls.inspect_python_syntax([s for s in core_scripts if s.exists()])
         all_errors.extend(py_errs)
 
         passed = len(all_errors) == 0

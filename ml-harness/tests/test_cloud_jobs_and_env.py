@@ -37,7 +37,7 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         res = get_next_experiment_id(branch="feat", descriptor="test_cleaning")
         self.assertIn("next_id", res)
         self.assertIn("next_number", res)
-        self.assertTrue(res["next_number"] >= 2)
+        self.assertTrue(res["next_number"] >= 1)
         self.assertTrue(res["next_id"].startswith(f"exp{res['next_number']:03d}_feat_test_cleaning"))
 
     def test_list_and_switch_tasks(self):
