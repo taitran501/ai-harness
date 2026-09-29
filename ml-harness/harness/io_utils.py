@@ -57,23 +57,11 @@ def atomic_write_json(
 def get_project_root() -> Path:
     """Finds the root directory of the active project or competition workspace.
 
-    Handles both standalone execution and subfolder plugin installation
-    (e.g., when the harness is inside an 'ml-harness/' subfolder of a competition).
+    Shared resolver honors an explicit root or an attached workspace manifest.
     """
-    if "HARNESS_PROJECT_ROOT" in os.environ:
-        return Path(os.environ["HARNESS_PROJECT_ROOT"]).resolve()
+    from harness.project import resolve_project_root
 
-    cwd = Path.cwd().resolve()
-    if (cwd / "configs" / "task.yaml").exists() or (cwd / "dataset").exists() or (cwd / "artifacts").exists():
-        return cwd
-
-
-    file_dir = Path(__file__).resolve().parent.parent
-    if file_dir.name in ("ml-harness", "ml_harness"):
-        parent = file_dir.parent
-        if (parent / "configs" / "task.yaml").exists() or (parent / "dataset").exists():
-            return parent
-    return file_dir
+    return resolve_project_root()
 
 
 def set_seed(seed: int = 42) -> None:

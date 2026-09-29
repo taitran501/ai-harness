@@ -15,12 +15,13 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { api } from '../services/api';
-import { CloudPreflightResult, ExperimentSummary, StrategyCard } from '../types/experiment';
+import { CloudPreflightResult, ExperimentSummary, StrategyCard, TaskInfo } from '../types/experiment';
 
 interface ExperimentConfigModalProps {
   initialConfigPath?: string;
   initialParentId?: string;
   experiments?: ExperimentSummary[];
+  taskInfo?: TaskInfo | null;
   onClose: () => void;
   onConfigSaved?: (savedPath: string) => void;
 }
@@ -174,6 +175,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   initialConfigPath,
   initialParentId,
   experiments = [],
+  taskInfo,
   onClose,
   onConfigSaved,
 }) => {
@@ -342,37 +344,41 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   const buildAgentPrompt = (type: 'iterate' | 'explore' | 'card', card?: StrategyCard): string => {
     const parentNode = experiments.find((e) => e.id === selectedParentId);
     const parentScore = parentNode?.score ? parentNode.score.toFixed(4) : 'baseline';
+    const primaryMetric = taskInfo?.primary_metric || 'primary metric';
+    const artifactDir = taskInfo?.artifacts_dir || '.ml-harness/artifacts/<task-id>';
+    const foldCount = taskInfo?.data_config?.n_folds;
+    const validationPlan = foldCount ? `${foldCount}-fold configured validation` : 'configured validation';
 
     if (type === 'iterate') {
       return selectedIde === 'antigravity'
         ? `# ANTIGRAVITY ITERATION DIRECTIVE: OPTIMIZE BOTTLENECK ON ${selectedParentId}
 
-- Target Baseline: ${selectedParentId} (Macro-F1: ${parentScore})
+- Target Baseline: ${selectedParentId} (${primaryMetric}: ${parentScore})
 - Operating Contract: Strictly adhere to AGENTS.md.
 - Rule Invariant: Single Atomic Intervention (Control vs Treatment).
 
 ## MANDATORY STEPS:
-1. Failure Mode Analysis: Inspect \`artifacts/${selectedParentId}/run.log\` and diagnostics. Identify the primary failure slice, confusion pattern, or high-loss segment.
+1. Failure Mode Analysis: Inspect \`${artifactDir}/${selectedParentId}/\` and diagnostics. Identify the primary failure slice or error pattern.
 2. Formulate Target Config: Create \`configs/exp<NNN>_<branch>_<descriptor>.yaml\` declaring:
    - \`parent_id: "${selectedParentId}"\`
    - Single atomic intervention addressing the diagnosed bottleneck.
    - Grounding citation from local knowledge base or Hugging Face Hub.
 3. Execute Smoke Test:
    \`\`\`powershell
-   python train.py --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0
+   ml-harness-run --project-root . --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0
    \`\`\`
-4. Run Full 5-Fold Cross-Validation: Execute full CV and record artifacts.
-5. Deterministic Audit Gate: Validate that validation delta achieves Min Prediction Delta >= 2.0% without regression.`
+4. Run Full Validation: Execute the configured ${validationPlan} and record artifacts.
+5. Verify the declared task metric and follow the selected task plugin's submission contract. Do not treat validation predictions as test-set predictions.`
         : `# OPENAI CODEX CLI DIRECTIVE: ITERATE & ADDRESS FAILURE MODES
 
 - Parent Baseline: \`${selectedParentId}\` (Score: ${parentScore})
 - Repository Rules: Follow \`AGENTS.md\`. Raw data in \`dataset/\` is read-only.
 - Task: Implement ONE atomic modification to improve over \`${selectedParentId}\`.
 - Action:
-  1. Inspect \`artifacts/${selectedParentId}/\` to diagnose errors.
+  1. Inspect \`${artifactDir}/${selectedParentId}/\` to diagnose errors.
   2. Create a new config in \`configs/\` specifying the intervention.
-  3. Run smoke test on Fold 0, then full 5-fold cross-validation.
-  4. Summarize validation metrics and verify Min Prediction Delta >= 2.0% row delta.`;
+  3. Run a smoke test, then the configured ${validationPlan}.
+  4. Summarize validation metrics and follow the selected task plugin's submission contract. Do not use validation predictions as test-set predictions.`;
     }
 
     if (type === 'explore') {
@@ -397,7 +403,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 - Protocol:
   1. Create \`configs/exp<NNN>_model_<name>.yaml\` with explicit model backbone.
   2. Implement necessary model loader or pipeline in \`src/\`.
-  3. Run smoke test on Fold 0: \`python train.py --config configs/exp<NNN>_...yaml --debug --fold 0\`.
+  3. Run smoke test on Fold 0: \`ml-harness-run --project-root . --config configs/exp<NNN>_...yaml --debug --fold 0\`.
   4. Run full CV and output evaluation metrics.`;
     }
 
@@ -420,9 +426,9 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 2. Implement the controlled intervention in \`harness/\` or \`src/\`.
 3. Run smoke test verification:
    \`\`\`powershell
-   python train.py --config configs/exp<NNN>_${card.descriptor}.yaml --debug --fold 0
+   ml-harness-run --project-root . --config configs/exp<NNN>_${card.descriptor}.yaml --debug --fold 0
    \`\`\`
-4. Execute full 5-fold cross-validation and verify generated artifacts in \`artifacts/\`.`;
+4. Execute the configured ${validationPlan} and verify generated artifacts in \`${artifactDir}/\`.`;
     }
 
     return '';

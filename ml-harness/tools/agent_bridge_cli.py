@@ -5,27 +5,28 @@ Provides structured Context Packets and Typed Harness Action execution with stat
 BridgeSession tracking, optional budget enforcement, and USER_APPROVAL governance:
 
   # 1. Read compressed Context Packet (Competition State + UCB + Diagnostics + Session):
-  python tools/agent_bridge_cli.py context
-  python tools/agent_bridge_cli.py context --format json
+  ml-harness-agent context
+  ml-harness-agent context --format json
 
   # 2. Start or configure a BridgeSession with optional budget limits:
-  python tools/agent_bridge_cli.py start-session --goal "Improve Subtask C Macro-F1" --max-experiments 3
+  ml-harness-agent start-session --goal "Improve the primary metric" --max-experiments 3
 
   # 3. Invoke a Typed Harness Action (returns structured ActionObservation JSON):
-  python tools/agent_bridge_cli.py act --action inspect_diagnostics --params '{"exp_id": "exp001_baseline_tfidf"}'
-  python tools/agent_bridge_cli.py act --action create_experiment --params '{"branch": "feat", "descriptor": "title_ctx"}'
-  python tools/agent_bridge_cli.py act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_title_ctx.yaml"}'
-  python tools/agent_bridge_cli.py act --action run_full_validation --params '{"config_path": "configs/exp002_feat_title_ctx.yaml", "backend": "local"}'
-  python tools/agent_bridge_cli.py act --action synthesize_candidate --params '{"name": "router_v1", "mode": "specialist_router"}'
+  ml-harness-agent act --action inspect_diagnostics --params '{"exp_id": "exp001_baseline"}'
+  ml-harness-agent act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_v1"}'
+  ml-harness-agent act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_feature_v1.yaml"}'
+  ml-harness-agent act --action run_full_validation --params '{"config_path": "configs/exp002_feat_feature_v1.yaml", "backend": "local"}'
+  ml-harness-agent act --action synthesize_candidate --params '{"name": "ensemble_v1", "mode": "ensemble_vote"}'
 
   # 4. Approve a paused USER_APPROVAL action (submit, freeze, unfreeze, finalize):
-  python tools/agent_bridge_cli.py approve --session-id session_0001
+  ml-harness-agent approve --session-id session_0001
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -35,12 +36,8 @@ HARNESS_DIR = Path(__file__).resolve().parent.parent
 if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
-from harness.io_utils import get_project_root
-PROJECT_ROOT = get_project_root()
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from harness.agent_bridge import AgentBridge
+from harness.project import HarnessProject
 
 
 def _parse_json_arg(raw: str | None) -> Dict[str, Any]:
@@ -54,10 +51,12 @@ def _parse_json_arg(raw: str | None) -> Dict[str, Any]:
         sys.exit(1)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Antigravity <-> ML Harness Bidirectional Context & Action Bridge CLI"
     )
+    parser.add_argument("--project-root", default=None, help="Competition workspace root")
+    parser.add_argument("--task-config", default=None, help="Task spec path relative to workspace root")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # 1. context
@@ -114,8 +113,13 @@ def main() -> None:
     # 6. list
     subparsers.add_parser("list", help="List recent BridgeSessions")
 
-    args = parser.parse_args()
-    bridge = AgentBridge(PROJECT_ROOT)
+    args = parser.parse_args(argv)
+    project = HarnessProject.discover(args.project_root, args.task_config)
+    os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
+    os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
+    if str(project.root) not in sys.path:
+        sys.path.insert(0, str(project.root))
+    bridge = AgentBridge(project.root, task_spec_path=project.task_config_path)
 
     if args.command == "context":
         if args.format == "json":
@@ -180,7 +184,7 @@ def main() -> None:
         sessions = bridge.list_sessions()
         if not sessions:
             print("No BridgeSessions recorded yet.")
-            return
+            return 0
         print(f"{'Session ID':<14} | {'Status':<22} | {'Exp Used':<10} | {'Goal'}")
         print("-" * 88)
         for s in sessions:
@@ -190,6 +194,8 @@ def main() -> None:
             exp_str = f"{cu.get('experiments_used', 0)}/{max_e if max_e is not None else '∞'}"
             print(f"{s['session_id']:<14} | {s['status']:<22} | {exp_str:<10} | {s.get('goal', '')}")
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -95,7 +95,11 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
     }
 
     // Add any additional numeric top-level metrics not already covered
-    const standardKeys = new Set(['overall_composite', 'macro_f1', 'score', 'model', 'language_breakdown']);
+    const partitionColumn = taskInfo?.data_config?.partition_column;
+    const standardKeys = new Set([
+      'overall_composite', 'macro_f1', 'score', 'model', 'partition_breakdown',
+      ...(partitionColumn ? [`${partitionColumn}_breakdown`] : []),
+    ]);
     for (const [k, v] of Object.entries(metrics)) {
       if (!standardKeys.has(k) && typeof v === 'number') {
         const formattedKey = k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -119,10 +123,15 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
     return cards;
   }, [taskInfo, metrics, node.score]);
 
-  // Language breakdown from metrics or diagnostics
-  const langBreakdown = diagnostics.language_breakdown || metrics.language_breakdown || null;
+  const partitionColumn = taskInfo?.data_config?.partition_column;
+  const partitionBreakdown =
+    diagnostics.partition_breakdown ||
+    metrics.partition_breakdown ||
+    (partitionColumn
+      ? diagnostics[`${partitionColumn}_breakdown`] || metrics[`${partitionColumn}_breakdown`]
+      : null);
+  const partitionLabel = partitionColumn?.replace(/_/g, ' ') || 'Partition';
   const criticalBottlenecks = diagnostics.critical_bottlenecks || [];
-  const implicitHate = diagnostics.implicit_hate_analysis;
 
   return (
     <div className="fixed inset-y-0 right-0 w-full max-w-xl bg-slate-900 border-l border-slate-800 shadow-2xl z-50 flex flex-col transition-transform duration-300">
@@ -276,21 +285,27 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               ))}
             </div>
 
-            {/* Language Breakdown */}
-            {langBreakdown && Object.keys(langBreakdown).length > 0 && (
+            {/* Declared Task Partition Breakdown */}
+            {partitionBreakdown && Object.keys(partitionBreakdown).length > 0 && (
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
                 <h4 className="text-slate-200 font-semibold text-xs flex items-center justify-between">
-                  <span>Language Performance Breakdown</span>
+                  <span>{partitionLabel} Performance Breakdown</span>
                   <span className="text-[10px] font-mono text-slate-400">
-                    {Object.keys(langBreakdown).join(' / ')}
+                    {Object.keys(partitionBreakdown).join(' / ')}
                   </span>
                 </h4>
                 <div className="grid grid-cols-3 gap-2 pt-1 font-mono">
-                  {Object.entries(langBreakdown).map(([lang, val]: [string, any]) => (
-                    <div key={lang} className="bg-slate-900 p-2.5 rounded-lg border border-slate-800/80 text-center">
-                      <div className="text-[10px] text-slate-400 font-bold">{lang}</div>
+                  {Object.entries(partitionBreakdown).map(([partition, val]: [string, any]) => (
+                    <div key={partition} className="bg-slate-900 p-2.5 rounded-lg border border-slate-800/80 text-center">
+                      <div className="text-[10px] text-slate-400 font-bold">{partition}</div>
                       <div className="text-xs font-semibold text-indigo-300 mt-1">
-                        {val.a_accuracy !== undefined ? `Acc: ${(val.a_accuracy * 100).toFixed(1)}%` : val.macro_f1 !== undefined ? val.macro_f1.toFixed(4) : '-'}
+                        {val && typeof val === 'object'
+                          ? Object.entries(val)
+                              .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+                              .slice(0, 2)
+                              .map(([metric, score]) => `${metric}: ${score.toFixed(4)}`)
+                              .join(' · ') || '-'
+                          : typeof val === 'number' ? val.toFixed(4) : '-'}
                       </div>
                     </div>
                   ))}
@@ -305,7 +320,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                 Immutable Artifacts on Disk
               </h4>
               <p className="text-[11px] text-slate-400">
-                Located in <code className="text-slate-300">artifacts/{node.id}/</code>:
+                Located in <code className="text-slate-300">{taskInfo?.artifacts_dir || 'artifacts'}/{node.id}/</code>:
               </p>
               <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] font-mono text-slate-300">
                 <div className="flex items-center gap-1.5">
@@ -544,18 +559,6 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                     <li key={i}>{b}</li>
                   ))}
                 </ul>
-              </div>
-            )}
-
-            {implicitHate && (
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-1.5 font-sans">
-                <h4 className="text-slate-200 font-semibold text-xs">Implicit Hate Speech Miss Rate</h4>
-                <p className="text-slate-300">
-                  <strong className="text-rose-400 font-mono">
-                    {(implicitHate.miss_rate * 100).toFixed(1)}%
-                  </strong>{' '}
-                  miss rate ({implicitHate.misclassified_as_no} / {implicitHate.total_implicit} implicit hate comments misclassified as "no").
-                </p>
               </div>
             )}
 

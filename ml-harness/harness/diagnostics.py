@@ -76,31 +76,35 @@ class DiagnosticEngine:
         return results
 
     @classmethod
-    def analyze_minority_identities(
+    def analyze_minority_label_matrix(
         cls,
         df_target: pd.DataFrame,
         pred_matrix: np.ndarray,
         labels: Optional[List[str]] = None,
+        column_prefix: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Analyze support, recall, false positive, and false negative counts per rare label."""
-        # Resolve label list: explicit arg > infer from columns > TaskSpec > empty
+        """Analyze support, recall, false positives, and false negatives by label."""
+        prefix = column_prefix or "label_"
         if labels:
             target_labels = labels
-        elif any(c.startswith("identity_") for c in df_target.columns):
-            target_labels = [c.replace("identity_", "") for c in df_target.columns if c.startswith("identity_")]
+        elif any(c.startswith(prefix) for c in df_target.columns):
+            target_labels = [c[len(prefix) :] for c in df_target.columns if c.startswith(prefix)]
         else:
-            # Dynamically load from active TaskSpec if available
             try:
                 from harness.task_spec import load_active_task_spec
                 spec = load_active_task_spec()
-                target_labels = spec.metadata.get("labels", spec.metadata.get("identities", []))
+                target_labels = [
+                    label
+                    for subtask in spec.subtasks.values()
+                    for label in subtask.labels
+                ]
             except Exception:
                 target_labels = []
         return cls.analyze_minority_labels(
             df_target=df_target,
             pred_labels=pred_matrix,
             label_names=target_labels,
-            column_prefix="identity_",
+            column_prefix=prefix,
         )
 
     @classmethod
@@ -169,7 +173,7 @@ class DiagnosticEngine:
         # 3. Generic Multi-Label / Minority Label Scan
         minority_labels: Dict[str, Any] = {}
         for col in eval_df.columns:
-            if col.startswith("identity_") or col.startswith("label_") or col.startswith("tag_"):
+            if col.startswith("label_") or col.startswith("tag_"):
                 pred_col = f"pred_{col}"
                 if pred_col in merged.columns:
                     lbl_name = col.split("_", 1)[1]
@@ -197,8 +201,21 @@ class DiagnosticEngine:
                         bottlenecks.append(f"Zero recall on rare label '{lbl_name}' in '{col}'.")
 
         # 4. Generic Slice Breakdown
+        declared_slices: List[str] = []
+        try:
+            from harness.task_spec import load_active_task_spec
+
+            task_spec = load_active_task_spec()
+            data_cfg = task_spec.metadata.get("data_config") or task_spec.metadata.get("data", {})
+            declared_slices = [
+                value
+                for value in (task_spec.group_column, data_cfg.get("partition_column"))
+                if value
+            ]
+        except Exception:
+            pass
         slice_col = None
-        for cand_slice in ["group", "category", "split", "fold", "language", "segment", "cluster"]:
+        for cand_slice in [*declared_slices, "group", "category", "split", "fold", "segment", "cluster"]:
             if cand_slice in merged.columns and 1 < merged[cand_slice].nunique() <= 30:
                 slice_col = cand_slice
                 break

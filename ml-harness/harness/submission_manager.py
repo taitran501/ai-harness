@@ -40,8 +40,31 @@ class SubmissionEntry:
 class SubmissionManager:
     """Central registry and tracker for competition submissions."""
 
-    def __init__(self, submissions_dir: str = "submissions"):
+    def __init__(
+        self,
+        submissions_dir: Optional[str | Path] = None,
+        *,
+        artifacts_dir: Optional[str | Path] = None,
+        project_root: Optional[str | Path] = None,
+        task_config_path: Optional[str | Path] = None,
+    ):
+        from harness.project import HarnessProject
+
+        project = HarnessProject.discover(project_root, task_config_path)
+        self.project_root = project.root
+        self.task_config_path = project.task_config_path
+        self.artifacts_dir = Path(artifacts_dir) if artifacts_dir is not None else project.artifacts_dir
+        if not self.artifacts_dir.is_absolute():
+            self.artifacts_dir = self.project_root / self.artifacts_dir
+        if submissions_dir is None:
+            submissions_dir = (
+                self.artifacts_dir / "submissions"
+                if project.manifest
+                else self.project_root / "submissions"
+            )
         self.submissions_dir = Path(submissions_dir)
+        if not self.submissions_dir.is_absolute():
+            self.submissions_dir = self.project_root / self.submissions_dir
         self.submissions_dir.mkdir(parents=True, exist_ok=True)
         self.registry_file = self.submissions_dir / "registry.json"
         self.submissions: Dict[str, SubmissionEntry] = {}
@@ -105,7 +128,7 @@ class SubmissionManager:
         # 1. Run physical audit gate
         cmd = [
             sys.executable,
-            "tools/audit_gate.py",
+            str(Path(__file__).resolve().parent.parent / "tools" / "audit_gate.py"),
             "--candidate", str(candidate_csv),
             "--output-zip", str(target_zip),
             "--receipt", str(target_receipt),
@@ -120,7 +143,7 @@ class SubmissionManager:
             cmd.append("--ensemble-components")
             cmd.extend(ensemble_components)
 
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=self.project_root)
         if res.returncode != 0:
             shutil.rmtree(target_dir, ignore_errors=True)
             raise RuntimeError(
@@ -129,13 +152,13 @@ class SubmissionManager:
 
         # 2. Extract CV scores if summary.csv or metrics.json exists in artifacts
         local_cv: Dict[str, float] = {}
-        artifact_dir = Path("artifacts") / exp_id
+        artifact_dir = self.artifacts_dir / exp_id
         summary_csv = artifact_dir / "summary.csv"
         metrics_json = artifact_dir / "metrics.json"
 
         try:
             from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec()
+            spec = load_active_task_spec(self.task_config_path)
             primary_metric = spec.primary_metric
         except Exception:
             primary_metric = "macro_f1"
@@ -184,6 +207,111 @@ class SubmissionManager:
         self.save()
         return entry
 
+    def register_plugin_submission(
+        self,
+        *,
+        exp_id: str,
+        candidate_csv: str | Path,
+        plugin: Any,
+        plugin_context: Any,
+        file_name: str = "submission.csv",
+        notes: str = "",
+    ) -> SubmissionEntry:
+        """Build and validate a task-specific package through the selected plugin."""
+        import re
+
+        source = Path(candidate_csv).expanduser()
+        if not source.is_absolute():
+            source = self.project_root / source
+        source = source.resolve()
+        if not source.is_file():
+            raise FileNotFoundError(f"Prediction file does not exist: {source}")
+
+        normalized_file_name = str(file_name).replace("\\", "/")
+        safe_name = Path(normalized_file_name).name
+        if safe_name in ("", ".", "..") or "/" in normalized_file_name:
+            raise ValueError("Submission file_name must be a simple filename without directories.")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", safe_name):
+            raise ValueError(f"Submission file_name contains unsupported characters: {safe_name!r}")
+
+        sub_id = f"{self.get_next_submission_id()}_{exp_id}"
+        target_dir = self.submissions_dir / sub_id
+        target_dir.mkdir(parents=True, exist_ok=False)
+        target_path = target_dir / safe_name
+        receipt_path = target_dir / "PLUGIN_AUDIT_RECEIPT.json"
+
+        try:
+            import pandas as pd
+
+            predictions = pd.read_csv(source)
+            built_path = plugin.build_submission(plugin_context, predictions, target_path)
+            final_path = Path(built_path or target_path).expanduser()
+            if not final_path.is_absolute():
+                final_path = target_dir / final_path
+            final_path = final_path.resolve()
+            try:
+                final_path.relative_to(target_dir.resolve())
+            except ValueError as exc:
+                raise ValueError("Task plugin wrote its submission outside the managed submission directory.") from exc
+            if not final_path.is_file():
+                raise FileNotFoundError(f"Task plugin did not create a submission file: {final_path}")
+
+            plugin.validate_submission(plugin_context, final_path)
+
+            local_cv: Dict[str, float] = {}
+            summary_csv = self.artifacts_dir / exp_id / "summary.csv"
+            metrics_json = self.artifacts_dir / exp_id / "metrics.json"
+            if summary_csv.is_file():
+                summary = pd.read_csv(summary_csv)
+                for column in summary.select_dtypes(include=["number"]).columns:
+                    if column not in ("dev_fold", "train_rows", "dev_rows", "fold"):
+                        local_cv[column] = round(float(summary[column].mean()), 4)
+            elif metrics_json.is_file():
+                try:
+                    metrics = json.loads(metrics_json.read_text(encoding="utf-8"))
+                    first = metrics[0] if isinstance(metrics, list) and metrics else metrics
+                    if isinstance(first, dict):
+                        local_cv = {
+                            key: round(float(value), 4)
+                            for key, value in first.items()
+                            if isinstance(value, (int, float))
+                        }
+                except (OSError, ValueError, TypeError):
+                    pass
+
+            from harness.io_utils import atomic_write_json
+
+            receipt = {
+                "status": "PASS",
+                "plugin_id": getattr(plugin, "plugin_id", "unknown"),
+                "plugin_version": getattr(plugin, "version", "unknown"),
+                "source_predictions": str(source),
+                "submission_file": str(final_path),
+                "validated_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+            }
+            atomic_write_json(receipt_path, receipt, indent=2, ensure_ascii=False)
+
+            entry = SubmissionEntry(
+                id=sub_id,
+                exp_id=exp_id,
+                created_at=time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+                status="LOCAL_VERIFIED",
+                local_cv_scores=local_cv,
+                candidate_path=str(source),
+                archive_path=str(final_path),
+                receipt_path=str(receipt_path),
+                notes=notes,
+            )
+            from harness.io_utils import atomic_write_json
+
+            atomic_write_json(target_dir / "metadata.json", asdict(entry), indent=2, ensure_ascii=False)
+            self.submissions[sub_id] = entry
+            self.save()
+            return entry
+        except Exception:
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise
+
     def record_official_score(
         self,
         sub_id: str,
@@ -207,7 +335,7 @@ class SubmissionManager:
         primary_key = "score"
         try:
             from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec()
+            spec = load_active_task_spec(self.task_config_path)
             if getattr(spec, "primary_metric", None):
                 primary_key = getattr(spec.primary_metric, "name", str(spec.primary_metric))
         except Exception:
@@ -240,7 +368,7 @@ class SubmissionManager:
         opt_direction = "maximize"
         try:
             from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec()
+            spec = load_active_task_spec(self.task_config_path)
             if hasattr(spec, "primary_metric") and hasattr(spec.primary_metric, "direction"):
                 opt_direction = str(spec.primary_metric.direction).lower()
             else:
@@ -294,7 +422,7 @@ class SubmissionManager:
         """Render high-density submissions tracker table into SUBMISSIONS.md."""
         try:
             from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec()
+            spec = load_active_task_spec(self.task_config_path)
             spec_name = spec.name
             primary_metric = spec.primary_metric
         except Exception:

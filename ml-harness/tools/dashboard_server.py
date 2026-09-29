@@ -31,7 +31,12 @@ if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
 from harness.io_utils import get_project_root
+from harness.project import HarnessProject
 PROJECT_ROOT = get_project_root()
+HARNESS_PROJECT = HarnessProject.discover(PROJECT_ROOT)
+ARTIFACTS_DIR = HARNESS_PROJECT.artifacts_dir
+os.environ["HARNESS_PROJECT_ROOT"] = str(PROJECT_ROOT)
+os.environ["HARNESS_TASK_CONFIG"] = str(HARNESS_PROJECT.task_config_path)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -50,7 +55,7 @@ from harness.agent_bridge import AgentBridge
 
 
 def get_next_experiment_id(branch: str = "feat", descriptor: str = "run") -> Dict[str, Any]:
-    """Find the next consecutive experiment ID by scanning configs/ and artifacts/."""
+    """Find the next consecutive experiment ID in task configs and managed artifacts."""
     exp_numbers: List[int] = []
 
     # 1. Scan configs directory
@@ -69,7 +74,7 @@ def get_next_experiment_id(branch: str = "feat", descriptor: str = "run") -> Dic
                 pass
 
     # 2. Scan artifacts directory
-    art_dir = PROJECT_ROOT / "artifacts"
+    art_dir = ARTIFACTS_DIR
     if art_dir.exists():
         for exp_folder in art_dir.iterdir():
             if exp_folder.is_dir():
@@ -280,10 +285,10 @@ def list_available_tasks() -> List[Dict[str, Any]]:
         results.insert(0, {
             "id": active_id,
             "name": active_task.get("task_name") or active_task.get("name", "Active Task"),
-            "platform": active_task.get("platform", "codabench"),
-            "type": active_task.get("task_type") or active_task.get("type", "Multi-Task Text Classification"),
-            "modality": active_task.get("modality", "text"),
-            "primary_metric": active_task.get("primary_metric", "Macro-F1"),
+            "platform": active_task.get("platform", "custom"),
+            "type": active_task.get("task_type") or active_task.get("type", "Predictive Modeling"),
+            "modality": active_task.get("modality", "generic"),
+            "primary_metric": active_task.get("primary_metric", "Score"),
             "direction": active_task.get("direction", "maximize"),
             "file_path": "configs/task.yaml",
             "is_active": True,
@@ -384,7 +389,7 @@ def create_and_activate_task(task_spec: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_task_config() -> Dict[str, Any]:
     """Load dynamic task specification from configs/task.yaml or fall back to generic schema."""
-    task_file = PROJECT_ROOT / "configs" / "task.yaml"
+    task_file = HARNESS_PROJECT.task_config_path
     if task_file.exists():
         try:
             import yaml
@@ -397,7 +402,7 @@ def load_task_config() -> Dict[str, Any]:
 
     return {
         "id": "general",
-        "platform": "codabench",
+        "platform": "custom",
         "name": "General ML/DL Benchmark",
         "type": "Predictive Modeling",
         "modality": "generic",
@@ -411,7 +416,7 @@ def load_task_config() -> Dict[str, Any]:
 
 def save_task_config(task_data: Dict[str, Any]) -> None:
     """Save updated task specification to configs/task.yaml."""
-    task_file = PROJECT_ROOT / "configs" / "task.yaml"
+    task_file = HARNESS_PROJECT.task_config_path
     task_file.parent.mkdir(parents=True, exist_ok=True)
     content = {"task": task_data}
     with open(task_file, "w", encoding="utf-8") as f:
@@ -420,49 +425,29 @@ def save_task_config(task_data: Dict[str, Any]) -> None:
 
 TASK_PRESETS: List[Dict[str, Any]] = [
     {
-        "id": "codabench_nlp_multitask",
-        "preset_name": "Multi-Task NLP Classification Benchmark",
-        "platform": "codabench",
+        "id": "multitask_text_classification",
+        "preset_name": "Generic Multi-Task Text Classification",
+        "platform": "custom",
         "name": "Multi-Task Text Classification",
         "type": "Multi-Task Text Classification",
         "modality": "text",
         "primary_metric": "Macro-F1",
         "direction": "maximize",
-        "primary_metric_baseline": 0.6500,
-        "primary_metric_target": 0.8500,
         "metrics": [
-            {"id": "subtask_1", "name": "Primary Classification", "metric": "Macro-F1", "direction": "maximize", "baseline_score": 0.7000, "target_score": 0.8800, "weight": 0.5, "description": "Primary binary/multiclass target"},
-            {"id": "subtask_2", "name": "Fine-Grained Classification", "metric": "Macro-F1", "direction": "maximize", "baseline_score": 0.6000, "target_score": 0.8200, "weight": 0.5, "description": "Secondary multi-label/fine-grained target"},
+            {"id": "target_primary", "name": "Primary Target", "metric": "Macro-F1", "direction": "maximize", "weight": 0.5, "description": "Primary classification target"},
+            {"id": "target_secondary", "name": "Secondary Target", "metric": "Macro-F1", "direction": "maximize", "weight": 0.5, "description": "Optional fine-grained target"},
         ],
-        "languages": ["EN"],
-        "description": "Multi-task textual classification benchmark with grouped validation splits.",
+        "languages": [],
+        "description": "Generic multi-task text classification example with configurable validation.",
         "data_config": {
             "train_path": "dataset/",
             "test_path": "dataset/test/",
-            "split_strategy": "GroupKFold",
-            "group_column": "group_id",
+            "split_strategy": "KFold",
             "n_folds": 5,
             "seed": 42,
             "id_column": "id",
             "target_column": "target_1,target_2",
             "missing_data_policy": "drop_invalid_rows",
-        },
-        "competition_rules": {
-            "allow_llm": False,
-            "allow_api": False,
-            "allow_external_data": False,
-            "allow_pretrained_models": True,
-            "max_params_limit": 150000000,
-            "daily_submission_limit": 5,
-            "deadline": "2027-01-15T23:59:59Z",
-            "reproducibility_required": True,
-        },
-        "submission_spec": {
-            "file_name": "submission.zip",
-            "archive_format": "zip",
-            "min_diff_pct": 2.0,
-            "max_kappa": 0.85,
-            "min_disagreement": 5.0,
         },
     },
     {
@@ -612,10 +597,8 @@ TASK_PRESETS: List[Dict[str, Any]] = [
         "modality": "generic",
         "primary_metric": "Score",
         "direction": "maximize",
-        "primary_metric_baseline": 0.700,
-        "primary_metric_target": 0.850,
         "metrics": [
-            {"id": "primary_metric", "name": "Primary Metric", "metric": "Score", "direction": "maximize", "baseline_score": 0.700, "target_score": 0.850, "weight": 1.0, "description": "Primary benchmark objective"},
+            {"id": "primary_metric", "name": "Primary Metric", "metric": "Score", "direction": "maximize", "weight": 1.0, "description": "Primary benchmark objective"},
         ],
         "languages": [],
         "description": "Custom machine learning / deep learning experimentation task.",
@@ -665,8 +648,24 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     task_name = task.get("name", "ML/DL Task")
     task_type = task.get("type", "Machine Learning Task")
     task_modality = task.get("modality", "generic")
-    primary_metric = task.get("primary_metric", "Macro-F1")
+    primary_metric = task.get("primary_metric", "Primary Metric")
     direction = task.get("direction", "maximize")
+    artifact_rel = ARTIFACTS_DIR.relative_to(PROJECT_ROOT).as_posix()
+    data_config = task.get("data_config", {})
+    fold_count = data_config.get("n_folds") or task.get("validation", {}).get("num_folds")
+    validation_label = f"{fold_count}-fold validation" if fold_count else "the configured validation scheme"
+    custom_plugin = HARNESS_PROJECT.plugin_id not in (None, "default")
+    if custom_plugin:
+        submission_guidance = (
+            f"Use task plugin '{HARNESS_PROJECT.plugin_id}' for submission building and validation. "
+            "If either hook is missing, stop and report that the task is not submission-ready; "
+            "use test-set predictions rather than validation OOF predictions."
+        )
+    else:
+        submission_guidance = (
+            "Use the configured generic submission checks and task-declared output format; "
+            "keep validation metrics separate from external scores."
+        )
 
     # Dynamic diagnostics extraction
     diagnostics_notes = []
@@ -683,11 +682,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     if not diagnostics_notes:
         diagnostics_notes.append(f"- **Performance Frontier**: Target metric `{primary_metric}` stands at `{best_score}`. Focus on generalization on validation splits.")
 
-    graveyard_items = [
-        "- **[REFUTED] Pseudo-Ensembles**: Combining two models of the same family is blocked by Audit Gate (Cohen's Kappa > 0.85).",
-        "- **[REFUTED] Unverified Hyperparameter Tweaks**: Minor learning rate or regularization adjustments changing < 2% of predictions fail MMES.",
-        "- **[REFUTED] Unconditioned Auxiliary Noise**: Appending uncurated metadata without feature selection degrades validation performance.",
-    ]
+    graveyard_items = ["- No rejected approaches are recorded in the current experiment history."]
 
     rec_parent = rec.get("parent_id") or best_id
     rec_branch = rec.get("branch") or "feat"
@@ -738,8 +733,8 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
         tid = "codex_iterate"
 
     data_config = task.get("data_config", {})
-    split_strategy = data_config.get("split_strategy", "GroupKFold")
-    group_col = data_config.get("group_column", "video_key")
+    split_strategy = data_config.get("split_strategy", "task-declared validation")
+    group_col = data_config.get("group_column")
     train_path = data_config.get("train_path", "dataset/")
 
     if tid == "antigravity_attach":
@@ -754,24 +749,24 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             f"- **Dataset Path**: `{train_path}`",
             f"- **Validation Scheme**: `{split_strategy}` on `{group_col}` (Zero data leakage tolerated).",
             f"- **Task Specification**: Inspect `configs/task.yaml` and `harness/task_spec.py` for target columns, subtasks, and conditional if-else routing.",
-            "- **Scientific Protocol**: Strictly adhere to `AGENTS.md`. Folders inside `artifacts/` are permanent records.",
+            f"- **Scientific Protocol**: Strictly adhere to `AGENTS.md`. Completed runs under `{artifact_rel}/` are permanent records.",
             "",
             "## 2. ACTIVE TASK METRICS & CONSTRAINTS",
             f"- **Primary Metric**: `{primary_metric}` ({direction})",
-            f"- **Target Score Goal**: `{task.get('primary_metric_target', 0.85)}`",
-            f"- **Rule Invariants**: Fixed random seed (`seed: 42`), precomputed canonical splits, immutable experiments.",
+            f"- **Target Score Goal**: `{task.get('primary_metric_target', 'not configured')}`",
+            f"- **Rule Invariants**: Use the task-declared seed and split files; completed experiments are immutable.",
             "",
             "## 3. MANDATORY INITIAL SETUP SEQUENCE",
             "Follow these sequential steps to initialize the competition harness:",
-            "1. **Explore Data & Audit Splits**: Inspect `dataset/` schemas, check for label imbalances, and verify split integrity with `harness/data_strategy.py`.",
+            "1. **Explore Data & Audit Splits**: Inspect declared training inputs, check target distributions, and verify split integrity with `harness/data_strategy.py`.",
             "2. **Declare Baseline Configuration**: Create `configs/exp001_baseline_<name>.yaml` declaring the foundational control model with explicit `grounding:` and `assumption_register:` blocks.",
             "3. **Execute Smoke Test Probe**: Verify execution on Fold 0 with minimal samples:",
             "   ```powershell",
-            "   python train.py --config configs/exp001_baseline_<name>.yaml --debug --fold 0",
+            "   ml-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml --debug --fold 0",
             "   ```",
-            "4. **Run Full 5-Fold Cross-Validation**: Execute full cross-validation and verify generated artifacts (`metrics.json`, `oof_predictions.csv`, `EXPERIMENT_CARD.md`):",
+            f"4. **Run Full Validation**: Execute {validation_label} and verify generated metrics and experiment artifacts:",
             "   ```powershell",
-            "   python train.py --config configs/exp001_baseline_<name>.yaml",
+            "   ml-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml",
             "   ```",
             "5. **Register Champion Baseline**: Ensure the result is recorded in `EXPERIMENTS.md` and registered in `TreeJournal`.",
             "",
@@ -787,16 +782,16 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "> You are OpenAI Codex CLI operating in autonomous ML engineer mode. Setup the baseline and verify pipeline integrity.",
             "",
             "## 1. REPOSITORY INVARIANTS & HARD RULES",
-            "1. **Operating Contract**: Strictly obey `AGENTS.md`. Never edit `dataset/` directly. Never overwrite completed `artifacts/`.",
-            f"2. **Data Strategy**: Validation is `{split_strategy}` on `{group_col}`. Random comment-level splitting is forbidden due to group leakage.",
-            "3. **Deterministic Audit Gate**: All candidate submissions must pass `tools/audit_gate.py` with MMES >= 2.0% row delta.",
+            f"1. **Operating Contract**: Strictly obey `AGENTS.md`. Treat `{train_path}` as read-only and never overwrite completed runs under `{artifact_rel}/`.",
+            f"2. **Data Strategy**: Use the declared `{split_strategy}` validation strategy" + (f" grouped by `{group_col}`." if group_col else ". Do not invent a grouping column or split rule."),
+            f"3. **Submission Contract**: {submission_guidance}",
             "",
             "## 2. INITIALIZATION SEQUENCE (PLAN -> CODE -> SMOKE TEST -> FULL CV)",
             "1. **Inspect Repo**: Read `configs/task.yaml`, `harness/task_spec.py`, and `harness/data_strategy.py`.",
             "2. **Formulate exp001 Baseline**: Create `configs/exp001_baseline_<name>.yaml` with valid `grounding:` and `assumption_register:` blocks.",
-            "3. **Run Smoke Test**: Execute `python train.py --config configs/exp001_baseline_<name>.yaml --debug --fold 0`.",
-            "4. **Run Full Cross-Validation**: Execute `python train.py --config configs/exp001_baseline_<name>.yaml`.",
-            "5. **Verify Receipts**: Confirm `artifacts/exp001_.../metrics.json` and `EXPERIMENT_CARD.md` exist.",
+            "3. **Run Smoke Test**: Execute `ml-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml --debug --fold 0`.",
+            "4. **Run Full Cross-Validation**: Execute `ml-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml`.",
+            f"5. **Verify Receipts**: Confirm `{artifact_rel}/exp001_.../` contains the expected metrics and experiment record.",
         ]
     elif tid == "codex_iterate":
         prompt_lines = [
@@ -815,8 +810,8 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "## 2. STRICT OPERATIONAL CONSTRAINTS (HARD BOUNDARIES)",
             "1. **Reference Contract**: Read and strictly adhere to `AGENTS.md` before modifying any files.",
             "2. **Single Atomic Intervention**: Exactly ONE independent variable modified per iteration (Control vs Treatment). Never combine multiple speculative changes into a single run.",
-            "3. **No Pseudo-Ensembles**: You are strictly forbidden from ensembling models of the same family. Ensembles require distinct architectures with Cohen's Kappa <= 0.85.",
-            "4. **Physical Audit Gate**: Submissions and candidate predictions must pass `tools/audit_gate.py` with Minimum Meaningful Effect Size (MMES >= 2.0% row delta).",
+            "3. **Ensemble Policy**: Follow the ensemble constraints declared by the task and harness configuration; do not infer undocumented thresholds.",
+            f"4. **Submission Contract**: {submission_guidance}",
             "5. **Epistemic Grounding**: Physically cite verified models/papers (Hugging Face / ArXiv) in `configs/exp<NNN>.yaml`. Zero guessing from stale memory.",
             "",
             "## 3. ACTIVE BOTTLENECK & IDEA GRAVEYARD",
@@ -829,7 +824,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "## 4. EXECUTION LOOP (PLAN -> CODE -> VERIFY)",
             "1. **Plan & Declare**: Output a 3-bullet plan: (a) parent baseline, (b) single atomic intervention, (c) grounded justification.",
             "2. **Implement**: Create a new config `configs/exp<NNN>_<branch>_<descriptor>.yaml` and necessary `src/` modules.",
-            "3. **Validate**: Execute CV validation: `python train.py --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0` (smoke test first), then full CV.",
+            "3. **Validate**: Execute CV validation: `ml-harness-run --project-root . --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0` (smoke test first), then full CV.",
             "4. **Output Format**: Provide a concise summary, git diff, and resulting validation scores.",
         ]
     else:  # antigravity_iterate (default)
@@ -860,8 +855,8 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             *graveyard_items,
             "",
             "## 5. Hard Operational Protocols (Physical Circuit Breakers)",
-            "1. **Epistemic Grounding Gate (`harness/grounding_gate.py`)**: You are physically forbidden from proposing models from stale parametric memory. Every config MUST include explicit `grounding:` (citing Hugging Face Hub / ArXiv) and `assumption_register:`.",
-            "2. **Physical Audit Gate (`tools/audit_gate.py`)**: Predictions with less than 2.0% row delta (MMES) or pseudo-ensembles ($\kappa > 0.85$) are physically rejected.",
+            "1. **Epistemic Grounding**: State evidence and assumptions for each experiment; apply the grounding gate when required by the task configuration.",
+            f"2. **Submission Contract**: {submission_guidance}",
             "3. **Atomic Modification**: Exactly ONE controlled variable per experiment (Control vs Treatment).",
             "",
             "## 6. Mandatory Agent Acknowledgment Step (Alignment Gate)",
@@ -1108,7 +1103,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     )
                 elif action == "freeze":
                     comp.freeze_final_candidates(
-                        slot_1_id=data.get("slot_1_safe_cv", "baseline_v1_comment"),
+                        slot_1_id=data.get("slot_1_safe_cv", "baseline"),
                         slot_2_id=data.get("slot_2_aggressive_lb"),
                         notes=data.get("notes", ""),
                     )
@@ -1118,7 +1113,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     comp.finalize_competition(data, TreeJournal(auto_sync=True), SubmissionManager())
                 elif action == "agent-run":
                     rt = AgentRuntime(PROJECT_ROOT)
-                    goal = data.get("goal") or "Improve Subtask B and C without degrading Subtask A"
+                    goal = data.get("goal") or "Improve the declared primary metric without regressing protected metrics or constraints."
                     max_exp = int(data.get("max_experiments", 3))
                     rt.start_run(goal=goal, max_experiments=max_exp)
                 elif action == "agent-approve":
@@ -1146,21 +1141,24 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json({"error": f"Submission '{sub_id}' not found."}, status=404)
                     return
 
-                macro_a = float(official_scores["subtask_a_macro"]) if official_scores.get("subtask_a_macro") is not None else None
-                macro_b = float(official_scores["subtask_b_macro"]) if official_scores.get("subtask_b_macro") is not None else None
-                macro_c_type = float(official_scores["subtask_c_type_macro"]) if official_scores.get("subtask_c_type_macro") is not None else None
-                macro_c_id = float(official_scores["subtask_c_id_macro"]) if official_scores.get("subtask_c_id_macro") is not None else None
                 split_type = str(official_scores.get("split_type", "public"))
+                primary_metric = str(load_task_config().get("primary_metric") or "score")
+                primary_score = official_scores.get(
+                    "primary_metric",
+                    official_scores.get("score", official_scores.get(primary_metric)),
+                )
+                custom_scores = {
+                    key: value
+                    for key, value in official_scores.items()
+                    if key not in ("split_type", "primary_metric", "score", primary_metric)
+                }
 
                 mgr.record_official_score(
                     sub_id=sub_id,
-                    macro_a=macro_a,
-                    macro_b=macro_b,
-                    macro_c_type=macro_c_type,
-                    macro_c_id=macro_c_id,
+                    primary_score=primary_score,
                     split_type=split_type,
                     notes=notes,
-                    custom_scores=official_scores,
+                    custom_scores=custom_scores,
                 )
                 self.send_json({"success": True, "submission": asdict(mgr.submissions[sub_id])})
             except Exception as e:
@@ -1276,30 +1274,60 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     return
 
                 candidate_csv = data.get("candidate_csv")
-                if not candidate_csv:
-                    default_cand = PROJECT_ROOT / "artifacts" / exp_id / "oof_predictions.csv"
-                    if default_cand.exists():
-                        candidate_csv = str(default_cand)
-                    else:
-                        self.send_json({
-                            "error": f"Candidate predictions file not found at '{default_cand}'. Please provide valid candidate_csv path."
-                        }, status=400)
-                        return
-
                 baseline_csv = data.get("baseline_csv")
                 notes = data.get("notes", "")
                 min_diff_pct = float(data.get("min_diff_pct", 2.0))
                 ensemble_components = data.get("ensemble_components")
 
                 mgr = SubmissionManager()
-                entry = mgr.register_submission(
-                    exp_id=exp_id,
-                    candidate_csv=candidate_csv,
-                    baseline_csv=baseline_csv,
-                    ensemble_components=ensemble_components,
-                    notes=notes,
-                    min_diff_pct=min_diff_pct,
-                )
+                if HARNESS_PROJECT.plugin_id not in (None, "default"):
+                    if not candidate_csv:
+                        raise ValueError(
+                            "Provide test-set predictions. The dashboard will not package OOF validation predictions as a submission."
+                        )
+                    from harness.plugins import TaskPluginContext, load_task_plugin
+                    from harness.task_spec import load_active_task_spec
+
+                    task_spec = load_active_task_spec(HARNESS_PROJECT.task_config_path)
+                    plugin_context = TaskPluginContext(
+                        project_root=PROJECT_ROOT,
+                        task_config_path=HARNESS_PROJECT.task_config_path,
+                        task_spec=task_spec,
+                        plugin_id=HARNESS_PROJECT.plugin_id,
+                    )
+                    plugin = load_task_plugin(HARNESS_PROJECT.plugin_id, plugin_context)
+                    capabilities = plugin.capabilities()
+                    if not capabilities.get("submission_builder") or not capabilities.get("submission_validator"):
+                        raise ValueError(
+                            f"Task plugin '{HARNESS_PROJECT.plugin_id}' must implement submission_builder and submission_validator."
+                        )
+                    submission_spec = load_task_config().get("submission_spec", {})
+                    entry = mgr.register_plugin_submission(
+                        exp_id=exp_id,
+                        candidate_csv=candidate_csv,
+                        plugin=plugin,
+                        plugin_context=plugin_context,
+                        file_name=submission_spec.get("file_name", "submission.csv"),
+                        notes=notes,
+                    )
+                else:
+                    if not candidate_csv:
+                        default_cand = ARTIFACTS_DIR / exp_id / "oof_predictions.csv"
+                        if default_cand.exists():
+                            candidate_csv = str(default_cand)
+                        else:
+                            self.send_json({
+                                "error": f"Candidate predictions file not found at '{default_cand}'. Please provide valid candidate_csv path."
+                            }, status=400)
+                            return
+                    entry = mgr.register_submission(
+                        exp_id=exp_id,
+                        candidate_csv=candidate_csv,
+                        baseline_csv=baseline_csv,
+                        ensemble_components=ensemble_components,
+                        notes=notes,
+                        min_diff_pct=min_diff_pct,
+                    )
                 self.send_json({"success": True, "submission": asdict(entry)})
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
@@ -1445,7 +1473,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         # Attempt to load grounding receipt if present
         grounding_data = None
-        exp_dir = PROJECT_ROOT / "artifacts" / node_id
+        exp_dir = ARTIFACTS_DIR / node_id
         receipt_file = exp_dir / "GROUNDING_RECEIPT.json"
         if receipt_file.exists():
             try:
@@ -1458,7 +1486,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         config_data = None
         cand_files = [
             PROJECT_ROOT / "configs" / f"{node.id}.yaml",
-            PROJECT_ROOT / "artifacts" / node.id / "run_config.yaml",
+            ARTIFACTS_DIR / node.id / "run_config.yaml",
         ]
         configs_dir = PROJECT_ROOT / "configs"
         if configs_dir.exists():
@@ -1604,7 +1632,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     "intent": "iterate",
                     "name": "OpenAI Codex — Continue Iteration",
                     "badge": "CLI Iteration",
-                    "description": "Autonomous ML engineering loop: Single atomic changes, anti-pseudo-ensemble verification, MMES audit check, and Git diff reporting.",
+                    "description": "Autonomous ML engineering loop: Single atomic changes, task-configured validation, and Git diff reporting.",
                 },
                 # Backward-compatibility aliases
                 {
@@ -1675,6 +1703,24 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_api_task_info(self) -> None:
         task = load_task_config()
+        artifact_path = ARTIFACTS_DIR.relative_to(PROJECT_ROOT).as_posix()
+        plugin_id = HARNESS_PROJECT.plugin_id or "default"
+        plugin_info: Dict[str, Any] = {"id": plugin_id, "version": None, "capabilities": {}}
+        try:
+            from harness.plugins import TaskPluginContext, load_task_plugin
+            from harness.task_spec import load_active_task_spec
+
+            task_spec = load_active_task_spec(HARNESS_PROJECT.task_config_path)
+            context = TaskPluginContext(
+                project_root=PROJECT_ROOT,
+                task_config_path=HARNESS_PROJECT.task_config_path,
+                task_spec=task_spec,
+                plugin_id=plugin_id,
+            )
+            plugin = load_task_plugin(HARNESS_PROJECT.plugin_id, context)
+            plugin_info.update(version=plugin.version, capabilities=plugin.capabilities())
+        except Exception as exc:
+            plugin_info["error"] = str(exc)
         self.send_json({
             "platform": task.get("platform", "codabench"),
             "task_name": task.get("task_name") or task.get("name", "General ML/DL Benchmark"),
@@ -1694,6 +1740,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "data_config": task.get("data_config", {}),
             "competition_rules": task.get("competition_rules", {}),
             "submission_spec": task.get("submission_spec", {}),
+            "artifacts_dir": artifact_path,
+            "task_plugin": plugin_info,
         })
 
     def handle_api_configs(self) -> None:
@@ -1731,7 +1779,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         elif exp_id:
             for cand in [
                 PROJECT_ROOT / "configs" / f"{exp_id}.yaml",
-                PROJECT_ROOT / "artifacts" / exp_id / "run_config.yaml",
+                ARTIFACTS_DIR / exp_id / "run_config.yaml",
             ]:
                 if cand.exists():
                     target_file = cand
@@ -1828,7 +1876,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "task": {
                 "name": task_cfg.get("name", "Competition Task"),
                 "type": task_cfg.get("type", "Standard Classification"),
-                "primary_metric": task_cfg.get("primary_metric", "Macro-F1"),
+                "primary_metric": task_cfg.get("primary_metric", "Score"),
                 "direction": task_cfg.get("direction", "maximize"),
                 "approach_type": approach_type,
                 "model_family": model_family,
@@ -1916,8 +1964,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         })
 
     def handle_api_cloud_generate(self, data: Dict[str, Any]) -> None:
+        if HARNESS_PROJECT.plugin_id not in (None, "default"):
+            self.send_json(
+                {"error": f"Remote execution is disabled for task plugin '{HARNESS_PROJECT.plugin_id}' until its adapter is installed in the remote runtime."},
+                status=400,
+            )
+            return
         backend = data.get("backend") or data.get("platform") or "modal"
-        config_path = data.get("config_path", "configs/exp001_tfidf_baseline.yaml")
+        config_path = data.get("config_path")
+        if not config_path:
+            self.send_json({"error": "config_path is required."}, status=400)
+            return
         gpu = data.get("gpu", "A10G" if backend == "modal" else "T4 x 2")
         task_slug = KaggleKernelManager._get_task_slug()
         default_dataset_slug = f"antigravity/{task_slug}-dataset"
@@ -1967,11 +2024,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     "dataset_cmd": f"kaggle datasets init -p dataset/\nkaggle datasets create -p dataset/ -r zip --public",
                     "push_cmd": f"kaggle kernels push -p tmp/kaggle/{exp_id}  # Or: python harness/cloud_runner.py --backend kaggle --config {config_path}",
                     "status_cmd": f"kaggle kernels status {meta_json.get('id', 'antigravity/' + exp_id)}",
-                    "output_cmd": f"kaggle kernels output {meta_json.get('id', 'antigravity/' + exp_id)} -p artifacts/{exp_id}/",
+                    "output_cmd": f"kaggle kernels output {meta_json.get('id', 'antigravity/' + exp_id)} -p {ARTIFACTS_DIR / exp_id}",
                 }
             })
 
     def handle_api_cloud_push_dataset(self, data: Dict[str, Any]) -> None:
+        if HARNESS_PROJECT.plugin_id not in (None, "default"):
+            self.send_json(
+                {"error": f"Dataset upload is disabled for task plugin '{HARNESS_PROJECT.plugin_id}' until its adapter is installed in the remote runtime."},
+                status=400,
+            )
+            return
         platform = (data.get("platform") or data.get("backend") or "kaggle").lower()
         dataset_slug = data.get("dataset_slug")
         task_slug = KaggleKernelManager._get_task_slug()
@@ -2001,7 +2064,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             res = KaggleKernelManager.pull_kernel_output(exp_id=exp_id, kernel_slug=kernel_slug)
         else:
             # For Modal or Local, inspect local artifacts/<exp_id>/ directory
-            exp_dir = PROJECT_ROOT / "artifacts" / exp_id
+            exp_dir = ARTIFACTS_DIR / exp_id
             found_files = []
             metrics_data = None
             if exp_dir.exists():
@@ -2018,7 +2081,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "artifacts_dir": str(exp_dir),
                 "migrated_files": found_files,
                 "metrics": metrics_data,
-                "raw_output": f"Verified {len(found_files)} artifact files in artifacts/{exp_id}/",
+                "raw_output": f"Verified {len(found_files)} artifact files in {exp_dir}/",
             }
 
         # Automatically sync Solution Tree DAG if outputs were pulled
@@ -2090,6 +2153,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
     def handle_api_cloud_run(self, data: Dict[str, Any]) -> None:
         backend = data.get("backend", "modal")
+        if HARNESS_PROJECT.plugin_id not in (None, "default") and backend != "local":
+            self.send_json(
+                {"error": f"Remote execution is disabled for task plugin '{HARNESS_PROJECT.plugin_id}' until its adapter is installed in the remote runtime."},
+                status=400,
+            )
+            return
         config_path = data.get("config_path")
         if not config_path:
             self.send_json({"error": "config_path is required."}, status=400)
@@ -2158,7 +2227,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         exp_id = data.get("exp_id")
         candidate_csv = data.get("candidate_csv")
         if not candidate_csv and exp_id:
-            candidate_csv = str(PROJECT_ROOT / "artifacts" / exp_id / "oof_predictions.csv")
+            candidate_csv = str(ARTIFACTS_DIR / exp_id / "oof_predictions.csv")
 
         if not candidate_csv or not Path(candidate_csv).exists():
             self.send_json({"error": f"Candidate predictions not found: '{candidate_csv}'"}, status=400)
@@ -2167,8 +2236,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         baseline_csv = data.get("baseline_csv")
         if not baseline_csv:
             best = TreeJournal().get_best_node()
-            if best and (PROJECT_ROOT / "artifacts" / best.id / "oof_predictions.csv").exists():
-                baseline_csv = str(PROJECT_ROOT / "artifacts" / best.id / "oof_predictions.csv")
+            if best and (ARTIFACTS_DIR / best.id / "oof_predictions.csv").exists():
+                baseline_csv = str(ARTIFACTS_DIR / best.id / "oof_predictions.csv")
 
         cmd = [sys.executable, str(PROJECT_ROOT / "tools" / "audit_gate.py"), "--candidate", candidate_csv]
         if baseline_csv and Path(baseline_csv).exists():
@@ -2296,7 +2365,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         try:
             model_name = data.get("model_name", "Qwen/Qwen2.5-7B-Instruct")
             train_path = data.get("train_path", "dataset/train.csv")
-            output_dir = data.get("output_dir", "artifacts/exp_qlora")
+            output_dir = data.get("output_dir", str(ARTIFACTS_DIR / "exp_qlora"))
             text_column = data.get("text_column", "text")
             target_column = data.get("target_column", "target")
             lora_r = int(data.get("lora_r", 16))
@@ -2433,7 +2502,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         try:
             model_name = data.get("model_name", "unsloth/Qwen2.5-7B-Instruct-bnb-4bit")
             train_path = data.get("train_path", "dataset/train.csv")
-            output_dir = data.get("output_dir", "artifacts/exp_unsloth_lora")
+            output_dir = data.get("output_dir", str(ARTIFACTS_DIR / "exp_unsloth_lora"))
             text_column = data.get("text_column", "text")
             target_column = data.get("target_column", "target")
             max_seq_length = int(data.get("max_seq_length", 2048))

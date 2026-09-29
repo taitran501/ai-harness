@@ -36,6 +36,17 @@ artifacts/agent_sessions/
 artifacts/cand_*/
 artifacts/base/
 
+# Local task state does not belong to the installable runtime distribution
+/.agents/
+/artifacts/
+/.ml-harness/
+/build/
+/ml_harness.egg-info/
+/task_plugins/*/build/
+/task_plugins/*.egg-info/
+/task_plugins/*/*.egg-info/
+/splits/fold_assignments.tsv
+
 # Agent-generated experiment configs (all except the template)
 configs/exp[0-9][0-9][0-9]_*.yaml
 

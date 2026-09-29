@@ -241,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={handleSync}
           disabled={syncing}
           className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white p-1.5 sm:px-2.5 sm:py-1 rounded-md border border-zinc-800 text-xs font-medium transition"
-          title="Scan artifacts/ directory for new runs"
+          title="Scan experiment artifacts for new runs"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-zinc-400' : 'text-zinc-400'}`} />
           <span className="hidden sm:inline">{syncMessage || 'Sync'}</span>

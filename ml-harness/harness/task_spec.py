@@ -7,7 +7,10 @@ relationships (if-else routing, oracle masks) between prediction targets.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import ntpath
 from pathlib import Path
+import shutil
+import stat
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
@@ -82,7 +85,7 @@ class SubtaskSpec:
     name: str
     task_type: str  # 'binary_classification', 'multiclass_classification', 'multilabel_classification', 'regression'
     column: Optional[str] = None
-    column_prefix: Optional[str] = None  # For multi-label (e.g., 'identity_')
+    column_prefix: Optional[str] = None  # Column prefix for multi-label targets (e.g., 'label_')
     classes: List[str] = field(default_factory=list)
     labels: List[str] = field(default_factory=list)  # For multi-label
     primary_metric: str = "macro_f1"
@@ -143,6 +146,111 @@ class ValidationSpec:
         )
 
 
+def load_dataframe_file(path: Path | str) -> pd.DataFrame:
+    """Load arbitrary tabular data format (csv, tsv, parquet, feather, jsonl, sqlite)."""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"File not found: {p}")
+    suffix = p.suffix.lower()
+    if suffix in (".tsv", ".tab"):
+        return pd.read_csv(p, sep="\t")
+    elif suffix == ".csv":
+        return pd.read_csv(p)
+    elif suffix in (".parquet", ".pq"):
+        return pd.read_parquet(p)
+    elif suffix == ".feather":
+        return pd.read_feather(p)
+    elif suffix in (".jsonl", ".ndjson"):
+        return pd.read_json(p, lines=True)
+    elif suffix == ".json":
+        try:
+            return pd.read_json(p)
+        except Exception:
+            return pd.read_json(p, lines=True)
+    elif suffix in (".db", ".sqlite", ".sqlite3"):
+        import sqlite3
+        conn = sqlite3.connect(p)
+        tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
+        if len(tables) > 0:
+            tbl_name = tables.iloc[0, 0]
+            df = pd.read_sql_query(f"SELECT * FROM {tbl_name}", conn)
+            conn.close()
+            return df
+        conn.close()
+    return pd.read_csv(p)
+
+
+def extract_archives_in_directory(dir_path: Path | str) -> List[Path]:
+    """Scan and unpack any archive files (.zip, .tar.gz, .tgz, .tar) found in a directory."""
+    d = Path(dir_path)
+    if not d.is_dir():
+        return []
+    extracted = []
+    import tarfile
+    import zipfile
+
+    def destination_for(target: Path, member_name: str) -> Path:
+        normalized = member_name.replace("\\", "/")
+        drive, _ = ntpath.splitdrive(normalized)
+        member_path = Path(normalized)
+        if drive or member_path.is_absolute() or any(part == ".." for part in normalized.split("/")):
+            raise ValueError(f"Unsafe archive member path: {member_name!r}")
+        destination = (target / Path(*[part for part in normalized.split("/") if part not in ("", ".")])).resolve()
+        try:
+            destination.relative_to(target.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Archive member escapes extraction directory: {member_name!r}") from exc
+        return destination
+
+    def extract_zip(archive: Path, target: Path) -> None:
+        with zipfile.ZipFile(archive, "r") as zf:
+            for item in zf.infolist():
+                destination = destination_for(target, item.filename)
+                mode = item.external_attr >> 16
+                file_type = stat.S_IFMT(mode)
+                if stat.S_ISLNK(mode) or file_type not in (0, stat.S_IFREG, stat.S_IFDIR):
+                    raise ValueError(f"Unsupported archive entry type: {item.filename!r}")
+                if item.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(item, "r") as source, destination.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+
+    def extract_tar(archive: Path, target: Path) -> None:
+        with tarfile.open(archive, "r:*") as tf:
+            for item in tf.getmembers():
+                destination = destination_for(target, item.name)
+                if item.isdir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    continue
+                if not item.isfile():
+                    raise ValueError(f"Unsupported archive entry type: {item.name!r}")
+                source = tf.extractfile(item)
+                if source is None:
+                    raise ValueError(f"Could not read archive entry: {item.name!r}")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with source, destination.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+
+    for f in list(d.iterdir()):
+        if f.is_file():
+            if f.suffix.lower() == ".zip":
+                target_out = d / f.stem
+                if not target_out.exists():
+                    target_out.mkdir(parents=True, exist_ok=True)
+                    extract_zip(f, target_out)
+                    extracted.append(target_out)
+            elif f.name.lower().endswith((".tar.gz", ".tgz", ".tar")):
+                stem = f.name.split(".")[0]
+                target_out = d / stem
+                if not target_out.exists():
+                    target_out.mkdir(parents=True, exist_ok=True)
+                    extract_tar(f, target_out)
+                    extracted.append(target_out)
+    return extracted
+
+
 @dataclass
 class UniversalTaskSpec:
     """Complete specification of a competition/experiment task."""
@@ -170,7 +278,8 @@ class UniversalTaskSpec:
     @property
     def group_column(self) -> Optional[str]:
         """Group column for leakage prevention."""
-        return self.metadata.get("group_column")
+        data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
+        return data_cfg.get("group_column") or self.metadata.get("group_column")
 
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> UniversalTaskSpec:
@@ -416,14 +525,17 @@ class UniversalTaskSpec:
         project_root: Path | str = ".",
     ) -> pd.DataFrame:
         """Load tabular/text dataset for a given split in a completely task-agnostic manner."""
+        root = Path(project_root)
+        data_dir = root / "dataset"
+        if data_dir.is_dir():
+            extract_archives_in_directory(data_dir)
+
         # 0. If 'split' is an absolute/valid file path, load directly
         split_path = Path(split)
         if split_path.is_absolute() or split_path.exists():
             if split_path.is_file():
-                sep = "\t" if split_path.suffix.lower() in (".tsv", ".tab") else ","
-                return pd.read_csv(split_path, sep=sep)
+                return load_dataframe_file(split_path)
 
-        root = Path(project_root)
         # Support both 'data_config' and 'data' keys (universal task.yaml convention)
         data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
 
@@ -434,58 +546,81 @@ class UniversalTaskSpec:
             if not p.is_absolute():
                 p = root / custom_path
             if p.is_file() and p.exists():
-                sep = "\t" if p.suffix.lower() in (".tsv", ".tab") else ","
-                return pd.read_csv(p, sep=sep)
+                return load_dataframe_file(p)
             elif p.is_dir() and p.exists():
-                files = sorted(list(p.glob("*.tsv")) + list(p.glob("*.csv")))
+                extract_archives_in_directory(p)
+                exts = ("*.tsv", "*.csv", "*.parquet", "*.pq", "*.feather", "*.jsonl", "*.json")
+                files = []
+                for ext in exts:
+                    files.extend(p.glob(ext))
+                files = sorted(files)
                 if files:
-                    sep = "\t" if files[0].suffix.lower() in (".tsv", ".tab") else ","
-                    return pd.concat([pd.read_csv(f, sep=sep) for f in files], ignore_index=True)
+                    return pd.concat([load_dataframe_file(f) for f in files], ignore_index=True)
 
         # 2. Standard convention search
-        candidates = [
-            f"{split}.csv", f"{split}.tsv",
-            f"dataset/{split}.csv", f"dataset/{split}.tsv",
-            f"dataset/{split}_data.csv", f"dataset/{split}_data.tsv",
-        ]
+        extensions = [".csv", ".tsv", ".parquet", ".pq", ".feather", ".jsonl", ".json"]
+        candidates = []
+        for ext in extensions:
+            candidates.extend([
+                f"{split}{ext}",
+                f"dataset/{split}{ext}",
+                f"dataset/{split}_data{ext}",
+            ])
+
         if split == "train":
             candidates.extend(["dataset/train/", "dataset/"])
         elif split in ("dev", "val", "validation"):
-            candidates.extend(["val.csv", "val.tsv", "dev.csv", "dev.tsv", "dataset/val.csv", "dataset/dev.csv", "dataset/val/", "dataset/dev/"])
+            for ext in extensions:
+                candidates.extend([f"val{ext}", f"dev{ext}", f"dataset/val{ext}", f"dataset/dev{ext}"])
+            candidates.extend(["dataset/val/", "dataset/dev/"])
         elif split == "test":
-            candidates.extend(["test.csv", "test.tsv", "dataset/test.csv", "dataset/test/", "dataset/test_data.csv"])
+            for ext in extensions:
+                candidates.extend([f"test{ext}", f"dataset/test{ext}", f"dataset/test_data{ext}"])
+            candidates.extend(["dataset/test/"])
 
         for cand in candidates:
             cand_p = root / cand
             if cand_p.is_file() and cand_p.exists():
-                sep = "\t" if cand_p.suffix.lower() in (".tsv", ".tab") else ","
-                return pd.read_csv(cand_p, sep=sep)
+                return load_dataframe_file(cand_p)
             elif cand_p.is_dir() and cand_p.exists():
-                files = sorted(list(cand_p.glob("*.tsv")) + list(cand_p.glob("*.csv")))
+                extract_archives_in_directory(cand_p)
+                exts = ("*.tsv", "*.csv", "*.parquet", "*.pq", "*.feather", "*.jsonl", "*.json")
+                files = []
+                for ext in exts:
+                    files.extend(cand_p.glob(ext))
                 if split == "train":
                     files = [f for f in files if "test" not in f.name.lower() and "val" not in f.name.lower() and "dev" not in f.name.lower()]
                 if files:
-                    sep = "\t" if files[0].suffix.lower() in (".tsv", ".tab") else ","
-                    return pd.concat([pd.read_csv(f, sep=sep) for f in files], ignore_index=True)
+                    return pd.concat([load_dataframe_file(f) for f in sorted(files)], ignore_index=True)
 
         raise FileNotFoundError(f"Could not locate dataset for split '{split}' in '{root}'.")
 
 
-_ACTIVE_TASK_SPEC: Optional[UniversalTaskSpec] = None
+_ACTIVE_TASK_SPECS: Dict[Path, UniversalTaskSpec] = {}
 
 
-def load_active_task_spec(config_path: Path | str = "configs/task.yaml") -> UniversalTaskSpec:
-    """Safely load and cache the active task specification."""
-    global _ACTIVE_TASK_SPEC
-    p = Path(config_path)
-    if p.exists():
-        try:
-            _ACTIVE_TASK_SPEC = UniversalTaskSpec.from_yaml(p)
-            return _ACTIVE_TASK_SPEC
-        except Exception:
-            pass
-    if _ACTIVE_TASK_SPEC is not None:
-        return _ACTIVE_TASK_SPEC
+def load_active_task_spec(
+    config_path: Optional[Path | str] = None,
+    *,
+    force_reload: bool = False,
+) -> UniversalTaskSpec:
+    """Load the task spec for the selected workspace without cross-project cache reuse."""
+    from harness.project import HarnessProject, resolve_project_root
+
+    if config_path is None:
+        p = HarnessProject.discover().task_config_path
+    else:
+        p = Path(config_path).expanduser()
+        if not p.is_absolute():
+            p = resolve_project_root() / p
+        p = p.resolve()
+    if p.is_file():
+        cached = _ACTIVE_TASK_SPECS.get(p)
+        if cached is not None and not force_reload:
+            return cached
+        spec = UniversalTaskSpec.from_yaml(p)
+        _ACTIVE_TASK_SPECS[p] = spec
+        return spec
     return UniversalTaskSpec(
         name="universal_task",
         task_type="classification",

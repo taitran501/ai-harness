@@ -51,7 +51,7 @@ class StoppingPolicy:
 
     max_consecutive_rejections: int = 3
     min_meaningful_improvement: float = 0.002
-    target_score_goal: float = 0.85
+    target_score_goal: Optional[float] = None
     stop_on_submission_quota_exhausted: bool = True
     stop_on_freeze_state: bool = True
     pause_on_user_approval_required: bool = True

@@ -46,7 +46,7 @@ Harness Runtime (Layer 3 - harness/)
 3. **Fast Probes Before Full Runs**:
    - Run a single fold or debug probe (`--debug --fold 0`) first to verify code syntax and loss convergence before committing full multi-fold or cloud GPU resources.
 4. **Reproducibility**:
-   - Use fixed random seeds (`seed: 42`). Never overwrite existing artifacts in `artifacts/`.
+   - Use the seed declared by the task config. Never overwrite completed experiment artifacts under the attached project's configured artifact directory.
 
 ---
 
@@ -63,33 +63,36 @@ The harness is task-agnostic. Competition-specific schemas and metrics are defin
 - **Built-in Presets (`configs/tasks/`)**:
   - `configs/tasks/kaggle_tabular_regression.yaml`
   - `configs/tasks/kaggle_binary_classification.yaml`
-  - `configs/tasks/stereoqueereval.yaml` (Multi-Task NLP Reference)
+  - Competition-specific presets are distributed by their task plugins.
 
 ---
 
 ## 4. Standard Workflow via Agent Bridge
 
 ```powershell
+# 0. Attach the installed harness to this competition workspace
+ml-harness attach --project-root . --task-config configs/task.yaml --plugin <installed-plugin-id>
+
 # 1. Inspect current status and recommendations
-python tools/agent_bridge_cli.py context
+ml-harness-agent --project-root . context
 
 # 2. Start a work session with a specific goal
-python tools/agent_bridge_cli.py start-session --goal "Improve primary validation metric" --max-experiments 3
+ml-harness-agent --project-root . start-session --goal "Improve primary validation metric" --max-experiments 3
 
 # 3. Create a verified experiment configuration
-python tools/agent_bridge_cli.py act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_pipeline_v1"}'
+ml-harness-agent --project-root . act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_pipeline_v1"}'
 
 # 4. Run a fast smoke test (Fold 0 or debug probe)
-python tools/agent_bridge_cli.py act --action run_smoke_test --params '{"config_path": "configs/<exp_config>.yaml"}'
+ml-harness-agent --project-root . act --action run_smoke_test --params '{"config_path": "configs/<exp_config>.yaml"}'
 
 # 5. Run full validation (local, modal, or kaggle)
-python tools/agent_bridge_cli.py act --action run_full_validation --params '{"config_path": "configs/<exp_config>.yaml", "backend": "local"}'
+ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path": "configs/<exp_config>.yaml", "backend": "local"}'
 
 # 6. Promote successful experiment to the candidate pool
-python tools/agent_bridge_cli.py act --action promote_candidate --params '{"exp_id": "<exp_id>", "name": "candidate_v1"}'
+ml-harness-agent --project-root . act --action promote_candidate --params '{"exp_id": "<exp_id>", "name": "candidate_v1"}'
 
 # 7. Package and audit a submission (requires human approval)
-python tools/agent_bridge_cli.py act --action prepare_submission --user-approved --params '{"exp_id": "<id>", "candidate_csv": "<cand_csv>", "baseline_csv": "<base_csv>"}'
+ml-harness-agent --project-root . act --action prepare_submission --user-approved --params '{"exp_id": "<id>", "candidate_csv": "<test_predictions.csv>"}'
 ```
 
 ---
@@ -98,11 +101,12 @@ python tools/agent_bridge_cli.py act --action prepare_submission --user-approved
 
 | Purpose | Command | Notes |
 |---|---|---|
-| View Assistant Context | `python tools/agent_bridge_cli.py context` | Read-only status overview |
-| Execute Typed Action | `python tools/agent_bridge_cli.py act --action <name> --params '{...}'` | Runs supported harness actions |
-| UCB Branch Recommendation | `python tools/journal_tool.py --recommend` | Suggests next exploration branch |
-| Solution Tree Summary | `python tools/journal_tool.py --summary` | Lists all experiments in DAG |
-| Fast Smoke Test | `python train.py --config configs/<config>.yaml --debug --fold 0` | Fast convergence check |
-| Full Validation | `python train.py --config configs/<config>.yaml` | Runs all configured folds |
-| Pre-Submission Audit | `python tools/audit_gate.py --candidate <cand.csv> --baseline <base.csv> --output-zip submission.zip` | Enforces non-duplicate checks |
+| Autonomous Task Onboarding | `ml-harness-bootstrap --project-root . --dataset dataset --context docs/TASK.md` | Auto-extracts data, builds `task.yaml`, generates splits & updates skill |
+| View Assistant Context | `ml-harness-agent --project-root . context` | Read-only status overview |
+| Execute Typed Action | `ml-harness-agent --project-root . act --action <name> --params '{...}'` | Runs supported harness actions |
+| Dashboard | `ml-harness-dashboard --project-root .` | Opens the installed dashboard for this attached task |
+| Solution Tree & UCB | `ml-harness-agent --project-root . context` | Includes the current tree and branch recommendation |
+| Fast Smoke Test | `ml-harness-run --project-root . --config configs/<config>.yaml --debug --fold 0` | Fast convergence check |
+| Full Validation | `ml-harness-run --project-root . --config configs/<config>.yaml` | Runs all configured folds |
+| Pre-Submission Audit | `ml-harness-agent --project-root . act --action prepare_submission --user-approved --params '{...}'` | Requires task plugin submission hooks and test-set predictions |
 | Run Test Suite | `python -m unittest discover -s tests -p "test_*.py"` | Runs full test suite |

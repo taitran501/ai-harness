@@ -73,7 +73,7 @@ class ThresholdOptimizer:
         true_col: str,
         prob_col: str,
     ) -> Dict[Any, float]:
-        """Optimize thresholds separately per group (e.g., per language)."""
+        """Optimize thresholds separately for each declared group or cohort."""
         group_thresholds = {}
         for group_val, group_sub in df.groupby(group_col):
             y_t = group_sub[true_col].to_numpy()

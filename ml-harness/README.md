@@ -5,7 +5,6 @@ A modular experimentation harness and dashboard for competitive machine learning
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Dashboard](https://img.shields.io/badge/Dashboard-React%20%2B%20Vite-purple.svg)](dashboard/)
-[![Tests](https://img.shields.io/badge/Tests-145%20passing-brightgreen.svg)](tests/)
 
 ---
 
@@ -13,7 +12,30 @@ A modular experimentation harness and dashboard for competitive machine learning
 
 **ML-Harness** is a Python framework designed to streamline running, tracking, and evaluating machine learning experiments. It works for standard data science workflows whether you run models locally, dispatch heavy training jobs to cloud GPUs (Modal or Kaggle), or collaborate with AI coding assistants (such as Antigravity or Codex).
 
-The harness is **task-agnostic**. The core runtime (cross-validation, experiment lineage tracking, ensembling checks, submission verification, and web UI) is decoupled from any specific competition. You can adapt it to a new tabular, text, vision, or multi-task problem by editing a single configuration file (`configs/task.yaml`).
+The harness is **task-agnostic**. Its core runtime provides experiment tracking, validation orchestration, agent sessions, and generic guardrails. Competition-specific data loading, model factories, metrics, and official submission contracts live in separately installed task adapters.
+
+## Install into a competition workspace
+
+Install the core runtime and only the adapter needed by the task, then attach it to that workspace:
+
+```powershell
+python -m pip install .
+python -m pip install -e .\task_plugins\stereoqueereval
+ml-harness plugins
+ml-harness attach --project-root C:\path\to\competition --task-config configs/task.yaml --plugin stereoqueereval
+ml-harness-agent --project-root C:\path\to\competition context
+```
+
+For a fresh environment, install directly from this repository's package subdirectories:
+
+```powershell
+python -m pip install "ml-harness @ git+https://github.com/taitran501/ml-harness.git#subdirectory=ml-harness"
+python -m pip install "ml-harness-stereoqueereval @ git+https://github.com/taitran501/ml-harness.git#subdirectory=ml-harness/task_plugins/stereoqueereval"
+```
+
+`ml-harness attach` writes `.ml-harness/project.yaml` and an agent skill under `.agents/skills/ml-harness/`. The task config stays owned by the competition workspace. Session state and experiment artifacts are namespaced under `.ml-harness/artifacts/<task-id>/`.
+
+See [Plugin architecture and lifecycle](docs/plugin_architecture.md) for the entry-point API, attach flow, and capability rules. The StereoQueerEval adapter is maintained in [`task_plugins/stereoqueereval`](task_plugins/stereoqueereval/README.md); its local data and metric code is not imported unless that adapter is installed and selected.
 
 ---
 
@@ -31,17 +53,17 @@ The harness is **task-agnostic**. The core runtime (cross-validation, experiment
 - **Debug Probes**: Low-cost, sampled-row smoke tests (`--debug --fold 0`) to verify syntax, pipeline wiring, and convergence before launching long runs.
 
 ### 3. Experiment Tracking & Solution Tree
-- **Lineage DAG**: Experiments are tracked in `artifacts/journal.json` with parent-child relationships, hypotheses, and evaluation metrics.
+- **Lineage DAG**: Experiments are tracked with parent-child relationships, hypotheses, and evaluation metrics. Attached projects keep this state in `.ml-harness/artifacts/<task-id>/`.
 - **Upper Confidence Bound (UCB) Search**: Recommends next steps by balancing exploitation of the current best model with exploration of under-tested model families.
 - **Human-Readable Logs**: Summaries and notes are maintained in `EXPERIMENTS.md` (tracking best models and an idea graveyard of approaches that did not pan out).
 
 ### 4. Verification & Guardrails
 - **Epistemic Grounding**: Optional metadata verification ensuring configurations specify their rationale, reference sources, and assumptions before running.
-- **Ensemble Diversity Guard**: Rejects pseudo-ensembles by enforcing prediction divergence thresholds (Cohen's Kappa $\kappa \le 0.85$ and minimum disagreement $\ge 5.0\%$) between models before blending.
-- **Pre-Submission Audit**: Validates submission files against baselines (checking for duplicate predictions, minimum effect size $\ge 2.0\%$, and format errors) before packaging `submission.zip` or `submission.csv`.
+- **Ensemble Diversity Guard**: Checks candidate diversity against thresholds declared by the active task or plugin.
+- **Pre-Submission Audit**: Uses the selected task plugin's submission builder and validator; the generic audit applies only to declarative tasks.
 
 ### 5. Multi-Backend Execution
-- **Local**: Run directly on your development machine (`python train.py`).
+- **Local**: Run directly on your development machine (`ml-harness-run`).
 - **Modal.com**: Serverless GPU execution with persistent volume caching and GPU selection (A10G, A100, H100, T4, L4).
 - **Kaggle API / CLI**: Automated script packaging, kernel push, remote execution monitoring, and artifact download.
 
@@ -51,199 +73,78 @@ A local web UI built with React, Vite, and Tailwind CSS provides:
 - **Leaderboard**: Compare validation scores, parameters, and training logs across models.
 - **Execution Runner**: Configure and trigger runs directly from the browser.
 - **LLM Studio**: Test prompts against sample data, search Hugging Face Hub models, and generate Unsloth training scripts.
-- **Task Configurator**: Switch between task presets (e.g., Kaggle house prices regression, binary classification, Codabench multi-task NLP) or edit task definitions interactively.
+- **Task Configurator**: Edit a task definition while keeping task-specific adapters independently installable.
 - **Submissions Hub**: Track generated submission files and audit receipts.
 
 ---
 
-## Directory Structure
+## Package layout
 
 ```text
 ml-harness/
-├── configs/                    # Declarative configuration files
-│   ├── base.yaml               # Default runtime and path settings
-│   ├── task.yaml               # Active competition/benchmark definition
-│   ├── tasks/                  # Task presets (Kaggle tabular, NLP, etc.)
-│   ├── exp000_template.yaml    # Starter experiment template
-│   └── exp001_tfidf_baseline.yaml # Baseline configuration
-├── dashboard/                  # React + Vite frontend source code
-├── docs/                       # Technical documentation
-│   ├── architecture.md         # System design, Solution Tree DAG, and verification gates
-│   ├── knowledge_base.md       # Modeling reference catalog (backbones, tabular, loss functions)
-│   ├── agent_workflow.md       # AI assistant conventions and Agent Bridge integration
-│   └── prompts/                # Assistant prompt templates
-│       └── onboarding.md       # Master competition onboarding prompt
-├── harness/                    # Core Python library
-│   ├── runner.py               # Universal experiment execution engine
-│   ├── task_spec.py            # Task definition parsing and metric evaluation
-│   ├── agent_bridge.py         # Session management and assistant bridge
-│   ├── tree_journal.py         # Solution tree and UCB recommendation
-│   ├── diagnostics.py          # Error slice analysis and confusion matrices
-│   ├── ensemble_guard.py       # Candidate diversity validation
-│   ├── grounding_gate.py       # Configuration and assumption checks
-│   ├── submission_manager.py   # Submission registration and tracking
-│   └── cloud_runner.py         # Modal and Kaggle execution dispatch
-├── submissions/                # Packaged submissions and audit records
-├── tests/                      # Unit and integration test suite
-├── tools/                      # CLI utilities and dashboard server
-│   ├── dashboard_server.py     # Local dashboard HTTP API server
-│   ├── agent_bridge_cli.py     # CLI for assistant session management
-│   ├── journal_tool.py         # CLI for inspecting solution tree & UCB suggestions
-│   ├── audit_gate.py           # Pre-submission verification tool
-│   ├── submission_tool.py      # Submission packaging CLI
-│   └── web/                    # Built static dashboard assets served by Python
-├── train.py                    # Main CLI entrypoint for running experiments
-├── AGENTS.md                   # Assistant operating guidelines and command reference
-├── EXPERIMENTS.md              # Experiment log and idea graveyard
-├── requirements.txt            # Python dependencies
-└── README.md
+├── harness/                    # Task-neutral runtime, runner, and plugin API
+├── tools/                      # Agent Bridge, dashboard, audit, and bootstrap CLIs
+├── dashboard/                  # Dashboard source; packaged static assets are in tools/web/
+├── configs/tasks/              # Generic example task presets
+└── task_plugins/               # Separately installable competition adapters
+    └── stereoqueereval/        # Optional adapter for the SemEval task
 ```
 
----
+Task-owned configs, datasets, split assignments, generated skills, run history, and submissions stay in the attached competition workspace. The harness writes its attachment manifest and managed state under `.ml-harness/` there. The Python wheel contains the runtime and dashboard assets, not competition data or run artifacts.
 
-## Getting Started
+## Install and attach to a task
 
-### 1. Installation
+From this checkout, install the core package and only the task adapter you need:
 
-```bash
-# Clone the repository
-git clone https://github.com/taitran501/ml-harness.git
-cd ml-harness
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# (Optional) If modifying the React dashboard frontend:
-cd dashboard && pnpm install && pnpm build && cd ..
+```powershell
+cd C:\path\to\semeval_2027\ml-harness
+python -m pip install .
+python -m pip install .\task_plugins\stereoqueereval
+ml-harness plugins
+ml-harness attach --project-root C:\path\to\competition --task-config configs/task.yaml --plugin stereoqueereval
 ```
 
-### 2. Competition Onboarding (Agent vs. Manual)
+Or install the packages directly from this repository's feature branch:
 
-To onboard a competition into ML-Harness, the AI coding assistant needs **at least one** of two inputs:
-1. **A Dataset**: Local archive (`.zip`, `.tar`), folder of TSV/CSVs, or download URL.
-2. **A Task Context**: Competition name, problem link (Kaggle/Codabench), paper, or guidelines.
-
-The assistant autonomously resolves the missing half:
-- *If only Dataset is provided:* The agent inspects schemas and web-searches its origin to discover the competition, official metric, and rules.
-- *If only Task Context is provided:* The agent researches the problem and locates/downloads the dataset.
-- *If both are provided:* The agent cross-verifies alignment before configuring the harness.
-
-#### Option A: Agent-Driven (The Master Prompt)
-
-Open the workspace in your assistant (Antigravity IDE, Claude Code, OpenAI Codex) and paste the comprehensive onboarding prompt:
-
-> *"You are an expert competitive ML engineer setting up this project using the ML-Harness framework.  
-> **Task Context**: [Insert competition name/URL, or 'None provided']  
-> **Dataset**: [Insert path to archive/folder, or 'None provided']  
-> Resolve the missing piece, explore data hygiene, configure `configs/task.yaml`, run `python tools/inject_skill.py`, design a leak-free validation split, run a smoke test (`--debug --fold 0`), and establish the baseline."*
-
-👉 **Read the full, in-depth prompt and scenario walkthroughs in [`docs/prompts/onboarding.md`](docs/prompts/onboarding.md).**
-
-#### Option B: Manual Setup (3 Terminal Commands)
-If setting up manually without an assistant:
-```bash
-# 1. Extract your dataset into your preferred location (e.g., dataset/ or data/)
-tar -xf dataset/competition_data.zip -C dataset/
-
-# 2. Select a preset or customize configs/task.yaml
-cp configs/tasks/kaggle_tabular_regression.yaml configs/task.yaml
-# (Or kaggle_binary_classification.yaml, stereoqueereval.yaml, etc.)
-
-# 3. Inject competition skill into .agents/skills/
-python tools/inject_skill.py
-
-# 4. Run a fast smoke test (single fold debug probe)
-python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0
+```powershell
+python -m pip install "ml-harness @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin#subdirectory=ml-harness"
+python -m pip install "ml-harness-stereoqueereval @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin#subdirectory=ml-harness/task_plugins/stereoqueereval"
 ```
 
----
+The task workspace must own the task specification named by `--task-config`. Attach records the chosen plugin and config in `.ml-harness/project.yaml`, then creates `.agents/skills/ml-harness/SKILL.md` so a local coding agent can follow the task contract. Use `--force` only when intentionally replacing an existing attachment.
 
-### 3. Task Configuration Reference (`configs/task.yaml`)
+## Work with an agent
 
-A minimal `configs/task.yaml` looks like this:
-
-```yaml
-task:
-  name: "MyCompetition"
-  platform: "kaggle"
-  task_type: "classification"
-  primary_metric: "macro_f1"
-  direction: "maximize"
-
-data:
-  train_path: "dataset/train.csv"
-  id_column: "id"
-  target_column: "target"
-
-validation:
-  strategy: "kfold"
-  n_folds: 5
-  seed: 42
-  probe_samples: 50
+```powershell
+ml-harness-agent --project-root C:\path\to\competition context
+ml-harness-agent --project-root C:\path\to\competition start-session --goal "Improve the declared validation metric" --max-experiments 3
+ml-harness-agent --project-root C:\path\to\competition act --action inspect_data_readiness
 ```
 
-### 3. Launch the Web Dashboard
+The bridge returns task/plugin capabilities and enforces typed action budgets and approval gates. For a local experiment, use a config inside the task workspace:
 
-```bash
-python tools/dashboard_server.py --port 8080
-```
-Open **[http://localhost:8080](http://localhost:8080)** in your browser. You can inspect your solution tree, edit task parameters, generate new configs, or test prompts in the LLM Studio.
-
-### 4. Run an Experiment
-
-Use `train.py` to run models. Use `--debug --fold 0` for a fast smoke test:
-
-```bash
-# Fast smoke test on fold 0 with sample probe
-python train.py --config configs/exp001_tfidf_baseline.yaml --debug --fold 0 --force
-
-# Full validation run across all folds
-python train.py --config configs/exp001_tfidf_baseline.yaml --force
+```powershell
+ml-harness-run --project-root C:\path\to\competition --config configs/exp001.yaml --debug --fold 0
+ml-harness-dashboard --project-root C:\path\to\competition
 ```
 
-### 5. Inspect the Solution Tree
+All experiment output from an attached task is routed under `.ml-harness/artifacts/<task-id>/`, even if an experiment config contains an older `artifacts/` path. The task's dataset and declared split/config paths remain in that workspace.
 
-```bash
-# View current experiment tree summary
-python tools/journal_tool.py --summary
+## Task plugin contract
 
-# Ask for the next recommended branch using UCB
-python tools/journal_tool.py --recommend
+A task adapter is a separate Python distribution registered under the `ml_harness.task_plugins` entry-point group. It can provide data loading and validation, a model factory, prediction normalization, task metrics, and official submission build/validation hooks. See [Plugin architecture and lifecycle](docs/plugin_architecture.md) and the [task specification template](docs/TASK_SPEC_TEMPLATE.md).
+
+The optional StereoQueerEval adapter loads the selected workspace's `src.data`, `src.models`, and `src.metrics` only when installed and selected. It supports local training-data loading, grouped validation, model creation, and task metrics. Its official submission hooks are unavailable until the organizers publish the required format and scorer contract, so the harness blocks package creation for that adapter. Remote runs with third-party plugins also remain disabled until that adapter is installed in the remote runtime.
+
+## Develop the dashboard
+
+```powershell
+cd dashboard
+pnpm install
+pnpm run build
 ```
 
-### 6. Verify and Package a Submission
-
-Before submitting to a competition platform, check your predictions with `audit_gate.py`:
-
-```bash
-# Compare candidate predictions against your baseline
-python tools/audit_gate.py \
-  --candidate artifacts/exp002_my_model/oof_predictions.csv \
-  --baseline artifacts/exp001_tfidf_baseline/oof_predictions.csv \
-  --output-zip submissions/sub002.zip
-```
-
-If the checks pass (non-duplicate predictions, formatting verified), the script packages your submission and saves an `AUDIT_RECEIPT.json`.
-
-### 7. Run Tests
-
-```bash
-python -m unittest discover -s tests -p "test_*.py"
-```
-
----
-
-## Working with AI Assistants
-
-If you use an AI coding assistant (such as Antigravity, OpenAI Codex, or Claude Code), the assistant can interact with ML-Harness using the CLI tools:
-
-- **Context Overview**: `python tools/agent_bridge_cli.py context` returns a structured summary of the current task, top models, recommended branches, and recent bottlenecks.
-- **Session Tracking**: `python tools/agent_bridge_cli.py start-session --goal "Improve F1 score" --max-experiments 3` tracks progress and resource usage.
-- **Typed Actions**: The assistant can invoke actions like `create_experiment`, `run_smoke_test`, `run_full_validation`, or `promote_candidate` through `agent_bridge_cli.py act`.
-
-Detailed guidelines and action contracts are documented in [AGENTS.md](AGENTS.md).
-
----
+The built dashboard is served from `tools/web/` by the installed runtime. For release builds, copy the generated `dashboard/dist/` files into `tools/web/` before building the Python wheel.
 
 ## License
 

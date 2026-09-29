@@ -2,8 +2,8 @@
 
 Enforces physical code assertions instead of relying on LLM self-policing:
 1. Model parameter ceiling assertion.
-2. Grouped Cross-Validation split leakage check (video title/id intersection).
-3. Subtask C conditioning assertions (oracle_hate).
+    2. Grouped Cross-Validation split leakage check.
+    3. Task-declared conditional target integrity.
 """
 
 from __future__ import annotations
@@ -60,14 +60,6 @@ class ExperimentValidator:
                 group_column = spec.group_column
             except Exception:
                 group_column = None
-            if not group_column or group_column not in train_df.columns:
-                group_candidates = ["group", "group_id", "cluster_id", "session_id", "video_key"] + [
-                    c for c in train_df.columns if "title" in c.lower() or "group" in c.lower()
-                ]
-                for candidate in group_candidates:
-                    if candidate in train_df.columns and candidate in val_df.columns:
-                        group_column = candidate
-                        break
 
         if not group_column or group_column not in train_df.columns or group_column not in val_df.columns:
             return  # Column not available in this view
@@ -83,16 +75,6 @@ class ExperimentValidator:
                 f"train and validation splits! Sample leaked: {leaked_sample}. "
                 f"Pipelines MUST strictly use valid grouped split assignments without cross-fold leakage."
             )
-
-    @classmethod
-    def assert_no_video_data_leakage(
-        cls,
-        train_df: pd.DataFrame,
-        val_df: pd.DataFrame,
-        group_column: Optional[str] = None,
-    ) -> None:
-        """Backward-compatible alias for assert_no_group_data_leakage."""
-        return cls.assert_no_group_data_leakage(train_df, val_df, group_column=group_column)
 
     @classmethod
     def assert_conditional_integrity(
@@ -138,23 +120,3 @@ class ExperimentValidator:
                                 f"[CONDITIONAL CONSTRAINT VIOLATION] Found {len(invalid)} rows where '{child_col}' "
                                 f"violates conditional dependency on '{parent_col}'! Expected '{cond.fallback_value}'."
                             )
-
-    @classmethod
-    def assert_subtask_c_oracle_conditioning(cls, df: pd.DataFrame, spec: Optional[Any] = None) -> None:
-        """Backward-compatible alias for task conditional assertions."""
-        if spec is None:
-            from harness.task_spec import load_active_task_spec
-            active = load_active_task_spec()
-            if any(st.condition is not None for st in getattr(active, "subtasks", {}).values()):
-                spec = active
-            elif "hate_speech" in df.columns and "target_type" in df.columns:
-                invalid = df[(df["hate_speech"] == "no") & (df["target_type"] != "none")]
-                if len(invalid) > 0:
-                    raise AssertionError(
-                        f"[CONDITIONAL CONSTRAINT VIOLATION] Found {len(invalid)} rows where 'target_type' "
-                        f"violates conditional dependency on 'hate_speech'! Expected 'none'."
-                    )
-                return
-            else:
-                spec = active
-        cls.assert_task_conditional_integrity(df, spec=spec)

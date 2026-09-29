@@ -23,7 +23,10 @@ from typing import Any, Dict, Generator, List, Optional
 
 HARNESS_DIR = Path(__file__).resolve().parent.parent
 from harness.io_utils import get_project_root
+from harness.project import HarnessProject
 PROJECT_ROOT = get_project_root()
+HARNESS_PROJECT = HarnessProject.discover(PROJECT_ROOT)
+ARTIFACTS_DIR = HARNESS_PROJECT.artifacts_dir
 if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 if str(PROJECT_ROOT) not in sys.path:
@@ -86,7 +89,7 @@ class CloudJobManager:
             return
         self._jobs: Dict[str, CloudJob] = {}
         self._processes: Dict[str, subprocess.Popen] = {}
-        self._jobs_dir = PROJECT_ROOT / "tmp" / "jobs"
+        self._jobs_dir = HARNESS_PROJECT.manifest_path.parent / "jobs"
         self._jobs_dir.mkdir(parents=True, exist_ok=True)
         self._initialized = True
 
@@ -101,6 +104,14 @@ class CloudJobManager:
         extra_args: Optional[List[str]] = None,
     ) -> CloudJob:
         """Launch an asynchronous execution job."""
+        is_custom_plugin = HARNESS_PROJECT.plugin_id not in (None, "default")
+        if is_custom_plugin and backend != "local":
+            raise ValueError(
+                f"Remote execution is disabled for task plugin '{HARNESS_PROJECT.plugin_id}' until its adapter is installed in the remote runtime."
+            )
+        if is_custom_plugin and not config_path.lower().endswith((".yaml", ".yml")):
+            raise ValueError("Task-plugin experiments must use a YAML config through the ML-Harness runner.")
+
         # Resolve experiment ID from config
         import yaml
         full_cfg_path = PROJECT_ROOT / config_path
@@ -119,7 +130,7 @@ class CloudJobManager:
             best = journal.get_best_node()
             if best:
                 for candidate_name in ("predictions.csv", "oof_predictions.csv"):
-                    candidate_file = PROJECT_ROOT / "artifacts" / best.id / candidate_name
+                    candidate_file = ARTIFACTS_DIR / best.id / candidate_name
                     if candidate_file.exists():
                         baseline_csv = str(candidate_file)
                         break
@@ -136,7 +147,7 @@ class CloudJobManager:
             status="PENDING",
             started_at=time.time(),
             log_file=str(log_file.relative_to(PROJECT_ROOT)).replace("\\", "/"),
-            auto_audit=auto_audit,
+            auto_audit=auto_audit and not is_custom_plugin,
             auto_sync=auto_sync,
             baseline_csv=baseline_csv,
         )
@@ -150,7 +161,7 @@ class CloudJobManager:
                 "--backend",
                 backend,
                 "--config",
-                config_path,
+                str(full_cfg_path),
             ])
             if backend == "modal" and gpu:
                 cmd.extend(["--gpu", gpu])
@@ -160,9 +171,12 @@ class CloudJobManager:
                 cmd.append(str(script_path))
             else:
                 cmd.extend([
-                    str(_find_script("train.py")),
+                    "-m",
+                    "harness.runner",
+                    "--project-root",
+                    str(PROJECT_ROOT),
                     "--config",
-                    config_path,
+                    str(full_cfg_path),
                 ])
         else:
             raise ValueError(f"Unsupported execution backend: {backend}")
@@ -180,12 +194,19 @@ class CloudJobManager:
 
         # Launch process with stdout/stderr appended to log file
         log_handle = open(log_file, "a", encoding="utf-8", buffering=1)
+        child_env = os.environ.copy()
+        child_env["HARNESS_PROJECT_ROOT"] = str(PROJECT_ROOT)
+        child_env["HARNESS_TASK_CONFIG"] = str(HARNESS_PROJECT.task_config_path)
+        child_env["PYTHONPATH"] = os.pathsep.join(
+            p for p in (str(HARNESS_DIR), child_env.get("PYTHONPATH", "")) if p
+        )
         proc = subprocess.Popen(
             cmd,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             cwd=str(PROJECT_ROOT),
             text=True,
+            env=child_env,
         )
         job.pid = proc.pid
         job.status = "RUNNING"
@@ -237,7 +258,7 @@ class CloudJobManager:
 
     def _handle_post_run(self, job: CloudJob) -> None:
         """Run deterministic audit gate and solution tree synchronization."""
-        exp_dir = PROJECT_ROOT / "artifacts" / job.exp_id
+        exp_dir = ARTIFACTS_DIR / job.exp_id
         candidate_csv = exp_dir / "predictions.csv"
         if not candidate_csv.exists():
             candidate_csv = exp_dir / "oof_predictions.csv"
@@ -258,6 +279,10 @@ class CloudJobManager:
                         str(_find_script("tools/audit_gate.py")),
                         "--candidate",
                         str(candidate_csv),
+                        "--output-zip",
+                        str(exp_dir / "candidate-audit.zip"),
+                        "--receipt",
+                        str(exp_dir / "AUDIT_RECEIPT.json"),
                     ]
                     if job.baseline_csv and Path(job.baseline_csv).exists():
                         audit_cmd.extend(["--baseline", job.baseline_csv])
@@ -276,15 +301,11 @@ class CloudJobManager:
                     job.audit_passed = (audit_proc.returncode == 0)
 
                     # Check for receipt
-                    receipt_path = PROJECT_ROOT / "AUDIT_RECEIPT.json"
                     exp_receipt = exp_dir / "AUDIT_RECEIPT.json"
-                    if receipt_path.exists():
+                    if exp_receipt.exists():
                         try:
-                            with open(receipt_path, "r", encoding="utf-8") as rf:
+                            with open(exp_receipt, "r", encoding="utf-8") as rf:
                                 job.audit_receipt = json.load(rf)
-                            # Copy receipt into experiment folder
-                            import shutil
-                            shutil.copy2(receipt_path, exp_receipt)
                         except Exception:
                             pass
 
@@ -295,13 +316,18 @@ class CloudJobManager:
                 except Exception as audit_err:
                     f.write(f"⚠️ Audit Gate error: {audit_err}\n")
                     job.audit_passed = False
+            elif HARNESS_PROJECT.plugin_id not in (None, "default"):
+                f.write(
+                    f"ℹ️ Generic submission audit skipped for task plugin '{HARNESS_PROJECT.plugin_id}'. "
+                    "Use the task plugin's declared submission validator with test-set predictions.\n"
+                )
 
             # Solution tree synchronization
             if job.auto_sync:
                 f.write("🌳 Synchronizing Artifacts with Solution Tree DAG...\n")
                 try:
                     journal = TreeJournal()
-                    synced = journal.sync_from_artifacts()
+                    synced = journal.sync_from_artifacts(ARTIFACTS_DIR)
                     f.write(f"✅ Solution Tree updated: {synced} new node(s) synced.\n")
                 except Exception as sync_err:
                     f.write(f"⚠️ Solution tree sync failed: {sync_err}\n")

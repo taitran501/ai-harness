@@ -40,7 +40,6 @@ class DataAuditConfig:
     check_label_distribution: bool = True
     check_group_leakage: bool = True
     check_conditional_labels: bool = True
-    check_subtask_c_conditioning: bool = True  # Backward-compatible alias
     check_text_length_outliers: bool = True
     check_missing_nulls: bool = True
 
@@ -62,10 +61,17 @@ class AgentContextConfig:
 class CompetitionStateMachine:
     """Task-agnostic 8-Phase Competition Journey Engine driven by CompetitionSpec."""
 
-    def __init__(self, project_root: Path | str = "."):
-        self.project_root = Path(project_root).resolve()
-        self.artifacts_dir = self.project_root / "artifacts"
-        self.submissions_dir = self.project_root / "submissions"
+    def __init__(
+        self,
+        project_root: Path | str = ".",
+        task_config_path: Optional[Path | str] = None,
+    ):
+        from harness.project import HarnessProject
+
+        self.project = HarnessProject.discover(project_root, task_config_path)
+        self.project_root = self.project.root
+        self.artifacts_dir = self.project.artifacts_dir
+        self.submissions_dir = self.artifacts_dir / "submissions"
         self.state_file = self.artifacts_dir / "competition_state.json"
         self.data_report_file = self.artifacts_dir / "DATA_READINESS_REPORT.json"
         self.freeze_lock_file = self.submissions_dir / "FROZEN_FINAL_LOCK.json"
@@ -79,7 +85,7 @@ class CompetitionStateMachine:
 
     def load_competition_spec(self) -> Dict[str, Any]:
         """Load the declarative Competition Spec from configs/task.yaml."""
-        spec_path = self.project_root / "configs" / "task.yaml"
+        spec_path = self.project.task_config_path
         if spec_path.exists():
             try:
                 raw = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
@@ -189,7 +195,7 @@ class CompetitionStateMachine:
             "mode": "EXPLORE",  # EXPLORE | OPTIMIZE | FROZEN | FINALIZED
             "manual_phase_override": None,
             "gates": {
-                "spec_confirmed": True,
+                "spec_confirmed": False,
                 "data_risks_confirmed": False,
                 "baseline_locked": False,
                 "baseline_exp_id": self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline",
@@ -233,13 +239,6 @@ class CompetitionStateMachine:
     def _load_or_init_state(self) -> Dict[str, Any]:
         default = self._default_state()
         if not self.state_file.exists():
-            default_base_id = self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
-            for base_candidate in [default_base_id, "baseline", "exp001_baseline", "baseline_v1"]:
-                if (self.artifacts_dir / base_candidate / "metrics.json").exists():
-                    default["gates"]["data_risks_confirmed"] = True
-                    default["gates"]["baseline_locked"] = True
-                    default["gates"]["baseline_exp_id"] = base_candidate
-                    break
             self._save_raw(default)
             return default
         try:
@@ -285,7 +284,14 @@ class CompetitionStateMachine:
             self.state["data_audit_config"].update(custom_config)
             self.save()
 
-        cfg = DataAuditConfig(**self.state["data_audit_config"])
+        cfg_values = self.state.get("data_audit_config", {})
+        cfg = DataAuditConfig(
+            **{
+                key: value
+                for key, value in cfg_values.items()
+                if key in DataAuditConfig.__dataclass_fields__
+            }
+        )
         declared_checks = self.spec.get("data_checks", [])
         data_cfg = self.spec.get("data_config", {})
         group_col = data_cfg.get("group_column") or "group"
@@ -318,7 +324,7 @@ class CompetitionStateMachine:
             merged = None
             try:
                 from harness.task_spec import load_active_task_spec
-                spec = load_active_task_spec()
+                spec = load_active_task_spec(self.project.task_config_path)
                 merged = spec.load_dataset_split("train", project_root=self.project_root)
             except Exception:
                 pass
@@ -352,11 +358,18 @@ class CompetitionStateMachine:
                 except Exception:
                     pass
 
-            lang_counts = merged["language"].value_counts().to_dict() if "language" in merged.columns else {}
+            data_cfg = self.spec.get("data_config") or self.spec.get("data", {})
+            partition_col = data_cfg.get("partition_column") or self.spec.get("partition_column")
+            partition_counts = (
+                merged[partition_col].value_counts().to_dict()
+                if partition_col and partition_col in merged.columns
+                else {}
+            )
             fold_counts = merged["fold"].value_counts().sort_index().to_dict() if "fold" in merged.columns else {}
             report["dataset_overview"] = {
                 "total_rows": int(len(merged)),
-                "partitions": {str(k): int(v) for k, v in lang_counts.items()},
+                "partition_column": partition_col,
+                "partitions": {str(k): int(v) for k, v in partition_counts.items()},
                 "folds": {str(k): int(v) for k, v in fold_counts.items()},
                 "unique_groups": int(merged[group_col].nunique()) if group_col in merged.columns else 0,
                 "group_column": group_col,
@@ -397,11 +410,11 @@ class CompetitionStateMachine:
                                     "id": chk_id,
                                     "severity": "critical",
                                     "title": f"Phát hiện {leaked} nhóm `{g_key}` bị rò rỉ giữa Train và Validation!",
-                                    "detail": "Cần chia lại tập dữ liệu bằng GroupKFold trước khi huấn luyện.",
+                                    "detail": "Rebuild the validation folds using the task's declared group-aware split strategy before training.",
                                 }
                             )
 
-                elif chk_type == "conditional_label" and (cfg.check_conditional_labels or cfg.check_subtask_c_conditioning):
+                elif chk_type == "conditional_label" and cfg.check_conditional_labels:
                     if_col = chk.get("if_column")
                     if_val = chk.get("if_equals")
                     req_col = chk.get("require_column")
@@ -427,7 +440,7 @@ class CompetitionStateMachine:
                 elif chk_type == "label_sparsity" and cfg.check_label_distribution:
                     f_col = chk.get("filter_column")
                     f_neq = chk.get("filter_not_equals")
-                    prefix = chk.get("prefix", "identity_")
+                    prefix = chk.get("prefix", "label_")
                     thresh = float(chk.get("min_pct_threshold", 5.0))
                     sub_df = merged[merged[f_col] != f_neq] if (f_col and f_col in merged.columns) else merged
                     pref_cols = [c for c in sub_df.columns if c.startswith(prefix)]
@@ -444,8 +457,7 @@ class CompetitionStateMachine:
                                     "severity": "critical",
                                     "title": f"{chk.get('title', 'Label Sparsity Alert')}: {len(rare)}/{len(pref_cols)} nhãn xuất hiện < {thresh}%",
                                     "detail": (
-                                        f"Các nhãn hiếm {rare} có tần suất dưới {thresh}%, dễ khiến hàm loss mặc định bị sập điểm Macro-F1. "
-                                        f"Đề xuất: Áp dụng Class-Balanced / Focal Loss hoặc tối ưu ngưỡng (Threshold Tuning)."
+                                        f"Rare labels {rare} occur below {thresh}%. Check whether the task's official metric is sensitive to this sparsity and choose an intervention supported by the task contract."
                                     ),
                                 }
                             )
@@ -499,6 +511,16 @@ class CompetitionStateMachine:
 
         candidates_list: List[Dict[str, Any]] = []
         criteria = self.spec.get("evaluation_criteria", {})
+        if not criteria:
+            declared_subtasks = self.spec.get("subtasks", [])
+            if isinstance(declared_subtasks, dict):
+                criteria = declared_subtasks
+            elif isinstance(declared_subtasks, list):
+                criteria = {
+                    item.get("id"): item
+                    for item in declared_subtasks
+                    if isinstance(item, dict) and item.get("id")
+                }
 
         for n in completed:
             score = n.get_score()
@@ -510,14 +532,23 @@ class CompetitionStateMachine:
                 if isinstance(n.metrics.get(crit_key), (int, float)):
                     val = float(n.metrics[crit_key])
                 elif isinstance(n.metrics.get(crit_key), dict):
-                    val = float(n.metrics[crit_key].get("macro_f1") or n.metrics[crit_key].get("score") or n.metrics[crit_key].get("type_macro_f1", 0.0))
+                    metric_key = (
+                        str(crit_meta.get("metric_key") or crit_meta.get("primary_metric") or "score")
+                        if isinstance(crit_meta, dict)
+                        else "score"
+                    )
+                    metric_value = n.metrics[crit_key].get(metric_key)
+                    if metric_value is None:
+                        metric_value = next(
+                            (
+                                n.metrics[crit_key][key]
+                                for key in ("score", "macro_f1", "f1", "accuracy")
+                                if key in n.metrics[crit_key]
+                            ),
+                            0.0,
+                        )
+                    val = float(metric_value or 0.0)
                 subtasks_scores[crit_key] = round(val, 4)
-
-            # Backward-compatibility for subtask_a, subtask_b, subtask_c
-            sub_a = subtasks_scores.get("subtask_a") or (n.metrics.get("subtask_a", {}).get("macro_f1", 0.0) if isinstance(n.metrics.get("subtask_a"), dict) else 0.0)
-            sub_b = subtasks_scores.get("subtask_b") or (n.metrics.get("subtask_b", {}).get("macro_f1", 0.0) if isinstance(n.metrics.get("subtask_b"), dict) else 0.0)
-            sub_c_type = subtasks_scores.get("subtask_c_type") or (n.metrics.get("subtask_c", {}).get("type_macro_f1", 0.0) if isinstance(n.metrics.get("subtask_c"), dict) else 0.0)
-            sub_c_id = subtasks_scores.get("subtask_c_identity") or (n.metrics.get("subtask_c", {}).get("id_macro_f1", 0.0) if isinstance(n.metrics.get("subtask_c"), dict) else 0.0)
 
             fold_std = 0.015
             exp_dir = (self.project_root / n.artifact_dir).resolve() if n.artifact_dir else (self.artifacts_dir / n.id).resolve()
@@ -543,10 +574,6 @@ class CompetitionStateMachine:
                 "composite_score": round(score, 4),
                 "delta_vs_baseline": delta,
                 "subtasks": subtasks_scores,
-                "subtask_a": round(float(sub_a), 4),
-                "subtask_b": round(float(sub_b), 4),
-                "subtask_c_type": round(float(sub_c_type), 4),
-                "subtask_c_id": round(float(sub_c_id), 4),
                 "fold_std": fold_std,
                 "has_oof": oof_csv.exists(),
                 "oof_path": str(oof_csv.relative_to(self.project_root)).replace("\\", "/") if oof_csv.exists() else None,
@@ -563,11 +590,6 @@ class CompetitionStateMachine:
             matching = [c for c in candidates_list if crit_key in c.get("subtasks", {})]
             if matching:
                 specialists[crit_key] = max(matching, key=lambda x: x["subtasks"][crit_key])
-        if not specialists and candidates_list:
-            for k in ["subtask_a", "subtask_b", "subtask_c_type", "subtask_c_id"]:
-                if k in candidates_list[0]:
-                    specialists[k] = max(candidates_list, key=lambda x: x.get(k, 0.0))
-
         stable_candidates = sorted(
             [c for c in candidates_list if c["verdict"] == "KEEP"],
             key=lambda x: (x["fold_std"], -x["composite_score"]),
@@ -707,7 +729,14 @@ class CompetitionStateMachine:
             first_df = next(iter(loaded_dfs.values()))
             id_col = _get_id_col(first_df)
 
-            meta_cols = [c for c in [id_col, "language", "group", "fold"] if c in first_df.columns]
+            data_cfg = self.spec.get("data_config") or self.spec.get("data", {})
+            meta_candidates = [
+                id_col,
+                data_cfg.get("group_column"),
+                data_cfg.get("partition_column") or self.spec.get("partition_column"),
+                "fold",
+            ]
+            meta_cols = list(dict.fromkeys(c for c in meta_candidates if c and c in first_df.columns))
             merged = first_df[meta_cols].copy()
             merged["input_variant"] = "specialist_router"
 
@@ -723,7 +752,7 @@ class CompetitionStateMachine:
             # Apply conditional rules declared in UniversalTaskSpec or CompetitionSpec
             try:
                 from harness.task_spec import load_active_task_spec
-                task_spec = load_active_task_spec()
+                task_spec = load_active_task_spec(self.project.task_config_path)
                 raw_preds = {c.replace("pred_", ""): merged[c].values for c in merged.columns if c.startswith("pred_")}
                 routed_preds = task_spec.apply_routing(raw_preds, n_samples=len(merged))
                 for k, v in routed_preds.items():
@@ -757,13 +786,24 @@ class CompetitionStateMachine:
 
             pred_cols = [c for c in dfs[0].columns if c.startswith("pred_")]
             if not pred_cols:
-                pred_cols = [c for c in dfs[0].columns if c not in [id_col, "fold", "language", "input_variant"]]
+                pred_cols = [c for c in dfs[0].columns if c not in {*meta_cols, "input_variant"}]
 
             audit_col = next((c for c in pred_cols if "pred_" in c), pred_cols[0])
+            submission_spec = self.spec.get("submission_spec") or {}
             passed, errs, div_details = EnsembleGuard.audit_constituent_diversity(
-                dfs, col=audit_col, max_kappa=0.85, min_disagreement_pct=5.0
+                dfs,
+                col=audit_col,
+                max_kappa=float(submission_spec.get("max_kappa", 0.85)),
+                min_disagreement_pct=float(submission_spec.get("min_disagreement", 5.0)),
             )
-            meta_cols = [c for c in [id_col, "language", "fold"] if c in dfs[0].columns]
+            data_cfg = self.spec.get("data_config") or self.spec.get("data", {})
+            meta_candidates = [
+                id_col,
+                data_cfg.get("group_column"),
+                data_cfg.get("partition_column") or self.spec.get("partition_column"),
+                "fold",
+            ]
+            meta_cols = list(dict.fromkeys(c for c in meta_candidates if c and c in dfs[0].columns))
             merged = dfs[0][meta_cols].copy()
 
             if mode in ("weighted_blend", "probability_blend"):
@@ -912,17 +952,18 @@ class CompetitionStateMachine:
 
         steps_log: List[Dict[str, str]] = []
 
-        if action_id == "CONFIRM_DATA_RISKS":
-            steps_log.append({"step": "Running declarative data checks from Competition Spec", "status": "completed"})
-            self.run_data_readiness_audit()
-            steps_log.append({"step": "Verifying group split isolation & conditional label rules", "status": "completed"})
-            self.state["gates"]["data_risks_confirmed"] = True
-            steps_log.append({"step": "Data readiness verified — advancing to Baseline phase", "status": "completed"})
+        if action_id == "CONFIRM_TASK_SPEC":
+            steps_log.append({"step": "Task config and adapter capabilities are ready for review", "status": "completed"})
+            steps_log.append({"step": "Waiting for explicit user approval to confirm the task contract", "status": "pending_approval"})
+
+        elif action_id == "CONFIRM_DATA_RISKS":
+            report = self.run_data_readiness_audit()
+            steps_log.append({"step": "Ran declarative data checks from the task specification", "status": "completed"})
+            steps_log.append({"step": "Waiting for explicit user approval to confirm the reviewed data risks", "status": "pending_approval"})
 
         elif action_id == "LOCK_BASELINE_ANCHOR":
             steps_log.append({"step": "Inspecting initial baseline validation metrics across folds", "status": "completed"})
             steps_log.append({"step": "Verifying reproducibility seed & commit hash", "status": "completed"})
-            self.state["gates"]["data_risks_confirmed"] = True
             self.state["gates"]["baseline_locked"] = True
             steps_log.append({"step": "Official Baseline Anchor established — unlocking parallel iteration tracks", "status": "completed"})
 
@@ -1126,6 +1167,8 @@ class CompetitionStateMachine:
                 p_state = "upcoming"
 
             gate_locked = False
+            if idx == 2 and not gates.get("spec_confirmed"):
+                gate_locked = True
             if idx == 3 and not gates.get("data_risks_confirmed"):
                 gate_locked = True
             if idx in (4, 5, 6) and not gates.get("baseline_locked"):
@@ -1143,6 +1186,17 @@ class CompetitionStateMachine:
         # 3. ACTION-ORIENTED BLOCKERS (No developer jargon like 'Gate 2->3')
         blockers: List[Dict[str, Any]] = []
         warn_count = len(data_report.get("warnings", []))
+        if not gates.get("spec_confirmed"):
+            blockers.append(
+                {
+                    "code": "TASK_SPEC_REVIEW_REQUIRED",
+                    "title": "Task contract review required",
+                    "severity": "critical",
+                    "phase": 1,
+                    "action_label": "Review task contract",
+                    "message": "Confirm the selected task config and plugin before relying on their metrics and constraints.",
+                }
+            )
         if not gates.get("data_risks_confirmed"):
             blockers.append(
                 {
@@ -1200,7 +1254,20 @@ class CompetitionStateMachine:
             )
 
         # 4. NEXT RECOMMENDED ACTION + AGENT CO-PILOT PLAN
-        if not gates.get("data_risks_confirmed"):
+        if not gates.get("spec_confirmed"):
+            next_action = {
+                "target_phase": 1,
+                "action_id": "CONFIRM_TASK_SPEC",
+                "title": "Review and confirm the selected task contract",
+                "detail": f"Task config: `{self.project.task_config_path.relative_to(self.project_root)}`; plugin: `{self.project.plugin_id or 'default'}`.",
+                "cta_label": "Confirm task contract",
+                "agent_plan": [
+                    "Inspect the selected task specification and adapter capabilities",
+                    "Confirm the metric, data, and validation contract",
+                    "Request explicit user approval before marking it confirmed",
+                ],
+            }
+        elif not gates.get("data_risks_confirmed"):
             next_action = {
                 "target_phase": 2,
                 "action_id": "CONFIRM_DATA_RISKS",
@@ -1211,7 +1278,7 @@ class CompetitionStateMachine:
                     "Run declarative data checks from Competition Spec",
                     "Verify group split isolation across folds",
                     "Audit conditional label rules & class sparsity",
-                    "Mark dataset ready for Baseline establishment",
+                    "Request explicit user approval before marking the dataset ready for baseline work",
                 ],
             }
         elif not gates.get("baseline_locked"):
@@ -1294,10 +1361,6 @@ class CompetitionStateMachine:
                     "score": overall_best["composite_score"] if overall_best else pool["baseline_score"],
                     "delta": overall_best["delta_vs_baseline"] if overall_best else 0.0,
                     "subtasks": overall_best.get("subtasks", {}) if overall_best else {},
-                    "subtask_a": overall_best.get("subtask_a", 0.0) if overall_best else 0.0,
-                    "subtask_b": overall_best.get("subtask_b", 0.0) if overall_best else 0.0,
-                    "subtask_c_type": overall_best.get("subtask_c_type", 0.0) if overall_best else 0.0,
-                    "subtask_c_id": overall_best.get("subtask_c_id", 0.0) if overall_best else 0.0,
                 },
                 "public_lb_best": {
                     "enabled": has_public_lb,

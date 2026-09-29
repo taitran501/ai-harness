@@ -76,14 +76,23 @@ class TreeJournal:
         auto_sync: bool = False,
         task_spec: Optional[Any] = None,
         journal_path: Optional[str | Path] = None,
+        artifacts_dir: Optional[str | Path] = None,
     ):
-        path = journal_path or storage_path or "artifacts/journal.json"
+        from harness.project import HarnessProject
+
+        project = HarnessProject.discover()
+        path = journal_path or storage_path or (project.artifacts_dir / "journal.json")
         self.storage_path = Path(path)
+        self.artifacts_dir = (
+            Path(artifacts_dir)
+            if artifacts_dir
+            else (self.storage_path.parent if journal_path or storage_path else project.artifacts_dir)
+        )
         self.task_spec = task_spec
         self.nodes: Dict[str, Node] = {}
         self.load()
         if auto_sync:
-            self.sync_from_artifacts()
+            self.sync_from_artifacts(self.artifacts_dir)
 
     def add_node(
         self,
@@ -128,9 +137,9 @@ class TreeJournal:
         except Exception as e:
             print(f"[TreeJournal] Warning: Failed to load {self.storage_path}: {e}")
 
-    def sync_from_artifacts(self, artifacts_dir: str = "artifacts") -> int:
+    def sync_from_artifacts(self, artifacts_dir: Optional[str | Path] = None) -> int:
         """Scan artifacts/ directory and auto-discover completed experiment runs."""
-        art_path = Path(artifacts_dir)
+        art_path = Path(artifacts_dir) if artifacts_dir is not None else self.artifacts_dir
         if not art_path.exists():
             return 0
 

@@ -71,6 +71,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
   onRefreshAll,
 }) => {
   const specSummary = compState?.spec_summary || {};
+  const baselineScore = Number(specSummary.baseline_goal ?? 0);
   const evalProto = specSummary.evaluation_protocol || {};
   const finalPolicy = specSummary.final_selection_policy || { max_candidates: 2, slots: [] };
   const hud = compState?.hud || {};
@@ -86,8 +87,8 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
     },
   };
   const currentBest = hud.what_is_current_best || {
-    baseline: { id: 'baseline_v1_comment', score: 0.6459 },
-    cv_best: { id: 'baseline_v1_comment', score: 0.6459, delta: 0 },
+    baseline: { id: 'baseline', score: baselineScore },
+    cv_best: { id: 'baseline', score: baselineScore, delta: 0 },
     public_lb_best: { enabled: true, label: 'Public Leaderboard', sub_id: null, score: null, quota_used_today: 0, daily_quota: 5 },
     private_frozen: { label: 'Private Evaluation', max_candidates: 2, is_frozen: false, slot_1_safe_cv: null, slot_2_aggressive_lb: null },
   };
@@ -131,28 +132,22 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
   const [synthName, setSynthName] = useState('cand_v1');
   const [synthMode, setSynthMode] = useState<string>('specialist_router');
   const [singleSourceExp, setSingleSourceExp] = useState(
-    currentBest.cv_best?.id || 'baseline_v1_comment'
+    currentBest.cv_best?.id || 'baseline'
   );
-  const [routerSubA, setRouterSubA] = useState(
-    candidatePool.subtask_specialists?.subtask_a?.id || 'baseline_v1_comment'
-  );
-  const [routerSubB, setRouterSubB] = useState(
-    candidatePool.subtask_specialists?.subtask_b?.id || 'baseline_v1_comment'
-  );
-  const [routerSubC, setRouterSubC] = useState(
-    candidatePool.subtask_specialists?.subtask_c_id?.id || 'baseline_v1_full_context'
-  );
+  const [routerTargets, setRouterTargets] = useState<Record<string, string>>({});
+  const declaredSubtasks = taskInfo?.subtasks?.length ? taskInfo.subtasks : taskInfo?.metrics || [];
   const [ensembleChecked, setEnsembleChecked] = useState<string[]>([]);
 
   // Phase 7 Dynamic N-Slot Freeze state
   const maxFinalSlots = Number(finalPolicy.max_candidates || 2);
   const [slot1Safe, setSlot1Safe] = useState(
-    freezeSelection.slot_1_safe_cv || currentBest.cv_best?.id || 'baseline_v1_comment'
+    freezeSelection.slot_1_safe_cv || currentBest.cv_best?.id || 'baseline'
   );
   const [slot2Aggr, setSlot2Aggr] = useState(
     freezeSelection.slot_2_aggressive_lb ||
       candidatePool.synthesized_candidates?.[0]?.id ||
-      'baseline_v1_full_context'
+      currentBest.cv_best?.id ||
+      'baseline'
   );
   const [freezeNotes, setFreezeNotes] = useState(
     freezeSelection.freeze_notes || 'Selected according to Final Selection Policy'
@@ -418,19 +413,19 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             <span className="flex items-center gap-1.5">
               <Trophy className="w-4 h-4" /> What is the current best?
             </span>
-            <span className="text-[10px] text-zinc-400">{specSummary.primary_metric || 'Macro-F1'}</span>
+            <span className="text-[10px] text-zinc-400">{specSummary.primary_metric || 'Primary metric'}</span>
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs">
             <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-2">
               <div className="text-zinc-400 text-[10px]">Baseline Anchor</div>
               <div className="font-mono font-bold text-zinc-200 text-sm">
-                {Number(currentBest.baseline?.score || 0.6459).toFixed(4)}
+                {Number(currentBest.baseline?.score ?? baselineScore).toFixed(4)}
               </div>
             </div>
             <div className="bg-zinc-950 border border-emerald-500/30 rounded-lg p-2">
               <div className="text-emerald-400 text-[10px]">Best Local CV</div>
               <div className="font-mono font-bold text-emerald-300 text-sm">
-                {Number(currentBest.cv_best?.score || 0.6459).toFixed(4)}
+                {Number(currentBest.cv_best?.score ?? baselineScore).toFixed(4)}
               </div>
             </div>
             <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-2">
@@ -552,10 +547,10 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
               <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3">
                 <div className="text-zinc-400">Primary Evaluation Metric</div>
                 <div className="text-base font-bold text-emerald-400 mt-0.5">
-                  {specSummary.primary_metric || 'Macro-F1'} ({specSummary.direction || 'maximize'})
+                  {specSummary.primary_metric || 'Primary metric'} ({specSummary.direction || 'maximize'})
                 </div>
                 <div className="text-zinc-500 mt-1">
-                  Baseline: {specSummary.baseline_goal ?? 0.6459} → Target: {specSummary.target_goal ?? 0.85}
+                  Baseline: {specSummary.baseline_goal ?? 'not set'} → Target: {specSummary.target_goal ?? 'not set'}
                 </div>
               </div>
               <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3">
@@ -748,7 +743,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             </select>
             {[
               { key: 'check_group_leakage', label: 'Group Isolation & Split Leakage Check' },
-              { key: 'check_subtask_c_conditioning', label: 'Conditional Target Rules Check' },
+              { key: 'check_conditional_labels', label: 'Conditional Target Rules Check' },
               { key: 'check_label_distribution', label: 'Class Balance & Label Sparsity Check' },
               { key: 'check_text_length_outliers', label: 'Input Length & Context Dilution Check' },
             ].map((chk) => (
@@ -792,7 +787,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                     gates: {
                       data_risks_confirmed: true,
                       baseline_locked: true,
-                      baseline_exp_id: currentBest.baseline?.id || 'baseline_v1_comment',
+                      baseline_exp_id: currentBest.baseline?.id || 'baseline',
                     },
                   },
                   4
@@ -1016,28 +1011,31 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
               </div>
             ) : synthMode === 'specialist_router' ? (
               <div className="space-y-2">
-                <select
-                  value={routerSubA}
-                  onChange={(e) => setRouterSubA(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-white font-mono"
-                >
-                  {(candidatePool.all_candidates || []).map((c: any) => (
-                    <option key={c.id} value={c.id}>
-                      Primary A: {c.id}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={routerSubC}
-                  onChange={(e) => setRouterSubC(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-white font-mono"
-                >
-                  {(candidatePool.all_candidates || []).map((c: any) => (
-                    <option key={c.id} value={c.id}>
-                      Secondary C: {c.id}
-                    </option>
-                  ))}
-                </select>
+                {declaredSubtasks.map((subtask: any) => (
+                  <label key={subtask.id} className="block space-y-1 text-zinc-400">
+                    {subtask.name || subtask.id}
+                    <select
+                      value={
+                        routerTargets[subtask.id] ||
+                        candidatePool.subtask_specialists?.[subtask.id]?.id ||
+                        singleSourceExp
+                      }
+                      onChange={(e) =>
+                        setRouterTargets((prev) => ({ ...prev, [subtask.id]: e.target.value }))
+                      }
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-white font-mono"
+                    >
+                      {(candidatePool.all_candidates || []).map((candidate: any) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+                {declaredSubtasks.length === 0 && (
+                  <p className="text-zinc-500">Declare task targets before configuring specialist routing.</p>
+                )}
               </div>
             ) : (
               <div className="space-y-1">
@@ -1067,7 +1065,16 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                     synthMode === 'single_model' || synthMode === 'checkpoint_selection'
                       ? { source_exp: singleSourceExp }
                       : synthMode === 'specialist_router'
-                      ? { subtask_a_exp: routerSubA, subtask_b_exp: routerSubB, subtask_c_exp: routerSubC }
+                      ? {
+                          routing: Object.fromEntries(
+                            declaredSubtasks.map((subtask: any) => [
+                              `pred_${subtask.column || subtask.id}`,
+                              routerTargets[subtask.id] ||
+                                candidatePool.subtask_specialists?.[subtask.id]?.id ||
+                                singleSourceExp,
+                            ])
+                          ),
+                        }
                       : { components: ensembleChecked },
                 })
               }
@@ -1233,7 +1240,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                   });
                   await onRefreshAll();
                   if (res.state?.finalization) {
-                    setGeneratedReportMd('Exported to artifacts/FINAL_COMPETITION_REPORT.md');
+                    setGeneratedReportMd(`Exported to ${taskInfo?.artifacts_dir || 'artifacts'}/FINAL_COMPETITION_REPORT.md`);
                   }
                 }}
                 className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center justify-center gap-1.5"

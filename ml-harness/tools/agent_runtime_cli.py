@@ -4,10 +4,7 @@
 Allows running, inspecting, and approving multi-step AgentRuns (`run_0001`, ...)
 without requiring the Web UI to be open:
 
-  python tools/agent_runtime_cli.py run --goal "Improve Subtask C without degrading A" --max-experiments 3
-  python tools/agent_runtime_cli.py list
-  python tools/agent_runtime_cli.py inspect --run-id run_0001
-  python tools/agent_runtime_cli.py approve --run-id run_0001
+  ml-harness-agent start-session --goal "Improve the primary metric" --max-experiments 3
 """
 
 from __future__ import annotations

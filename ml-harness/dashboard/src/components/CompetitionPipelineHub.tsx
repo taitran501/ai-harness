@@ -56,11 +56,11 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
 
   // Step 1: Competition portal URL
   const [portalUrl, setPortalUrl] = useState<string>(
-    () => localStorage.getItem('competition_portal_url') || 'https://www.kaggle.com/competitions'
+    () => localStorage.getItem('competition_portal_url') || ''
   );
 
   // Step 3: Execution & Cloud sync state
-  const [execMode, setExecMode] = useState<'local' | 'kaggle' | 'modal'>('kaggle');
+  const [execMode, setExecMode] = useState<'local' | 'kaggle' | 'modal'>('local');
   const [smokeTestOnly, setSmokeTestOnly] = useState<boolean>(false);
   const [modalGpu, setModalGpu] = useState<string>('A10G');
   const [kaggleGpu, setKaggleGpu] = useState<string>('T4 x 2');
@@ -106,6 +106,12 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const currentExpId = selectedConfig
     .replace(/^configs\//, '')
     .replace(/\.ya?ml$/, '');
+  const artifactDir = taskInfo?.artifacts_dir || 'artifacts';
+  const isCustomTaskPlugin = Boolean(taskInfo?.task_plugin?.id && taskInfo.task_plugin.id !== 'default');
+  const pluginCanSubmit = Boolean(
+    taskInfo?.task_plugin?.capabilities?.submission_builder &&
+    taskInfo?.task_plugin?.capabilities?.submission_validator,
+  );
 
   useEffect(() => {
     const taskSlug = (taskInfo?.name || 'competition').toLowerCase().replace(/[^a-z0-9]/g, '-');
@@ -278,12 +284,12 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
       const minDiff = taskInfo?.submission_spec?.min_diff_pct ?? 2.0;
       const res = await api.registerSubmission({
         exp_id: currentExpId,
-        notes: `Packaged from ${currentExpId} for ${taskInfo?.platform || 'Codabench'}`,
+        notes: `Packaged from ${currentExpId} for ${taskInfo?.platform || 'the configured task'}`,
         min_diff_pct: minDiff,
       });
       setActiveSubmissionId(res.submission.id);
       setPackageMsg(
-        `Packaged ${res.submission.archive_path || 'submission.zip'} (${res.submission.id}) verified by Audit Gate.`
+        `Packaged ${res.submission.archive_path || 'submission.zip'} (${res.submission.id}) with the active submission checks.`
       );
       await onRefreshAll();
     } catch (err: any) {
@@ -347,7 +353,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             {
               step: 1 as const,
               title: 'Step 1. Task & Data Setup',
-              desc: `${taskInfo?.platform?.toUpperCase() || 'CODABENCH'} / ${dataCfg.split_strategy || 'GroupKFold'}`,
+              desc: `${taskInfo?.platform?.toUpperCase() || 'Platform not set'} / ${dataCfg.split_strategy || 'Validation not set'}`,
             },
             {
               step: 2 as const,
@@ -356,13 +362,15 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             },
             {
               step: 3 as const,
-              title: 'Step 3. Run & Pull Cloud Output',
-              desc: `Local CPU or Cloud GPU (Kaggle / Modal)`,
+              title: 'Step 3. Run & Retrieve Outputs',
+              desc: isCustomTaskPlugin ? 'Run locally through the installed task plugin' : 'Local CPU or Cloud GPU (Kaggle / Modal)',
             },
             {
               step: 4 as const,
-              title: 'Step 4. Submit to Codabench & Score',
-              desc: `Package .${subSpec.archive_format || 'zip'}, Log LB & Loop`,
+              title: 'Step 4. Submission & Score',
+              desc: isCustomTaskPlugin && !pluginCanSubmit
+                ? 'Submission hooks are missing from the selected task plugin'
+                : `Build .${subSpec.archive_format || 'zip'} package, record score & continue`,
             },
           ].map((item) => {
             const isActive = activeStep === item.step;
@@ -440,11 +448,11 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </div>
                 <div>
                   <span className="text-zinc-500">Platform: </span>
-                  <span className="text-zinc-200 uppercase">{taskInfo?.platform || 'codabench'}</span>
+                  <span className="text-zinc-200 uppercase">{taskInfo?.platform || 'not configured'}</span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Primary Metric: </span>
-                  <span className="text-emerald-400">{taskInfo?.primary_metric || 'Macro-F1'}</span>
+                  <span className="text-emerald-400">{taskInfo?.primary_metric || 'Not configured'}</span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Submission File: </span>
@@ -506,21 +514,21 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               <div className="space-y-1.5 text-xs font-mono">
                 <div>
                   <span className="text-zinc-500">Split Method: </span>
-                  <span className="text-zinc-200">{dataCfg.split_strategy || 'GroupKFold'}</span>
+                  <span className="text-zinc-200">{dataCfg.split_strategy || 'Not declared'}</span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Group Column: </span>
-                  <span className="text-amber-300">{dataCfg.group_column || 'group_id'}</span>
+                  <span className="text-amber-300">{dataCfg.group_column || 'Not declared'}</span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Folds / Seed: </span>
                   <span className="text-zinc-200">
-                    {dataCfg.n_folds || 5} folds (seed={dataCfg.seed || 42})
+                    {dataCfg.n_folds ?? 'Not declared'} folds (seed={dataCfg.seed ?? 'Not declared'})
                   </span>
                 </div>
                 <div>
                   <span className="text-zinc-500">Fold File: </span>
-                  <span className="text-zinc-200">{dataCfg.split_file || dataCfg.fold_file || 'splits/folds.csv'}</span>
+                  <span className="text-zinc-200">{dataCfg.split_file || dataCfg.fold_file || 'Not declared'}</span>
                 </div>
               </div>
             </div>
@@ -530,13 +538,13 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           <div className="p-4 bg-zinc-900/40 border border-zinc-800 rounded-xl flex flex-wrap items-center justify-between gap-3">
             <div className="flex-1 min-w-[260px]">
               <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                Codabench / Competition Submission Portal URL:
+                Competition Submission Portal URL:
               </label>
               <input
                 type="url"
                 value={portalUrl}
                 onChange={(e) => handleSavePortalUrl(e.target.value)}
-                placeholder="https://www.codabench.org/competitions/..."
+                placeholder="https://..."
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-200"
               />
             </div>
@@ -602,7 +610,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             </button>
           </div>
 
-          {/* Agent Context & Prompt Generator (Includes CV + Codabench LB Feedback) */}
+          {/* Agent Context & Prompt Generator (Includes Validation & External Score Feedback) */}
           <PrimingCenter initialPrompt={initialPrompt} taskInfo={taskInfo} />
         </div>
       )}
@@ -615,7 +623,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           {/* Top Cloud Account Status Bar */}
           <div className="bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3 text-xs">
-              <span className="font-semibold text-zinc-300">Cloud Accounts:</span>
+              <span className="font-semibold text-zinc-300">Optional Cloud Accounts:</span>
               <span className="px-2.5 py-1 rounded border bg-zinc-900 border-zinc-800 text-zinc-300 font-mono">
                 Kaggle: <strong>{envStatus?.kaggle.username || 'Not logged in'}</strong>
               </span>
@@ -648,6 +656,11 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               <div className="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2">
                 1. Sync Dataset & Splits to Cloud
               </div>
+              {isCustomTaskPlugin && (
+                <p className="text-xs text-amber-200">
+                  Dataset upload is disabled until the selected task adapter is available in the remote runtime.
+                </p>
+              )}
               <p className="text-xs text-zinc-400">
                 Push <code>dataset/</code> and <code>splits/</code> once to Kaggle Datasets or Modal Volume. Every subsequent run automatically mounts this cloud dataset.
               </p>
@@ -659,6 +672,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 <input
                   type="text"
                   value={execMode === 'modal' ? modalVolume : datasetSlug}
+                  disabled={isCustomTaskPlugin}
                   onChange={(e) =>
                     execMode === 'modal'
                       ? setModalVolume(e.target.value)
@@ -671,7 +685,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               <button
                 type="button"
                 onClick={handlePushDataset}
-                disabled={pushingDataset}
+                disabled={pushingDataset || isCustomTaskPlugin}
                 className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
               >
                 <Upload className={`w-3.5 h-3.5 ${pushingDataset ? 'animate-bounce' : ''}`} />
@@ -711,6 +725,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 <button
                   type="button"
                   onClick={() => setExecMode('kaggle')}
+                  disabled={isCustomTaskPlugin}
                   className={`py-1.5 px-2 rounded text-xs font-medium transition flex items-center justify-center gap-1 ${
                     execMode === 'kaggle'
                       ? 'bg-zinc-800 text-white shadow'
@@ -723,6 +738,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 <button
                   type="button"
                   onClick={() => setExecMode('modal')}
+                  disabled={isCustomTaskPlugin}
                   className={`py-1.5 px-2 rounded text-xs font-medium transition flex items-center justify-center gap-1 ${
                     execMode === 'modal'
                       ? 'bg-zinc-800 text-white shadow'
@@ -734,10 +750,16 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </button>
               </div>
 
+              {isCustomTaskPlugin && (
+                <p className="p-2.5 bg-amber-950/30 border border-amber-800/60 rounded-lg text-xs text-amber-200">
+                  Remote runs are disabled for task plugins until the adapter is installed in the remote runtime. Local runs use the selected adapter.
+                </p>
+              )}
+
               {execMode === 'local' ? (
                 <div className="p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg space-y-2 text-xs text-zinc-300">
                   <div>
-                    Runs lightweight baselines (TF-IDF, Ridge, LightGBM), smoke tests, or OOF blending on local CPU.
+                Runs the configured experiment through the selected task adapter on this machine.
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -806,7 +828,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 3. Monitor & Pull Output to Local
               </div>
               <p className="text-xs text-zinc-400">
-                Check remote kernel progress and pull lightweight outputs (<code>oof_predictions.csv</code>, <code>test_predictions.csv</code>, <code>metrics.json</code>) into <code>artifacts/{currentExpId}/</code>.
+                Check remote job progress and pull run outputs into <code>{artifactDir}/{currentExpId}/</code>.
               </p>
 
               <div className="grid grid-cols-2 gap-2">
@@ -841,7 +863,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 <div className="p-3 bg-emerald-950/30 border border-emerald-800/60 rounded-lg space-y-1.5 text-xs">
                   <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>Pulled {pulledResult.migrated_files.length} files to artifacts/{pulledResult.exp_id}/</span>
+                    <span>Pulled {pulledResult.migrated_files.length} files to {artifactDir}/{pulledResult.exp_id}/</span>
                   </div>
                   <div className="font-mono text-zinc-300">
                     Files: {pulledResult.migrated_files.join(', ') || 'None'}
@@ -880,18 +902,22 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
       )}
 
       {/* =====================================================================
-          STEP 4: PACKAGE SUBMISSION (CODABENCH), RECORD SCORE & LOOP TO STEP 2
+          STEP 4: BUILD SUBMISSION, RECORD SCORE & LOOP TO STEP 2
          ===================================================================== */}
       {activeStep === 4 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Left Card: Package Submission according to Step 1 Spec & Open Codabench */}
+          {/* Left Card: Package Submission according to the task adapter */}
           <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-5 space-y-4 shadow-xl">
             <div className="border-b border-zinc-800 pb-3">
               <h2 className="text-base font-semibold text-zinc-100">
-                1. Package Submission for {taskInfo?.platform?.toUpperCase() || 'CODABENCH'}
+                1. Build Submission for {taskInfo?.platform?.toUpperCase() || 'Configured Platform'}
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Formats predictions from <code>artifacts/{currentExpId}/</code> using Step 1 schema (<code>{dataCfg.id_column || 'id'}</code>, <code>.{subSpec.archive_format || 'zip'}</code>) and runs Audit Gate.
+                {isCustomTaskPlugin
+                  ? pluginCanSubmit
+                    ? 'Use Submissions Hub to provide test-set predictions; the task plugin builds and validates the official package.'
+                    : `Task plugin “${taskInfo?.task_plugin?.id}” does not expose both submission builder and validator hooks yet.`
+                  : <>Formats the configured predictions from <code>{artifactDir}/{currentExpId}/</code> using the declared task contract and runs the configured audit.</>}
               </p>
             </div>
 
@@ -914,14 +940,16 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               <button
                 type="button"
                 onClick={handlePackageSubmission}
-                disabled={packagingSub}
+                disabled={packagingSub || isCustomTaskPlugin}
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
               >
                 <FileArchive className="w-4 h-4" />
                 <span>
                   {packagingSub
-                    ? 'Running Audit Gate & Packaging...'
-                    : `Package Submission (${subSpec.file_name || 'submission.zip'})`}
+                    ? 'Building & validating package...'
+                    : isCustomTaskPlugin
+                      ? 'Use Submissions Hub for plugin submissions'
+                      : `Build Submission (${subSpec.file_name || 'submission.zip'})`}
                 </span>
               </button>
 
@@ -939,7 +967,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </div>
               )}
 
-              {/* Download & Open Codabench Portal Buttons */}
+              {/* Download & Open Competition Portal Buttons */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 {activeSubmissionId && (
                   <a
@@ -948,7 +976,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                     className="py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
                   >
                     <Download className="w-4 h-4 text-emerald-400" />
-                    <span>Download {activeSubObj?.archive_path?.split('/').pop() || 'submission.zip'}</span>
+                    <span>Download {activeSubObj?.archive_path?.split(/[\\/]/).pop() || 'submission.zip'}</span>
                   </a>
                 )}
 

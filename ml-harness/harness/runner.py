@@ -36,6 +36,8 @@ from harness.io_utils import (
     update_experiments_leaderboard,
 )
 from harness.task_spec import UniversalTaskSpec, load_active_task_spec
+from harness.plugins import TaskPluginContext, load_task_plugin
+from harness.project import HarnessProject
 from harness.tree_journal import Node, TreeJournal
 from harness.validator import ExperimentValidator
 
@@ -137,17 +139,36 @@ class UniversalRunner:
         self.cfg = cfg
         self.config_path = config_path
         self.args = args
-        self.project_root = get_project_root()
+        task_config = cfg.get("paths", {}).get("task_config") or getattr(args, "task_config", None)
+        self.project = HarnessProject.discover(getattr(args, "project_root", None), task_config)
+        self.project_root = self.project.root
+        if str(self.project_root) not in sys.path:
+            sys.path.insert(0, str(self.project_root))
 
         exp_info = cfg.get("experiment", {})
         self.exp_id = exp_info.get("id", Path(config_path).stem)
         paths = cfg.get("paths", {})
-        artifacts_root = Path(paths.get("artifacts_dir", "artifacts"))
+        # An attached workspace owns all run output paths. This prevents an
+        # experiment config copied from another harness checkout from writing
+        # into a shared `artifacts/` directory or the installed package.
+        artifacts_root = self.project.artifacts_dir if self.project.manifest else Path(
+            paths.get("artifacts_dir") or self.project.artifacts_dir
+        )
+        if not artifacts_root.is_absolute():
+            artifacts_root = self.project_root / artifacts_root
+        self.artifacts_dir = artifacts_root.resolve()
         self.exp_dir = artifacts_root / self.exp_id
 
         # Task specification
-        task_cfg_path = paths.get("task_config", "configs/task.yaml")
-        self.task_spec = load_active_task_spec(self.project_root / task_cfg_path)
+        self.task_spec = load_active_task_spec(self.project.task_config_path)
+        self.plugin_context = TaskPluginContext(
+            project_root=self.project_root,
+            task_config_path=self.project.task_config_path,
+            task_spec=self.task_spec,
+            plugin_id=self.project.plugin_id or "default",
+            run_config=self.cfg,
+        )
+        self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
 
         # Logger
         self.exp_dir.mkdir(parents=True, exist_ok=True)
@@ -196,30 +217,12 @@ class UniversalRunner:
                 df_res = getattr(mod, fn_name)(str(self.project_root / "dataset"))
                 df = df_res[0] if isinstance(df_res, tuple) else df_res
             except Exception as e:
-                self.logger.warning(f"Could not load via {adapter_fn}: {e}")
+                raise RuntimeError(f"Configured task data loader '{adapter_fn}' failed: {e}") from e
 
         if df is None:
-            # Check for domain adapter in workspace (src.data)
-            try:
-                import importlib
-                src_data = importlib.import_module("src.data")
-                if hasattr(src_data, "load_dataset"):
-                    df_res = src_data.load_dataset(str(self.project_root / "dataset"))
-                    df_res = df_res[0] if isinstance(df_res, tuple) else df_res
-                    split_cand = self.cfg.get("paths", {}).get("split_path")
-                    split_path = self.project_root / split_cand if split_cand else None
-                    if not split_path or not split_path.exists():
-                        for cand in ["splits/fold_assignments.tsv", "splits/folds.csv", "splits/splits.csv"]:
-                            if (self.project_root / cand).exists():
-                                split_path = self.project_root / cand
-                                break
-                    if hasattr(src_data, "load_splits") and hasattr(src_data, "merge_data_and_splits") and split_path and split_path.exists():
-                        splits_df = src_data.load_splits(str(split_path))
-                        df = src_data.merge_data_and_splits(df_res, splits_df)
-                    else:
-                        df = df_res
-            except Exception as e:
-                self.logger.debug(f"Optional workspace adapter src.data not used: {e}")
+            df = self.task_plugin.load_training_data(self.plugin_context)
+            if isinstance(df, tuple):
+                df = df[0]
 
         if df is None:
             df = self.task_spec.load_dataset_split("train", project_root=self.project_root)
@@ -245,19 +248,24 @@ class UniversalRunner:
                     self.logger.warning(f"Could not merge splits from {split_path}: {e}")
 
         self.logger.info(f"Loaded {len(df):,} training instances.")
+        self.task_plugin.validate_training_data(self.plugin_context, df)
 
         # Subsample for debug/probe (group-aware to guarantee anti-leakage invariant)
         if self.args.debug or getattr(self.args, "probe_samples", None):
             sample_n = getattr(self.args, "probe_samples", None) or 50
             self.logger.warning(f"Probe/Debug mode enabled: sampling {sample_n} instances.")
             group_col = self.task_spec.group_column
-            if group_col in df.columns:
+            partition_col = (
+                self.cfg.get("data", {}).get("partition_column")
+                or self.task_spec.metadata.get("data_config", {}).get("partition_column")
+            )
+            if group_col and group_col in df.columns:
                 sampled_groups = set()
-                if "language" in df.columns:
-                    for _, lang_df in df.groupby("language"):
-                        for grp in lang_df[group_col].dropna().unique():
+                if partition_col and partition_col in df.columns:
+                    for _, partition_df in df.groupby(partition_col, dropna=False):
+                        for grp in partition_df[group_col].dropna().unique():
                             sampled_groups.add(grp)
-                            if len(lang_df[lang_df[group_col].isin(sampled_groups)]) >= sample_n:
+                            if len(partition_df[partition_df[group_col].isin(sampled_groups)]) >= sample_n:
                                 break
                 else:
                     for grp in df[group_col].dropna().unique():
@@ -265,8 +273,8 @@ class UniversalRunner:
                         if len(df[df[group_col].isin(sampled_groups)]) >= sample_n:
                             break
                 df = df[df[group_col].isin(sampled_groups)].reset_index(drop=True)
-            elif "language" in df.columns:
-                df = df.groupby("language").head(sample_n).reset_index(drop=True)
+            elif partition_col and partition_col in df.columns:
+                df = df.groupby(partition_col, dropna=False).head(sample_n).reset_index(drop=True)
             else:
                 df = df.head(sample_n).reset_index(drop=True)
 
@@ -289,21 +297,13 @@ class UniversalRunner:
             return self._run_model_training(df, val_strategy, git_hash)
 
     def _get_model_factory(self) -> Any:
-        """Dynamically resolve model factory from config, workspace adapter, or universal built-in."""
+        """Resolve an explicitly configured factory or the generic built-in."""
         factory_path = self.cfg.get("model", {}).get("factory")
         if factory_path:
             import importlib
             mod_name, fn_name = factory_path.rsplit(".", 1)
             mod = importlib.import_module(mod_name)
             return getattr(mod, fn_name)
-
-        try:
-            import importlib
-            mod = importlib.import_module("src.models")
-            if hasattr(mod, "build_model"):
-                return getattr(mod, "build_model")
-        except Exception:
-            pass
 
         return lambda name, **kwargs: GenericBaselineModel(self.task_spec, model_name=name, **kwargs)
 
@@ -314,22 +314,22 @@ class UniversalRunner:
         model_cfg = self.cfg.get("model", {})
         model_name = model_cfg.get("name", "tfidf_logistic_regression")
         model_params = model_cfg.get("params", {})
-        input_variants = self.cfg.get("data", {}).get("input_variants", ["comment"])
+        input_variants = self.cfg.get("data", {}).get("input_variants")
+        if not input_variants:
+            input_variants = [item.name for item in self.task_spec.inputs] or ["default"]
 
         id_col = self.task_spec.id_column
         if id_col not in df.columns:
             id_col = df.columns[0]
 
         group_col = self.task_spec.group_column
-        max_params = self.cfg.get("constraints", {}).get("max_params_limit", 150_000_000)
+        max_params = self.cfg.get("constraints", {}).get("max_params_limit")
 
         detailed_results: List[Dict[str, Any]] = []
         summary_rows: List[Dict[str, Any]] = []
         oof_records: List[Dict[str, Any]] = []
 
         partition_col = self.cfg.get("data", {}).get("partition_column")
-        if not partition_col and "language" in df.columns:
-            partition_col = "language"
 
         # Setup folds or holdout splits
         if val_strategy == "holdout" or "fold" not in df.columns:
@@ -371,11 +371,13 @@ class UniversalRunner:
 
             for part_key, train_part, dev_part in partitions:
                 for variant in input_variants:
-                    model = model_factory(model_name, **model_params)
+                    model = self.task_plugin.build_model(self.plugin_context, model_name, model_params)
+                    if model is None:
+                        model = model_factory(model_name, **model_params)
                     ExperimentValidator.assert_parameter_limit(model, max_params=max_params)
 
                     if group_col and group_col in train_part.columns and group_col in dev_part.columns:
-                        ExperimentValidator.assert_no_video_data_leakage(train_part, dev_part, group_column=group_col)
+                        ExperimentValidator.assert_no_group_data_leakage(train_part, dev_part, group_column=group_col)
 
                     # Train
                     t0 = time.time()
@@ -392,7 +394,8 @@ class UniversalRunner:
                         preds = model.predict(dev_part)
 
                     # Route predictions through UniversalTaskSpec if needed
-                    routed_preds = self.task_spec.apply_routing(preds, n_samples=len(dev_part))
+                    normalized_preds = self.task_plugin.normalize_predictions(self.plugin_context, preds)
+                    routed_preds = self.task_spec.apply_routing(normalized_preds, n_samples=len(dev_part))
 
                     # Store predictions
                     resolved_id_col = id_col if id_col in dev_part.columns else dev_part.columns[0]
@@ -406,18 +409,19 @@ class UniversalRunner:
                             rec[partition_col] = dev_part[partition_col].iloc[i]
 
                         for k, v in routed_preds.items():
+                            pred_column = k if k.startswith("pred_") else f"pred_{k}"
                             if isinstance(v, (np.ndarray, list)):
                                 val = v[i]
                                 if isinstance(val, (np.ndarray, list)):
-                                    rec[f"pred_{k}"] = ",".join(str(x) for x in val)
+                                    rec[pred_column] = ",".join(str(x) for x in val)
                                 else:
-                                    rec[f"pred_{k}"] = val
+                                    rec[pred_column] = val
                             else:
-                                rec[f"pred_{k}"] = v
+                                rec[pred_column] = v
                         oof_records.append(rec)
 
                     # Compute Metrics using UniversalTaskSpec
-                    eval_metrics = self.task_spec.evaluate_predictions(dev_part, routed_preds)
+                    eval_metrics = self.task_plugin.evaluate_predictions(self.plugin_context, dev_part, routed_preds)
 
                     # Optional custom domain evaluator hook
                     custom_eval_hook = self.cfg.get("paths", {}).get("metrics_evaluator")
@@ -518,7 +522,7 @@ class UniversalRunner:
                 self.logger.info(f"Processed {idx + 1}/{len(eval_df)} samples...")
 
         infer_sec = time.time() - t0
-        eval_metrics = self.task_spec.evaluate_predictions(eval_df, preds_dict)
+        eval_metrics = self.task_plugin.evaluate_predictions(self.plugin_context, eval_df, preds_dict)
 
         metric_record = {
             "experiment_id": self.exp_id,
@@ -575,9 +579,13 @@ class UniversalRunner:
             self.logger.warning(f"Diagnostic generation skipped or failed: {e}")
 
         # Update TreeJournal
-        journal_path = Path("artifacts/journal.json")
+        journal_path = self.artifacts_dir / "journal.json"
         try:
-            journal = TreeJournal(journal_path=str(journal_path), task_spec=self.task_spec)
+            journal = TreeJournal(
+                journal_path=journal_path,
+                artifacts_dir=self.artifacts_dir,
+                task_spec=self.task_spec,
+            )
             comp_score = 0.0
             if detailed_results:
                 comp_score = detailed_results[0].get("composite_score", 0.0)
@@ -612,7 +620,18 @@ class UniversalRunner:
                 "score": comp_score,
                 "notes": exp_info.get("problem_addressed", ""),
             }
-            update_experiments_leaderboard("EXPERIMENTS.md", [new_row], task_spec=self.task_spec)
+            if not getattr(self.args, "skip_leaderboard", False):
+                leaderboard_value = (
+                    self.project.manifest.get("leaderboard_path")
+                    if self.project.manifest
+                    else self.cfg.get("paths", {}).get("leaderboard_path")
+                ) or "EXPERIMENTS.md"
+                leaderboard = Path(
+                    leaderboard_value
+                )
+                if not leaderboard.is_absolute():
+                    leaderboard = self.project_root / leaderboard
+                update_experiments_leaderboard(leaderboard, [new_row], task_spec=self.task_spec)
         except Exception as e:
             self.logger.debug(f"Leaderboard update skipped: {e}")
 
@@ -620,37 +639,69 @@ class UniversalRunner:
         return detailed_results[0] if detailed_results else {}
 
 
-def main() -> None:
+def main(argv: Optional[List[str]] = None) -> int:
     """CLI entrypoint for universal training runner."""
     parser = argparse.ArgumentParser(description="Universal Competition Experiment Runner")
+    parser.add_argument("--project-root", type=str, default=None, help="Competition workspace root")
+    parser.add_argument("--task-config", type=str, default=None, help="Task specification YAML")
     parser.add_argument("--config", type=str, required=True, help="Path to experiment config YAML")
-    parser.add_argument("--base-config", type=str, default="configs/base.yaml", help="Path to base config YAML")
+    parser.add_argument("--base-config", type=str, default=None, help="Path to base config YAML")
     parser.add_argument("--fold", type=int, default=None, help="Target fold index to train (smoke test / probe)")
     parser.add_argument("--debug", action="store_true", help="Debug mode with subsampled data")
     parser.add_argument("--force", action="store_true", help="Force overwrite existing experiment artifacts")
     parser.add_argument("--probe-samples", type=int, default=None, help="Probe sample count limit")
     parser.add_argument("--backend", type=str, default="local", choices=["local", "modal", "kaggle"], help="Execution backend")
-    args = parser.parse_args()
+    parser.add_argument("--skip-leaderboard", action="store_true", help="Do not write the project leaderboard")
+    args = parser.parse_args(argv)
+
+    project = HarnessProject.discover(args.project_root, args.task_config)
+    os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
+    os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
+    if str(project.root) not in sys.path:
+        sys.path.insert(0, str(project.root))
+    os.chdir(project.root)
+
+    def resolve_project_path(value: str | Path) -> Path:
+        path = Path(value).expanduser()
+        return path.resolve() if path.is_absolute() else (project.root / path).resolve()
+
+    config_path = resolve_project_path(args.config)
+    if not config_path.is_file():
+        parser.error(f"Experiment config does not exist: {config_path}")
 
     # If backend is modal or kaggle, delegate to cloud runner
     if args.backend == "modal":
+        if project.plugin_id not in (None, "default") or project.artifacts_dir != project.root / "artifacts":
+            parser.error("Remote backends do not install selected task adapters or route artifacts through the attached manifest yet; use --backend local.")
         from harness.cloud_runner import run_via_modal
-        run_via_modal(config_path=args.config)
-        return
+        run_via_modal(config_path=str(config_path))
+        return 0
     elif args.backend == "kaggle":
+        if project.plugin_id not in (None, "default") or project.artifacts_dir != project.root / "artifacts":
+            parser.error("Remote backends do not install selected task adapters or route artifacts through the attached manifest yet; use --backend local.")
         from harness.cloud_runner import run_via_kaggle
-        run_via_kaggle(config_path=args.config)
-        return
+        run_via_kaggle(config_path=str(config_path))
+        return 0
 
     # Local execution
-    base_cfg = load_yaml_config(args.base_config) if Path(args.base_config).exists() else {}
-    exp_cfg = load_yaml_config(args.config)
+    package_base = Path(__file__).resolve().parent / "defaults" / "base.yaml"
+    workspace_base = project.root / "configs" / "base.yaml"
+    base_path = resolve_project_path(args.base_config) if args.base_config else (
+        workspace_base if workspace_base.is_file() else package_base
+    )
+    base_cfg = load_yaml_config(base_path) if base_path.exists() else {}
+    exp_cfg = load_yaml_config(config_path)
     cfg = merge_configs(base_cfg, exp_cfg)
 
     # Immutability check
-    exp_id = cfg.get("experiment", {}).get("id", Path(args.config).stem)
+    exp_id = cfg.get("experiment", {}).get("id", config_path.stem)
     paths = cfg.get("paths", {})
-    exp_dir = Path(paths.get("artifacts_dir", "artifacts")) / exp_id
+    artifacts_root = project.artifacts_dir if project.manifest else Path(
+        paths.get("artifacts_dir") or project.artifacts_dir
+    )
+    if not artifacts_root.is_absolute():
+        artifacts_root = project.root / artifacts_root
+    exp_dir = artifacts_root / exp_id
     if exp_dir.exists() and (exp_dir / "metrics.json").exists() and not args.force:
         print(
             f"ERROR: Experiment directory '{exp_dir}' already exists with completed metrics.\n"
@@ -659,9 +710,12 @@ def main() -> None:
         )
         sys.exit(1)
 
-    runner = UniversalRunner(cfg=cfg, config_path=args.config, args=args)
+    args.project_root = str(project.root)
+    args.task_config = str(project.task_config_path)
+    runner = UniversalRunner(cfg=cfg, config_path=str(config_path), args=args)
     runner.run()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

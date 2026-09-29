@@ -15,7 +15,7 @@ export const ML_METRICS_CATALOG: MetricDefinition[] = [
     category: 'Classification',
     direction: 'maximize',
     description: 'Calculates F1 per class and takes unweighted mean; critical for imbalanced classes.',
-    commonIn: 'NLP, Multi-Class, Hate Speech Detection',
+    commonIn: 'Text classification, imbalanced multi-class tasks',
   },
   {
     id: 'Micro-F1',

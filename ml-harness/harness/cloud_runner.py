@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness.cloud_inspector import CloudPreflightInspector
+from harness.project import HarnessProject
 from harness.submission_manager import SubmissionManager
 from harness.templates.kaggle_template import KaggleKernelManager
 from harness.templates.modal_template import generate_modal_script
@@ -170,6 +171,13 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    project = HarnessProject.discover()
+    if project.plugin_id not in (None, "default"):
+        parser.error(
+            f"Remote execution is disabled for task plugin '{project.plugin_id}' until its adapter is installed in the remote runtime."
+        )
+    os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
+    os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     if args.backend == "modal":
         run_via_modal(args.config, gpu=args.gpu, auto_submit=args.auto_submit, baseline_csv=args.baseline)
     elif args.backend == "kaggle":

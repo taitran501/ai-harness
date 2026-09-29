@@ -24,26 +24,25 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
 
   // Map experiment ID to latest official submission score if any
   const subScoreMap = useMemo(() => {
-    const map: Record<string, { primary?: number; a?: number; b?: number; c?: number }> = {};
+    const map: Record<string, { primary?: number }> = {};
     for (const sub of submissions) {
       if (sub.status === 'SCORED' && sub.official_scores) {
         const scores = sub.official_scores;
-        const primaryScore =
-          scores.primary_metric ??
-          scores.score ??
-          scores.overall_composite ??
-          scores.subtask_a_macro ??
-          Object.values(scores).find((v) => typeof v === 'number');
+        const primaryScore = [
+          scores.primary_metric,
+          taskInfo?.primary_metric ? scores[taskInfo.primary_metric] : undefined,
+          scores.primary,
+          scores.score,
+          scores.overall_composite,
+          ...Object.values(scores),
+        ].find((value) => typeof value === 'number');
         map[sub.exp_id] = {
           primary: typeof primaryScore === 'number' ? primaryScore : undefined,
-          a: scores.subtask_a_macro ?? undefined,
-          b: scores.subtask_b_macro ?? undefined,
-          c: scores.subtask_c_type_macro ?? undefined,
         };
       }
     }
     return map;
-  }, [submissions]);
+  }, [submissions, taskInfo?.primary_metric]);
 
   const toggleExpand = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();

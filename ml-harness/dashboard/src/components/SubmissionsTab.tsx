@@ -47,11 +47,25 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
   const [registering, setRegistering] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
   const [regSuccess, setRegSuccess] = useState<string | null>(null);
+  const artifactDir = taskInfo?.artifacts_dir || 'artifacts';
+  const isCustomTaskPlugin = Boolean(taskInfo?.task_plugin?.id && taskInfo.task_plugin.id !== 'default');
+  const pluginCanSubmit = Boolean(
+    taskInfo?.task_plugin?.capabilities?.submission_builder &&
+    taskInfo?.task_plugin?.capabilities?.submission_validator,
+  );
 
   const handleRegisterSubmission = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!regExpId.trim()) {
       setRegError('Please provide an Experiment ID.');
+      return;
+    }
+    if (isCustomTaskPlugin && !pluginCanSubmit) {
+      setRegError('The selected task plugin has not implemented its submission builder and validator.');
+      return;
+    }
+    if (isCustomTaskPlugin && !regCandidateCsv.trim()) {
+      setRegError('Provide a CSV with predictions for the competition test set. OOF predictions are not a submission.');
       return;
     }
     setRegistering(true);
@@ -65,7 +79,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
         notes: regNotes.trim(),
         min_diff_pct: parseFloat(regMinDiffPct) || 2.0,
       });
-      setRegSuccess(`Submission ${res.submission.id} registered and audit-verified!`);
+      setRegSuccess(`Submission ${res.submission.id} built and validated!`);
       await onRefresh();
       setTimeout(() => {
         setIsRegisterModalOpen(false);
@@ -77,7 +91,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
       }, 1500);
     } catch (err: any) {
       console.error(err);
-      setRegError(err.message || 'Audit Gate failed to register submission.');
+      setRegError(err.message || 'Failed to build or validate the submission.');
     } finally {
       setRegistering(false);
     }
@@ -229,7 +243,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
             className="flex items-center gap-1.5 bg-zinc-100 hover:bg-white active:scale-95 text-zinc-950 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition"
           >
             <PlusCircle className="w-3.5 h-3.5" />
-            <span>Register Submission</span>
+            <span>Build / Register Submission</span>
           </button>
         </div>
 
@@ -238,13 +252,19 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
             <FileArchive className="w-10 h-10 text-slate-600 mx-auto" />
             <h3 className="text-sm font-semibold text-slate-300">No Submissions Registered Yet</h3>
             <p className="text-xs text-slate-400 max-w-lg mx-auto leading-relaxed">
-              Submissions must pass the Audit Gate before being registered. Package a candidate via:
+              {isCustomTaskPlugin
+                ? pluginCanSubmit
+                  ? 'Provide predictions for the competition test set. The selected task plugin builds and validates its submission format.'
+                  : `The selected task plugin (${taskInfo?.task_plugin?.id}) has no submission builder and validator. Submission packaging is unavailable until both hooks are implemented.`
+                : 'Build a package from candidate predictions using the configured submission checks.'}
             </p>
-            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300 max-w-xl mx-auto text-left">
-              python tools/audit_gate.py --candidate artifacts/expXXX/oof_predictions.csv --baseline artifacts/exp001/oof_predictions.csv --output-zip submission.zip
-              <br />
-              python tools/submission_tool.py register --exp-id expXXX --candidate artifacts/expXXX/oof_predictions.csv
-            </div>
+            {!isCustomTaskPlugin && (
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300 max-w-xl mx-auto text-left">
+                ml-harness-audit --candidate {artifactDir}/&lt;exp_id&gt;/oof_predictions.csv --output-zip submission.zip
+                <br />
+                ml-harness-agent --project-root . act --action prepare_submission --params {'{'}"exp_id": "&lt;exp_id&gt;"{'}'}
+              </div>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -257,7 +277,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                   <th className="py-3 px-3 text-right">Local CV ({taskInfo?.primary_metric || 'Metric'})</th>
                   <th className="py-3 px-3 text-right">Remote LB ({taskInfo?.primary_metric || 'Metric'})</th>
                   <th className="py-3 px-3 text-right">Delta (Δ LB - CV)</th>
-                  <th className="py-3 px-3">Audit Receipt</th>
+                  <th className="py-3 px-3">Validation Receipt</th>
                   <th className="py-3 px-3 text-right">Action</th>
                 </tr>
               </thead>
@@ -268,7 +288,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                     ? Object.values(sub.score_deltas).filter((v) => typeof v === 'number')
                     : [];
                   const mainDelta =
-                    sub.score_deltas?.subtask_a_macro ??
+                    (taskInfo?.primary_metric ? sub.score_deltas?.[taskInfo.primary_metric] : undefined) ??
                     sub.score_deltas?.primary_metric ??
                     (deltaValues.length > 0 ? (deltaValues[0] as number) : undefined);
 
@@ -347,7 +367,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                         )}
                       </td>
 
-                      {/* Audit Receipt */}
+                      {/* Receipt from the active submission validator */}
                       <td className="py-3.5 px-3 text-slate-400 font-sans text-[11px]">
                         <span className="font-mono text-emerald-400">✓ Verified</span>
                         {sub.notes && (
@@ -477,7 +497,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                 <label className="block text-slate-400 font-medium mb-1">Evaluation Notes / Run ID</label>
                 <input
                   type="text"
-                  placeholder="e.g. Codabench submission #42981"
+                  placeholder={`e.g. ${taskInfo?.platform || 'competition'} submission ID`}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
@@ -513,10 +533,14 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Award className="w-4 h-4 text-indigo-400" />
-                  <span>Register & Audit New Submission</span>
+                  <span>{isCustomTaskPlugin ? 'Build & Validate Submission' : 'Register Submission'}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Package candidate predictions via the Audit Gate (verifies min prediction delta &ge; 2.0% and formats archive).
+                  {isCustomTaskPlugin
+                    ? pluginCanSubmit
+                      ? 'Provide competition test-set predictions. The task plugin owns package creation and validation.'
+                      : `Task plugin “${taskInfo?.task_plugin?.id}” must implement both submission hooks before packaging is available.`
+                    : 'The configured submission checks validate candidate predictions and create the declared package.'}
                 </p>
               </div>
               <button
@@ -556,8 +580,8 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                   onChange={(e) => {
                     const id = e.target.value;
                     setRegExpId(id);
-                    if (!regCandidateCsv || regCandidateCsv.startsWith('artifacts/')) {
-                      setRegCandidateCsv(id ? `artifacts/${id}/oof_predictions.csv` : '');
+                    if (!isCustomTaskPlugin && (!regCandidateCsv || regCandidateCsv.startsWith(artifactDir))) {
+                      setRegCandidateCsv(id ? `${artifactDir}/${id}/oof_predictions.csv` : '');
                     }
                   }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
@@ -571,23 +595,25 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="artifacts/<exp_id>/oof_predictions.csv"
+                  placeholder={isCustomTaskPlugin ? 'path/to/test_predictions.csv' : `${artifactDir}/<exp_id>/oof_predictions.csv`}
                   value={regCandidateCsv}
                   onChange={(e) => setRegCandidateCsv(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                 />
                 <p className="text-[10px] text-slate-500 mt-0.5">
-                  Leave blank to auto-detect <code className="text-slate-400">artifacts/{regExpId || '&lt;exp_id&gt;'}/oof_predictions.csv</code>
+                  {isCustomTaskPlugin
+                    ? 'Use test-set predictions; validation OOF files are not accepted as submissions.'
+                    : <>Leave blank to auto-detect <code className="text-slate-400">{artifactDir}/{regExpId || '&lt;exp_id&gt;'}/oof_predictions.csv</code></>}
                 </p>
               </div>
 
-              <div>
+              {!isCustomTaskPlugin && <div>
                 <label className="block text-slate-300 font-semibold mb-1">
                   Parent Baseline CSV Path (for prediction delta check)
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. artifacts/exp000_template/oof_predictions.csv (leave blank if initial baseline)"
+                  placeholder={`e.g. ${artifactDir}/<exp_id>/oof_predictions.csv (leave blank if initial baseline)`}
                   value={regBaselineCsv}
                   onChange={(e) => setRegBaselineCsv(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
@@ -595,9 +621,9 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                 <p className="text-[10px] text-slate-500 mt-0.5">
                   Optional. If omitted, candidate is registered as the initial baseline package.
                 </p>
-              </div>
+              </div>}
 
-              <div className="grid grid-cols-2 gap-3">
+              {!isCustomTaskPlugin && <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
                     Min Prediction Delta (%)
@@ -611,7 +637,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                   />
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    Requires &ge; 2.0% row variance vs baseline.
+                    Uses the configured prediction-difference threshold.
                   </p>
                 </div>
 
@@ -620,13 +646,13 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                     Target Platform
                   </label>
                   <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-300 font-mono">
-                    {taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'CODABENCH / KAGGLE'}
+                    {taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Not configured'}
                   </div>
                   <p className="text-[10px] text-slate-500 mt-0.5">
                     From Task Config.
                   </p>
                 </div>
-              </div>
+              </div>}
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
@@ -651,10 +677,10 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={registering}
+                  disabled={registering || (isCustomTaskPlugin && !pluginCanSubmit)}
                   className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold rounded-lg transition shadow-lg shadow-indigo-600/30 disabled:opacity-50"
                 >
-                  {registering ? 'Auditing & Registering...' : 'Verify Audit & Register'}
+                  {registering ? 'Building & Validating...' : isCustomTaskPlugin ? 'Build & Validate Submission' : 'Verify Audit & Register'}
                 </button>
               </div>
             </form>

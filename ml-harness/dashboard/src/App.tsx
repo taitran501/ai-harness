@@ -349,6 +349,7 @@ const DashboardContent: React.FC = () => {
           initialConfigPath={configModalTarget}
           initialParentId={configModalParentId}
           experiments={experiments}
+          taskInfo={taskInfo}
           onClose={() => setIsConfigModalOpen(false)}
           onConfigSaved={async () => {
             await loadData();

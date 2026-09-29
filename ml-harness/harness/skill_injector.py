@@ -1,6 +1,6 @@
 """Skill Injector Engine for ML-Harness.
 
-Dynamically adapts and injects the AI Agent skill (.agents/skills/ml-experiment-harness/SKILL.md)
+Dynamically adapts and injects the AI Agent skill (.agents/skills/ml-harness/SKILL.md)
 to perfectly match any competition or benchmark (Kaggle, Codabench, SemEval, DrivenData, Hugging Face),
 parameterizing task modalities, metrics, subtasks, grounding backbones, and audit rules.
 """
@@ -12,13 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
 
-from harness.io_utils import get_project_root
-
-PROJECT_ROOT = get_project_root()
-SKILL_DIR = PROJECT_ROOT / ".agents" / "skills" / "ml-experiment-harness"
-SKILL_FILE = SKILL_DIR / "SKILL.md"
-TASK_CONFIG_FILE = PROJECT_ROOT / "configs" / "task.yaml"
-
+from harness.project import HarnessProject
 
 MODALITY_GROUNDING_SUGGESTIONS: Dict[str, Dict[str, Any]] = {
     "text": {
@@ -77,8 +71,11 @@ MODALITY_GROUNDING_SUGGESTIONS: Dict[str, Dict[str, Any]] = {
 
 
 def load_task_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
-    """Load task configuration from configs/task.yaml or specified path."""
-    path = config_path or TASK_CONFIG_FILE
+    """Load the attached task specification or a specified task config."""
+    project = HarnessProject.discover()
+    path = Path(config_path) if config_path is not None else project.task_config_path
+    if not path.is_absolute():
+        path = project.root / path
     if not path.exists():
         return {
             "name": "General ML/DL Benchmark",
@@ -93,7 +90,9 @@ def load_task_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     return data.get("task", data)
 
 
-def generate_skill_content(task: Dict[str, Any]) -> str:
+def generate_skill_content(
+    task: Dict[str, Any], artifact_path: str = ".ml-harness/artifacts/<task-id>"
+) -> str:
     """Generate Markdown content for SKILL.md dynamically tailored to the target task."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
     platform = (task.get("platform") or "generic").capitalize()
@@ -160,28 +159,34 @@ def generate_skill_content(task: Dict[str, Any]) -> str:
     # Data & Validation Strategy
     data_cfg = task.get("data_config", {})
     if data_cfg:
+        fold_count = data_cfg.get("n_folds")
+        fold_label = f"{fold_count} folds" if fold_count is not None else "fold count not declared"
         lines.extend([
             "",
             "### Data & Cross-Validation Strategy:",
-            f"- **Validation Scheme**: `{data_cfg.get('split_strategy', 'KFold')}` ({data_cfg.get('n_folds', 5)} folds, seed {data_cfg.get('seed', 42)})",
-            f"- **Anti-Leakage Group Column**: `{data_cfg.get('group_column', 'None (Standard split)')}`",
-            f"- **Dataset Paths**: Train: `{data_cfg.get('train_path', 'dataset/')}` | Test: `{data_cfg.get('test_path', 'dataset/test/')}`",
-            f"- **Key Columns**: ID: `{data_cfg.get('id_column', 'id')}` | Target: `{data_cfg.get('target_column', 'target')}`",
+            f"- **Validation Scheme**: `{data_cfg.get('split_strategy', 'Not declared')}` ({fold_label}, seed `{data_cfg.get('seed', 'not declared')}`)",
+            f"- **Anti-Leakage Group Column**: `{data_cfg.get('group_column', 'Not declared')}`",
+            f"- **Dataset Paths**: Train: `{data_cfg.get('train_path', 'not declared')}` | Test: `{data_cfg.get('test_path', 'not declared')}`",
+            f"- **Key Columns**: ID: `{data_cfg.get('id_column', 'not declared')}` | Target: `{data_cfg.get('target_column', 'not declared')}`",
         ])
 
     # Competition Constraints & Rules
     comp_rules = task.get("competition_rules", {})
     if comp_rules:
         max_p = comp_rules.get("max_params_limit")
-        p_str = f"{max_p / 1e6:.0f}M parameters" if max_p else "No limit"
+        p_str = f"{max_p / 1e6:.0f}M parameters" if max_p else "Not declared"
+        def declared_permission(key: str) -> str:
+            if key not in comp_rules:
+                return "Not declared"
+            return "Allowed" if comp_rules[key] else "Not allowed"
         lines.extend([
             "",
             "### Competition Rules & Constraints:",
-            f"- **Allowed LLM / API**: `{'Yes' if comp_rules.get('allow_llm') else 'No (Local/Open models only)'}`",
-            f"- **External Data**: `{'Allowed' if comp_rules.get('allow_external_data') else 'Forbidden'}`",
-            f"- **Pretrained Weights**: `{'Allowed' if comp_rules.get('allow_pretrained_models', True) else 'Forbidden'}`",
+            f"- **LLM / API**: `{declared_permission('allow_llm')}`",
+            f"- **External Data**: `{declared_permission('allow_external_data')}`",
+            f"- **Pretrained Weights**: `{declared_permission('allow_pretrained_models')}`",
             f"- **Parameter Ceiling**: `{p_str}`",
-            f"- **Daily Submission Quota**: `{comp_rules.get('daily_submission_limit', 'Unlimited')} submissions / day`",
+            f"- **Daily Submission Quota**: `{comp_rules.get('daily_submission_limit', 'Not declared')}`",
         ])
         if comp_rules.get("deadline"):
             lines.append(f"- **Competition Deadline**: `{comp_rules['deadline']}`")
@@ -192,11 +197,16 @@ def generate_skill_content(task: Dict[str, Any]) -> str:
         lines.extend([
             "",
             "### Submission & Audit Specification:",
-            f"- **File Name / Format**: `{sub_spec.get('file_name', 'submission.csv')}` (`{sub_spec.get('archive_format', 'csv')}`)",
-            f"- **MMES Effect Size Threshold**: `>= {sub_spec.get('min_diff_pct', 2.0)}%` of validation rows",
-            f"- **Ensemble Diversity Ceiling**: Cohen's Kappa `kappa <= {sub_spec.get('max_kappa', 0.85)}`",
-            f"- **Ensemble Disagreement Floor**: `>= {sub_spec.get('min_disagreement', 5.0)}%`",
+            f"- **File Name / Format**: `{sub_spec.get('file_name', 'not declared')}` (`{sub_spec.get('archive_format', 'not declared')}`)",
+            "- Follow only the audit rules explicitly declared by the task or its selected plugin.",
         ])
+        for key, label in (
+            ("min_diff_pct", "Minimum prediction difference (%)"),
+            ("max_kappa", "Maximum ensemble Cohen's Kappa"),
+            ("min_disagreement", "Minimum ensemble disagreement (%)"),
+        ):
+            if sub_spec.get(key) is not None:
+                lines.append(f"- **{label}**: `{sub_spec[key]}`")
 
     lines.extend([
         "",
@@ -205,38 +215,37 @@ def generate_skill_content(task: Dict[str, Any]) -> str:
         "## 2. Three-Layer Architecture (`Antigravity IDE` <-> `AgentBridge` <-> `Harness`)",
         "",
         "- **Layer 1 — True Agent Runtime (`Antigravity in IDE`)**: Performs scientific reasoning, hypothesis formulation, and the `Observe -> Decide -> Next Action` loop. The Harness does **not** run a separate internal LLM planner.",
-        "- **Layer 2 — Agent Bridge & Context Bridge (`harness/agent_bridge.py` & `tools/agent_bridge_cli.py`)**:",
+        "- **Layer 2 — Agent Bridge & Context Bridge (`harness/agent_bridge.py`, `ml-harness-agent`)**:",
         "  - Feeds Antigravity a compressed **Context Packet** (`CompetitionState` 8-Phase HUD, Parallel Tracks, `TreeJournal` UCB recommendation, Parent `DIAGNOSTICS` bottlenecks, Idea Graveyard, and active `BridgeSession` budget/usage):",
         "    ```powershell",
-        "    python tools/agent_bridge_cli.py context",
+        "    ml-harness-agent context",
         "    ```",
         "  - Tracks stateful **`BridgeSession` (`session_XXXX`)** (`goal`, `experiments_run`, `compute_usage`, `consecutive_rejections`, optional `max_experiments` / `max_gpu_hours` / `max_cloud_runs` budgets) and enforces **`USER_APPROVAL` governance** on sensitive actions (`prepare_submission`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`).",
         "  - Exposes **Typed Harness Actions** returning structured `ActionObservation` JSON payloads (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `new_blockers`):",
         "    ```powershell",
-        "    python tools/agent_bridge_cli.py start-session --goal \"Improve target metric\" --max-experiments 3",
-        "    python tools/agent_bridge_cli.py act --action <typed_action> --params '{\"...\": \"...\"}'",
+        "    ml-harness-agent start-session --goal \"Improve target metric\" --max-experiments 3",
+        "    ml-harness-agent act --action <typed_action> --params '{\"...\": \"...\"}'",
         "    ```",
-        "- **Layer 3 — Competition State Machine & Execution Runtime (`harness/competition_state.py`, `train.py`, `harness/cloud_runner.py`)**:",
+        "- **Layer 3 — Task State & Execution Runtime (`harness/competition_state.py`, `ml-harness-run`, `harness/cloud_runner.py`)**:",
         "  - **8-Phase Journey**: `1. Setup` -> `2. Understand` -> `3. Baseline Anchor` -> **Parallel Iteration Tracks** (`4. Experiment Loop` || `5. Candidate Management` || `6. External Evaluation`) -> `7. Freeze (Lock Candidate Portfolio & Mutations)` -> `8. Closure`.",
-        "  - **Execution Backends**: Local (`train.py`), Modal Serverless GPU (`--backend modal`), and Kaggle Kernels CLI (`--backend kaggle`).",
+        "  - **Execution Backends**: Local (`ml-harness-run`); remote backends require the selected task adapter to be installed remotely.",
         "",
         "---",
         "",
         "## 3. Core Operational Rules (Enforced & Immutable)",
         "",
         "### 3.1 The Context Protection Rule (Anti-Context Saturation)",
-        "- **NEVER** attempt to dump raw fold logs or entire `artifacts/` directories into prompt context.",
-        "- **ALWAYS** query the Agent Bridge Context Packet or Solution Tree CLI first:",
+        f"- **NEVER** attempt to dump raw fold logs or the entire `{artifact_path}/` directory into prompt context.",
+        "- **ALWAYS** query the Agent Bridge Context Packet first:",
         "  ```powershell",
-        "  python tools/agent_bridge_cli.py context",
-        "  python tools/journal_tool.py --summary",
+        "  ml-harness-agent context",
         "  ```",
         "",
         "### 3.2 The Anti-Pivot & Branch Exploration Rule (AIDE UCB Tree Search)",
         "- **DO NOT** make speculative guesses or pivot arbitrarily without mathematical justification.",
         "- Query the optimal branch recommendation according to Upper Confidence Bound (UCB):",
         "  ```powershell",
-        "  python tools/journal_tool.py --recommend",
+        "  ml-harness-agent context --format json",
         "  ```",
         "- Ensure every experiment implements **EXACTLY ONE ATOMIC INTERVENTION** (Control vs Treatment).",
         "",
@@ -259,33 +268,32 @@ def generate_skill_content(task: Dict[str, Any]) -> str:
         "  ```",
         "",
         "### 3.4 Diagnostic-First Exploration Rule",
-        "- Before writing any config, inspect `artifacts/<parent_id>/DIAGNOSTICS.md` (or call `act --action inspect_diagnostics`).",
+        f"- Before writing any config, inspect `{artifact_path}/<parent_id>/DIAGNOSTICS.md` (or call `act --action inspect_diagnostics`).",
         "- Declare a `problem_addressed` that directly targets a documented failure slice or confusion mode.",
         "- **Strictly DO NOT pseudo-ensemble** models of the same family or merge previous versions mechanically.",
         "",
         "### 3.5 SWE-Agent Physical & Statistical Audit Gate",
         "- Submissions and candidate predictions CANNOT be approved by natural language alone.",
-        "- **EnsembleGuard (`harness/ensemble_guard.py`)**: Checks constituent model diversity before ensembling: Cohen's Kappa ($\\kappa \\le 0.85$) and Disagreement Rate ($\\ge 5.0\\%$).",
-        "- **AuditGate (`tools/audit_gate.py`)**: Performs pre-submission statistical verification, SHA-256 duplicate detection, Minimum Meaningful Effect Size (MMES >= 2.0%), McNemar significance testing, and signs `AUDIT_RECEIPT.json`.",
+        "- **Task Contract and Approval Gates**: Apply validation and submission requirements only when the task or selected plugin declares them.",
+        "- **Submission checks**: Inspect the selected plugin capabilities and declared task contract. Do not infer scoring or audit thresholds.",
         "  ```powershell",
-        "  python tools/audit_gate.py --candidate <candidate_pred_csv> --baseline <baseline_pred_csv> --output-zip submission.zip",
+        "  ml-harness-agent act --action prepare_submission --user-approved --params '{\"exp_id\": \"<experiment-id>\", \"candidate_csv\": \"<test-predictions.csv>\"}'",
         "  ```",
-        "- **Minimum Meaningful Effect Size (MMES >= 2.0%)**: Candidates differing by < 2% of validation samples are physically rejected.",
         "",
         "### 3.6 Approval Governance (`AUTO` / `AUTO_WITH_LIMIT` / `USER_APPROVAL`)",
         "- **AUTO**: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
-        "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (`local` | `modal` | `kaggle`), `promote_candidate`, `synthesize_candidate`, `build_ensemble`",
+        "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation`, `promote_candidate`, `synthesize_candidate`, `build_ensemble`",
         "- **USER_APPROVAL (Mandatory Human Confirmation)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
         "",
         "---",
         "",
         "## 4. Standard Operating Procedure (SOP) for Antigravity in IDE",
         "",
-        "1. **Read Bridge Context Packet**: Run `python tools/agent_bridge_cli.py context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
-        "2. **Start / Configure Session (Optional Budgets)**: Run `python tools/agent_bridge_cli.py start-session --goal \"...\" --max-experiments 3`.",
-        "3. **Create Grounded Experiment**: Run `python tools/agent_bridge_cli.py act --action create_experiment --params '{...}'` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
-        "4. **Execute Smoke Test**: Run `python tools/agent_bridge_cli.py act --action run_smoke_test --params '{\"config_path\": \"configs/<exp>.yaml\"}'`.",
-        "5. **Execute Full 5-Fold Validation (`local` | `modal` | `kaggle`)**: Run `python tools/agent_bridge_cli.py act --action run_full_validation --params '{\"config_path\": \"configs/<exp>.yaml\", \"backend\": \"local\"}'`.",
+        "1. **Read Bridge Context Packet**: Run `ml-harness-agent context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
+        "2. **Start / Configure Session (Optional Budgets)**: Run `ml-harness-agent start-session --goal \"...\" --max-experiments 3`.",
+        "3. **Create Grounded Experiment**: Run `ml-harness-agent act --action create_experiment --params '{...}'` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
+        "4. **Execute Smoke Test**: Run `ml-harness-agent act --action run_smoke_test --params '{\"config_path\": \"configs/<exp>.yaml\"}'`.",
+        "5. **Execute Task-Declared Validation**: Run `ml-harness-agent act --action run_full_validation --params '{\"config_path\": \"configs/<exp>.yaml\", \"backend\": \"local\"}'`.",
         "6. **Observe & Decide Next Step**: Antigravity analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
         "7. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
         "",
@@ -300,10 +308,18 @@ def inject_skill_file(
     output_path: Optional[Path] = None,
 ) -> Path:
     """Inject/write dynamic SKILL.md tailored to the specified task configuration."""
-    cfg = task_config or load_task_config(config_path)
-    content = generate_skill_content(cfg)
+    project = HarnessProject.discover()
+    task_path = Path(config_path).expanduser() if config_path is not None else project.task_config_path
+    if not task_path.is_absolute():
+        task_path = project.root / task_path
+    cfg = task_config or load_task_config(task_path)
+    try:
+        artifact_path = project.artifacts_dir.relative_to(project.root).as_posix()
+    except ValueError:
+        artifact_path = str(project.artifacts_dir)
+    content = generate_skill_content(cfg, artifact_path=artifact_path)
 
-    dest = output_path or SKILL_FILE
+    dest = output_path or (project.root / ".agents" / "skills" / "ml-harness" / "SKILL.md")
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(content, encoding="utf-8")
     return dest
@@ -314,8 +330,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Inject dynamic competition-specific skill into .agents/skills/")
     parser.add_argument("--config", type=str, default="configs/task.yaml", help="Path to task configuration YAML")
-    parser.add_argument("--output", type=str, default=str(SKILL_FILE), help="Output path for SKILL.md")
+    parser.add_argument("--output", type=str, default=None, help="Output path for SKILL.md")
     args = parser.parse_args()
 
-    out_p = inject_skill_file(config_path=Path(args.config), output_path=Path(args.output))
+    out_p = inject_skill_file(
+        config_path=Path(args.config),
+        output_path=Path(args.output) if args.output else None,
+    )
     print(f"✔ Successfully injected dynamic task-specific skill into: {out_p}")

@@ -45,14 +45,14 @@ The execution engine is task-agnostic and supports multiple modeling paradigms:
 ### 2.4 Guardrails & Verification Gates
 To maintain experimental rigor:
 - **Epistemic Grounding Gate (`harness/grounding_gate.py`)**: Checks experiment configurations for explicit hypotheses, literature references, and assumptions before running.
-- **Ensemble Diversity Guard (`harness/ensemble_guard.py`)**: Rejects pseudo-ensembles by enforcing prediction divergence thresholds ($\kappa \le 0.85$, disagreement $\ge 5\%$).
-- **Deterministic Audit Gate (`tools/audit_gate.py`)**: Validates submission files against baselines before packaging.
+- **Ensemble Diversity Guard (`harness/ensemble_guard.py`)**: Applies configured diversity thresholds when the task declares them.
+- **Submission Gate**: Uses the selected task plugin's submission builder and validator. The generic audit applies only to declarative tasks.
 
 ---
 
 ## 3. Execution Backends
 
 ML-Harness supports three execution backends:
-1. **Local**: Direct execution on the developer machine via `python train.py`.
+1. **Local**: Direct execution on the developer machine via `ml-harness-run --project-root .`.
 2. **Modal.com**: Serverless GPU dispatch with persistent volume caching.
 3. **Kaggle**: Automated notebook packaging, push, and artifact synchronization.

@@ -32,7 +32,7 @@ interface TaskConfigModalProps {
 }
 
 const PLATFORMS = [
-  { id: 'codabench', name: 'Codabench', badge: 'SemEval / Academic' },
+  { id: 'codabench', name: 'Codabench', badge: 'Academic / Shared Tasks' },
   { id: 'kaggle', name: 'Kaggle', badge: 'Kaggle Competitions' },
   { id: 'aicrowd', name: 'AIcrowd', badge: 'Challenge Platform' },
   { id: 'drivendata', name: 'DrivenData', badge: 'Data Science for Good' },
@@ -81,11 +81,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [presets, setPresets] = useState<TaskPreset[]>([]);
 
   // Tab 1: Task & Objective
-  const [platform, setPlatform] = useState<string>('codabench');
+  const [platform, setPlatform] = useState<string>('custom');
   const [name, setName] = useState<string>('');
   const [type, setType] = useState<string>('');
-  const [modality, setModality] = useState<string>('text');
-  const [primaryMetric, setPrimaryMetric] = useState<string>('Macro-F1');
+  const [modality, setModality] = useState<string>('generic');
+  const [primaryMetric, setPrimaryMetric] = useState<string>('Score');
   const [direction, setDirection] = useState<'maximize' | 'minimize'>('maximize');
   const [primaryBaseline, setPrimaryBaseline] = useState<string>('');
   const [primaryTarget, setPrimaryTarget] = useState<string>('');
@@ -106,8 +106,8 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [missingDataPolicy, setMissingDataPolicy] = useState<string>('fill_empty');
 
   // Tab 3: Validation Protocol (CV)
-  const [splitStrategy, setSplitStrategy] = useState<string>('GroupKFold');
-  const [groupColumn, setGroupColumn] = useState<string>('group_id');
+  const [splitStrategy, setSplitStrategy] = useState<string>('KFold');
+  const [groupColumn, setGroupColumn] = useState<string>('');
   const [nFolds, setNFolds] = useState<number>(5);
   const [seed, setSeed] = useState<number>(42);
   const [foldFilePath, setFoldFilePath] = useState<string>('splits/folds.csv');
@@ -147,11 +147,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   // Initialize form when currentTask changes
   useEffect(() => {
     if (currentTask) {
-      setPlatform(currentTask.platform || 'codabench');
+      setPlatform(currentTask.platform || 'custom');
       setName(currentTask.name || currentTask.task_name || '');
       setType(currentTask.type || currentTask.task_type || '');
       setModality(currentTask.modality || 'text');
-      setPrimaryMetric(currentTask.primary_metric ? currentTask.primary_metric.replace(/\s*\(CV\)/i, '') : 'Macro-F1');
+      setPrimaryMetric(currentTask.primary_metric ? currentTask.primary_metric.replace(/\s*\(CV\)/i, '') : 'Score');
       setDirection(currentTask.direction || 'maximize');
       setPrimaryBaseline(currentTask.primary_metric_baseline !== undefined ? String(currentTask.primary_metric_baseline) : '');
       setPrimaryTarget(currentTask.primary_metric_target !== undefined ? String(currentTask.primary_metric_target) : '');
@@ -164,7 +164,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       setTrainPath(d.train_path || 'dataset/');
       setTestPath(d.test_path || 'dataset/test/');
       setSampleSubPath(d.sample_submission_path || 'submissions/sample_submission.csv');
-      setSplitStrategy(d.split_strategy || 'GroupKFold');
+      setSplitStrategy(d.split_strategy || 'KFold');
       setGroupColumn(d.group_column || '');
       setNFolds(d.n_folds || 5);
       setSeed(d.seed || 42);
@@ -202,13 +202,14 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   }, [initialTab]);
 
   if (!isOpen) return null;
+  const isCustomTaskPlugin = Boolean(currentTask?.task_plugin?.id && currentTask.task_plugin.id !== 'default');
 
   const handleApplyPreset = (preset: TaskPreset) => {
     setPlatform(preset.platform || 'kaggle');
     setName(preset.name);
     setType(preset.type);
     setModality(preset.modality || 'text');
-    setPrimaryMetric(preset.primary_metric ? preset.primary_metric.replace(/\s*\(CV\)/i, '') : 'Macro-F1');
+    setPrimaryMetric(preset.primary_metric ? preset.primary_metric.replace(/\s*\(CV\)/i, '') : 'Score');
     setDirection(preset.direction);
     setPrimaryBaseline(preset.primary_metric_baseline !== undefined ? String(preset.primary_metric_baseline) : '');
     setPrimaryTarget(preset.primary_metric_target !== undefined ? String(preset.primary_metric_target) : '');
@@ -337,9 +338,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       submission_spec: {
         file_name: submissionFileName.trim(),
         archive_format: archiveFormat,
-        min_diff_pct: minDiffPct ? parseFloat(minDiffPct) : 2.0,
-        max_kappa: maxKappa ? parseFloat(maxKappa) : 0.85,
-        min_disagreement: minDisagreement ? parseFloat(minDisagreement) : 5.0,
+        ...(isCustomTaskPlugin ? {} : {
+          min_diff_pct: minDiffPct ? parseFloat(minDiffPct) : 2.0,
+          max_kappa: maxKappa ? parseFloat(maxKappa) : 0.85,
+          min_disagreement: minDisagreement ? parseFloat(minDisagreement) : 5.0,
+        }),
       },
     };
 
@@ -1150,6 +1153,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 </div>
               </div>
 
+              {isCustomTaskPlugin ? (
+                <div className="p-3.5 bg-zinc-950 rounded-lg border border-zinc-800 text-xs text-zinc-300">
+                  The selected task plugin owns submission construction and validation. Its builder is {currentTask?.task_plugin?.capabilities?.submission_builder ? 'available' : 'not implemented'}, and its validator is {currentTask?.task_plugin?.capabilities?.submission_validator ? 'available' : 'not implemented'}. Core audit thresholds are not applied to this plugin.
+                </div>
+              ) : (
               <div className="p-3.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
                 <div className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
@@ -1197,6 +1205,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
                 </div>
               </div>
+              )}
             </div>
           )}
 

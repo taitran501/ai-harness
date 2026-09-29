@@ -41,6 +41,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
   onRefreshSolutionTree,
   onOpenConfigModal,
 }) => {
+  const isCustomTaskPlugin = Boolean(taskInfo?.task_plugin?.id && taskInfo.task_plugin.id !== 'default');
   const [platform, setPlatform] = useState<'modal' | 'kaggle'>('modal');
   const [configs, setConfigs] = useState<string[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<string>('configs/exp001_tfidf_baseline.yaml');
@@ -350,8 +351,13 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
             <span>Cloud Runner Hub</span>
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Launch remote GPU experiments on Modal.com or Kaggle Kernels with real-time log streaming and automated audit gate.
+            Launch remote GPU experiments on Modal.com or Kaggle Kernels with live logs.
           </p>
+          {isCustomTaskPlugin && (
+            <p className="mt-2 p-2.5 bg-amber-950/30 border border-amber-800/60 rounded-lg text-xs text-amber-200">
+              Remote execution is disabled for task plugin “{taskInfo?.task_plugin?.id}” until the adapter is installed in the remote runtime. Run locally through the task adapter.
+            </p>
+          )}
         </div>
 
         {/* Platform Switcher */}
@@ -466,8 +472,8 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
               )}
             </div>
 
-            {/* Checkboxes for Audit Gate & DAG Sync */}
-            <div className="space-y-1.5 pt-1 border-t border-zinc-900">
+            {/* Automatic audit applies only to the declarative core runner. */}
+            {!isCustomTaskPlugin && <div className="space-y-1.5 pt-1 border-t border-zinc-900">
               <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                 <input
                   type="checkbox"
@@ -486,7 +492,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                 />
                 <span>Auto-sync Solution Tree DAG on Pass</span>
               </label>
-            </div>
+            </div>}
           </div>
         </div>
 
@@ -557,7 +563,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
             ) : (
               <button
                 onClick={handleLaunchExecution}
-                disabled={isLaunching}
+                disabled={isLaunching || isCustomTaskPlugin}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-500 to-sky-500 hover:from-indigo-400 hover:to-sky-400 active:scale-95 text-white py-2 rounded-lg text-xs font-semibold shadow-lg shadow-indigo-500/20 transition"
               >
                 <Play className={`w-3.5 h-3.5 ${isLaunching ? 'animate-spin' : 'fill-current'}`} />

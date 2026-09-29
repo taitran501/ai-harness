@@ -15,8 +15,8 @@ This guide describes how AI coding assistants (such as Antigravity IDE, Claude C
 3. **Fast Probes Before Full Runs**:
    All new pipelines are verified with a fast single-fold debug probe (`--debug --fold 0`) to catch syntax, data shape, and convergence issues before allocating multi-fold compute.
 
-4. **Deterministic Guardrails**:
-   Ensemble candidates and submission files are verified via programmatic audit gates before packaging.
+4. **Task-Owned Contracts**:
+   The installed task plugin defines data, metrics, and submission capabilities. The agent checks those declared capabilities before treating a task as submission-ready.
 
 ---
 
@@ -26,7 +26,7 @@ When starting a new competition or benchmark, the assistant needs **at least one
 - A dataset location (local archive, folder, or link).
 - A task context (competition title, link, or description).
 
-The complete prompt to initiate onboarding is documented in [`docs/prompts/onboarding.md`](prompts/onboarding.md).
+The complete prompt to initiate onboarding is documented in [`docs/prompts/onboarding.md`](prompts/onboarding.md). For prompts across all lifecycle phases (iteration, ensembling, and pre-submission audit), see the [Prompt Library](prompts/README.md).
 
 ---
 
@@ -35,42 +35,42 @@ The complete prompt to initiate onboarding is documented in [`docs/prompts/onboa
 The assistant interacts with the execution harness through `tools/agent_bridge_cli.py`:
 
 ### Viewing Context
-```bash
+```powershell
 # Retrieve current stage, best CV score, and UCB branch suggestions
-python tools/agent_bridge_cli.py context
+ml-harness-agent --project-root . context
 ```
 
 ### Starting a Work Session
-```bash
+```powershell
 # Start a session with experiment and runtime budgets
-python tools/agent_bridge_cli.py start-session --goal "Improve primary metric" --max-experiments 3
+ml-harness-agent --project-root . start-session --goal "Improve primary metric" --max-experiments 3
 ```
 
 ### Executing Actions
-```bash
+```powershell
 # Create an experiment configuration
-python tools/agent_bridge_cli.py act --action create_experiment --params '{"branch": "feat", "descriptor": "target_encoding"}'
+ml-harness-agent --project-root . act --action create_experiment --params '{"branch": "feat", "descriptor": "target_encoding"}'
 
 # Run a smoke test on fold 0
-python tools/agent_bridge_cli.py act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_target_encoding.yaml"}'
+ml-harness-agent --project-root . act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_target_encoding.yaml"}'
 
 # Run full cross-validation
-python tools/agent_bridge_cli.py act --action run_full_validation --params '{"config_path": "configs/exp002_feat_target_encoding.yaml"}'
+ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path": "configs/exp002_feat_target_encoding.yaml"}'
 
 # Promote model to candidate pool
-python tools/agent_bridge_cli.py act --action promote_candidate --params '{"exp_id": "exp002", "name": "candidate_v1"}'
+ml-harness-agent --project-root . act --action promote_candidate --params '{"exp_id": "exp002", "name": "candidate_v1"}'
 ```
 
 ---
 
 ## 4. Solution Tree & Exploration (UCB)
 
-The solution tree (`artifacts/journal.json`) tracks all iterations as a directed acyclic graph (DAG). The assistant queries the next recommended direction using Upper Confidence Bound search:
+The solution tree is stored under `.ml-harness/artifacts/<task-id>/journal.json`. The Agent Bridge context packet includes the current tree and next branch recommendation:
 
 ```bash
 # Summary of all runs
-python tools/journal_tool.py --summary
+ml-harness-agent --project-root . context
 
 # Recommended next intervention branch
-python tools/journal_tool.py --recommend
+ml-harness-agent --project-root . context --format json
 ```

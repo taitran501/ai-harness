@@ -75,9 +75,6 @@ export interface ExperimentSummary {
   hypothesis?: string;
   intervention?: string;
   timestamp: number;
-  subtask_a?: number | null;
-  subtask_b?: number | null;
-  subtask_c?: number | null;
   official_lb_score?: number | null;
 }
 
@@ -177,6 +174,7 @@ export interface DataConfig {
   sample_submission_path?: string;
   split_strategy?: 'GroupKFold' | 'StratifiedKFold' | 'KFold' | 'TimeSeriesSplit' | string;
   group_column?: string;
+  partition_column?: string;
   n_folds?: number;
   seed?: number;
   id_column?: string;
@@ -237,6 +235,13 @@ export interface TaskInfo {
   data_config?: DataConfig;
   competition_rules?: CompetitionRules;
   submission_spec?: SubmissionSpec;
+  artifacts_dir?: string;
+  task_plugin?: {
+    id: string;
+    version?: string | null;
+    capabilities?: Record<string, boolean>;
+    error?: string;
+  };
 }
 
 export interface TaskPreset {
@@ -294,28 +299,9 @@ export interface SubmissionEntry {
   exp_id: string;
   created_at: string;
   status: 'LOCAL_VERIFIED' | 'SUBMITTED' | 'SCORED' | string;
-  local_cv_scores: {
-    subtask_a_macro?: number | null;
-    subtask_b_macro?: number | null;
-    subtask_c_type_macro?: number | null;
-    subtask_c_id_macro?: number | null;
-    [key: string]: any;
-  };
-  official_scores?: {
-    subtask_a_macro?: number | null;
-    subtask_b_macro?: number | null;
-    subtask_c_type_macro?: number | null;
-    subtask_c_id_macro?: number | null;
-    split_type?: string;
-    [key: string]: any;
-  };
-  score_deltas?: {
-    subtask_a_macro?: number | null;
-    subtask_b_macro?: number | null;
-    subtask_c_type_macro?: number | null;
-    subtask_c_id_macro?: number | null;
-    [key: string]: any;
-  };
+  local_cv_scores: Record<string, any>;
+  official_scores?: Record<string, any>;
+  score_deltas?: Record<string, any>;
   candidate_path: string;
   baseline_path?: string | null;
   archive_path: string;

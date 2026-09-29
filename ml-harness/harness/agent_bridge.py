@@ -4,9 +4,9 @@ Architecture Principle:
 - The TRUE Agent Runtime (Reasoning, Hypothesis Formulation, Planning, Decision Loop)
   is **Antigravity inside the IDE** — NOT an internal Python planner or LLM loop inside the Harness.
 - The Harness provides:
-  1. Competition State & Memory (`CompetitionStateMachine`, `TreeJournal`, `Diagnostics`, `Idea Graveyard`).
+  1. Task State & Memory (`CompetitionStateMachine`, `TreeJournal`, `Diagnostics`, `Idea Graveyard`).
   2. Deterministic Guardrails (`GroundingGate`, `ExperimentValidator`, `EnsembleGuard`, `AuditGate`).
-  3. Execution & Training Backends (`local` CPU/GPU via `train.py`, `modal` serverless GPU, `kaggle` CLI).
+  3. Execution & Training Backends (`local` CPU/GPU via `ml-harness-run`, remote backends when the selected adapter supports them).
 - `AgentBridge` connects Antigravity in the IDE with the Harness and Dashboard UI via:
   - Compact, high-signal `ContextPacket` (JSON & Markdown) so Antigravity can reason without context bloat.
   - Strictly typed Harness Actions (`TypedActionName`) returning structured `ActionObservation` payloads.
@@ -49,7 +49,10 @@ class ApprovalTier(str, Enum):
 class TypedActionName(str, Enum):
     """Canonical Typed Actions exposed by AgentBridge to Antigravity in the IDE."""
 
+    BOOTSTRAP_TASK = "bootstrap_task"
+    CONFIRM_TASK_SPEC = "confirm_task_spec"
     INSPECT_DATA_READINESS = "inspect_data_readiness"
+    CONFIRM_DATA_RISKS = "confirm_data_risks"
     ESTABLISH_BASELINE_ANCHOR = "establish_baseline_anchor"
     INSPECT_EXPERIMENT = "inspect_experiment"
     INSPECT_DIAGNOSTICS = "inspect_diagnostics"
@@ -68,7 +71,10 @@ class TypedActionName(str, Enum):
 
 
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
+    TypedActionName.BOOTSTRAP_TASK.value: ApprovalTier.AUTO.value,
+    TypedActionName.CONFIRM_TASK_SPEC.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.INSPECT_DATA_READINESS.value: ApprovalTier.AUTO.value,
+    TypedActionName.CONFIRM_DATA_RISKS.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.INSPECT_EXPERIMENT.value: ApprovalTier.AUTO.value,
     TypedActionName.INSPECT_DIAGNOSTICS.value: ApprovalTier.AUTO.value,
     TypedActionName.CREATE_EXPERIMENT.value: ApprovalTier.AUTO.value,
@@ -179,20 +185,61 @@ class AgentBridge:
     """
 
     def __init__(self, project_root: Path | str = ".", task_spec_path: Optional[str | Path] = None):
-        self.project_root = Path(project_root).resolve()
-        self.sessions_dir = self.project_root / "artifacts" / "agent_sessions"
-        self.legacy_runs_dir = self.project_root / "artifacts" / "agent_runs"
+        from harness.plugins import TaskPluginContext, load_task_plugin
+        from harness.project import HarnessProject
+        from harness.task_spec import load_active_task_spec
+
+        self.project = HarnessProject.discover(project_root, task_spec_path)
+        self.project_root = self.project.root
+        self.artifacts_dir = self.project.artifacts_dir
+        self.sessions_dir = self.artifacts_dir / "agent_sessions"
+        self.legacy_runs_dir = self.artifacts_dir / "agent_runs"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.legacy_runs_dir.mkdir(parents=True, exist_ok=True)
-        self.comp_state = CompetitionStateMachine(self.project_root)
-        # Support custom task.yaml injection (e.g. for tests or plugin scenarios)
-        if task_spec_path:
-            try:
-                import yaml
-                raw = yaml.safe_load(Path(task_spec_path).read_text(encoding="utf-8")) or {}
-                self.comp_state.spec = raw.get("task", raw)
-            except Exception:
-                pass
+        self.comp_state = CompetitionStateMachine(self.project_root, self.project.task_config_path)
+        self.task_spec = load_active_task_spec(self.project.task_config_path)
+        self.plugin_context = TaskPluginContext(
+            project_root=self.project_root,
+            task_config_path=self.project.task_config_path,
+            task_spec=self.task_spec,
+            plugin_id=self.project.plugin_id or "default",
+        )
+        self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
+
+    def _new_journal(self, auto_sync: bool = True) -> TreeJournal:
+        return TreeJournal(
+            journal_path=self.artifacts_dir / "journal.json",
+            artifacts_dir=self.artifacts_dir,
+            auto_sync=auto_sync,
+            task_spec=self.task_spec,
+        )
+
+    def _new_submission_manager(self) -> SubmissionManager:
+        return SubmissionManager(
+            self.artifacts_dir / "submissions",
+            artifacts_dir=self.artifacts_dir,
+            project_root=self.project_root,
+            task_config_path=self.project.task_config_path,
+        )
+
+    def _refresh_task_context(self) -> None:
+        """Reload task config and plugin state after an onboarding action rewrites it."""
+        from harness.plugins import TaskPluginContext, load_task_plugin
+        from harness.project import HarnessProject
+        from harness.task_spec import load_active_task_spec
+
+        self.project = HarnessProject.discover(self.project_root, self.project.task_config_path)
+        self.project_root = self.project.root
+        self.artifacts_dir = self.project.artifacts_dir
+        self.task_spec = load_active_task_spec(self.project.task_config_path, force_reload=True)
+        self.comp_state = CompetitionStateMachine(self.project_root, self.project.task_config_path)
+        self.plugin_context = TaskPluginContext(
+            project_root=self.project_root,
+            task_config_path=self.project.task_config_path,
+            task_spec=self.task_spec,
+            plugin_id=self.project.plugin_id or "default",
+        )
+        self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
 
     def _get_spec_min_improvement(self, session_or_budget: Optional[Any] = None) -> float:
         """Resolve min_meaningful_improvement from SessionBudget or CompetitionSpec (`configs/task.yaml`)."""
@@ -231,7 +278,7 @@ class AgentBridge:
             except Exception:
                 pass
         if not items:
-            items.append("Do NOT pseudo-ensemble models from the same family (requires Cohen's Kappa <= 0.85 & Disagreement >= 5.0%).")
+            items.append("No rejected approaches are recorded in the current experiment history.")
         return items
 
     # =========================================================================
@@ -338,8 +385,8 @@ class AgentBridge:
         budget: Optional[Dict[str, Any]] = None,
         session_id: Optional[str] = None,
     ) -> BridgeSession:
-        journal = TreeJournal(auto_sync=True)
-        sub_mgr = SubmissionManager()
+        journal = self._new_journal(auto_sync=True)
+        sub_mgr = self._new_submission_manager()
         snap = self.comp_state.evaluate_journey_snapshot(journal, sub_mgr)
 
         sid = session_id or self.get_next_session_id()
@@ -414,10 +461,10 @@ class AgentBridge:
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build a compressed, high-density Context Packet for Antigravity in the IDE."""
-        journal = TreeJournal(auto_sync=True)
-        sub_mgr = SubmissionManager()
+        journal = self._new_journal(auto_sync=True)
+        sub_mgr = self._new_submission_manager()
         snap = self.comp_state.evaluate_journey_snapshot(journal, sub_mgr)
-        max_p = self.comp_state.spec.get("competition_rules", {}).get("max_params_limit", 150_000_000)
+        max_p = self.comp_state.spec.get("competition_rules", {}).get("max_params_limit")
         ucb_rec = journal.recommend_next_branch(max_params=max_p)
 
         active_session = None
@@ -440,6 +487,13 @@ class AgentBridge:
 
         packet = {
             "bridge_version": "1.1_antigravity_bridge",
+            "project_root": str(self.project_root),
+            "task_config": str(self.project.task_config_path.relative_to(self.project_root)).replace("\\", "/"),
+            "task_plugin": {
+                "id": self.project.plugin_id or "default",
+                "version": self.task_plugin.version,
+                "capabilities": self.task_plugin.capabilities(),
+            },
             "architecture_motto": "Antigravity thinks. AgentBridge coordinates. Harness verifies and executes.",
             "runtime_owner": "Antigravity (IDE)",
             "active_session": active_session,
@@ -502,7 +556,7 @@ class AgentBridge:
                 pa = sess["pending_approval_action"]
                 lines.append(
                     f"- ⚠️ **PENDING USER APPROVAL**: Action `{pa.get('action')}` — {pa.get('rationale')} "
-                    f"(Resume via `python tools/agent_bridge_cli.py approve --session-id {sess['session_id']}`)"
+                    f"(Resume via `ml-harness-agent approve --session-id {sess['session_id']}`)"
                 )
 
         if hud.get("what_is_blocking_me"):
@@ -530,7 +584,7 @@ class AgentBridge:
 
         lines.extend([
             "",
-            "## 🛠️ Typed Bridge Actions (`python tools/agent_bridge_cli.py act --action <name> ...`)",
+            "## 🛠️ Typed Bridge Actions (`ml-harness-agent act --action <name> ...`)",
             "- **AUTO**: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
             "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (`--backend local|modal|kaggle`), `synthesize_candidate`, `build_ensemble`",
             "- **USER_APPROVAL (Requires Human Sign-off / `--user-approved`)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
@@ -623,6 +677,8 @@ class AgentBridge:
         if metrics_file.exists():
             try:
                 metrics_data = json.loads(metrics_file.read_text(encoding="utf-8"))
+                if isinstance(metrics_data, list) and metrics_data:
+                    metrics_data = metrics_data[0]
                 comp_score = float(metrics_data.get("composite_score") or metrics_data.get("macro_f1") or metrics_data.get("score") or 0.0)
                 scores_by_target = {k: float(v) for k, v in metrics_data.items() if isinstance(v, (int, float))}
                 return comp_score, scores_by_target
@@ -798,8 +854,8 @@ class AgentBridge:
             session_id=session_id,
             budget=budget,
         )
-        journal = TreeJournal(auto_sync=True)
-        sub_mgr = SubmissionManager()
+        journal = self._new_journal(auto_sync=True)
+        sub_mgr = self._new_submission_manager()
 
         step_idx = len(session.actions) + 1
         tier = session.approval_policy.get(action, DEFAULT_ACTION_APPROVAL_TIERS.get(action, ApprovalTier.AUTO.value))
@@ -842,7 +898,7 @@ class AgentBridge:
                 status="PAUSED_FOR_APPROVAL",
                 summary=(
                     f"Action '{action}' is in tier USER_APPROVAL. Execution paused until confirmed by user "
-                    f"(pass `--user-approved` or run `python tools/agent_bridge_cli.py approve --session-id {session.session_id}`)."
+                    f"(pass `--user-approved` or run `ml-harness-agent approve --session-id {session.session_id}`)."
                 ),
                 data={"pending_action": asdict(call)},
             )
@@ -864,7 +920,9 @@ class AgentBridge:
         )
 
         # Update final snapshot HUD
-        snap_after = self.comp_state.evaluate_journey_snapshot(TreeJournal(auto_sync=True), SubmissionManager())
+        snap_after = self.comp_state.evaluate_journey_snapshot(
+            self._new_journal(auto_sync=True), self._new_submission_manager()
+        )
         session.final_state = snap_after.get("hud", {})
         self.save_session(session)
         return session, obs
@@ -903,10 +961,50 @@ class AgentBridge:
         params = call.params
 
         try:
-            if act == TypedActionName.INSPECT_DATA_READINESS.value:
-                report = self.comp_state.run_data_readiness_audit(params.get("config"))
-                self.comp_state.state["gates"]["data_risks_confirmed"] = True
+            if act == TypedActionName.CONFIRM_TASK_SPEC.value:
+                self.comp_state.state["gates"]["spec_confirmed"] = True
+                self.comp_state._append_audit_event(
+                    "TASK_SPEC_CONFIRMED",
+                    "A user approved the attached task specification.",
+                    {"task_config": str(self.project.task_config_path)},
+                )
                 self.comp_state.save()
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary="Task contract marked reviewed and confirmed.",
+                    artifact_path=str(self.project.task_config_path.relative_to(self.project_root)).replace("\\", "/"),
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            if act == TypedActionName.BOOTSTRAP_TASK.value:
+                from tools.bootstrap_task import bootstrap_competition_task
+                dataset_dir = params.get("dataset_dir", "dataset")
+                context_file = params.get("context_file", "docs/TASK.md")
+                output_config = params.get("output_config", "configs/task.yaml")
+                res = bootstrap_competition_task(
+                    dataset_dir=dataset_dir,
+                    context_file=context_file,
+                    output_config=output_config,
+                    project_root=self.project_root,
+                )
+                self._refresh_task_context()
+                self.comp_state.state["gates"]["spec_confirmed"] = False
+                self.comp_state.state["gates"]["data_risks_confirmed"] = False
+                self.comp_state.save()
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=f"Bootstrapped task '{res.get('task_name')}' ({res.get('modality')}, {res.get('task_type')}) with {res.get('samples_count')} samples.",
+                    data=res,
+                    artifact_path=res.get("config_file"),
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            elif act == TypedActionName.INSPECT_DATA_READINESS.value:
+                report = self.comp_state.run_data_readiness_audit(params.get("config"))
                 warns = [w.get("title", "") for w in report.get("warnings", [])]
                 return ActionObservation(
                     step_index=call.step_index,
@@ -914,8 +1012,30 @@ class AgentBridge:
                     status="SUCCESS",
                     summary=f"Executed {len(report.get('checks_performed', []))} declarative data checks; {len(warns)} warnings logged.",
                     diagnostics_bottlenecks=warns,
-                    artifact_path="artifacts/DATA_READINESS_REPORT.json",
+                    artifact_path=str(self.comp_state.data_report_file.relative_to(self.project_root)).replace("\\", "/"),
                     data={"checks_performed": report.get("checks_performed", []), "warnings": warns},
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            elif act == TypedActionName.CONFIRM_DATA_RISKS.value:
+                if not self.comp_state.state["gates"].get("spec_confirmed"):
+                    raise ValueError("Review and confirm the task specification before confirming data risks.")
+                report = self.comp_state.get_data_readiness_report()
+                if report.get("status") == "BLOCKED":
+                    raise ValueError("The latest data readiness report is BLOCKED; fix its critical checks first.")
+                self.comp_state.state["gates"]["data_risks_confirmed"] = True
+                self.comp_state._append_audit_event(
+                    "DATA_RISKS_CONFIRMED",
+                    "A user reviewed and confirmed the latest data readiness report.",
+                    {"report_status": report.get("status"), "report_path": str(self.comp_state.data_report_file)},
+                )
+                self.comp_state.save()
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=f"Data readiness report ({report.get('status')}) reviewed and confirmed.",
+                    artifact_path=str(self.comp_state.data_report_file.relative_to(self.project_root)).replace("\\", "/"),
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
@@ -924,7 +1044,6 @@ class AgentBridge:
                 default_base_id = self.comp_state.state["gates"].get("baseline_exp_id") or self.comp_state.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
                 base_id = params.get("baseline_id") or pool.get("baseline_id", default_base_id)
                 base_score = float(pool.get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
-                self.comp_state.state["gates"]["data_risks_confirmed"] = True
                 self.comp_state.state["gates"]["baseline_locked"] = True
                 self.comp_state.state["gates"]["baseline_exp_id"] = base_id
                 self.comp_state.save()
@@ -964,7 +1083,7 @@ class AgentBridge:
                 pool = self.comp_state.compute_candidate_pool(journal)
                 default_exp_id = (pool.get("overall_best") or {}).get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
                 exp_id = params.get("exp_id", default_exp_id)
-                diag_file = self.project_root / "artifacts" / exp_id / "DIAGNOSTICS.md"
+                diag_file = self.artifacts_dir / exp_id / "DIAGNOSTICS.md"
                 node = journal.nodes.get(exp_id)
                 bottlenecks = []
                 if node and isinstance(node.diagnostics_summary, dict):
@@ -1009,7 +1128,7 @@ class AgentBridge:
                 cfg_path = configs_dir / f"{exp_id}.yaml"
                 uncertainty = str(params.get("uncertainty_level", "low")).lower()
                 task_name = self.comp_state.spec.get("name", "Competition Task")
-                primary_metric = self.comp_state.spec.get("primary_metric", "macro_f1")
+                primary_metric = self.comp_state.spec.get("primary_metric", "score")
                 parent_node = journal.get_node(parent_id) if hasattr(journal, "get_node") else journal.nodes.get(parent_id)
                 parent_score = parent_node.get_score() if parent_node else float(self.comp_state.spec.get("primary_metric_baseline") or 0.0)
 
@@ -1046,7 +1165,7 @@ class AgentBridge:
                         "known_facts": params.get(
                             "known_facts",
                             [
-                                f"Parent '{parent_id}' achieved {primary_metric}={parent_score:.4f} on grouped cross-validation.",
+                                f"Parent '{parent_id}' achieved {primary_metric}={parent_score:.4f} on the configured validation scheme.",
                             ],
                         ),
                         "assumptions": params.get(
@@ -1058,7 +1177,7 @@ class AgentBridge:
                         "uncertainty_level": uncertainty,
                         "verification_probe": params.get(
                             "verification_probe",
-                            f"Run single-fold smoke test: python train.py --config configs/{exp_id}.yaml --debug --fold 0",
+                            f"Run single-fold smoke test: ml-harness-run --project-root . --task-config {self.project.task_config_path.relative_to(self.project_root)} --config configs/{exp_id}.yaml --debug --fold 0",
                         ),
                     },
                     "data": {
@@ -1101,7 +1220,12 @@ class AgentBridge:
                 fold = str(params.get("fold", 0))
                 cmd = [
                     sys.executable,
-                    "train.py",
+                    "-m",
+                    "harness.runner",
+                    "--project-root",
+                    str(self.project_root),
+                    "--task-config",
+                    str(self.project.task_config_path),
                     "--config",
                     cfg_path,
                     "--debug",
@@ -1131,7 +1255,12 @@ class AgentBridge:
                 fold = str(params.get("fold", 0))
                 cmd = [
                     sys.executable,
-                    "train.py",
+                    "-m",
+                    "harness.runner",
+                    "--project-root",
+                    str(self.project_root),
+                    "--task-config",
+                    str(self.project.task_config_path),
                     "--config",
                     cfg_path,
                     "--debug",
@@ -1160,6 +1289,10 @@ class AgentBridge:
                     raise ValueError("Parameter 'config_path' is required for 'run_full_validation'.")
 
                 backend = str(params.get("backend", "local")).lower()
+                if backend in ("modal", "kaggle") and self.project.plugin_id not in (None, "default"):
+                    raise ValueError(
+                        f"Cloud execution for task plugin '{self.project.plugin_id}' is unavailable until its adapter is installed in the remote runtime."
+                    )
                 force = bool(params.get("force", True))
 
                 full_cfg_file = self.project_root / cfg_path
@@ -1169,7 +1302,8 @@ class AgentBridge:
                 if backend in ("modal", "kaggle"):
                     cmd = [
                         sys.executable,
-                        "harness/cloud_runner.py",
+                        "-m",
+                        "harness.cloud_runner",
                         "--backend",
                         backend,
                         "--config",
@@ -1178,7 +1312,17 @@ class AgentBridge:
                     if params.get("gpu"):
                         cmd.extend(["--gpu", str(params["gpu"])])
                 else:
-                    cmd = [sys.executable, "train.py", "--config", cfg_path]
+                    cmd = [
+                        sys.executable,
+                        "-m",
+                        "harness.runner",
+                        "--project-root",
+                        str(self.project_root),
+                        "--task-config",
+                        str(self.project.task_config_path),
+                        "--config",
+                        cfg_path,
+                    ]
                     if force:
                         cmd.append("--force")
 
@@ -1207,16 +1351,16 @@ class AgentBridge:
                         status="FAILED",
                         summary=f"Full validation ({backend}) failed for '{exp_id}'.",
                         advisory="REASSESS_RECOMMENDED" if session.reassess_recommended else None,
-                        artifact_path=f"artifacts/{exp_id}",
+                        artifact_path=str((self.artifacts_dir / exp_id).relative_to(self.project_root)).replace("\\", "/"),
                         data={"returncode": retcode, "tail": out_text[-600:]},
                         elapsed_seconds=elapsed,
                     )
 
                 # Reload TreeJournal and evaluate metrics
-                journal.sync_from_artifacts()
+                journal.sync_from_artifacts(self.artifacts_dir)
                 pool = self.comp_state.compute_candidate_pool(journal)
                 base_score = float(pool.get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
-                oof_path = self.project_root / "artifacts" / exp_id / "oof_predictions.csv"
+                oof_path = self.artifacts_dir / exp_id / "oof_predictions.csv"
 
                 if oof_path.exists():
                     comp_score, detail_scores = self._evaluate_oof_dataframe(oof_path)
@@ -1233,7 +1377,7 @@ class AgentBridge:
                     session.consecutive_rejections += 1
                 session.reassess_recommended = session.consecutive_rejections >= max_rej
 
-                diag_json = self.project_root / "artifacts" / exp_id / "diagnostics.json"
+                diag_json = self.artifacts_dir / exp_id / "diagnostics.json"
                 bottlenecks = []
                 if diag_json.exists():
                     try:
@@ -1241,16 +1385,35 @@ class AgentBridge:
                     except Exception:
                         pass
 
+                validation_cfg = self.comp_state.spec.get("validation") or {}
+                data_cfg = self.comp_state.spec.get("data_config") or self.comp_state.spec.get("data") or {}
+                validation_strategy = (
+                    validation_cfg.get("strategy")
+                    or validation_cfg.get("scheme")
+                    or data_cfg.get("split_strategy")
+                    or "configured validation"
+                )
+                fold_count = (
+                    validation_cfg.get("n_folds")
+                    or validation_cfg.get("num_folds")
+                    or data_cfg.get("n_folds")
+                )
+                validation_label = (
+                    f"{validation_strategy} ({fold_count} folds)"
+                    if fold_count
+                    else str(validation_strategy)
+                )
+
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
                     status="SUCCESS",
-                    summary=f"Completed 5-fold CV ({backend}) for '{exp_id}': Composite={comp_score:.4f} (Δ={delta:+.4f} vs baseline).",
+                    summary=f"Completed {validation_label} ({backend}) for '{exp_id}': Composite={comp_score:.4f} (Δ={delta:+.4f} vs baseline).",
                     composite_score=comp_score,
                     metric_delta=delta,
                     diagnostics_bottlenecks=bottlenecks,
                     advisory="REASSESS_RECOMMENDED" if session.reassess_recommended else None,
-                    artifact_path=f"artifacts/{exp_id}/oof_predictions.csv",
+                    artifact_path=str(oof_path.relative_to(self.project_root)).replace("\\", "/"),
                     data={"exp_id": exp_id, "backend": backend, "scores": detail_scores},
                     elapsed_seconds=elapsed,
                 )
@@ -1310,23 +1473,53 @@ class AgentBridge:
                 default_exp = best_cand.get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
                 exp_id = params.get("exp_id", default_exp)
                 cand_csv = params.get("candidate_csv")
+                if self.project.plugin_id not in (None, "default"):
+                    capabilities = self.task_plugin.capabilities()
+                    if not capabilities.get("submission_builder") or not capabilities.get("submission_validator"):
+                        raise ValueError(
+                            f"Task plugin '{self.project.plugin_id}' must implement both submission_builder and submission_validator."
+                        )
+                    if not cand_csv:
+                        raise ValueError(
+                            "Provide candidate_csv containing predictions for the competition test set. "
+                            "OOF validation predictions are not a competition submission."
+                        )
+                    submission_spec = self.comp_state.spec.get("submission_spec", {})
+                    entry = sub_mgr.register_plugin_submission(
+                        exp_id=exp_id,
+                        candidate_csv=cand_csv,
+                        plugin=self.task_plugin,
+                        plugin_context=self.plugin_context,
+                        file_name=submission_spec.get("file_name", "submission.csv"),
+                        notes=params.get("notes", ""),
+                    )
+                    session.compute_usage["submissions_used"] = int(session.compute_usage.get("submissions_used", 0)) + 1
+                    return ActionObservation(
+                        step_index=call.step_index,
+                        action=act,
+                        status="SUCCESS",
+                        summary=f"Built and validated task submission '{entry.id}' with plugin '{self.project.plugin_id}'.",
+                        artifact_path=entry.archive_path,
+                        data=asdict(entry),
+                        elapsed_seconds=round(time.time() - t0, 3),
+                    )
                 if not cand_csv:
                     for cand_opt in [
-                        self.project_root / "artifacts" / exp_id / "predictions.csv",
-                        self.project_root / "artifacts" / exp_id / "oof_predictions.csv",
+                        self.artifacts_dir / exp_id / "predictions.csv",
+                        self.artifacts_dir / exp_id / "oof_predictions.csv",
                     ]:
                         if cand_opt.exists():
                             cand_csv = str(cand_opt)
                             break
                     if not cand_csv:
-                        cand_csv = str(self.project_root / "artifacts" / exp_id / "predictions.csv")
+                        cand_csv = str(self.artifacts_dir / exp_id / "predictions.csv")
 
                 base_exp = self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
                 base_csv = params.get("baseline_csv")
                 if not base_csv:
                     for base_opt in [
-                        self.project_root / "artifacts" / base_exp / "predictions.csv",
-                        self.project_root / "artifacts" / base_exp / "oof_predictions.csv",
+                        self.artifacts_dir / base_exp / "predictions.csv",
+                        self.artifacts_dir / base_exp / "oof_predictions.csv",
                     ]:
                         if base_opt.exists():
                             base_csv = str(base_opt)

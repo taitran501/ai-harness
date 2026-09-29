@@ -528,7 +528,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
   const handleAddFewShot = () => {
     setFewShots((prev) => [
       ...prev,
-      { input: 'Sample comment text', output: 'no', explanation: 'No stereotype is detected here.' },
+      { input: 'Sample input text', output: 'class_a', explanation: 'This example does not match the configured target class.' },
     ]);
   };
 
@@ -592,12 +592,13 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
     try {
       const trainPath = taskInfo?.data_config?.train_path || 'dataset/train.csv';
       const cleanModelStem = peftModelName.split('/')[1]?.toLowerCase() || 'model';
+      const artifactDir = taskInfo?.artifacts_dir || 'artifacts';
 
       if (fineTuningFramework === 'unsloth') {
         const res = await api.generateUnslothScript({
           model_name: peftModelName,
           train_path: trainPath,
-          output_dir: `artifacts/exp_unsloth_${cleanModelStem}`,
+          output_dir: `${artifactDir}/exp_unsloth_${cleanModelStem}`,
           text_column: peftTextCol,
           target_column: peftTargetCol,
           max_seq_length: peftMaxSeqLength,
@@ -614,7 +615,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
         const res = await api.generateLLMPeftScript({
           model_name: peftModelName,
           train_path: trainPath,
-          output_dir: `artifacts/exp_peft_${cleanModelStem}`,
+          output_dir: `${artifactDir}/exp_peft_${cleanModelStem}`,
           text_column: peftTextCol,
           target_column: peftTargetCol,
           lora_r: peftLoraR,
