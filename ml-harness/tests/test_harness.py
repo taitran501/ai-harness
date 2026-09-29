@@ -146,28 +146,28 @@ class AuditGateTests(unittest.TestCase):
     def test_compute_diff_metrics(self):
         cand_df = pd.DataFrame(
             {
-                "StereoQueerEval_id": [1, 2, 3],
-                "pred_stereotype": ["yes", "no", "yes"],
+                "sample_id": [1, 2, 3],
+                "pred_label": ["pos", "neg", "pos"],
             }
         )
         base_df = pd.DataFrame(
             {
-                "StereoQueerEval_id": [1, 2, 3],
-                "pred_stereotype": ["yes", "yes", "yes"],  # row 2 differs
+                "sample_id": [1, 2, 3],
+                "pred_label": ["pos", "pos", "pos"],  # row 2 differs
             }
         )
         diff_count, details = compute_diff_metrics(cand_df, base_df)
         self.assertEqual(diff_count, 1)
-        self.assertEqual(details["pred_stereotype"]["different_count"], 1)
+        self.assertEqual(details["pred_label"]["different_count"], 1)
 
     def test_audit_gate_cli_duplicate_failure(self):
         """CLI must exit code 1 when candidate matches baseline 100%."""
         df = pd.DataFrame(
             {
-                "StereoQueerEval_id": [1, 2],
-                "pred_stereotype": ["yes", "no"],
-                "pred_hate_speech": ["no", "no"],
-                "pred_target_type": ["none", "none"],
+                "sample_id": [1, 2],
+                "pred_label": ["pos", "neg"],
+                "pred_secondary": ["no", "no"],
+                "pred_category": ["none", "none"],
             }
         )
         cand_file = self.dir_path / "cand.csv"
@@ -194,18 +194,18 @@ class AuditGateTests(unittest.TestCase):
         """CLI must exit code 0, create zip, and write receipt when differing predictions exist."""
         cand_df = pd.DataFrame(
             {
-                "StereoQueerEval_id": [1, 2],
-                "pred_stereotype": ["yes", "yes"],  # row 2 changed
-                "pred_hate_speech": ["no", "no"],
-                "pred_target_type": ["none", "none"],
+                "sample_id": [1, 2],
+                "pred_label": ["pos", "pos"],  # row 2 changed
+                "pred_secondary": ["no", "no"],
+                "pred_category": ["none", "none"],
             }
         )
         base_df = pd.DataFrame(
             {
-                "StereoQueerEval_id": [1, 2],
-                "pred_stereotype": ["yes", "no"],
-                "pred_hate_speech": ["no", "no"],
-                "pred_target_type": ["none", "none"],
+                "sample_id": [1, 2],
+                "pred_label": ["pos", "neg"],
+                "pred_secondary": ["no", "no"],
+                "pred_category": ["none", "none"],
             }
         )
         cand_file = self.dir_path / "cand.csv"

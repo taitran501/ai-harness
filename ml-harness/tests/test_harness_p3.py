@@ -30,24 +30,24 @@ class TestAuditGateRefinements(unittest.TestCase):
     def test_compute_diff_metrics_excludes_resolved_id_when_none(self):
         """When id_col is None, compute_diff_metrics must still exclude resolved_id from prediction comparison."""
         cand_df = pd.DataFrame({
-            "StereoQueerEval_id": ["id_1", "id_2", "id_3"],
+            "sample_id": ["id_1", "id_2", "id_3"],
             "pred_col": ["a", "b", "c"],
         })
         base_df = pd.DataFrame({
-            "StereoQueerEval_id": ["id_1", "id_2", "id_3"],
+            "sample_id": ["id_1", "id_2", "id_3"],
             "pred_col": ["a", "x", "c"],
         })
 
         diff_count, diff_details = compute_diff_metrics(cand_df, base_df, id_col=None)
         self.assertEqual(diff_count, 1)
         self.assertIn("pred_col", diff_details)
-        self.assertNotIn("StereoQueerEval_id", diff_details)
+        self.assertNotIn("sample_id", diff_details)
 
     def test_audit_prediction_integrity_valid_and_invalid_classes(self):
         """Dynamic class validation catches values outside allowed classes."""
         # Valid data
         valid_df = pd.DataFrame({
-            "StereoQueerEval_id": ["id_1", "id_2"],
+            "sample_id": ["id_1", "id_2"],
             "pred_stereotype": ["yes", "no"],
             "pred_hate_speech": ["no", "yes_explicit"],
             "pred_target_type": ["none", "individual"],
@@ -57,7 +57,7 @@ class TestAuditGateRefinements(unittest.TestCase):
 
         # Invalid stereotype value
         bad_df = pd.DataFrame({
-            "StereoQueerEval_id": ["id_1"],
+            "sample_id": ["id_1"],
             "pred_stereotype": ["maybe"],
         })
         bad_errors = audit_prediction_integrity(bad_df)

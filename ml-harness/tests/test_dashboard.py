@@ -228,7 +228,6 @@ class DashboardTests(unittest.TestCase):
             "platform": "kaggle",
             "config_path": "configs/exp001_tfidf_baseline.yaml",
             "kaggle_gpu": "T4 x 2",
-            "kaggle_dataset_slug": "antigravity/stereoqueer-eval-data"
         }).encode("utf-8")
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req) as resp:

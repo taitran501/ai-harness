@@ -17,7 +17,7 @@ class SkillInjectorTests(unittest.TestCase):
     def test_generate_skill_nlp(self):
         """Verify dynamic skill generation for NLP multi-task competition."""
         task_cfg = {
-            "task_name": "StereoQueerEval",
+            "task_name": "My NLP Benchmark",
             "platform": "codabench",
             "task_type": "Multi-Task Text Classification",
             "modality": "text",
@@ -28,20 +28,20 @@ class SkillInjectorTests(unittest.TestCase):
             "metrics": [
                 {
                     "id": "subtask_a",
-                    "name": "Stereotype Detection",
+                    "name": "Label Detection",
                     "metric": "Macro-F1",
                     "direction": "maximize",
                     "baseline_score": 0.6962,
                     "target_score": 0.88,
                     "weight": 0.333,
-                    "description": "Binary stereotype detection",
+                    "description": "Binary label detection",
                 }
             ],
             "languages": ["EN", "IT", "NL"],
         }
         content = generate_skill_content(task_cfg)
         self.assertIn("name: ml-experiment-harness", content)
-        self.assertIn("StereoQueerEval", content)
+        self.assertIn("My NLP Benchmark", content)
         self.assertIn("Codabench", content)
         self.assertIn("Macro-F1 (CV)", content)
         self.assertIn("0.6459", content)

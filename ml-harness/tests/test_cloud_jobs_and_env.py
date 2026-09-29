@@ -52,8 +52,8 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         self.assertTrue(switch_res["success"])
         self.assertEqual(switch_res["task_id"], first_id)
 
-        # Restore to stereoqueereval
-        switch_task("stereoqueereval")
+        # Restore to original task
+        switch_task(first_id)
 
     def test_cloud_job_manager_lifecycle(self):
         manager = CloudJobManager()

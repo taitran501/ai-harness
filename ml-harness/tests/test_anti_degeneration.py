@@ -31,25 +31,25 @@ class EnsembleGuardTests(unittest.TestCase):
         # Slightly modified (only 1 label flipped out of 100 -> 99% agreement)
         tweak = ["yes"] * 95 + ["no"] * 5
 
-        df1 = pd.DataFrame({"StereoQueerEval_id": range(100), "pred_stereotype": base})
-        df2 = pd.DataFrame({"StereoQueerEval_id": range(100), "pred_stereotype": tweak})
+        df1 = pd.DataFrame({"sample_id": range(100), "pred_label": base})
+        df2 = pd.DataFrame({"sample_id": range(100), "pred_label": tweak})
 
         passed, errs, details = EnsembleGuard.audit_constituent_diversity(
-            [df1, df2], col="pred_stereotype", max_kappa=0.85, min_disagreement_pct=5.0
+            [df1, df2], col="pred_label", max_kappa=0.85, min_disagreement_pct=5.0
         )
         self.assertFalse(passed)
         self.assertTrue(any("Excessive correlation" in e or "Insufficient disagreement" in e for e in errs))
 
     def test_audit_constituent_diversity_passes_diverse_models(self):
         """Audit should pass diverse models with reasonable disagreement and kappa <= 0.85."""
-        m1 = (["yes"] * 40 + ["no"] * 60)
-        m2 = (["yes"] * 55 + ["no"] * 45)  # Disagreement ~ 15%
+        m1 = (["pos"] * 40 + ["neg"] * 60)
+        m2 = (["pos"] * 55 + ["neg"] * 45)  # Disagreement ~ 15%
 
-        df1 = pd.DataFrame({"StereoQueerEval_id": range(100), "pred_stereotype": m1})
-        df2 = pd.DataFrame({"StereoQueerEval_id": range(100), "pred_stereotype": m2})
+        df1 = pd.DataFrame({"sample_id": range(100), "pred_label": m1})
+        df2 = pd.DataFrame({"sample_id": range(100), "pred_label": m2})
 
         passed, errs, details = EnsembleGuard.audit_constituent_diversity(
-            [df1, df2], col="pred_stereotype", max_kappa=0.85, min_disagreement_pct=5.0
+            [df1, df2], col="pred_label", max_kappa=0.85, min_disagreement_pct=5.0
         )
         self.assertTrue(passed)
         self.assertEqual(len(errs), 0)
@@ -108,14 +108,14 @@ class StatisticalAuditGateTests(unittest.TestCase):
         """CLI should reject a candidate differing by less than 2.0% (MMES violation)."""
         n = 200
         base_df = pd.DataFrame({
-            "StereoQueerEval_id": [f"id_{i}" for i in range(n)],
-            "pred_stereotype": ["no"] * n,
-            "pred_hate_speech": ["no"] * n,
-            "pred_target_type": ["none"] * n,
+            "sample_id": [f"id_{i}" for i in range(n)],
+            "pred_label": ["neg"] * n,
+            "pred_secondary": ["no"] * n,
+            "pred_category": ["none"] * n,
         })
         # Modify only 1 row out of 200 (0.5% < 2.0%)
         cand_df = base_df.copy()
-        cand_df.loc[0, "pred_stereotype"] = "yes"
+        cand_df.loc[0, "pred_label"] = "pos"
 
         base_csv = self.p / "baseline.csv"
         cand_csv = self.p / "candidate.csv"
@@ -139,13 +139,13 @@ class StatisticalAuditGateTests(unittest.TestCase):
         """CLI should reject an ensemble when constituent models are nearly identical."""
         n = 100
         comp1_df = pd.DataFrame({
-            "StereoQueerEval_id": [f"id_{i}" for i in range(n)],
-            "pred_stereotype": ["yes"] * 95 + ["no"] * 5,
-            "pred_hate_speech": ["no"] * n,
-            "pred_target_type": ["none"] * n,
+            "sample_id": [f"id_{i}" for i in range(n)],
+            "pred_label": ["pos"] * 95 + ["neg"] * 5,
+            "pred_secondary": ["no"] * n,
+            "pred_category": ["none"] * n,
         })
         comp2_df = comp1_df.copy()
-        comp2_df.loc[0, "pred_stereotype"] = "no"  # 99% identical
+        comp2_df.loc[0, "pred_label"] = "neg"  # 99% identical
 
         cand_df = comp1_df.copy()
 
