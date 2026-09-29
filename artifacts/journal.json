@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated_at": "2026-09-24 00:10:00",
+  "updated_at": "2026-09-29 16:15:15",
   "total_experiments": 4,
   "nodes": [
     {
@@ -31,6 +31,8 @@
         }
       },
       "param_count": 100000,
+      "param_size": null,
+      "llm_spec": null,
       "commit_hash": "init_commit",
       "status": "COMPLETED",
       "is_buggy": false,
@@ -65,6 +67,8 @@
         }
       },
       "param_count": 100000,
+      "param_size": null,
+      "llm_spec": null,
       "commit_hash": "init_commit",
       "status": "COMPLETED",
       "is_buggy": false,
@@ -99,6 +103,8 @@
         }
       },
       "param_count": 100000,
+      "param_size": null,
+      "llm_spec": null,
       "commit_hash": "init_commit",
       "status": "COMPLETED",
       "is_buggy": false,
@@ -109,35 +115,28 @@
     },
     {
       "id": "exp001_baseline_tfidf",
-      "parent_id": null,
+      "parent_id": "none",
       "branch": "baseline",
-      "approach_type": "ml",
+      "approach_type": "ml_classical",
       "model_family": "linear",
-      "primary_metric_name": "macro_f1",
+      "primary_metric_name": "overall_composite",
       "direction": "maximize",
-      "atomic_hypothesis": "Word (1-2) and char (3-5) n-gram TF-IDF provides a solid lower bound for Subtasks A and B, but will exhibit low Macro-F1 on rare Subtask C identity labels due to lack of semantic generalization.",
-      "intervention": "Canonical baseline reference implementation across comment, title_comment, and full_context variants.",
+      "atomic_hypothesis": "",
+      "intervention": "",
       "metrics": {
-        "model": "tfidf_logistic_regression",
-        "overall_composite": 0.3294,
-        "macro_f1": 0.3294,
-        "subtask_a": {
-          "macro_f1": 0.4576
-        },
-        "subtask_b": {
-          "macro_f1": 0.2589
-        },
-        "subtask_c": {
-          "type_macro_f1": 0.2717
-        }
+        "Macro-F1": 0.20048019207683074,
+        "composite_score": 0.20048019207683074,
+        "overall_composite": 0.20048019207683074
       },
       "param_count": null,
+      "param_size": null,
+      "llm_spec": null,
       "commit_hash": null,
       "status": "COMPLETED",
       "is_buggy": false,
-      "artifact_dir": "artifacts\\exp001_baseline_tfidf",
-      "timestamp": 1790178581.227048,
-      "notes": "Five-fold grouped cross-validation using word and char n-gram TF-IDF with balanced Logistic Regression.",
+      "artifact_dir": null,
+      "timestamp": 1790673315.411807,
+      "notes": "",
       "diagnostics_summary": {}
     }
   ]

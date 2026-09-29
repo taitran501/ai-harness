@@ -42,10 +42,11 @@ ml-harness/**/__pycache__/
 # Legacy and scratch artifacts
 legacy/
 docs/specs/
-artifacts/baseline_v1/
-artifacts/agent_runs/
-artifacts/agent_sessions/
-artifacts/cand_*/
+**/artifacts/baseline_v1/
+**/artifacts/agent_runs/
+**/artifacts/agent_sessions/
+**/artifacts/cand_*/
+**/artifacts/base/
 artifacts/competition_state.json
 artifacts/DATA_READINESS_REPORT.json
 

@@ -54,3 +54,28 @@ Saving experiment artifacts...
 Saving experiment artifacts...
 [2026-09-23 22:50:47] [INFO] Artifacts successfully written to: artifacts\exp001_baseline_tfidf
 [2026-09-23 22:50:47] [INFO] Experiment run finished.
+[2026-09-29 16:13:52] [INFO] ============================================================
+[2026-09-29 16:13:52] [INFO] Starting Experiment: exp001_baseline_tfidf
+[2026-09-29 16:13:52] [INFO] Task: StereoQueerEval (Modality: text)
+[2026-09-29 16:13:52] [INFO] Config path: configs/exp001_tfidf_baseline.yaml
+[2026-09-29 16:13:52] [INFO] ============================================================
+[2026-09-29 16:13:58] [INFO] Git commit hash: 764af56ea8c1384c7a7ddbdc95fc83d2ae6d2ad8-dirty | Seed: 42
+[2026-09-29 16:13:59] [INFO] Loaded 7,627 training instances.
+[2026-09-29 16:13:59] [WARNING] Probe/Debug mode enabled: sampling 50 instances.
+[2026-09-29 16:13:59] [INFO] Approach: ml_classical | Validation Strategy: kfold
+[2026-09-29 16:15:08] [INFO] ============================================================
+[2026-09-29 16:15:08] [INFO] Starting Experiment: exp001_baseline_tfidf
+[2026-09-29 16:15:08] [INFO] Task: StereoQueerEval (Modality: text)
+[2026-09-29 16:15:08] [INFO] Config path: configs/exp001_tfidf_baseline.yaml
+[2026-09-29 16:15:08] [INFO] ============================================================
+[2026-09-29 16:15:12] [INFO] Git commit hash: 764af56ea8c1384c7a7ddbdc95fc83d2ae6d2ad8-dirty | Seed: 42
+[2026-09-29 16:15:13] [INFO] Loaded 7,627 training instances.
+[2026-09-29 16:15:13] [WARNING] Probe/Debug mode enabled: sampling 50 instances.
+[2026-09-29 16:15:13] [INFO] Approach: ml_classical | Validation Strategy: kfold
+[2026-09-29 16:15:13] [INFO] 
+--- Processing Fold / Partition: 0 ---
+[2026-09-29 16:15:15] [INFO] [full_context] Fold 0 | Composite: 0.2005
+[2026-09-29 16:15:15] [INFO] 
+Saving experiment artifacts...
+[2026-09-29 16:15:15] [INFO] Computing failure diagnostics & error slices...
+[2026-09-29 16:15:15] [INFO] ✔ Experiment exp001_baseline_tfidf completed successfully. Score: 0.2005

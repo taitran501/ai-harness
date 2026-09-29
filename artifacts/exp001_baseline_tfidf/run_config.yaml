@@ -5,10 +5,6 @@ paths:
   leaderboard_path: EXPERIMENTS.md
 runtime:
   seed: 42
-  languages:
-  - EN
-  - IT
-  - NL
   n_splits: 5
 experiment:
   id: exp001_baseline_tfidf
@@ -24,6 +20,26 @@ experiment:
     labels due to lack of semantic generalization.
   intervention: Canonical baseline reference implementation across comment, title_comment,
     and full_context variants.
+task:
+  name: StereoQueerEval
+  type: classification
+  primary_metric: macro_f1
+  direction: maximize
+  approach_type: ml
+  model_family: linear
+grounding:
+  source_type: verified_baseline
+  source_id: sklearn_tfidf_logreg_canonical
+  retrieval_summary: Canonical n-gram TF-IDF reference control for StereoQueerEval
+    grouped CV benchmarking.
+  verified_via: local_registry
+assumption_register:
+  known_facts:
+  - 'StereoQueerEval dataset has 3 languages: EN, IT, NL with extreme identity imbalance.'
+  - Video-grouped cross-validation on fold_assignments.tsv prevents comment leakage.
+  assumptions:
+  - Word (1-2) and char (3-5) n-grams provide a stable competitive baseline floor.
+  uncertainty_level: low
 model:
   name: tfidf_logistic_regression
   params:
@@ -41,8 +57,8 @@ data:
   - 3
   - 4
 resolved_runtime:
-  git_commit_hash: dd8043af5dd3cfb335350e47953edab90e467b87-dirty
-  timestamp: '2026-09-23T22:50:43.889236'
+  git_commit_hash: 764af56ea8c1384c7a7ddbdc95fc83d2ae6d2ad8-dirty
+  timestamp: '2026-09-29T16:15:12.857359'
   python_version: 3.11.9
   pandas_version: 3.0.5
   sklearn_version: 1.8.0

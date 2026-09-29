@@ -41,3 +41,4 @@ Before proposing any new experiment, agents MUST check this table. Do not repeat
 2. **Atomic Intervention**: Modify exactly one hypothesis / variable at a time (Control vs Treatment).
 3. **If Rejected / Degraded**: Immediately log the root cause into **Section 2 (Idea Graveyard)** to prevent circular re-testing.
 4. **If Improved by $\ge 2.0\%$**: Record the experiment as the new baseline anchor or candidate pool member.
+| `exp001_baseline_tfidf` | `baseline` | `none` | 2026-09-23 | tfidf_logistic_regression |  | 0.2005 | `artifacts/exp001_baseline_tfidf` | Establish a competitive, fast, and reproducible sparse control baseline across all three subtasks. |

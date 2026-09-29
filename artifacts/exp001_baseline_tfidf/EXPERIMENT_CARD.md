@@ -5,7 +5,7 @@
 - **Branch / Category**: `baseline`
 - **Parent Baseline**: `none`
 - **Date**: `2026-09-23`
-- **Git Commit**: `dd8043af5dd3cfb335350e47953edab90e467b87-dirty`
+- **Git Commit**: `764af56ea8c1384c7a7ddbdc95fc83d2ae6d2ad8-dirty`
 - **Problem Addressed**: Establish a competitive, fast, and reproducible sparse control baseline across all three subtasks.
 
 ## 2. Hypothesis
@@ -17,17 +17,9 @@
 
 ## 4. Cross-Validation Results
 
-| Language | Input Variant | A Macro-F1 | B Macro-F1 | C Type Macro-F1 | C Id Macro-F1 | C Id Micro-F1 |
-|---|---|---:|---:|---:|---:|---:|
-| EN | comment | 0.8730 | 0.2222 | 0.2000 | 0.0741 | 0.4000 |
-| EN | full_context | 0.2000 | 0.4333 | 0.4000 | 0.0741 | 0.4000 |
-| EN | title_comment | 0.3333 | 0.0000 | 0.4286 | 0.0889 | 0.5714 |
-| IT | comment | 0.6000 | 0.0000 | 0.1667 | 0.0000 | 0.0000 |
-| IT | full_context | 0.4118 | 0.2333 | 0.2000 | 0.0741 | 0.2000 |
-| IT | title_comment | 0.3750 | 0.0000 | 0.2000 | 0.0741 | 0.2000 |
-| NL | comment | 0.4958 | 0.5556 | 0.4000 | 0.0000 | 0.0000 |
-| NL | full_context | 0.3333 | 0.3686 | 0.2500 | 0.0000 | 0.0000 |
-| NL | title_comment | 0.4958 | 0.5167 | 0.2000 | 0.0556 | 0.2857 |
+| input_variant   |   dev_fold |   train_rows |   dev_rows |   composite_score | language   |   subtask_a_f1 |   subtask_b_f1 |   subtask_c_type_f1 |   subtask_c_type_oracle_f1 |   subtask_c_identity_f1 |
+|:----------------|-----------:|-------------:|-----------:|------------------:|:-----------|---------------:|---------------:|--------------------:|---------------------------:|------------------------:|
+| full_context    |          0 |           60 |          7 |           0.20048 | IT         |              0 |              0 |                 0.5 |                        0.5 |                       0 |
 
 ## 5. Post-Mortem & Verdict
 
