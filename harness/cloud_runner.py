@@ -268,7 +268,7 @@ def run_via_kaggle(
         )
         dataset_slug = resources["kaggle_dataset_slug"]
         if not dataset_slug:
-            raise RuntimeError("Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry.")
+            raise RuntimeError("Could not determine the active Kaggle username. Run `kaggle auth login --force` and retry.")
         data_cfg = context["data_config"]
         license_name = data_cfg.get("license") or data_cfg.get("dataset_license")
         uploaded = KaggleKernelManager.push_dataset_to_kaggle(

@@ -934,6 +934,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_next_exp_id(parsed_url.query)
         elif path == "/api/environment/status":
             self.send_json(EnvironmentDetector.get_full_status())
+        elif path == "/api/environment/kaggle/auth_status":
+            self.send_json(EnvironmentDetector.get_kaggle_auth_flow_status())
         elif path == "/api/configs":
             self.handle_api_configs()
         elif path == "/api/strategy_cards":
@@ -1218,14 +1220,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 res = EnvironmentDetector.launch_kaggle_auth()
                 self.send_json(res)
-            except Exception as e:
-                self.send_json({"error": str(e)}, status=400)
-        elif path == "/api/environment/kaggle/profile":
-            try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length).decode("utf-8")
-                data = json.loads(body)
-                self.handle_api_kaggle_profile(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/cloud/run":
@@ -2048,7 +2042,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         data_config = task_data.get("data_config") or task_data.get("data") or {}
         dataset_slug = data_config.get("kaggle_dataset_slug") or resources["kaggle_dataset_slug"]
         if backend == "kaggle" and not dataset_slug:
-            self.send_json({"error": "Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry."}, status=409)
+            self.send_json({"error": "Could not determine the active Kaggle username. Connect the account through the dashboard or run `kaggle auth login --force`, then retry."}, status=409)
             return
 
         config_file = Path(config_path)
@@ -2145,7 +2139,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         else:
             dataset_slug = resources["kaggle_dataset_slug"]
             if not dataset_slug:
-                self.send_json({"error": "Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry."}, status=409)
+                self.send_json({"error": "Could not determine the active Kaggle username. Connect the account through the dashboard or run `kaggle auth login --force`, then retry."}, status=409)
                 return
             res = KaggleKernelManager.push_dataset_to_kaggle(dataset_slug=dataset_slug, project_root=PROJECT_ROOT)
 
@@ -2202,16 +2196,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "metrics": metrics_data,
             "identity_verified": True,
         })
-
-    def handle_api_kaggle_profile(self, data: Dict[str, Any]) -> None:
-        user = data.get("username")
-        key = data.get("key")
-        p_name = data.get("profile_name")
-        if not user or not key:
-            self.send_json({"error": "username and key are required."}, status=400)
-            return
-        res = EnvironmentDetector.switch_kaggle_profile(user, key, p_name)
-        self.send_json(res)
 
     def handle_api_cloud_run(self, data: Dict[str, Any]) -> None:
         backend = data.get("backend", "modal")

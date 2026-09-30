@@ -181,11 +181,39 @@ class WorkspaceFixture(unittest.TestCase):
 
         self.assertEqual(kaggle["quota"]["status"], "available")
         self.assertEqual(kaggle["quota"]["data"]["gpu_hours"]["remaining"], 20)
+        self.assertEqual(kaggle["account_status"], "connected")
+        self.assertTrue(kaggle["api_verified"])
+        self.assertEqual(kaggle["account"], "fixture-user")
         self.assertEqual(modal["billing"]["status"], "available")
         self.assertIn("not a remaining quota", modal["billing"]["note"])
         self.assertEqual(modal["quota"]["status"], "not_exposed")
         self.assertEqual(run.call_args_list[1].args[0], ["kaggle", "quota", "--json"])
         self.assertEqual(run.call_args_list[3].args[0], ["modal", "billing", "summary", "--json"])
+
+    def test_provider_preflight_distinguishes_credentials_from_verified_account(self):
+        with patch(
+            "harness.environment_detector.EnvironmentDetector.detect_kaggle",
+            return_value={
+                "installed": True,
+                "authenticated": True,
+                "username": "fixture-user",
+                "executable": "kaggle",
+                "authentication_method": "OAuth",
+                "oauth_supported": True,
+            },
+        ), patch(
+            "harness.cloud_policy._provider_usage",
+            return_value={"status": "unavailable", "reason": "Kaggle API is temporarily unavailable."},
+        ), patch(
+            "harness.cloud_policy.subprocess.run",
+            return_value=Mock(returncode=0, stdout="Kaggle CLI 2.2.0", stderr=""),
+        ):
+            status = provider_preflight(self.project, "kaggle")
+
+        self.assertEqual(status["account_status"], "credentials_unverified")
+        self.assertFalse(status["api_verified"])
+        self.assertEqual(status["account"], "fixture-user")
+        self.assertEqual(status["authentication_method"], "OAuth")
 
     def test_private_provider_resource_names_follow_task_data_fingerprint(self):
         first = dataset_fingerprint(self.project)

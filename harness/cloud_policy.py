@@ -181,12 +181,29 @@ class UploadConsentStore:
         return record
 
     def status(self) -> Dict[str, Any]:
-        fingerprint = dataset_fingerprint(self.project)
+        try:
+            fingerprint = dataset_fingerprint(self.project)
+        except Exception as exc:
+            return {
+                "providers": {
+                    provider: {
+                        "dataset_fingerprint": None,
+                        "file_count": 0,
+                        "dataset_ready": False,
+                        "upload_allowed": False,
+                        "default_visibility": "private",
+                        "reason": str(exc)[:500],
+                    }
+                    for provider in ("kaggle", "modal")
+                },
+                "consents_path": str(self.path),
+            }
         providers = {}
         for provider in ("kaggle", "modal"):
             providers[provider] = {
                 "dataset_fingerprint": fingerprint["fingerprint"],
                 "file_count": fingerprint["file_count"],
+                "dataset_ready": True,
                 "upload_allowed": self.is_granted(provider, fingerprint["fingerprint"]),
                 "default_visibility": "private",
             }
@@ -223,22 +240,59 @@ def provider_preflight(project: HarnessProject, provider: str) -> Dict[str, Any]
         str(account),
         authenticated=bool(status.get("installed")) and authenticated and version_supported,
     )
-    fingerprint = dataset_fingerprint(project)
-    consent = UploadConsentStore(project).is_granted(provider, fingerprint["fingerprint"])
+    dataset_status: Dict[str, Any]
+    try:
+        fingerprint = dataset_fingerprint(project)
+        consent = UploadConsentStore(project).is_granted(provider, fingerprint["fingerprint"])
+        dataset_status = {
+            "status": "ready",
+            "fingerprint": fingerprint["fingerprint"],
+            "file_count": fingerprint["file_count"],
+            "upload_consent": consent,
+            "visibility": "private",
+        }
+    except Exception as exc:
+        consent = False
+        dataset_status = {
+            "status": "not_ready",
+            "fingerprint": None,
+            "file_count": 0,
+            "upload_consent": False,
+            "visibility": "private",
+            "reason": str(exc)[:500],
+        }
     task_doc = yaml.safe_load(project.task_config_path.read_text(encoding="utf-8")) or {}
     task = task_doc.get("task", task_doc)
     internet = task.get("runtime", {}).get("enable_internet")
     warnings = ["Provider quotas, availability, and cost depend on the connected account and can change; check the provider before dispatch."]
+    if dataset_status["status"] != "ready":
+        warnings.append(f"Task dataset is not ready for provider upload: {dataset_status.get('reason', 'declare local data paths first.')}")
     if internet is False and provider == "kaggle":
         warnings.append("Task runtime explicitly disables internet access; Kaggle kernels will also have internet disabled.")
     if provider == "modal" and not version_supported:
         warnings.append("ML-Harness cloud jobs require Modal CLI/SDK version 1.5.0 or newer; upgrade the official Modal CLI.")
+    oauth_supported = bool(status.get("oauth_supported")) if provider == "kaggle" else None
+    if provider == "kaggle" and status.get("installed") and not oauth_supported:
+        warnings.append("The installed Kaggle CLI does not expose `kaggle auth login --force`; upgrade it to connect with OAuth.")
+    api_verified = usage.get("status") in {"available", "available_text"}
+    if not status.get("installed"):
+        account_status = "cli_missing"
+    elif not authenticated:
+        account_status = "not_connected"
+    elif api_verified:
+        account_status = "connected"
+    else:
+        account_status = "credentials_unverified"
     return {
         "provider": provider,
+        "account_status": account_status,
+        "api_verified": api_verified,
         "cli_installed": bool(status.get("installed")),
         "cli_executable": status.get("executable"),
         "authenticated": bool(status.get("authenticated") if provider == "kaggle" else status.get("has_credentials")),
         "account": status.get("username") or status.get("active_profile"),
+        "authentication_method": status.get("authentication_method"),
+        "oauth_supported": oauth_supported,
         "cli_version": version,
         "version_error": version_error,
         "version_supported": version_supported,
@@ -247,12 +301,7 @@ def provider_preflight(project: HarnessProject, provider: str) -> Dict[str, Any]
             "reason": "The Modal CLI billing summary does not report a remaining execution quota.",
         },
         "billing": usage if provider == "modal" else None,
-        "dataset": {
-            "fingerprint": fingerprint["fingerprint"],
-            "file_count": fingerprint["file_count"],
-            "upload_consent": consent,
-            "visibility": "private",
-        },
+        "dataset": dataset_status,
         "internet": internet,
         "warnings": warnings,
         "ready": bool(status.get("installed")) and bool(

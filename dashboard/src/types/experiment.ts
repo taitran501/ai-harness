@@ -325,6 +325,17 @@ export interface EnvironmentStatus {
     authenticated: boolean;
     username: string | null;
     config_dir: string;
+    cli_version?: string | null;
+    oauth_supported?: boolean;
+    authentication_method?: string | null;
+    connection_status?: 'cli_missing' | 'not_connected' | 'credentials_detected' | 'account_detected' | string;
+    auth_flow?: {
+      status: 'idle' | 'running' | 'completed' | 'failed' | string;
+      command?: string | null;
+      started_at?: number | null;
+      finished_at?: number | null;
+      return_code?: number | null;
+    };
     profiles: { name: string; username: string; is_active: boolean }[];
     error: string | null;
   };

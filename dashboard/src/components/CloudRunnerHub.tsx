@@ -48,6 +48,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
 
   // Environment & Multi-Account state
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
+  const [providerStatus, setProviderStatus] = useState<any>(null);
   const [isEnvModalOpen, setIsEnvModalOpen] = useState(false);
 
   // Modal Settings
@@ -83,13 +84,36 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
   const timerRef = useRef<any>(null);
 
   const fetchEnvironment = async () => {
-    try {
-      const data = await api.getEnvironmentStatus();
-      setEnvStatus(data);
-    } catch (err) {
-      console.warn('Failed to load environment status:', err);
+    const [environmentResult, providerResult] = await Promise.allSettled([
+      api.getEnvironmentStatus(),
+      api.getCloudStatus(),
+    ]);
+    if (environmentResult.status === 'fulfilled') {
+      setEnvStatus(environmentResult.value);
+    } else {
+      console.warn('Failed to load environment status:', environmentResult.reason);
+    }
+    if (providerResult.status === 'fulfilled') {
+      setProviderStatus(providerResult.value?.providers || null);
+    } else {
+      setProviderStatus(null);
     }
   };
+
+  const kaggleProviderStatus = providerStatus?.kaggle;
+  const kaggleAccountStatus = kaggleProviderStatus?.account_status;
+  const kaggleStatusLabel = kaggleAccountStatus === 'connected'
+    ? 'API verified'
+    : kaggleAccountStatus === 'credentials_unverified'
+      ? 'Credentials found'
+      : kaggleAccountStatus === 'cli_missing'
+        ? 'CLI missing'
+        : 'Not connected';
+  const kaggleStatusTitle = [
+    envStatus?.kaggle.cli_version,
+    `Quota: ${kaggleProviderStatus?.quota?.status || 'not checked'}`,
+    `Task ready: ${kaggleProviderStatus?.ready ? 'yes' : 'no'}`,
+  ].filter(Boolean).join(' · ');
 
   useEffect(() => {
     fetchEnvironment();
@@ -319,13 +343,17 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
 
             {/* Kaggle Pill */}
             <span
+              title={kaggleStatusTitle}
               className={`px-2 py-0.5 rounded border ${
-                envStatus?.kaggle.authenticated
+                kaggleAccountStatus === 'connected'
                   ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
-                  : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+                  : envStatus?.kaggle.authenticated
+                    ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                    : 'bg-zinc-900 text-zinc-500 border-zinc-800'
               }`}
             >
-              Kaggle: <strong>{envStatus?.kaggle.username || 'Not auth'}</strong>
+              Kaggle: <strong>{envStatus?.kaggle.username || 'No account name'}</strong>
+              {' · '}{kaggleStatusLabel}
             </span>
           </div>
         </div>

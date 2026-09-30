@@ -88,8 +88,10 @@ Install only the provider package you plan to use, along with `ml` for experimen
 
 ~~~powershell
 uv pip install "ml-harness[ml,kaggle] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
-kaggle auth login
+kaggle auth login --force
 ~~~
+
+Or use **Account Settings → Connect Kaggle** in the local dashboard. Approve access on the Kaggle page it opens; the dashboard then refreshes the account status.
 
 For Modal:
 

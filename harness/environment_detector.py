@@ -16,6 +16,8 @@ import shutil
 import ssl
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -48,6 +50,17 @@ PROVIDER_TO_KEY: Dict[str, str] = {
 
 class EnvironmentDetector:
     """Detects and manages environments and accounts across Modal, Kaggle, Docker, and GPU."""
+
+    _kaggle_auth_lock = threading.Lock()
+    _kaggle_auth_process: Optional[subprocess.Popen] = None
+    _kaggle_auth_log: Any = None
+    _kaggle_auth_state: Dict[str, Any] = {
+        "status": "idle",
+        "command": None,
+        "started_at": None,
+        "finished_at": None,
+        "return_code": None,
+    }
 
     @staticmethod
     def detect_modal() -> Dict[str, Any]:
@@ -200,120 +213,241 @@ class EnvironmentDetector:
 
     @staticmethod
     def launch_kaggle_auth() -> Dict[str, Any]:
-        """Open Kaggle settings and run `kaggle auth login` to authenticate Kaggle CLI."""
-        auth_url = "https://www.kaggle.com/settings"
-        opened = False
-        try:
-            import webbrowser
-            opened = webbrowser.open(auth_url)
-        except Exception:
-            pass
-
-        cmd = ["kaggle", "auth", "login"]
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            try:
-                stdout, stderr = proc.communicate(timeout=2)
-                output = (stdout or "") + "\n" + (stderr or "")
-                return {
-                    "success": True,
-                    "auth_url": auth_url,
-                    "opened_browser": opened,
-                    "command": "kaggle auth login",
-                    "output": output.strip(),
-                    "message": "Opened Kaggle Account Settings (https://www.kaggle.com/settings). Complete login in your browser.",
-                }
-            except subprocess.TimeoutExpired:
-                return {
-                    "success": True,
-                    "auth_url": auth_url,
-                    "opened_browser": opened,
-                    "command": "kaggle auth login",
-                    "message": "Running 'kaggle auth login' in background. Complete login in your browser.",
-                }
-        except Exception as e:
+        """Start Kaggle's official forced OAuth flow; Kaggle opens its authorization URL."""
+        kaggle_path = shutil.which("kaggle")
+        command = [kaggle_path or "kaggle", "auth", "login", "--force"]
+        if not kaggle_path:
             return {
-                "success": True,
-                "auth_url": auth_url,
-                "opened_browser": opened,
-                "command": "kaggle auth login",
-                "message": f"Opened Kaggle Account Settings ({auth_url}). Note: {e}",
+                "success": False,
+                "status": "cli_missing",
+                "command": "kaggle auth login --force",
+                "message": "Kaggle CLI is not installed or is not on PATH.",
             }
+
+        try:
+            help_result = subprocess.run(
+                [kaggle_path, "auth", "login", "--help"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=False,
+            )
+            help_text = (help_result.stdout or "") + "\n" + (help_result.stderr or "")
+            if help_result.returncode != 0 or "--force" not in help_text:
+                return {
+                    "success": False,
+                    "status": "oauth_unsupported",
+                    "command": "kaggle auth login --force",
+                    "message": "The installed Kaggle CLI does not expose OAuth login --force. Upgrade the official Kaggle CLI and retry.",
+                }
+        except Exception as exc:
+            return {
+                "success": False,
+                "status": "oauth_unavailable",
+                "command": "kaggle auth login --force",
+                "message": f"Could not verify Kaggle OAuth support: {exc}",
+            }
+
+        with EnvironmentDetector._kaggle_auth_lock:
+            current = EnvironmentDetector._kaggle_auth_process
+            if current is not None and current.poll() is None:
+                return {
+                    "success": True,
+                    "status": "running",
+                    "command": "kaggle auth login --force",
+                    "message": "Kaggle OAuth is already running. Approve access in the browser window it opened.",
+                }
+
+            if EnvironmentDetector._kaggle_auth_log is not None:
+                try:
+                    EnvironmentDetector._kaggle_auth_log.close()
+                except Exception:
+                    pass
+            log_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+            except Exception as exc:
+                log_file.close()
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "command": "kaggle auth login --force",
+                    "message": f"Could not start Kaggle OAuth: {exc}",
+                }
+
+            EnvironmentDetector._kaggle_auth_process = process
+            EnvironmentDetector._kaggle_auth_log = log_file
+            EnvironmentDetector._kaggle_auth_state = {
+                "status": "running",
+                "command": "kaggle auth login --force",
+                "started_at": time.time(),
+                "finished_at": None,
+                "return_code": None,
+            }
+
+        return {
+            "success": True,
+            **EnvironmentDetector.get_kaggle_auth_flow_status(),
+            "message": "Kaggle OAuth started. Approve access on the Kaggle page opened by the CLI.",
+        }
+
+    @classmethod
+    def get_kaggle_auth_flow_status(cls) -> Dict[str, Any]:
+        """Return the current OAuth subprocess state without exposing its output or credentials."""
+        with cls._kaggle_auth_lock:
+            process = cls._kaggle_auth_process
+            if process is not None:
+                return_code = process.poll()
+                if return_code is not None and cls._kaggle_auth_state.get("status") == "running":
+                    cls._kaggle_auth_state = {
+                        **cls._kaggle_auth_state,
+                        "status": "completed" if return_code == 0 else "failed",
+                        "finished_at": time.time(),
+                        "return_code": return_code,
+                    }
+                    cls._kaggle_auth_process = None
+                    if cls._kaggle_auth_log is not None:
+                        try:
+                            cls._kaggle_auth_log.close()
+                        except Exception:
+                            pass
+                        cls._kaggle_auth_log = None
+            return dict(cls._kaggle_auth_state)
 
     @staticmethod
     def detect_kaggle() -> Dict[str, Any]:
-        """Detect Kaggle CLI installation, credentials, and active username."""
+        """Detect Kaggle CLI, active account, configured auth source, and OAuth flow state."""
         kaggle_path = shutil.which("kaggle")
+        configured_dir = os.environ.get("KAGGLE_CONFIG_DIR")
+        if configured_dir:
+            kaggle_dir = Path(configured_dir).expanduser()
+        else:
+            default_dir = Path.home() / ".kaggle"
+            xdg_dir = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "kaggle"
+            kaggle_dir = default_dir if default_dir.exists() or os.name == "nt" else xdg_dir
         result: Dict[str, Any] = {
             "installed": kaggle_path is not None,
             "executable": kaggle_path,
             "authenticated": False,
             "username": None,
-            "config_dir": str(Path.home() / ".kaggle"),
+            "config_dir": str(kaggle_dir.resolve()),
+            "cli_version": None,
+            "oauth_supported": False,
+            "authentication_method": None,
+            "connection_status": "cli_missing" if not kaggle_path else "not_connected",
             "profiles": [],
             "error": None,
         }
 
-        # Check credentials in ~/.kaggle/ or ~/.config/kaggle/
-        search_dirs = [
-            Path.home() / ".kaggle",
-            Path.home() / ".config" / "kaggle",
-        ]
-        for k_dir in search_dirs:
-            for cred_name in ["credentials.json", "kaggle.json", "access_token"]:
-                cred_file = k_dir / cred_name
-                if cred_file.exists():
-                    try:
-                        raw = cred_file.read_text(encoding="utf-8").strip()
-                        if cred_name.endswith(".json"):
-                            data = json.loads(raw)
-                            username = (
-                                data.get("username")
-                                or data.get("user")
-                                or data.get("user_name")
-                                or ("OAuth User" if data.get("access_token") or data.get("refresh_token") else None)
-                            )
-                            if username:
-                                result["authenticated"] = True
-                                result["username"] = username
-                                break
-                        elif raw:
-                            result["authenticated"] = True
-                            result["username"] = "Kaggle OAuth"
-                            break
-                    except Exception:
-                        pass
-            if result["authenticated"]:
-                break
+        # Match Kaggle CLI credential precedence while never returning token values.
+        if os.environ.get("KAGGLE_API_TOKEN"):
+            result["authenticated"] = True
+            result["authentication_method"] = "KAGGLE_API_TOKEN"
+        elif os.environ.get("KAGGLE_USERNAME") and os.environ.get("KAGGLE_KEY"):
+            result["authenticated"] = True
+            result["authentication_method"] = "KAGGLE_USERNAME / KAGGLE_KEY"
 
-        # Also check kaggle config view
-        if not result["username"] and result["installed"]:
+        if kaggle_dir.is_dir():
+            access_token = kaggle_dir / "access_token"
             try:
-                proc = subprocess.run(
-                    ["kaggle", "config", "view"],
+                if access_token.is_file() and access_token.stat().st_size > 0:
+                    result["authenticated"] = True
+                    result["authentication_method"] = result["authentication_method"] or "OAuth access token file"
+            except OSError:
+                pass
+            for cred_name in ("credentials.json", "kaggle.json"):
+                cred_file = kaggle_dir / cred_name
+                if not cred_file.is_file():
+                    continue
+                try:
+                    data = json.loads(cred_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                username = data.get("username") or data.get("user") or data.get("user_name")
+                if username and not result["username"]:
+                    result["username"] = str(username)
+                if data.get("refresh_token") or data.get("access_token"):
+                    result["authenticated"] = True
+                    result["authentication_method"] = result["authentication_method"] or "OAuth credentials"
+                elif data.get("username") and data.get("key"):
+                    result["authenticated"] = True
+                    result["authentication_method"] = result["authentication_method"] or "Legacy API key"
+
+        if os.environ.get("KAGGLE_USERNAME"):
+            result["username"] = os.environ["KAGGLE_USERNAME"]
+
+        if result["installed"]:
+            try:
+                version_proc = subprocess.run(
+                    [kaggle_path, "--version"],
                     capture_output=True,
                     text=True,
                     timeout=5,
                     check=False,
                 )
-                if proc.returncode == 0:
-                    for line in proc.stdout.splitlines():
-                        if "username:" in line.lower():
-                            parts = line.split(":", 1)
-                            if len(parts) == 2 and parts[1].strip() and parts[1].strip() != "None":
-                                result["authenticated"] = True
-                                result["username"] = parts[1].strip()
-                                break
+                if version_proc.returncode == 0:
+                    result["cli_version"] = (version_proc.stdout or version_proc.stderr).strip()[:200]
             except Exception:
                 pass
 
-        # Check saved profiles under ~/.kaggle/profiles/
-        profiles_dir = Path.home() / ".kaggle" / "profiles"
+            try:
+                auth_help = subprocess.run(
+                    [kaggle_path, "auth", "login", "--help"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    check=False,
+                )
+                help_text = (auth_help.stdout or "") + "\n" + (auth_help.stderr or "")
+                result["oauth_supported"] = auth_help.returncode == 0 and "--force" in help_text
+            except Exception:
+                pass
+
+            # config view also reports the active OAuth account on current Kaggle CLI.
+            try:
+                proc = subprocess.run(
+                    [kaggle_path, "config", "view"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    check=False,
+                )
+                if proc.returncode == 0:
+                    for line in proc.stdout.splitlines():
+                        if ":" not in line:
+                            continue
+                        key, value = (part.strip().strip("\"'") for part in line.split(":", 1))
+                        normalized_key = key.casefold().replace(" ", "_")
+                        if normalized_key in {"username", "user", "user_name"} and value and value.casefold() not in {"none", "null"}:
+                            result["username"] = value
+                        elif normalized_key in {"auth_method", "authentication_method", "auth"} and value and value.casefold() not in {"none", "null"}:
+                            result["authentication_method"] = value
+                elif not result["error"]:
+                    result["error"] = "Kaggle CLI could not read the active account configuration."
+            except Exception:
+                pass
+
+        if result["authentication_method"] and str(result["authentication_method"]).casefold() not in {
+            "none", "null", "unauthenticated", "not connected"
+        }:
+            result["authenticated"] = True
+
+        if result["authenticated"]:
+            result["connection_status"] = "credentials_detected" if not result["username"] else "account_detected"
+        if not result["authentication_method"] and result["authenticated"]:
+            result["authentication_method"] = "Kaggle CLI credentials"
+
+        result["auth_flow"] = EnvironmentDetector.get_kaggle_auth_flow_status()
+
+        # Preserve legacy profile display for installations that still use archived profiles.
+        profiles_dir = kaggle_dir / "profiles"
         if profiles_dir.exists():
             for p_file in profiles_dir.glob("*.json"):
                 try:
@@ -328,28 +462,6 @@ class EnvironmentDetector:
                     pass
 
         return result
-
-    @staticmethod
-    def switch_kaggle_profile(username: str, key: str, profile_name: Optional[str] = None) -> Dict[str, Any]:
-        """Save and switch Kaggle credentials."""
-        try:
-            kaggle_dir = Path.home() / ".kaggle"
-            kaggle_dir.mkdir(parents=True, exist_ok=True)
-            kaggle_json = kaggle_dir / "kaggle.json"
-
-            # Write active credentials
-            creds = {"username": username, "key": key}
-            kaggle_json.write_text(json.dumps(creds, indent=2), encoding="utf-8")
-
-            # Also save to profiles archive
-            p_name = profile_name or username
-            profiles_dir = kaggle_dir / "profiles"
-            profiles_dir.mkdir(parents=True, exist_ok=True)
-            (profiles_dir / f"{p_name}.json").write_text(json.dumps(creds, indent=2), encoding="utf-8")
-
-            return {"success": True, "username": username, "profile_name": p_name}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
 
     @staticmethod
     def detect_docker() -> Dict[str, Any]:

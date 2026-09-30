@@ -8,12 +8,8 @@ import {
   RefreshCw,
   UserCheck,
   Key,
-  Shield,
   Layers,
-  ChevronRight,
-  Sparkles,
   ExternalLink,
-  Upload,
 } from 'lucide-react';
 import { EnvironmentStatus } from '../types/experiment';
 import { api } from '../services/api';
@@ -31,6 +27,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
+  const [cloudStatus, setCloudStatus] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Modal Profile action
@@ -43,10 +40,6 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
   const [modalTokenSecret, setModalTokenSecret] = useState('');
   const [savingModalToken, setSavingModalToken] = useState(false);
 
-  // Kaggle Profile action
-  const [showKaggleForm, setShowKaggleForm] = useState(false);
-  const [kaggleUser, setKaggleUser] = useState('');
-  const [kaggleKey, setKaggleKey] = useState('');
   const [savingKaggle, setSavingKaggle] = useState(false);
   const [kaggleSuccessMsg, setKaggleSuccessMsg] = useState<string | null>(null);
 
@@ -73,17 +66,27 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
     error?: string;
   }>>({});
 
-  const fetchStatus = async () => {
+  const fetchStatus = async (): Promise<EnvironmentStatus | null> => {
     setLoading(true);
     setError(null);
-    try {
-      const data = await api.getEnvironmentStatus();
-      setEnvStatus(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to detect environment.');
-    } finally {
-      setLoading(false);
+    const [environmentResult, cloudResult] = await Promise.allSettled([
+      api.getEnvironmentStatus(),
+      api.getCloudStatus(),
+    ]);
+    let environment: EnvironmentStatus | null = null;
+    if (environmentResult.status === 'fulfilled') {
+      environment = environmentResult.value;
+      setEnvStatus(environment);
+    } else {
+      setError((environmentResult.reason as Error)?.message || 'Failed to detect environment.');
     }
+    if (cloudResult.status === 'fulfilled') {
+      setCloudStatus(cloudResult.value);
+    } else {
+      setCloudStatus(null);
+    }
+    setLoading(false);
+    return environment;
   };
 
   useEffect(() => {
@@ -91,6 +94,15 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
       fetchStatus();
     }
   }, [isOpen]);
+
+  const kaggleProvider = cloudStatus?.providers?.kaggle;
+  const kaggleQuota = kaggleProvider?.quota;
+  const kaggleQuotaValue = kaggleQuota?.data ?? kaggleQuota?.raw;
+  const kaggleQuotaText = kaggleQuotaValue !== undefined
+    ? typeof kaggleQuotaValue === 'string' ? kaggleQuotaValue : JSON.stringify(kaggleQuotaValue)
+    : kaggleQuota?.reason || kaggleQuota?.status || 'Not checked';
+  const kaggleApiVerified = Boolean(kaggleProvider?.api_verified);
+  const kaggleUploadReady = kaggleProvider?.dataset?.status === 'ready' && kaggleProvider?.dataset?.upload_consent;
 
   if (!isOpen) return null;
 
@@ -124,17 +136,52 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
   const handleLaunchKaggleAuth = async () => {
     setError(null);
     setSavingKaggle(true);
+    setKaggleSuccessMsg(null);
     try {
       const res = await api.launchKaggleAuth();
-      setKaggleSuccessMsg(
-        res.message || "Executed 'kaggle login auth --force'. Complete the browser login flow."
-      );
-      setTimeout(() => {
-        fetchStatus();
-        onStatusChanged?.();
-      }, 3000);
+      if (!res.success) {
+        throw new Error(res.message || 'Kaggle OAuth could not start.');
+      }
+      if (res.status === 'failed') {
+        throw new Error('Kaggle CLI exited before the authorization flow could start. Check the installed CLI version.');
+      }
+      setKaggleSuccessMsg(res.message || 'Kaggle OAuth started. Approve access in the browser.');
+      const finishLogin = async () => {
+        const refreshed = await fetchStatus();
+        if (refreshed?.kaggle.authenticated) {
+          setKaggleSuccessMsg(
+            `Kaggle connected${refreshed.kaggle.username ? ` as ${refreshed.kaggle.username}` : ''}.`
+          );
+          onStatusChanged?.();
+        } else {
+          setError('Kaggle CLI finished login, but the active account could not be verified. Refresh status and check CLI configuration.');
+        }
+      };
+
+      if (res.status === 'completed') {
+        await finishLogin();
+      } else if (res.status === 'running') {
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1500));
+          const flow = await api.getKaggleAuthFlowStatus();
+          if (flow.status !== 'running') {
+            if (flow.status === 'completed') {
+              await finishLogin();
+            } else if (flow.status === 'failed') {
+              await fetchStatus();
+              setError('Kaggle OAuth did not complete. Retry the login or check the Kaggle CLI installation.');
+            } else {
+              await fetchStatus();
+              setError('Kaggle CLI finished login, but the active account could not be verified. Refresh status and check CLI configuration.');
+            }
+            return;
+          }
+        }
+        await fetchStatus();
+        setKaggleSuccessMsg('Kaggle authorization is still running. Approve access in the browser, then refresh status.');
+      }
     } catch (err: any) {
-      setError(err.message || "Failed to execute 'kaggle login auth --force'.");
+      setError(err.message || "Failed to execute 'kaggle auth login --force'.");
     } finally {
       setSavingKaggle(false);
     }
@@ -176,65 +223,6 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
       setError(err.message || 'Error saving token.');
     } finally {
       setSavingModalToken(false);
-    }
-  };
-
-  const handleKaggleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError(null);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const content = event.target?.result as string;
-        const parsed = JSON.parse(content);
-        const username = parsed.username || parsed.user;
-        const key = parsed.key;
-        if (!username || !key) {
-          setError('Invalid kaggle.json: "username" and "key" properties are required.');
-          return;
-        }
-        setSavingKaggle(true);
-        const res = await api.switchKaggleProfile(username, key);
-        if (res.success) {
-          setKaggleSuccessMsg(`Kaggle authenticated for '${res.username}' via 1-click kaggle.json!`);
-          await fetchStatus();
-          onStatusChanged?.();
-          setTimeout(() => setKaggleSuccessMsg(null), 3500);
-        } else {
-          setError('Failed to apply Kaggle credentials from file.');
-        }
-      } catch (err: any) {
-        setError(`Failed to read kaggle.json: ${err.message}`);
-      } finally {
-        setSavingKaggle(false);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const handleSaveKaggleCreds = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!kaggleUser || !kaggleKey) return;
-    setSavingKaggle(true);
-    setError(null);
-    try {
-      const res = await api.switchKaggleProfile(kaggleUser, kaggleKey);
-      if (res.success) {
-        setKaggleSuccessMsg(`Kaggle credentials set for '${res.username}'.`);
-        setShowKaggleForm(false);
-        setKaggleUser('');
-        setKaggleKey('');
-        await fetchStatus();
-        onStatusChanged?.();
-        setTimeout(() => setKaggleSuccessMsg(null), 3000);
-      } else {
-        setError('Failed to save Kaggle credentials.');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Error saving Kaggle credentials.');
-    } finally {
-      setSavingKaggle(false);
     }
   };
 
@@ -493,16 +481,20 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2.5">
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-cyan-400" />
-                <span className="font-semibold text-zinc-100">Kaggle CLI & Kernels</span>
-                {envStatus?.kaggle.authenticated ? (
-                  <span className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">
-                    Authenticated: {envStatus.kaggle.username}
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded">
-                    Not Authenticated
-                  </span>
-                )}
+                <span className="font-semibold text-zinc-100">Kaggle account</span>
+                <span className={`text-[10px] font-mono border px-1.5 py-0.5 rounded ${
+                  kaggleApiVerified
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : envStatus?.kaggle.authenticated
+                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                      : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                }`}>
+                  {kaggleApiVerified
+                    ? 'Connected'
+                    : envStatus?.kaggle.authenticated
+                      ? 'Credentials found · API not verified'
+                      : 'Not connected'}
+                </span>
               </div>
 
               {/* Action Buttons */}
@@ -510,18 +502,104 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                 <button
                   type="button"
                   onClick={handleLaunchKaggleAuth}
-                  disabled={savingKaggle}
+                  disabled={savingKaggle || envStatus?.kaggle.auth_flow?.status === 'running'}
                   className="flex items-center gap-1.5 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition"
-                  title="Execute kaggle login auth --force to authenticate automatically"
+                  title="Run kaggle auth login --force and approve access in the browser"
                 >
-                  <span>{savingKaggle ? 'Logging in...' : 'Kaggle Login'}</span>
+                  {savingKaggle || envStatus?.kaggle.auth_flow?.status === 'running'
+                    ? <RefreshCw className="w-3 h-3 animate-spin" />
+                    : <ExternalLink className="w-3 h-3" />}
+                  <span>{savingKaggle || envStatus?.kaggle.auth_flow?.status === 'running'
+                    ? 'Waiting for approval...'
+                    : envStatus?.kaggle.authenticated ? 'Switch / reconnect' : 'Connect Kaggle'}</span>
                 </button>
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-zinc-400 font-mono">
-              <span>Config Directory:</span>
-              <span className="text-zinc-300">{envStatus?.kaggle.config_dir || '~/.kaggle'}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-2 text-[11px]">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-zinc-500">Account</span>
+                {envStatus?.kaggle.username ? (
+                  <a
+                    href={`https://www.kaggle.com/${encodeURIComponent(envStatus.kaggle.username)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1"
+                  >
+                    {envStatus.kaggle.username}<ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : (
+                  <span className="text-zinc-400">{envStatus?.kaggle.authenticated ? 'Name unavailable' : 'Not signed in'}</span>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-zinc-500">CLI</span>
+                <span className="text-zinc-300 text-right">{envStatus?.kaggle.cli_version || (envStatus?.kaggle.installed ? 'Installed · version unavailable' : 'Not installed')}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-zinc-500">OAuth login support</span>
+                <span className={envStatus?.kaggle.oauth_supported ? 'text-emerald-400' : 'text-amber-300'}>
+                  {envStatus?.kaggle.oauth_supported ? 'Available' : 'Upgrade Kaggle CLI'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 sm:col-span-2">
+                <span className="text-zinc-500">CLI path</span>
+                <span className="text-zinc-400 font-mono text-right break-all">{envStatus?.kaggle.executable || 'Not found on PATH'}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-zinc-500">Authentication</span>
+                <span className="text-zinc-300">{envStatus?.kaggle.authentication_method || 'None detected'}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-zinc-500">Task run readiness</span>
+                <span className={kaggleProvider?.ready ? 'text-emerald-400' : 'text-amber-300'}>
+                  {kaggleProvider?.ready ? 'Ready' : 'Needs setup'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-zinc-500">OAuth flow</span>
+                <span className={envStatus?.kaggle.auth_flow?.status === 'running' ? 'text-amber-300' : 'text-zinc-300'}>
+                  {envStatus?.kaggle.auth_flow?.status === 'running'
+                    ? 'Waiting for browser approval'
+                    : envStatus?.kaggle.auth_flow?.status === 'failed'
+                      ? `Failed (exit ${envStatus.kaggle.auth_flow.return_code ?? 'unknown'})`
+                      : envStatus?.kaggle.auth_flow?.status === 'completed' ? 'Completed' : 'Idle'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-zinc-500">Account API check</span>
+                <span className={kaggleApiVerified ? 'text-emerald-400' : 'text-zinc-400'}>
+                  {kaggleApiVerified ? 'Verified' : kaggleQuota?.reason || 'Unavailable'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 sm:col-span-2">
+                <span className="text-zinc-500">Accelerator quota</span>
+                <span className="text-zinc-300 text-right break-all">{kaggleQuotaText}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 sm:col-span-2">
+                <span className="text-zinc-500">Current task upload</span>
+                <span className={kaggleUploadReady ? 'text-emerald-400' : 'text-amber-300'}>
+                  {kaggleUploadReady
+                    ? `Approved · ${kaggleProvider.dataset.file_count} files · ${String(kaggleProvider.dataset.fingerprint).slice(0, 12)}`
+                    : kaggleProvider?.dataset?.status === 'not_ready'
+                      ? kaggleProvider.dataset.reason || 'Dataset paths are not ready'
+                      : 'Consent required for this dataset'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 sm:col-span-2">
+                <span className="text-zinc-500">Config directory</span>
+                <span className="text-zinc-400 font-mono text-right break-all">{envStatus?.kaggle.config_dir || '~/.kaggle'}</span>
+              </div>
+              {envStatus?.kaggle.error && (
+                <div className="sm:col-span-2 text-rose-300">{envStatus.kaggle.error}</div>
+              )}
+              {Array.isArray(kaggleProvider?.warnings) && kaggleProvider.warnings.length > 0 && (
+                <div className="sm:col-span-2 text-zinc-500 space-y-1">
+                  {kaggleProvider.warnings.map((warning: string, index: number) => (
+                    <div key={`${index}-${warning}`}>{warning}</div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

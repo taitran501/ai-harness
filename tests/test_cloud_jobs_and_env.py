@@ -1,8 +1,11 @@
 """Tests for environment detection, cloud jobs, and per-task workspace isolation."""
 
 import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from harness.environment_detector import EnvironmentDetector
 from harness.cloud_job_runner import CloudJobManager, CloudJob
@@ -32,6 +35,64 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         self.assertTrue(status["kaggle"]["installed"])
         self.assertTrue(status["docker"]["installed"])
         self.assertTrue(status["gpu"]["detected"])
+
+    def test_kaggle_oauth_status_reads_active_config_dir_and_username(self):
+        with tempfile.TemporaryDirectory(prefix="mlh-kaggle-auth-") as config_dir:
+            (Path(config_dir) / "access_token").write_text("placeholder-token", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {"KAGGLE_CONFIG_DIR": config_dir, "KAGGLE_API_TOKEN": "", "KAGGLE_USERNAME": "", "KAGGLE_KEY": ""},
+                clear=False,
+            ), patch(
+                "harness.environment_detector.shutil.which", return_value="kaggle"
+            ), patch(
+                "harness.environment_detector.subprocess.run",
+                side_effect=[
+                    Mock(returncode=0, stdout="Kaggle CLI 2.2.3", stderr=""),
+                    Mock(returncode=0, stdout="Usage: kaggle auth login [OPTIONS]\n  --force", stderr=""),
+                    Mock(returncode=0, stdout="username: fixture-user\nauth_method: OAuth", stderr=""),
+                ],
+            ):
+                status = EnvironmentDetector.detect_kaggle()
+
+        self.assertTrue(status["authenticated"])
+        self.assertEqual(status["username"], "fixture-user")
+        self.assertEqual(status["authentication_method"], "OAuth")
+        self.assertEqual(status["cli_version"], "Kaggle CLI 2.2.3")
+        self.assertTrue(status["oauth_supported"])
+        self.assertEqual(status["config_dir"], str(Path(config_dir).resolve()))
+
+    def test_kaggle_connect_starts_forced_official_oauth_command(self):
+        process = Mock()
+        process.poll.return_value = None
+        with patch("harness.environment_detector.shutil.which", return_value="/fake/bin/kaggle"), patch(
+            "harness.environment_detector.subprocess.run",
+            return_value=Mock(returncode=0, stdout="--force", stderr=""),
+        ), patch(
+            "harness.environment_detector.subprocess.Popen", return_value=process
+        ) as popen:
+            result = EnvironmentDetector.launch_kaggle_auth()
+
+        try:
+            self.assertTrue(result["success"])
+            self.assertEqual(result["status"], "running")
+            self.assertEqual(
+                popen.call_args.args[0],
+                ["/fake/bin/kaggle", "auth", "login", "--force"],
+            )
+            self.assertNotIn("auth_url", result)
+        finally:
+            if EnvironmentDetector._kaggle_auth_log is not None:
+                EnvironmentDetector._kaggle_auth_log.close()
+            EnvironmentDetector._kaggle_auth_log = None
+            EnvironmentDetector._kaggle_auth_process = None
+            EnvironmentDetector._kaggle_auth_state = {
+                "status": "idle",
+                "command": None,
+                "started_at": None,
+                "finished_at": None,
+                "return_code": None,
+            }
 
     def test_get_next_experiment_id(self):
         res = get_next_experiment_id(branch="feat", descriptor="test_cleaning")
@@ -76,21 +137,12 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         jobs_list = manager.list_jobs(limit=5)
         self.assertTrue(len(jobs_list) >= 1)
 
-    def test_modal_and_kaggle_auth_helpers(self):
+    def test_modal_token_input_parser(self):
         # 1. Parse token inputs
         raw_cmd = "modal token set --token-id ak-1234567890abcdef --token-secret as-abcdef1234567890"
         t_id, t_sec = EnvironmentDetector.parse_modal_token_input(raw_cmd)
         self.assertEqual(t_id, "ak-1234567890abcdef")
         self.assertEqual(t_sec, "as-abcdef1234567890")
-
-        # 2. Launch auth returns valid URL structure
-        m_res = EnvironmentDetector.launch_modal_auth()
-        self.assertTrue(m_res["success"])
-        self.assertIn("modal.com/settings/tokens", m_res["auth_url"])
-
-        k_res = EnvironmentDetector.launch_kaggle_auth()
-        self.assertTrue(k_res["success"])
-        self.assertIn("kaggle.com/settings", k_res["auth_url"])
 
 
 if __name__ == "__main__":

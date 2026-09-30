@@ -183,7 +183,7 @@ $HarnessEnvPath = Join-Path $env:USERPROFILE ".venvs/ml-harness"
 
 # Kaggle
 uv pip install "ml-harness[ml,kaggle] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
-kaggle auth login
+kaggle auth login --force
 
 # For Modal instead, run these two commands:
 # uv pip install "ml-harness[ml,modal] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"

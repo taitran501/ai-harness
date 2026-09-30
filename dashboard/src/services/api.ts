@@ -432,19 +432,6 @@ export const api = {
     return res.json();
   },
 
-  async switchKaggleProfile(username: string, key: string, profileName?: string): Promise<{ success: boolean; username: string; profile_name: string }> {
-    const res = await fetch(`${API_BASE}/environment/kaggle/profile`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, key, profile_name: profileName }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `Failed to switch kaggle profile: ${res.statusText}`);
-    }
-    return res.json();
-  },
-
   async launchModalAuth(): Promise<{ success: boolean; auth_url: string; message: string }> {
     const res = await fetch(`${API_BASE}/environment/modal/launch_auth`, {
       method: 'POST',
@@ -457,16 +444,30 @@ export const api = {
     return res.json();
   },
 
-  async launchKaggleAuth(): Promise<{ success: boolean; auth_url: string; message: string }> {
+  async launchKaggleAuth(): Promise<{
+    success: boolean;
+    status: string;
+    command: string;
+    message: string;
+  }> {
     const res = await fetch(`${API_BASE}/environment/kaggle/launch_auth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || `Failed to launch Kaggle authorization: ${res.statusText}`);
+      throw new Error(data.error || data.message || `Failed to launch Kaggle authorization: ${res.statusText}`);
     }
-    return res.json();
+    return data;
+  },
+
+  async getKaggleAuthFlowStatus(): Promise<{ status: string; return_code?: number | null }> {
+    const res = await fetch(`${API_BASE}/environment/kaggle/auth_status`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Failed to fetch Kaggle login status: ${res.statusText}`);
+    }
+    return data;
   },
 
   async getTasks(): Promise<{ tasks: import('../types/experiment').TaskSummary[] }> {

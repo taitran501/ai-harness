@@ -14,12 +14,14 @@ $HarnessEnvPath = Join-Path $env:USERPROFILE ".venvs/ml-harness"
 
 # Kaggle
 uv pip install "ml-harness[ml,kaggle] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
-kaggle auth login
+kaggle auth login --force
 
 # For Modal instead:
 # uv pip install "ml-harness[ml,modal] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
 # modal setup
 ~~~
+
+You can also choose **Account Settings → Connect Kaggle** in the local dashboard. It runs the same forced OAuth login and opens Kaggle's approval page in your browser.
 
 See the official [Kaggle CLI authentication guide](https://github.com/Kaggle/kaggle-cli/blob/main/skills/references/auth.md) and [Modal account setup guide](https://modal.com/docs/guide/modal-user-account-setup) for account requirements and alternative credential flows. Keep credentials in the provider's local profile or secret store; never commit them or place them in a task prompt.
 

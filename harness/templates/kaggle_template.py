@@ -108,7 +108,7 @@ class KaggleKernelManager:
         if not full_slug:
             return {
                 "success": False,
-                "error": "Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry.",
+                "error": "Could not determine the active Kaggle username. Run `kaggle auth login --force` and retry.",
                 "fingerprint": fingerprint_data["fingerprint"],
             }
         slug_name = resources["kaggle_dataset_name"]
@@ -226,7 +226,7 @@ class KaggleKernelManager:
             resources = private_upload_resource_names(project, kaggle_username=username)
             resolved_dataset = resources["kaggle_dataset_slug"]
             if not resolved_dataset:
-                raise ValueError("Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry.")
+                raise ValueError("Could not determine the active Kaggle username. Run `kaggle auth login --force` and retry.")
 
         meta = cls.generate_kernel_metadata(
             kernel_slug=slug,
