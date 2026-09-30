@@ -9,24 +9,34 @@ description = "Installable experiment and agent harness for competition task plu
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = [
+dependencies = ["pyyaml>=6.0"]
+
+[project.optional-dependencies]
+ml = [
   "numpy>=1.24.0",
   "pandas>=2.0.0",
   "scikit-learn>=1.3.0",
-  "pyyaml>=6.0",
   "scipy>=1.11.0",
 ]
-
-[project.optional-dependencies]
-cloud = ["modal>=1.5.0", "kaggle>=1.6.0"]
+kaggle = ["kaggle>=1.6.0"]
+modal = ["modal>=1.5.0"]
+# Preserve the former full runtime when both cloud providers are requested.
+cloud = [
+  "numpy>=1.24.0",
+  "pandas>=2.0.0",
+  "scikit-learn>=1.3.0",
+  "scipy>=1.11.0",
+  "modal>=1.5.0",
+  "kaggle>=1.6.0",
+]
 
 [project.scripts]
 ml-harness = "harness.cli:main"
 ml-harness-agent = "tools.agent_bridge_cli:main"
 ml-harness-dashboard = "tools.dashboard_cli:main"
-ml-harness-run = "harness.runner:main"
-ml-harness-audit = "tools.audit_gate:main"
-ml-harness-bootstrap = "tools.bootstrap_task:main"
+ml-harness-run = "tools.optional_cli:run_main"
+ml-harness-audit = "tools.optional_cli:audit_main"
+ml-harness-bootstrap = "tools.optional_cli:bootstrap_main"
 
 [tool.setuptools.packages.find]
 where = ["."]

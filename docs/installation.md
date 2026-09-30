@@ -1,45 +1,53 @@
 # Installation and task attachment
 
-ML-Harness is installed as a Python package. For normal use, you do not need to clone the repository, build a wheel, install Node.js, or build dashboard assets: pip installs the runtime, CLI commands, and dashboard assets directly from GitHub. Use the same Python environment for the core, optional adapter, and CLI commands.
+ML-Harness is distributed as a Python package with optional dependency profiles. The base profile supports workspace attachment, phase prompts, plugin discovery, and basic task context. Install the `ml` extra for EDA, experiments, full Agent Bridge diagnostics, bootstrap, and the local dashboard.
 
-Start with the [copy/paste PowerShell cookbook](cookbook.md) for the complete install-to-experiment workflow.
+## Requirements
 
-## Prerequisites
+Python 3.10 or newer and Git are required. [`uv`](https://docs.astral.sh/uv/getting-started/installation/) is recommended for creating the environment and installing the package. Its cache lets separate environments reuse downloaded wheels.
 
-Python 3.10 or newer is required; Python 3.11 is recommended. Installing from the GitHub URL also requires Git to be available on PATH.
-
-## Install the core
-
-Create one reusable environment outside competition workspaces, activate it, and install the package:
+## Create an environment and install the base profile
 
 ~~~powershell
 $HarnessEnvPath = Join-Path $env:USERPROFILE ".venvs/ml-harness"
-New-Item -ItemType Directory -Force (Split-Path $HarnessEnvPath) | Out-Null
-if (-not (Test-Path "$HarnessEnvPath\Scripts\python.exe")) {
-    py -3.11 -m venv $HarnessEnvPath
-}
+uv venv $HarnessEnvPath --python 3.11
+uv pip install --python "$HarnessEnvPath\Scripts\python.exe" "ml-harness @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
 & "$HarnessEnvPath\Scripts\Activate.ps1"
-python -m pip install --upgrade pip
-python -m pip install "ml-harness @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
 ml-harness plugins
 ~~~
 
-These commands install the current feature branch. Replace the branch with a release tag or the default branch after a release is published.
-
-## Install an optional task adapter
-
-For a declarative task supported by the core, no adapter installation is needed. For StereoQueerEval, install its adapter into the same environment:
+To use pip instead, create and activate the environment, then install the same package requirement:
 
 ~~~powershell
-python -m pip install "ml-harness-stereoqueereval @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin#subdirectory=task_plugins/stereoqueereval"
+py -3.11 -m venv $HarnessEnvPath
+& "$HarnessEnvPath\Scripts\Activate.ps1"
+python -m pip install "ml-harness @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+~~~
+
+## Enable local ML tools
+
+Install this extra in the same environment when you need EDA, model runs, full Agent Bridge context and actions, task bootstrap, or the dashboard:
+
+~~~powershell
+uv pip install "ml-harness[ml] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+~~~
+
+This adds NumPy, pandas, scikit-learn, and SciPy. With pip, run `python -m pip install "ml-harness[ml] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"` in the activated environment. The base workflow remains available without these packages. If an ML-only command is used before installing the extra, it prints the missing profile and install command.
+
+## Install a task adapter
+
+For a declarative task supported by the core, no adapter is needed. Install a specialized adapter into the same environment before selecting its plugin ID. For StereoQueerEval:
+
+~~~powershell
+uv pip install "ml-harness-stereoqueereval @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin#subdirectory=task_plugins/stereoqueereval"
 ml-harness plugins
 ~~~
 
-An adapter must be installed before selecting its plugin ID during attachment. For details about writing adapters, see [Task adapters](task-adapters.md).
+The adapter requires the `ml` profile. For adapter development from a checkout, see [Task adapters](task-adapters.md).
 
 ## Attach to a task workspace
 
-Keep each competition task in its own workspace. Activate the environment, change to the task folder, and attach the workspace's own task config:
+Use a separate workspace for each competition task. Activate the environment, change to the task folder, and attach its task config:
 
 ~~~powershell
 & "$HarnessEnvPath\Scripts\Activate.ps1"
@@ -49,7 +57,7 @@ ml-harness-agent --project-root . context
 ml-harness phase validate --project-root .
 ~~~
 
-For an installed task adapter, select its entry-point ID:
+For an installed adapter, pass its plugin ID:
 
 ~~~powershell
 ml-harness attach --project-root . --task-config configs/task.yaml --plugin stereoqueereval
@@ -57,16 +65,14 @@ ml-harness attach --project-root . --task-config configs/task.yaml --plugin ster
 
 Attachment creates these task-local files:
 
-- .ml-harness/project.yaml: task config, selected adapter, and artifact directory.
-- .agents/skills/ml-harness/SKILL.md: instructions for the IDE agent working in this task.
-- prompts/ml-harness/: editable phase prompts and output contracts.
-- .ml-harness/artifacts/<task-id>/: phase history, responses, experiment runs, and imported remote results.
+- `.ml-harness/project.yaml`: task config, selected adapter, and artifact directory.
+- `.agents/skills/ml-harness/SKILL.md`: instructions for the IDE agent working in this task.
+- `prompts/ml-harness/`: editable phase prompts and output contracts.
+- `.ml-harness/artifacts/<task-id>/`: phase history, responses, experiment runs, and imported remote results.
 
-Attach does not copy the harness source into the task or replace its task config. Use --force only when intentionally replacing an existing attachment or when attaching after bootstrap generated a starter skill.
+## Start from a dataset and competition context
 
-## Start from only a dataset and competition context
-
-Create docs/TASK.md with the official competition contract and put local competition files under dataset/. Then run:
+Create `docs/TASK.md` with the official competition contract and put local competition files under `dataset/`. Bootstrap requires the `ml` profile:
 
 ~~~powershell
 ml-harness-bootstrap --project-root . --dataset dataset --context docs/TASK.md
@@ -74,19 +80,25 @@ Get-Content configs/task.yaml
 ml-harness attach --project-root . --task-config configs/task.yaml --force
 ~~~
 
-Review the generated target, metric, data paths, and split settings against organizer instructions before running experiments. Bootstrap creates a starter experiment config at configs/exp000_baseline.yaml when it can infer the required fields. The [cookbook](cookbook.md) includes the complete setup commands.
+Review the generated target, metric, data paths, and split settings against organizer instructions before running experiments. The [cookbook](cookbook.md) contains a complete setup sequence.
 
-## Install optional cloud support
+## Install provider support
 
-Add Kaggle and Modal support only in the environment that will launch cloud jobs:
+Install only the provider package you plan to use, along with `ml` for experiment execution. For Kaggle:
 
 ~~~powershell
-$HarnessEnvPath = Join-Path $env:USERPROFILE ".venvs/ml-harness"
-& "$HarnessEnvPath\Scripts\Activate.ps1"
-python -m pip install "ml-harness[cloud] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+uv pip install "ml-harness[ml,kaggle] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+kaggle auth login
 ~~~
 
-Then authenticate with the provider CLI and run task-scoped preflight. See [Cloud execution](cloud-execution.md).
+For Modal:
+
+~~~powershell
+uv pip install "ml-harness[ml,modal] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+modal setup
+~~~
+
+The `[cloud]` extra installs the ML profile and both provider packages together. Provider quotas, availability, and charges depend on the account and service; see [Cloud execution](cloud-execution.md).
 
 ## Check or remove the installation
 

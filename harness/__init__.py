@@ -1,25 +1,35 @@
-"""ML Experiment Harness - Autonomous Agentic ML/DL Experimentation Platform.
+"""ML-Harness public API, loaded lazily to keep workflow-only installs small."""
 
-Combines AIDE ML (Tree Search & Memory Compression) with SWE-agent (Deterministic Audit Gate).
-"""
+from __future__ import annotations
 
-from .tree_journal import Node, TreeJournal
-from .validator import ExperimentValidator
-from .competition_state import CompetitionStateMachine, CompetitionState
-from .agent_bridge import AgentBridge
-from .ensemble_guard import EnsembleGuard
-from .submission_manager import SubmissionManager
-from .io_utils import atomic_write_json, atomic_write_text
+from importlib import import_module
 
-__all__ = [
-    "Node",
-    "TreeJournal",
-    "ExperimentValidator",
-    "CompetitionStateMachine",
-    "CompetitionState",
-    "AgentBridge",
-    "EnsembleGuard",
-    "SubmissionManager",
-    "atomic_write_json",
-    "atomic_write_text",
-]
+_EXPORTS = {
+    "Node": (".tree_journal", "Node"),
+    "TreeJournal": (".tree_journal", "TreeJournal"),
+    "ExperimentValidator": (".validator", "ExperimentValidator"),
+    "CompetitionStateMachine": (".competition_state", "CompetitionStateMachine"),
+    "CompetitionState": (".competition_state", "CompetitionState"),
+    "AgentBridge": (".agent_bridge", "AgentBridge"),
+    "EnsembleGuard": (".ensemble_guard", "EnsembleGuard"),
+    "SubmissionManager": (".submission_manager", "SubmissionManager"),
+    "atomic_write_json": (".io_utils", "atomic_write_json"),
+    "atomic_write_text": (".io_utils", "atomic_write_text"),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    """Load public runtime APIs only when callers request them."""
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute_name = target
+    value = getattr(import_module(module_name, __name__), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

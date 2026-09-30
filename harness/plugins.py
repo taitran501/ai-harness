@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 TASK_PLUGIN_ENTRY_POINT_GROUP = "ml_harness.task_plugins"

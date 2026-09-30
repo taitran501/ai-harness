@@ -36,7 +36,6 @@ HARNESS_DIR = Path(__file__).resolve().parent.parent
 if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
-from harness.agent_bridge import AgentBridge
 from harness.project import HarnessProject
 
 
@@ -114,6 +113,24 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("list", help="List recent BridgeSessions")
 
     args = parser.parse_args(argv)
+    from harness.optional_deps import missing_extra_modules, require_extra
+
+    # Workflow-only installs can still read task context and phase progress. Actions,
+    # experiment diagnostics, and the complete context packet need the ML extra.
+    if args.command == "context" and not args.session_id and missing_extra_modules("ml"):
+        from harness.light_context import build_light_context, render_light_context
+
+        packet = build_light_context(args.project_root or ".", args.task_config)
+        if args.format == "json":
+            print(json.dumps(packet, indent=2, ensure_ascii=False))
+        else:
+            print(render_light_context(packet), end="")
+        return 0
+
+    if not require_extra("ml", "The Agent Bridge"):
+        return 2
+    from harness.agent_bridge import AgentBridge
+
     project = HarnessProject.discover(args.project_root, args.task_config)
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)

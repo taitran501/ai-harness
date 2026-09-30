@@ -12,18 +12,20 @@ This repository contains the installable, task-neutral ML-Harness runtime and se
 
 ## Install for development
 
-Use a Python environment and install the core in editable mode:
+Use `uv` for environment management and install the ML runtime in editable mode:
 
 ~~~powershell
-python -m pip install -e .
-python -m pip install -e task_plugins/stereoqueereval
+uv venv --python 3.11
+uv pip install -e ".[ml]"
+uv pip install -e task_plugins/stereoqueereval
 ml-harness plugins
 ~~~
 
-For remote backend development, install the optional cloud dependencies:
+For provider development, install only the provider extras you are changing:
 
 ~~~powershell
-python -m pip install -e ".[cloud]"
+uv pip install -e ".[ml,kaggle]"
+# Or: uv pip install -e ".[ml,modal]"
 ~~~
 
 ## Contracts to preserve

@@ -1,36 +1,41 @@
 # ML-Harness PowerShell cookbook
 
-Copy and run these commands on Windows to install ML-Harness and use it with an IDE agent. The package is installed directly from GitHub: you do not need to clone this repository, build a wheel, install Node.js, or build the dashboard.
+Use this Windows workflow to install ML-Harness, attach a competition workspace, and work with an IDE agent. It uses `uv` for environment and package management.
 
 You provide the competition dataset and organizer context. The IDE agent uses those inputs to research the task, run EDA and experiments, and create task outputs; ML-Harness tracks the workflow and runtime.
 
 ## 0. Prerequisites
 
-Install Python 3.11 and Git, then open PowerShell. The py launcher and git command should work:
+Install Python 3.11, Git, and [uv](https://docs.astral.sh/uv/getting-started/installation/), then open PowerShell. If `uv` is not installed, Windows users can install it with WinGet:
+
+~~~powershell
+winget install --id astral-sh.uv -e
+~~~
+
+Open a new PowerShell window after installing, then check the commands:
 
 ~~~powershell
 py -3.11 --version
 git --version
+uv --version
 ~~~
 
 ## 1. Install ML-Harness once
 
-The reusable virtual environment stays outside competition folders. Install the core and, only if needed, the optional StereoQueerEval adapter into the same environment.
+The reusable virtual environment stays outside competition folders. This end-to-end cookbook uses the `ml` profile for EDA, model runs, full Agent Bridge actions, and the dashboard. If you only need attachment, phase prompts, plugin discovery, and basic task context, install the base package without `[ml]`; add the profile later when you need ML tools.
 
 ~~~powershell
 $HarnessEnvPath = Join-Path $env:USERPROFILE ".venvs/ml-harness"
-New-Item -ItemType Directory -Force (Split-Path $HarnessEnvPath) | Out-Null
-if (-not (Test-Path "$HarnessEnvPath\Scripts\python.exe")) {
-    py -3.11 -m venv $HarnessEnvPath
-}
+uv venv $HarnessEnvPath --python 3.11
 & "$HarnessEnvPath\Scripts\Activate.ps1"
-python -m pip install --upgrade pip
+# Full local workflow: EDA, experiments, diagnostics, and dashboard
+uv pip install --python "$HarnessEnvPath\Scripts\python.exe" "ml-harness[ml] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
 
-# Required: core runtime, CLIs, and dashboard assets
-python -m pip install "ml-harness @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+# For attachment and phase workflow only, install the base profile instead:
+# uv pip install --python "$HarnessEnvPath\Scripts\python.exe" "ml-harness @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
 
 # Optional: only for a StereoQueerEval task workspace
-python -m pip install "ml-harness-stereoqueereval @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin#subdirectory=task_plugins/stereoqueereval"
+uv pip install --python "$HarnessEnvPath\Scripts\python.exe" "ml-harness-stereoqueereval @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin#subdirectory=task_plugins/stereoqueereval"
 
 ml-harness plugins
 ~~~
@@ -170,15 +175,19 @@ Keep the terminal running and open the printed local URL in a browser. The dashb
 
 ## 7. Optional: run on Kaggle or Modal
 
-Install cloud support once in the same environment. Then sign in using the official provider CLI:
+Install the ML profile and only the provider you plan to use in the same environment. Then sign in using the official provider CLI:
 
 ~~~powershell
 $HarnessEnvPath = Join-Path $env:USERPROFILE ".venvs/ml-harness"
 & "$HarnessEnvPath\Scripts\Activate.ps1"
-python -m pip install "ml-harness[cloud] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
 
-# Choose the provider or providers you use
+# Kaggle
+uv pip install "ml-harness[ml,kaggle] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
 kaggle auth login
+
+# For Modal instead, run these two commands:
+# uv pip install "ml-harness[ml,modal] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+# modal setup
 modal setup
 ~~~
 

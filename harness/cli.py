@@ -9,7 +9,6 @@ from typing import Optional, Sequence
 
 from harness.plugins import list_task_plugins
 from harness.phase_workflow import PhaseWorkflow, PromptPackError, initialize_prompt_pack
-from harness.eda import run_eda, render_eda_markdown
 from harness.project import HarnessProject, attach_project
 from harness.cloud_policy import UploadConsentStore, dataset_fingerprint, provider_preflight
 
@@ -117,6 +116,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 2
 
     if args.command == "eda":
+        from harness.optional_deps import require_extra
+
+        if not require_extra("ml", "EDA"):
+            return 2
+        from harness.eda import render_eda_markdown, run_eda
+
         try:
             result = run_eda(args.project_root or ".", data_path=args.data, output_dir=args.output_dir)
             print(render_eda_markdown(result))

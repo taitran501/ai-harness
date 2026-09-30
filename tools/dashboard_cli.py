@@ -19,6 +19,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.task_config:
         os.environ["HARNESS_TASK_CONFIG"] = args.task_config
 
+    from harness.optional_deps import require_extra
+
+    if not require_extra("ml", "The dashboard"):
+        return 2
+
     # Import only after applying workspace overrides: the dashboard and its
     # managers resolve the project during module initialization.
     from tools.dashboard_server import run_server

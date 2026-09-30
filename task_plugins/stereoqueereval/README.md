@@ -7,16 +7,16 @@ This optional adapter keeps StereoQueerEval loading, model construction, output 
 Install ML-Harness and the adapter into the same Python environment:
 
 ~~~powershell
-python -m pip install "ml-harness @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
-python -m pip install "ml-harness-stereoqueereval @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin#subdirectory=task_plugins/stereoqueereval"
+uv pip install "ml-harness[ml] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+uv pip install "ml-harness-stereoqueereval @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin#subdirectory=task_plugins/stereoqueereval"
 ml-harness plugins
 ~~~
 
 From a local clone of this repository, install in editable mode from its root:
 
 ~~~powershell
-python -m pip install -e .
-python -m pip install -e task_plugins/stereoqueereval
+uv pip install -e ".[ml]"
+uv pip install -e task_plugins/stereoqueereval
 ~~~
 
 ## Attach to the competition workspace
