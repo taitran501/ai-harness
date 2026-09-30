@@ -1,2 +1,0 @@
-input_variant,dev_fold,train_rows,dev_rows,composite_score,language,subtask_a_f1,subtask_b_f1,subtask_c_type_f1,subtask_c_type_oracle_f1,subtask_c_identity_f1
-full_context,0,60,7,0.20048019207683074,IT,0.0,0.0,0.5,0.5,0.0

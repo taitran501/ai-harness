@@ -1,61 +1,46 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+build/
+dist/
 
-# Virtual environments
+# Environments and local secrets
 .venv/
-env/
 venv/
-ENV/
+env/
+.env
+.env.*
+!.env.example
 
-# Testing and caching
+# Tests and caches
 .pytest_cache/
 .coverage
 htmlcov/
-tmp/
 .ipynb_checkpoints/
 
-# Node & Frontend dependencies
+# Frontend
 node_modules/
 dashboard/node_modules/
 dashboard/dist/
 *.local
 pnpm-debug.log*
 
-# Heavy model artifacts and weights
+# Task workspace state and generated outputs
+/.agents/
+/.ml-harness/
+/artifacts/
+/prompts/ml-harness/
+
+# Model artifacts
 *.pt
 *.bin
 *.safetensors
 *.onnx
 checkpoints/
-**/*.zip
 
-# ml-harness subfolder dependencies & build outputs
-ml-harness/dashboard/node_modules/
-ml-harness/dashboard/dist/
-ml-harness/**/__pycache__/
-
-# Allow dataset zip
-!dataset/*.zip
-
-# Legacy and scratch artifacts
-legacy/
-docs/specs/
-**/artifacts/baseline_v1/
-**/artifacts/agent_runs/
-**/artifacts/agent_sessions/
-**/artifacts/cand_*/
-**/artifacts/base/
-artifacts/competition_state.json
-artifacts/DATA_READINESS_REPORT.json
-
-# Agent teamwork scratch runs
-.agents/teamwork/
-
-# OS & Environment
+# OS files
 Thumbs.db
 .DS_Store
-.env
-.env.*
 .gemini/

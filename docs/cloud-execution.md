@@ -1,0 +1,63 @@
+# Cloud execution
+
+The core package can run experiments locally. Kaggle and Modal are optional backends that require their CLI/account setup and may have quotas, availability limits, or charges. The harness does not promise that either provider is always free.
+
+## Install cloud dependencies and sign in
+
+~~~powershell
+python -m pip install "ml-harness[cloud] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
+
+kaggle auth login
+modal setup
+~~~
+
+See the official [Kaggle CLI authentication guide](https://github.com/Kaggle/kaggle-cli/blob/main/skills/references/auth.md) and [Modal account setup guide](https://modal.com/docs/guide/modal-user-account-setup) for account requirements and alternative credential flows. Keep credentials in the provider's local profile or secret store; never commit them or place them in a task prompt.
+
+## Preflight before a remote run
+
+Run account and task checks from the task workspace:
+
+~~~powershell
+ml-harness cloud status --project-root .
+ml-harness cloud preflight --project-root . --provider kaggle
+ml-harness cloud preflight --project-root . --provider modal
+~~~
+
+When available, validate a particular experiment config too:
+
+~~~powershell
+ml-harness cloud preflight --project-root . --provider kaggle --config configs/exp001.yaml
+~~~
+
+Preflight reports detected CLI/account state and whether the task's runtime and data setup are suitable. Resolve reported blockers before dispatching a run.
+
+## Authorize task data upload
+
+Signing in does not authorize uploading the task dataset. Review the task files and provider before granting consent. Consent is scoped to the selected task, provider, and current data fingerprint:
+
+~~~powershell
+ml-harness cloud consent --project-root . --provider kaggle --confirm-upload
+ml-harness cloud consent --project-root . --provider modal --confirm-upload
+~~~
+
+A changed dataset or split creates a new fingerprint and requires new consent. Uploaded task resources stay private by default. Provider credentials are excluded from the remote code bundle.
+
+If the task already declares an existing Kaggle dataset, the harness can use that resource without uploading local data. Check the preflight report to see whether local upload consent is required.
+
+## Dispatch and inspect jobs
+
+Start a run through the dashboard's Cloud Runner or through the Agent Bridge:
+
+~~~powershell
+ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path":"configs/exp001.yaml","backend":"kaggle"}'
+~~~
+
+For Modal, use backend modal:
+
+~~~powershell
+ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path":"configs/exp001.yaml","backend":"modal"}'
+~~~
+
+The command returns a tracked job ID and status. The dashboard and CLI share persisted job state; Kaggle jobs are polled until they reach a terminal state. When a job completes, ML-Harness validates task, experiment, config, and artifact identity before importing outputs under .ml-harness/artifacts/<task-id>/ for the agent to inspect.
+
+Remote bundles include the selected harness runtime, adapter, task code, and declared dependencies. Add adapter-specific packages to the task runtime requirements. Credentials and task data are sent separately under the account and consent rules above.
