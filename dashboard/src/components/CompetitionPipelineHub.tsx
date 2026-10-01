@@ -141,12 +141,8 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   }, [taskInfo?.name]);
 
   useEffect(() => {
-    if (execMode === 'local' || isCustomTaskPlugin) {
-      setCloudDataStatus(null);
-      return;
-    }
     void refreshCloudDataStatus();
-  }, [execMode, isCustomTaskPlugin, refreshCloudDataStatus, taskInfo?.name]);
+  }, [refreshCloudDataStatus, taskInfo?.name]);
 
   useEffect(() => {
     if (submissions.length > 0 && !activeSubmissionId) {
@@ -357,7 +353,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             },
             {
               step: 3 as const,
-              title: 'Step 3. Run & Retrieve Outputs',
+              title: 'Step 3. Run Experiment',
               desc: isCustomTaskPlugin ? 'Run locally through the installed task plugin' : 'Local CPU or Cloud GPU (Kaggle / Modal)',
             },
             {
@@ -528,6 +524,36 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               </div>
             </div>
           </div>
+
+          {!isCustomTaskPlugin && cloudDataStatus && !cloudDataStatus.ready && (
+            <div className="p-3 bg-amber-950/30 border border-amber-800/60 rounded-xl space-y-2 text-xs text-amber-100">
+              <div className="font-semibold">Cloud data needs attention before upload.</div>
+              <div>
+                {missingRemoteDataPath
+                  ? <>Task setup declares <code>{missingRemoteDataPath}</code>, but it is not present in this workspace. No data has been uploaded.</>
+                  : cloudDataStatus.error || 'The declared task data paths could not be checked.'}
+              </div>
+              <p>
+                Local CPU keeps data on this machine and skips cloud upload. The selected TF-IDF baseline is a good fit for it.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setExecMode('local'); setActiveStep(3); }}
+                  className="px-3 py-1.5 bg-amber-200 text-zinc-900 rounded-md font-semibold"
+                >
+                  Go to Local CPU run
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenTaskConfig('data')}
+                  className="text-amber-200 underline underline-offset-2"
+                >
+                  Fix paths for cloud
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Competition Portal URL Bar */}
           <div className="p-4 bg-zinc-900/40 border border-zinc-800 rounded-xl flex flex-wrap items-center justify-between gap-3">
