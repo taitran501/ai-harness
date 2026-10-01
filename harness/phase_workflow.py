@@ -439,7 +439,13 @@ class PhaseWorkflow:
         if state_path.is_file():
             try:
                 comp_state = json.loads(state_path.read_text(encoding="utf-8"))
-                gates = comp_state.get("gates", {})
+                raw_gates = comp_state.get("gates", {})
+                gates = dict(raw_gates) if isinstance(raw_gates, dict) else {}
+                if not gates.get("baseline_locked"):
+                    gates.pop("baseline_exp_id", None)
+                    gates.pop("baseline_evidence", None)
+                if not gates.get("freeze_locked"):
+                    gates.pop("frozen_candidate_id", None)
                 lines.append("- Gates: " + json.dumps(gates, ensure_ascii=False, sort_keys=True))
             except (OSError, json.JSONDecodeError):
                 lines.append("- Competition state exists but could not be parsed; inspect it before acting.")
