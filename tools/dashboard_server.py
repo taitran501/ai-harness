@@ -997,6 +997,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json({"error": f"Could not read EDA report: {exc}"}, status=500)
             else:
                 self.send_json({"report": None})
+        elif path == "/api/dataset-sources":
+            try:
+                from harness.dataset_sources import list_dataset_sources
+                self.send_json({"sources": list_dataset_sources(HARNESS_PROJECT)})
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=500)
         elif path == "/api/cloud/status":
             from harness.cloud_policy import UploadConsentStore, provider_preflight
             self.send_json({
@@ -1265,6 +1271,15 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 from harness.eda import run_eda
                 report = run_eda(PROJECT_ROOT, data_path=data.get("data_path"))
                 self.send_json({"success": True, "report": report})
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=400)
+        elif path == "/api/datasets/import-kaggle":
+            try:
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
+                data = json.loads(body or "{}")
+                from harness.dataset_sources import import_kaggle_dataset
+                result = import_kaggle_dataset(HARNESS_PROJECT, data.get("slug", ""))
+                self.send_json({"success": True, **result})
             except Exception as exc:
                 self.send_json({"error": str(exc)}, status=400)
         elif path == "/api/cloud/stop":

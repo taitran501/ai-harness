@@ -309,6 +309,25 @@ class PhaseWorkflow:
                 if len(content) > limit:
                     lines.append("\n[Context excerpt truncated; read the source file for the full document.]")
 
+        try:
+            from harness.dataset_sources import list_dataset_sources
+
+            imported_sources = list_dataset_sources(self.project)
+        except Exception as exc:
+            imported_sources = []
+            lines.extend(["", "## Imported dataset sources", f"- The local source catalog could not be read: {exc}"])
+        if imported_sources:
+            lines.extend([
+                "",
+                "## Imported dataset sources",
+                "These are workspace-local datasets imported separately from any competition-provided data. Review their license, relevance, and leakage risks before using them.",
+            ])
+            for source in imported_sources:
+                lines.append(
+                    f"- Kaggle dataset `{source.get('slug')}`: `{source.get('local_path')}` "
+                    f"({source.get('file_count', 'unknown')} files; source: {source.get('url')})."
+                )
+
         latest_eda = self.project.artifacts_dir / "eda"
         eda_reports = sorted(latest_eda.glob("eda_*.json"), reverse=True) if latest_eda.exists() else []
         if eda_reports:

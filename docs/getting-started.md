@@ -48,6 +48,8 @@ ml-harness eda run --project-root .
 ml-harness-agent --project-root . context
 ~~~
 
+You can also import a Kaggle public dataset that is independent of any Kaggle competition. In the dashboard's **Agent workspace**, enter its page slug (`owner/dataset-name`) and choose **Import dataset**. ML-Harness downloads it into `dataset/sources/kaggle/`, keeps its source link in the workspace, and does not change the task's train/test configuration. Choose **Profile this dataset** to create an EDA report; the next phase prompt includes its workspace path and source URL for the IDE agent. Review the source license and relevance before using it. The import is local; sending data to Kaggle Kernels or Modal remains a separate action.
+
 Use an experiment config already owned by the task workspace. For a new workspace, ml-harness-bootstrap can produce a starter task config, baseline config, and grouped splits from the provided dataset and context. Review the generated contract against official instructions before running it. Then probe and validate the generated baseline config:
 
 ~~~powershell

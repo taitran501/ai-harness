@@ -32,6 +32,7 @@ pnpm-debug.log*
 /.ml-harness/
 /artifacts/
 /prompts/ml-harness/
+/dataset/sources/kaggle/
 
 # Model artifacts
 *.pt

@@ -14,16 +14,32 @@ type ProviderStatus = {
   warnings?: string[];
 };
 
+type DatasetSource = {
+  platform: string;
+  kind: string;
+  slug: string;
+  url: string;
+  local_path: string;
+  imported_at: string;
+  file_count: number;
+  license_review_required?: boolean;
+};
+
 const prettyStatus = (value?: string) => (value || 'UNKNOWN').replace(/_/g, ' ');
 
 export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({ onOpenEnvironmentModal }) => {
   const [phaseState, setPhaseState] = useState<any>(null);
   const [selectedPhase, setSelectedPhase] = useState<string>('');
   const [phasePrompt, setPhasePrompt] = useState('');
+  const [hasLoadedInitialPrompt, setHasLoadedInitialPrompt] = useState(false);
   const [phaseResponse, setPhaseResponse] = useState('');
   const [sourceJson, setSourceJson] = useState('[]');
   const [artifactText, setArtifactText] = useState('');
   const [eda, setEda] = useState<any>(null);
+  const [datasetSources, setDatasetSources] = useState<DatasetSource[]>([]);
+  const [kaggleSlug, setKaggleSlug] = useState('');
+  const [edaDataPath, setEdaDataPath] = useState('');
+  const [hasInitializedDataSelection, setHasInitializedDataSelection] = useState(false);
   const [cloudState, setCloudState] = useState<any>(null);
   const [jobs, setJobs] = useState<any[]>([]);
   const [uploadChecks, setUploadChecks] = useState<Record<string, boolean>>({});
@@ -37,21 +53,35 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       api.getPhases(),
       api.getLatestEda(),
       api.getCloudJobs(),
+      api.getDatasetSources(),
     ]);
-    const [phaseResult, edaResult, jobsResult] = results;
+    const [phaseResult, edaResult, jobsResult, dataSourcesResult] = results;
     if (phaseResult.status === 'fulfilled') {
       const state = phaseResult.value;
       setPhaseState(state);
+      const initialPhase = state.next_phase || state.phases?.find((phase: any) => phase.can_revisit)?.id || '';
       setSelectedPhase((current) => {
         if (current && state.phases?.some((phase: any) => phase.id === current)) return current;
-        return state.next_phase || state.phases?.find((phase: any) => phase.can_revisit)?.id || '';
+        return initialPhase;
       });
+      if (initialPhase && !hasLoadedInitialPrompt) {
+        setHasLoadedInitialPrompt(true);
+        api.getPhasePrompt(initialPhase).then((result) => setPhasePrompt(result.prompt)).catch(() => {});
+      }
     } else {
       setError(phaseResult.reason?.message || 'Could not read the prompt pack. Run `ml-harness phase init` in this workspace.');
     }
     if (edaResult.status === 'fulfilled') setEda(edaResult.value?.report ?? edaResult.value);
     if (jobsResult.status === 'fulfilled') setJobs(jobsResult.value.jobs || []);
-  }, []);
+    if (dataSourcesResult.status === 'fulfilled') {
+      const sources = dataSourcesResult.value.sources || [];
+      setDatasetSources(sources);
+      if (!hasInitializedDataSelection) {
+        setEdaDataPath(sources[sources.length - 1]?.local_path || '');
+        setHasInitializedDataSelection(true);
+      }
+    }
+  }, [hasInitializedDataSelection, hasLoadedInitialPrompt]);
 
   const refreshProviders = useCallback(async () => {
     try {
@@ -119,17 +149,55 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
     }
   };
 
-  const runEda = async () => {
+  const runEda = async (dataPath = edaDataPath) => {
     setBusy('eda');
     setError('');
     try {
-      const result = await api.runEda();
+      const result = await api.runEda(dataPath || undefined);
       const report = result.report || result;
       setEda(report);
-      setNotice(`EDA report saved to ${report.paths?.markdown || report.paths?.json || 'the task artifact directory'}.`);
+      setNotice(`Profiled ${dataPath || 'the task training data'}. EDA report saved to ${report.paths?.markdown || report.paths?.json || 'the task artifact directory'}.`);
       await refresh();
+      if (selectedPhase) {
+        try {
+          const rendered = await api.getPhasePrompt(selectedPhase);
+          setPhasePrompt(rendered.prompt);
+        } catch {
+          // The current phase may be gated; the user can render the next available phase.
+        }
+      }
     } catch (reason: any) {
       setError(reason?.message || 'EDA failed.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const importKaggleDataset = async () => {
+    setBusy('dataset-import');
+    setError('');
+    setNotice('');
+    try {
+      const result = await api.importKaggleDataset(kaggleSlug);
+      setDatasetSources(result.sources || []);
+      setEdaDataPath(result.source.local_path);
+      setHasInitializedDataSelection(true);
+      setKaggleSlug('');
+      setNotice(
+        result.status === 'EXISTS'
+          ? `This Kaggle dataset is already in the workspace at ${result.source.local_path}.`
+          : `Downloaded ${result.source.slug} to ${result.source.local_path}. The files are local and have not been uploaded to a provider. Review the dataset license before use.`,
+      );
+      if (selectedPhase) {
+        try {
+          const rendered = await api.getPhasePrompt(selectedPhase);
+          setPhasePrompt(rendered.prompt);
+        } catch {
+          // The current phase may be gated; the user can render the next available phase.
+        }
+      }
+    } catch (reason: any) {
+      setError(reason?.message || 'Could not download this Kaggle dataset.');
     } finally {
       setBusy('');
     }
@@ -254,16 +322,78 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       </section>
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <div className="rounded-xl border border-indigo-900/70 bg-indigo-950/20 p-5 xl:col-span-2">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <h3 className="text-sm font-bold text-white">Bring a dataset into this workspace</h3>
+              <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+                Import any Kaggle public dataset by its page slug, even when it is not tied to a Kaggle competition. The download stays local, appears in the IDE agent's phase context, and is never sent to Kaggle or Modal automatically.
+              </p>
+            </div>
+            <div className="w-full max-w-xl">
+              <label htmlFor="kaggle-dataset-slug" className="mb-1 block text-[11px] font-medium text-zinc-300">Kaggle dataset page</label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  id="kaggle-dataset-slug"
+                  value={kaggleSlug}
+                  onChange={(event) => setKaggleSlug(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter' && kaggleSlug.trim() && busy !== 'dataset-import') void importKaggleDataset(); }}
+                  placeholder="owner/dataset-name"
+                  className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-indigo-500"
+                />
+                <button
+                  onClick={importKaggleDataset}
+                  disabled={!kaggleSlug.trim() || busy === 'dataset-import'}
+                  className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
+                >
+                  {busy === 'dataset-import' ? 'Downloading…' : 'Import dataset'}
+                </button>
+              </div>
+              <p className="mt-1.5 text-[10px] text-zinc-500">
+                {cloudState?.providers?.kaggle?.account
+                  ? `Connected as ${cloudState.providers.kaggle.account}. `
+                  : 'Use the Kaggle account connection in Account setup if the download asks you to sign in. '}
+                Check the dataset's license and terms before using its files.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            {datasetSources.map((source) => (
+              <div key={`${source.platform}:${source.slug}`} className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <a href={source.url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-300 hover:underline">{source.slug}</a>
+                  <p className="mt-0.5 break-all font-mono text-[10px] text-zinc-500">{source.local_path} · {source.file_count} files</p>
+                </div>
+                <button
+                  onClick={() => { setEdaDataPath(source.local_path); void runEda(source.local_path); }}
+                  disabled={busy === 'eda' || busy === 'dataset-import'}
+                  className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  Profile this dataset
+                </button>
+              </div>
+            ))}
+            {!datasetSources.length && <p className="text-[10px] text-zinc-500">No external dataset has been imported yet.</p>}
+          </div>
+        </div>
+
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-white">Exploratory data analysis</h3>
-              <p className="mt-1 text-xs text-zinc-400">Profiles declared training data locally. Reports omit raw rows and are saved under this task's artifact tree.</p>
+              <p className="mt-1 text-xs text-zinc-400">Profiles the selected data locally. Reports omit raw rows and are saved under this task's artifact tree; the selected source is included in the next phase prompt.</p>
             </div>
-            <button onClick={runEda} disabled={busy === 'eda'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">
+            <button onClick={() => void runEda()} disabled={busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">
               {busy === 'eda' ? 'Running…' : 'Run EDA'}
             </button>
           </div>
+          <label className="mt-3 block text-[10px] text-zinc-500">
+            Data to profile
+            <select value={edaDataPath} onChange={(event) => setEdaDataPath(event.target.value)} className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-300 outline-none focus:border-indigo-600">
+              <option value="">Task's declared training data</option>
+              {datasetSources.map((source) => <option key={source.slug} value={source.local_path}>{source.slug} · {source.local_path}</option>)}
+            </select>
+          </label>
           {eda?.paths && <p className="mt-3 break-all text-[10px] text-zinc-500">Latest report: {eda.paths.markdown || eda.paths.json}</p>}
           <div className="mt-3 space-y-3">
             {(eda?.reports || []).map((report: any) => (

@@ -62,6 +62,24 @@ export const api = {
     return res.json();
   },
 
+  async getDatasetSources(): Promise<{ sources: Array<{ platform: string; kind: string; slug: string; url: string; local_path: string; imported_at: string; file_count: number; license_review_required?: boolean }> }> {
+    const res = await fetch(`${API_BASE}/dataset-sources`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Failed to fetch imported datasets: ${res.statusText}`);
+    return data;
+  },
+
+  async importKaggleDataset(slug: string): Promise<{ success: boolean; status: 'IMPORTED' | 'EXISTS'; source: { slug: string; local_path: string; file_count: number; url: string }; sources: any[] }> {
+    const res = await fetch(`${API_BASE}/datasets/import-kaggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Could not import Kaggle dataset: ${res.statusText}`);
+    return data;
+  },
+
   async runEda(dataPath?: string): Promise<any> {
     const res = await fetch(`${API_BASE}/eda/run`, {
       method: 'POST',

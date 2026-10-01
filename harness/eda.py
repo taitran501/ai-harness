@@ -108,9 +108,15 @@ def _input_files(path: Path) -> List[Path]:
         return [path]
     if not path.is_dir():
         raise FileNotFoundError(f"Dataset path does not exist: {path}")
-    files = sorted(p for p in path.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_DATA_SUFFIXES)
+    files = sorted(
+        p for p in path.rglob("*")
+        if p.is_file()
+        and not p.is_symlink()
+        and p.suffix.lower() in SUPPORTED_DATA_SUFFIXES
+        and not any(part.startswith(".") for part in p.relative_to(path).parts)
+    )
     if not files:
-        raise FileNotFoundError(f"No supported dataset files found directly under {path}")
+        raise FileNotFoundError(f"No supported dataset files found under {path}")
     return files
 
 
@@ -143,13 +149,20 @@ def run_eda(
     plugin = load_task_plugin(project.plugin_id, plugin_context)
 
     frames: List[tuple[str, pd.DataFrame]] = []
-    plugin_frame = plugin.load_training_data(plugin_context)
-    if plugin_frame is not None:
-        frames.append((f"task-plugin:{plugin.plugin_id}", plugin_frame))
-    else:
+    if data_path:
+        # A selected external dataset is an explicit request to profile that source,
+        # even when the active task plugin provides its own training-data loader.
         resolved = _resolve_training_path(project, task, data_path)
         for file_path in _input_files(resolved):
             frames.append((file_path.relative_to(project.root).as_posix(), load_dataframe_file(file_path)))
+    else:
+        plugin_frame = plugin.load_training_data(plugin_context)
+        if plugin_frame is not None:
+            frames.append((f"task-plugin:{plugin.plugin_id}", plugin_frame))
+        else:
+            resolved = _resolve_training_path(project, task, data_path)
+            for file_path in _input_files(resolved):
+                frames.append((file_path.relative_to(project.root).as_posix(), load_dataframe_file(file_path)))
 
     target_columns = _target_columns(task)
     reports = [profile_dataframe(frame, target_columns=target_columns, source=source) for source, frame in frames]
