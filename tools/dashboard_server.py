@@ -1003,6 +1003,18 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"sources": list_dataset_sources(HARNESS_PROJECT)})
             except Exception as exc:
                 self.send_json({"error": str(exc)}, status=500)
+        elif path == "/api/datasets/local":
+            try:
+                from harness.dataset_sources import discover_local_datasets
+                self.send_json(discover_local_datasets(HARNESS_PROJECT))
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=500)
+        elif path == "/api/datasets/research-prompt":
+            try:
+                from harness.dataset_sources import render_dataset_research_prompt
+                self.send_json({"prompt": render_dataset_research_prompt(HARNESS_PROJECT)})
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=500)
         elif path == "/api/cloud/status":
             from harness.cloud_policy import UploadConsentStore, provider_preflight
             self.send_json({

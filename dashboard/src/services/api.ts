@@ -69,6 +69,20 @@ export const api = {
     return data;
   },
 
+  async getLocalDatasets(): Promise<{ task_data: Array<{ label: string; role: string; path: string; kind: string; file_count: number; file_count_capped?: boolean; size_bytes: number }>; local_files: Array<{ label: string; role: string; path: string; kind: string; file_count: number; size_bytes: number }> }> {
+    const res = await fetch(`${API_BASE}/datasets/local`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Failed to find local datasets: ${res.statusText}`);
+    return data;
+  },
+
+  async getDatasetResearchPrompt(): Promise<{ prompt: string }> {
+    const res = await fetch(`${API_BASE}/datasets/research-prompt`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Could not prepare a dataset research prompt: ${res.statusText}`);
+    return data;
+  },
+
   async importKaggleDataset(slug: string): Promise<{ success: boolean; status: 'IMPORTED' | 'EXISTS'; source: { slug: string; local_path: string; file_count: number; url: string }; sources: any[] }> {
     const res = await fetch(`${API_BASE}/datasets/import-kaggle`, {
       method: 'POST',

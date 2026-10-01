@@ -25,6 +25,16 @@ type DatasetSource = {
   license_review_required?: boolean;
 };
 
+type LocalDataset = {
+  label: string;
+  role: string;
+  path: string;
+  kind: string;
+  file_count: number;
+  file_count_capped?: boolean;
+  size_bytes: number;
+};
+
 const prettyStatus = (value?: string) => (value || 'UNKNOWN').replace(/_/g, ' ');
 
 export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({ onOpenEnvironmentModal }) => {
@@ -36,10 +46,11 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
   const [sourceJson, setSourceJson] = useState('[]');
   const [artifactText, setArtifactText] = useState('');
   const [eda, setEda] = useState<any>(null);
+  const [localDatasets, setLocalDatasets] = useState<{ task_data: LocalDataset[]; local_files: LocalDataset[] }>({ task_data: [], local_files: [] });
   const [datasetSources, setDatasetSources] = useState<DatasetSource[]>([]);
   const [kaggleSlug, setKaggleSlug] = useState('');
   const [edaDataPath, setEdaDataPath] = useState('');
-  const [hasInitializedDataSelection, setHasInitializedDataSelection] = useState(false);
+  const [datasetResearchPrompt, setDatasetResearchPrompt] = useState('');
   const [cloudState, setCloudState] = useState<any>(null);
   const [jobs, setJobs] = useState<any[]>([]);
   const [uploadChecks, setUploadChecks] = useState<Record<string, boolean>>({});
@@ -76,12 +87,16 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
     if (dataSourcesResult.status === 'fulfilled') {
       const sources = dataSourcesResult.value.sources || [];
       setDatasetSources(sources);
-      if (!hasInitializedDataSelection) {
-        setEdaDataPath(sources[sources.length - 1]?.local_path || '');
-        setHasInitializedDataSelection(true);
-      }
     }
-  }, [hasInitializedDataSelection, hasLoadedInitialPrompt]);
+  }, [hasLoadedInitialPrompt]);
+
+  const refreshLocalDatasets = useCallback(async () => {
+    try {
+      setLocalDatasets(await api.getLocalDatasets());
+    } catch (reason: any) {
+      setError(reason?.message || 'Could not inspect local workspace datasets.');
+    }
+  }, []);
 
   const refreshProviders = useCallback(async () => {
     try {
@@ -93,10 +108,11 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
 
   useEffect(() => {
     refresh();
+    refreshLocalDatasets();
     refreshProviders();
     const timer = window.setInterval(refresh, 10000);
     return () => window.clearInterval(timer);
-  }, [refresh, refreshProviders]);
+  }, [refresh, refreshLocalDatasets, refreshProviders]);
 
   const selectedPhaseData = useMemo(
     () => phaseState?.phases?.find((phase: any) => phase.id === selectedPhase),
@@ -181,7 +197,7 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       const result = await api.importKaggleDataset(kaggleSlug);
       setDatasetSources(result.sources || []);
       setEdaDataPath(result.source.local_path);
-      setHasInitializedDataSelection(true);
+      await refreshLocalDatasets();
       setKaggleSlug('');
       setNotice(
         result.status === 'EXISTS'
@@ -200,6 +216,35 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       setError(reason?.message || 'Could not download this Kaggle dataset.');
     } finally {
       setBusy('');
+    }
+  };
+
+  const prepareDatasetResearchPrompt = async () => {
+    setBusy('dataset-research');
+    setError('');
+    setNotice('');
+    try {
+      const result = await api.getDatasetResearchPrompt();
+      setDatasetResearchPrompt(result.prompt);
+      try {
+        await navigator.clipboard.writeText(result.prompt);
+        setNotice('Research prompt copied. Paste it into your IDE agent; it will inspect local data first, then research outside sources if needed.');
+      } catch {
+        setNotice('Research prompt is ready below. Copy it into your IDE agent to continue.');
+      }
+    } catch (reason: any) {
+      setError(reason?.message || 'Could not prepare the dataset research prompt.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const copyDatasetResearchPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(datasetResearchPrompt);
+      setNotice('Research prompt copied. Continue in your IDE agent; this dashboard does not run an LLM.');
+    } catch {
+      setError('Clipboard access is unavailable. Select and copy the prompt below.');
     }
   };
 
@@ -232,7 +277,7 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
               then save its response and the sources or artifacts it actually used.
             </p>
           </div>
-          <button onClick={async () => { await refresh(); await refreshProviders(); }} className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">
+          <button onClick={async () => { await refresh(); await refreshProviders(); await refreshLocalDatasets(); }} className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">
             Refresh workspace state
           </button>
         </div>
@@ -322,59 +367,91 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       </section>
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <div className="rounded-xl border border-indigo-900/70 bg-indigo-950/20 p-5 xl:col-span-2">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-2xl">
-              <h3 className="text-sm font-bold text-white">Bring a dataset into this workspace</h3>
-              <p className="mt-1 text-xs leading-relaxed text-zinc-400">
-                Import any Kaggle public dataset by its page slug, even when it is not tied to a Kaggle competition. The download stays local, appears in the IDE agent's phase context, and is never sent to Kaggle or Modal automatically.
-              </p>
-            </div>
-            <div className="w-full max-w-xl">
-              <label htmlFor="kaggle-dataset-slug" className="mb-1 block text-[11px] font-medium text-zinc-300">Kaggle dataset page</label>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  id="kaggle-dataset-slug"
-                  value={kaggleSlug}
-                  onChange={(event) => setKaggleSlug(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter' && kaggleSlug.trim() && busy !== 'dataset-import') void importKaggleDataset(); }}
-                  placeholder="owner/dataset-name"
-                  className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-indigo-500"
-                />
-                <button
-                  onClick={importKaggleDataset}
-                  disabled={!kaggleSlug.trim() || busy === 'dataset-import'}
-                  className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
-                >
-                  {busy === 'dataset-import' ? 'Downloading…' : 'Import dataset'}
-                </button>
-              </div>
-              <p className="mt-1.5 text-[10px] text-zinc-500">
-                {cloudState?.providers?.kaggle?.account
-                  ? `Connected as ${cloudState.providers.kaggle.account}. `
-                  : 'Use the Kaggle account connection in Account setup if the download asks you to sign in. '}
-                Check the dataset's license and terms before using its files.
-              </p>
-            </div>
+        <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/10 p-5 xl:col-span-2">
+          <div>
+            <h3 className="text-sm font-bold text-white">1. Start with data already in this workspace</h3>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-400">
+              ML-Harness checks the task's configured files and common local folders first. Pick a file to profile it; nothing is copied or uploaded.
+            </p>
           </div>
           <div className="mt-4 space-y-2">
-            {datasetSources.map((source) => (
-              <div key={`${source.platform}:${source.slug}`} className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+            {localDatasets.task_data.map((source) => (
+              <div key={`task:${source.path}`} className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <a href={source.url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-300 hover:underline">{source.slug}</a>
-                  <p className="mt-0.5 break-all font-mono text-[10px] text-zinc-500">{source.local_path} · {source.file_count} files</p>
+                  <span className="text-xs font-semibold text-emerald-300">{source.label}</span>
+                  <p className="mt-0.5 break-all font-mono text-[10px] text-zinc-500">{source.path} · {source.file_count_capped ? `${source.file_count}+ files` : `${source.file_count} files`} · {(source.size_bytes / (1024 * 1024)).toFixed(1)} MB{source.file_count_capped ? ' sampled' : ''}</p>
                 </div>
-                <button
-                  onClick={() => { setEdaDataPath(source.local_path); void runEda(source.local_path); }}
-                  disabled={busy === 'eda' || busy === 'dataset-import'}
-                  className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                >
-                  Profile this dataset
-                </button>
+                <button onClick={() => { setEdaDataPath(source.path); void runEda(source.path); }} disabled={busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Profile local data</button>
               </div>
             ))}
-            {!datasetSources.length && <p className="text-[10px] text-zinc-500">No external dataset has been imported yet.</p>}
+            {localDatasets.local_files.map((source) => (
+              <div key={`local:${source.path}`} className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <span className="text-xs font-semibold text-zinc-200">{source.label}</span>
+                  <p className="mt-0.5 break-all font-mono text-[10px] text-zinc-500">{source.path} · {(source.size_bytes / (1024 * 1024)).toFixed(1)} MB</p>
+                </div>
+                <button onClick={() => { setEdaDataPath(source.path); void runEda(source.path); }} disabled={busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Profile local data</button>
+              </div>
+            ))}
+            {!localDatasets.task_data.length && !localDatasets.local_files.length && (
+              <p className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 text-xs text-zinc-400">No dataset files found in this workspace yet. You can add files to a local data folder or ask your IDE agent to research suitable sources.</p>
+            )}
           </div>
+        </div>
+
+        <div className="rounded-xl border border-indigo-900/60 bg-indigo-950/15 p-5">
+          <h3 className="text-sm font-bold text-white">2. Ask your IDE agent to research data</h3>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+            The prompt asks the agent to inspect local files first, then search public sources if there is a gap. It asks for fit, source links, license checks, and leakage risks before recommending anything.
+          </p>
+          <button onClick={prepareDatasetResearchPrompt} disabled={busy === 'dataset-research'} className="mt-3 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">
+            {busy === 'dataset-research' ? 'Preparing prompt…' : 'Prepare and copy research prompt'}
+          </button>
+          {datasetResearchPrompt && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-[10px] text-indigo-300">Review the prompt copied to the clipboard</summary>
+              <textarea readOnly value={datasetResearchPrompt} className="mt-2 h-48 w-full rounded-md border border-zinc-800 bg-zinc-950 p-2 font-mono text-[10px] leading-relaxed text-zinc-300" />
+              <button onClick={copyDatasetResearchPrompt} className="mt-2 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800">Copy prompt again</button>
+            </details>
+          )}
+          <p className="mt-3 text-[10px] text-zinc-500">The dashboard prepares the prompt; your IDE agent performs the web search and asks before downloading or uploading data.</p>
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
+          <details>
+            <summary className="cursor-pointer text-sm font-bold text-zinc-100">3. Import a Kaggle public dataset you already found</summary>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-400">This also supports Kaggle datasets published outside competitions. The download stays local and does not change the task's train/test config.</p>
+            <label htmlFor="kaggle-dataset-slug" className="mb-1 mt-3 block text-[11px] font-medium text-zinc-300">Dataset page slug</label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                id="kaggle-dataset-slug"
+                value={kaggleSlug}
+                onChange={(event) => setKaggleSlug(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter' && kaggleSlug.trim() && busy !== 'dataset-import') void importKaggleDataset(); }}
+                placeholder="owner/dataset-name"
+                className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs text-zinc-100 outline-none focus:border-indigo-500"
+              />
+              <button onClick={importKaggleDataset} disabled={!kaggleSlug.trim() || busy === 'dataset-import'} className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">
+                {busy === 'dataset-import' ? 'Downloading…' : 'Download here'}
+              </button>
+            </div>
+            <p className="mt-1.5 text-[10px] text-zinc-500">
+              {cloudState?.providers?.kaggle?.account ? `Connected as ${cloudState.providers.kaggle.account}. ` : 'Connect Kaggle in Account setup if the CLI requests sign-in. '}
+              Check the source license before using it.
+            </p>
+            <div className="mt-3 space-y-2">
+              {datasetSources.map((source) => (
+                <div key={`${source.platform}:${source.slug}`} className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <a href={source.url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-300 hover:underline">{source.slug}</a>
+                    <p className="mt-0.5 break-all font-mono text-[10px] text-zinc-500">{source.local_path} · {source.file_count} files</p>
+                  </div>
+                  <button onClick={() => { setEdaDataPath(source.local_path); void runEda(source.local_path); }} disabled={busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Profile dataset</button>
+                </div>
+              ))}
+              {!datasetSources.length && <p className="text-[10px] text-zinc-500">No Kaggle datasets downloaded to this workspace.</p>}
+            </div>
+          </details>
         </div>
 
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
@@ -391,7 +468,9 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
             Data to profile
             <select value={edaDataPath} onChange={(event) => setEdaDataPath(event.target.value)} className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-300 outline-none focus:border-indigo-600">
               <option value="">Task's declared training data</option>
-              {datasetSources.map((source) => <option key={source.slug} value={source.local_path}>{source.slug} · {source.local_path}</option>)}
+              {localDatasets.task_data.map((source) => <option key={`task:${source.path}`} value={source.path}>{source.label} · {source.path}</option>)}
+              {localDatasets.local_files.map((source) => <option key={`local:${source.path}`} value={source.path}>{source.label} · {source.path}</option>)}
+              {datasetSources.map((source) => <option key={`kaggle:${source.slug}`} value={source.local_path}>{source.slug} · {source.local_path}</option>)}
             </select>
           </label>
           {eda?.paths && <p className="mt-3 break-all text-[10px] text-zinc-500">Latest report: {eda.paths.markdown || eda.paths.json}</p>}
