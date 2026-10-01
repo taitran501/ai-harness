@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GitBranch, Table, Cpu, Award, Cloud } from 'lucide-react';
+import { GitBranch, Table, Award } from 'lucide-react';
 import { api } from './services/api';
 import { Header } from './components/Header';
 import { TreeCanvas } from './components/TreeCanvas';
@@ -29,7 +29,7 @@ import {
 
 const DashboardContent: React.FC = () => {
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'journey' | 'workspace' | 'pipeline' | 'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('journey');
+  const [activeTab, setActiveTab] = useState<'journey' | 'workspace' | 'pipeline' | 'tree' | 'experiments' | 'submissions' | 'cloud' | 'llm' | 'priming'>('workspace');
   const [compState, setCompState] = useState<any>(null);
   const [graphData, setGraphData] = useState<TreeGraphResponse>({ nodes: [], edges: [], best_id: null });
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
@@ -37,6 +37,9 @@ const DashboardContent: React.FC = () => {
   const [recommendation, setRecommendation] = useState<UCBRecommendation | null>(null);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [taskInfo, setTaskInfo] = useState<TaskInfo | null>(null);
+  const contractNeedsReview = !taskInfo || ['needs_review', 'unverified', 'draft'].includes(
+    String(taskInfo?.contract_status || '').toLowerCase(),
+  );
   const [primingPrompt, setPrimingPrompt] = useState<string>('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeDetail, setSelectedNodeDetail] = useState<NodeDetail | null>(null);
@@ -78,18 +81,16 @@ const DashboardContent: React.FC = () => {
     }
   }, []);
 
-  const handleSyncArtifacts = async () => {
-    try {
-      await api.syncArtifacts();
-    } catch (err) {
-      console.warn('Sync call failed, continuing to reload:', err);
-    }
-    await loadData();
-  };
-
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      api.getTaskInfo().then(setTaskInfo).catch(() => {});
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const handleSelectNode = async (nodeId: string) => {
     setSelectedNodeId(nodeId);
@@ -117,110 +118,70 @@ const DashboardContent: React.FC = () => {
     setIsConfigModalOpen(true);
   };
 
+  const handleSyncArtifacts = async () => {
+    try {
+      await api.syncArtifacts();
+    } catch (err) {
+      console.warn('Sync call failed, continuing to reload:', err);
+    }
+    await loadData();
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans">
       <Header
         status={status}
         taskInfo={taskInfo}
         onRefresh={handleSyncArtifacts}
-        onOpenTaskConfig={() => {
+        onOpenTaskConfig={taskInfo ? () => {
           setTaskConfigTab('task');
           setIsTaskConfigOpen(true);
-        }}
-        onOpenReadinessModal={() => setIsReadinessOpen(true)}
-        onOpenConfigModal={() => handleOpenConfigModal()}
+        } : undefined}
+        onOpenReadinessModal={contractNeedsReview ? undefined : () => setIsReadinessOpen(true)}
+        onOpenConfigModal={contractNeedsReview ? undefined : () => handleOpenConfigModal()}
         onOpenEnvironmentModal={() => setIsEnvModalOpen(true)}
       />
 
       <main className="flex-1 w-full px-5 py-3 space-y-3 flex flex-col">
-        {/* Segmented Navigation */}
+        {/* One guided entry point; specialist views live under More tools. */}
         <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
           <nav className="flex flex-wrap gap-1 bg-zinc-900/70 p-1 rounded-lg border border-zinc-800">
             <button
-              onClick={() => setActiveTab('journey')}
+              onClick={() => setActiveTab('workspace')}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-                activeTab === 'journey'
+                activeTab === 'workspace'
                   ? 'bg-indigo-600 text-white shadow'
                   : 'text-zinc-300 hover:text-white hover:bg-zinc-800/60'
               }`}
             >
-              <span>🧭 Competition Journey (Phases 1–8)</span>
+              <span>Guided workflow</span>
             </button>
-
             <button
-              onClick={() => setActiveTab('workspace')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'workspace'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>Agent workspace</span>
-            </button>
-
-            <button
+              disabled={contractNeedsReview}
+              title={contractNeedsReview ? 'Confirm the official task contract in Guided workflow first.' : undefined}
               onClick={() => setActiveTab('pipeline')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'pipeline'
+                contractNeedsReview
+                  ? 'cursor-not-allowed text-zinc-600'
+                  : activeTab === 'pipeline'
                   ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
-              <span>Execution Runner</span>
+              <span>{contractNeedsReview ? 'Run experiment · after setup' : 'Run experiment'}</span>
             </button>
-
-            <button
-              onClick={() => setActiveTab('tree')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'tree'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
-            >
-              <GitBranch className="w-3.5 h-3.5" />
-              <span>{t('nav_tree', 'Solution Tree')}</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('experiments')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'experiments'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
-            >
-              <Table className="w-3.5 h-3.5" />
-              <span>{t('nav_experiments', 'Leaderboard')}</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('llm')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'llm'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
-            >
-              <span>{t('nav_llm_studio', 'LLM Studio')}</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('submissions')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === 'submissions'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
-            >
-              <Award className="w-3.5 h-3.5" />
-              <span>{t('nav_submissions', 'Submissions History')}</span>
-              {submissions.length > 0 && (
-                <span className="text-zinc-400 text-[10px] font-mono">
-                  ({submissions.length})
-                </span>
-              )}
-            </button>
+            <details className="relative">
+              <summary className="cursor-pointer list-none rounded-md px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800/60 hover:text-white">
+                More tools
+              </summary>
+              <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-xl">
+                <button onClick={() => setActiveTab('journey')} className="w-full rounded px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800">Competition strategy</button>
+                <button onClick={() => setActiveTab('tree')} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"><GitBranch className="h-3.5 w-3.5" />{t('nav_tree', 'Solution Tree')}</button>
+                <button onClick={() => setActiveTab('experiments')} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"><Table className="h-3.5 w-3.5" />{t('nav_experiments', 'Results')}</button>
+                <button onClick={() => setActiveTab('llm')} className="w-full rounded px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800">{t('nav_llm_studio', 'LLM Studio')}</button>
+                <button onClick={() => setActiveTab('submissions')} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"><Award className="h-3.5 w-3.5" />{t('nav_submissions', 'Submissions')}</button>
+              </div>
+            </details>
           </nav>
         </div>
 
@@ -243,11 +204,12 @@ const DashboardContent: React.FC = () => {
             onOpenConfigModal={(targetPath, parentId) => handleOpenConfigModal(targetPath, parentId)}
             onOpenEnvModal={() => setIsEnvModalOpen(true)}
             onRefreshAll={loadData}
+            onOpenWorkspace={() => setActiveTab('workspace')}
           />
         )}
 
         {activeTab === 'workspace' && (
-          <WorkspaceHub onOpenEnvironmentModal={() => setIsEnvModalOpen(true)} />
+          <WorkspaceHub taskInfo={taskInfo} onOpenEnvironmentModal={() => setIsEnvModalOpen(true)} />
         )}
 
         {/* Unified 4-Step Competition Pipeline Hub */}
@@ -355,6 +317,7 @@ const DashboardContent: React.FC = () => {
         taskInfo={taskInfo}
         status={status}
         submissions={submissions}
+        onOpenWorkspace={() => setActiveTab('workspace')}
         onOpenTaskConfig={(tab) => {
           setTaskConfigTab(tab || 'task');
           setIsTaskConfigOpen(true);

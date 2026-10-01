@@ -220,6 +220,10 @@ export interface TaskInfo {
   platform?: string;
   name?: string;
   task_name: string;
+  contract_status?: 'needs_review' | 'unverified' | 'draft' | 'confirmed' | 'declared' | string;
+  contract_sources?: Array<{ path?: string; url?: string; title?: string; status?: string }>;
+  contract_review_summary?: string;
+  competition_context_files?: string[];
   type?: string;
   task_type: string;
   modality?: string;

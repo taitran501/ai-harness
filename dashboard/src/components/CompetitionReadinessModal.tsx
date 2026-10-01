@@ -16,6 +16,7 @@ interface CompetitionReadinessModalProps {
   status: SystemStatus | null;
   submissions: SubmissionEntry[];
   onOpenTaskConfig: (tabKey?: 'task' | 'data' | 'cv' | 'rules' | 'submission') => void;
+  onOpenWorkspace?: () => void;
 }
 
 interface PillarDisplayItem {
@@ -34,8 +35,35 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
   status,
   submissions,
   onOpenTaskConfig,
+  onOpenWorkspace,
 }) => {
   if (!isOpen) return null;
+
+  const contractNeedsReview = ['needs_review', 'unverified', 'draft'].includes(
+    String(taskInfo?.contract_status || '').toLowerCase(),
+  );
+  if (contractNeedsReview) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+        <section className="w-full max-w-xl rounded-xl border border-amber-700/50 bg-zinc-900 p-5 shadow-2xl">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">Contract not verified</p>
+              <h2 className="mt-1 text-base font-semibold text-white">Readiness cannot be assessed yet</h2>
+            </div>
+            <button onClick={onClose} className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white" aria-label="Close readiness details"><X className="h-4 w-4" /></button>
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-zinc-300">
+            The task config is an onboarding draft. The dashboard will not label guessed settings as verified. Ask your IDE agent to inspect official instructions and record the source URLs before confirming task setup.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button onClick={() => { onClose(); onOpenTaskConfig('task'); }} className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800">Review task config</button>
+            {onOpenWorkspace && <button onClick={() => { onClose(); onOpenWorkspace(); }} className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500">Open guided workflow</button>}
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   const dataCfg = taskInfo?.data_config || {};
   const rules = taskInfo?.competition_rules || {};

@@ -599,6 +599,21 @@ class UniversalTaskSpec:
 _ACTIVE_TASK_SPECS: Dict[Path, UniversalTaskSpec] = {}
 
 
+def assert_task_contract_confirmed(config_path: Path | str) -> None:
+    """Block model execution while bootstrap has left the task contract in draft."""
+    path = Path(config_path).expanduser().resolve()
+    if not path.is_file():
+        return
+    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    task = document.get("task", document) if isinstance(document, dict) else {}
+    status = str(task.get("contract_status", "")).casefold()
+    if status in {"needs_review", "unverified", "draft"}:
+        raise ValueError(
+            "The task contract is still marked needs_review. Verify the official metric, rules, "
+            "validation, and submission format, then confirm the reviewed contract before running a model."
+        )
+
+
 def load_active_task_spec(
     config_path: Optional[Path | str] = None,
     *,

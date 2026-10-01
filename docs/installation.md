@@ -80,7 +80,7 @@ Get-Content configs/task.yaml
 ml-harness attach --project-root . --task-config configs/task.yaml --force
 ~~~
 
-Review the generated target, metric, data paths, and split settings against organizer instructions before running experiments. The [cookbook](cookbook.md) contains a complete setup sequence.
+Bootstrap inventories all local data files and creates a `needs_review` task draft. It does not assign file roles, infer metric or validation rules, or create a baseline. Use the Setup phase prompt to check organizer sources, update `configs/task.yaml`, and confirm the contract before creating splits or running experiments. The [cookbook](cookbook.md) contains the complete setup sequence.
 
 ## Install provider support
 

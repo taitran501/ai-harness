@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
+import { TaskInfo } from '../types/experiment';
 
 type ProviderStatus = {
   provider: 'kaggle' | 'modal';
@@ -37,7 +38,7 @@ type LocalDataset = {
 
 const prettyStatus = (value?: string) => (value || 'UNKNOWN').replace(/_/g, ' ');
 
-export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({ onOpenEnvironmentModal }) => {
+export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void; taskInfo?: TaskInfo | null }> = ({ onOpenEnvironmentModal, taskInfo }) => {
   const [phaseState, setPhaseState] = useState<any>(null);
   const [selectedPhase, setSelectedPhase] = useState<string>('');
   const [phasePrompt, setPhasePrompt] = useState('');
@@ -92,7 +93,9 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
 
   const refreshLocalDatasets = useCallback(async () => {
     try {
-      setLocalDatasets(await api.getLocalDatasets());
+      const inventory = await api.getLocalDatasets();
+      setLocalDatasets(inventory);
+      setEdaDataPath((current) => current || inventory.task_data[0]?.path || inventory.local_files[0]?.path || '');
     } catch (reason: any) {
       setError(reason?.message || 'Could not inspect local workspace datasets.');
     }
@@ -265,21 +268,40 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
   };
 
   const providers: ProviderStatus[] = Object.values(cloudState?.providers || {}) as ProviderStatus[];
+  const contractNeedsReview = ['needs_review', 'unverified', 'draft'].includes(
+    String(taskInfo?.contract_status || '').toLowerCase(),
+  );
 
   return (
     <div className="flex-1 overflow-y-auto space-y-5 pb-8">
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-lg font-bold text-white">Agent workspace</h2>
+            <h2 className="text-lg font-bold text-white">Guided competition workflow</h2>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-400">
-              Prompts and phase history stay in this task workspace. Copy a phase prompt into your IDE agent,
-              then save its response and the sources or artifacts it actually used.
+              Follow the current phase with your IDE agent. The dashboard prepares prompts and records outputs; it does not run an LLM agent.
             </p>
           </div>
           <button onClick={async () => { await refresh(); await refreshProviders(); await refreshLocalDatasets(); }} className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">
             Refresh workspace state
           </button>
+        </div>
+        <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <strong className="text-zinc-100">{taskInfo?.task_name || taskInfo?.name || 'Task workspace'}</strong>
+            <span className={`rounded px-2 py-1 text-[10px] font-semibold ${contractNeedsReview ? 'bg-amber-950 text-amber-300' : 'bg-zinc-800 text-zinc-300'}`}>
+              Contract: {contractNeedsReview ? 'needs official review' : taskInfo?.contract_status || 'declared; source not recorded'}
+            </span>
+          </div>
+          {contractNeedsReview ? (
+            <p className="mt-2 max-w-4xl leading-relaxed text-amber-200/90">
+              Task fields are a draft. Start with the setup prompt and verify the official metric, rules, validation, and submission format. Do not run a baseline until the contract is confirmed.
+            </p>
+          ) : (
+            <p className="mt-2 text-zinc-400">
+              {taskInfo?.platform || 'Platform not declared'} · {taskInfo?.task_type || 'Task type not declared'} · {taskInfo?.primary_metric || 'Metric not declared'}
+            </p>
+          )}
         </div>
         {phaseState && (
           <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-zinc-400">
@@ -294,10 +316,14 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(250px,0.8fr)_minmax(0,1.6fr)]">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
-          <h3 className="text-sm font-bold text-white">Eight competition phases</h3>
+          <h3 className="text-sm font-bold text-white">{selectedPhaseData?.title || 'Next workflow step'}</h3>
+          <p className="mt-1 text-[11px] text-zinc-500">The highlighted phase is the next step. Other phases stay available below.</p>
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs font-medium text-indigo-300">View all eight phases</summary>
           <div className="mt-3 space-y-2">
             {(phaseState?.phases || []).map((phase: any, index: number) => {
-              const selectable = !phase.completed || phase.can_revisit;
+              const contractGateBlocked = phase.id === 'understand' && Boolean(phase.record_blocked_reason);
+              const selectable = (!phase.completed || phase.can_revisit) && !contractGateBlocked;
               return (
                 <button
                   key={phase.id}
@@ -325,13 +351,19 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
           {selectedPhaseData?.record_blocked_reason && (
             <p className="mt-3 rounded border border-amber-900 bg-amber-950/30 p-2 text-[10px] leading-relaxed text-amber-300">{selectedPhaseData.record_blocked_reason}</p>
           )}
+          </details>
         </div>
 
         <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-bold text-white">{selectedPhaseData?.title || 'Phase prompt'}</h3>
-              <p className="mt-1 text-[11px] text-zinc-500">Edit prompt files in the workspace and version them with Git.</p>
+              <p className="mt-1 text-[11px] text-zinc-500">Copy this prompt into your IDE agent. It includes the task brief, local data inventory, and current phase state.</p>
+              {selectedPhaseData?.record_blocked_reason && (
+                <p role="status" className="mt-2 rounded border border-amber-900 bg-amber-950/30 p-2 text-[11px] leading-relaxed text-amber-300">
+                  Waiting: {selectedPhaseData.record_blocked_reason}
+                </p>
+              )}
             </div>
             <button disabled={!phasePrompt} onClick={copyPrompt} className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">
               Copy prompt for IDE agent
@@ -349,14 +381,19 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
               Agent response
               <textarea value={phaseResponse} onChange={(event) => setPhaseResponse(event.target.value)} className="mt-1 h-40 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200 outline-none focus:border-indigo-600" placeholder="Paste the IDE agent's phase response here. The saved output is checked against the phase contract." />
             </label>
-            <label className="text-xs text-zinc-400">
-              Sources actually inspected (JSON array)
-              <textarea value={sourceJson} onChange={(event) => setSourceJson(event.target.value)} className="mt-1 h-20 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] text-zinc-200 outline-none focus:border-indigo-600" placeholder={'[{"url":"https://...","title":"..."}]'} />
-            </label>
-            <label className="text-xs text-zinc-400">
-              Workspace artifact paths (one per line)
-              <textarea value={artifactText} onChange={(event) => setArtifactText(event.target.value)} className="mt-1 h-16 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] text-zinc-200 outline-none focus:border-indigo-600" placeholder="artifacts/exp001/DIAGNOSTICS.md" />
-            </label>
+            <details>
+              <summary className="cursor-pointer text-[11px] text-zinc-400">Add inspected sources and output files</summary>
+              <div className="mt-3 grid gap-3">
+                <label className="text-xs text-zinc-400">
+                  Sources actually inspected (JSON array)
+                  <textarea value={sourceJson} onChange={(event) => setSourceJson(event.target.value)} className="mt-1 h-20 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] text-zinc-200 outline-none focus:border-indigo-600" placeholder={'[{"url":"https://...","title":"..."}]'} />
+                </label>
+                <label className="text-xs text-zinc-400">
+                  Workspace artifact paths (one per line)
+                  <textarea value={artifactText} onChange={(event) => setArtifactText(event.target.value)} className="mt-1 h-16 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] text-zinc-200 outline-none focus:border-indigo-600" placeholder="artifacts/exp001/DIAGNOSTICS.md" />
+                </label>
+              </div>
+            </details>
             <div className="flex justify-end">
               <button disabled={!selectedPhase || !phaseResponse.trim() || busy === 'phase' || Boolean(selectedPhaseData?.record_blocked_reason)} onClick={savePhaseResponse} className="rounded-md bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-40">
                 {busy === 'phase' ? 'Saving…' : 'Save phase output'}
@@ -369,29 +406,29 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/10 p-5 xl:col-span-2">
           <div>
-            <h3 className="text-sm font-bold text-white">1. Start with data already in this workspace</h3>
-            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-400">
-              ML-Harness checks the task's configured files and common local folders first. Pick a file to profile it; nothing is copied or uploaded.
+          <h3 className="text-sm font-bold text-white">After setup: inspect data already in this workspace</h3>
+          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-400">
+              Start with the Setup prompt above to identify the task and check its official rules. These local files are already available; choose one to profile when ready. Profiling does not copy or upload data.
             </p>
           </div>
           <div className="mt-4 space-y-2">
             {localDatasets.task_data.map((source) => (
-              <div key={`task:${source.path}`} className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <button type="button" key={`task:${source.path}`} onClick={() => setEdaDataPath(source.path)} className={`flex w-full flex-col gap-2 rounded-lg border p-3 text-left sm:flex-row sm:items-center sm:justify-between ${edaDataPath === source.path ? 'border-emerald-600 bg-emerald-950/20' : 'border-zinc-800 bg-zinc-950/70 hover:border-zinc-600'}`}>
                 <div className="min-w-0">
                   <span className="text-xs font-semibold text-emerald-300">{source.label}</span>
                   <p className="mt-0.5 break-all font-mono text-[10px] text-zinc-500">{source.path} · {source.file_count_capped ? `${source.file_count}+ files` : `${source.file_count} files`} · {(source.size_bytes / (1024 * 1024)).toFixed(1)} MB{source.file_count_capped ? ' sampled' : ''}</p>
                 </div>
-                <button onClick={() => { setEdaDataPath(source.path); void runEda(source.path); }} disabled={busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Profile local data</button>
-              </div>
+                <span className="shrink-0 text-[10px] text-emerald-300">{edaDataPath === source.path ? 'Selected for EDA' : 'Select'}</span>
+              </button>
             ))}
             {localDatasets.local_files.map((source) => (
-              <div key={`local:${source.path}`} className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <button type="button" key={`local:${source.path}`} onClick={() => setEdaDataPath(source.path)} className={`flex w-full flex-col gap-2 rounded-lg border p-3 text-left sm:flex-row sm:items-center sm:justify-between ${edaDataPath === source.path ? 'border-indigo-600 bg-indigo-950/20' : 'border-zinc-800 bg-zinc-950/70 hover:border-zinc-600'}`}>
                 <div className="min-w-0">
                   <span className="text-xs font-semibold text-zinc-200">{source.label}</span>
                   <p className="mt-0.5 break-all font-mono text-[10px] text-zinc-500">{source.path} · {(source.size_bytes / (1024 * 1024)).toFixed(1)} MB</p>
                 </div>
-                <button onClick={() => { setEdaDataPath(source.path); void runEda(source.path); }} disabled={busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Profile local data</button>
-              </div>
+                <span className="shrink-0 text-[10px] text-indigo-300">{edaDataPath === source.path ? 'Selected for EDA' : 'Select'}</span>
+              </button>
             ))}
             {!localDatasets.task_data.length && !localDatasets.local_files.length && (
               <p className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 text-xs text-zinc-400">No dataset files found in this workspace yet. You can add files to a local data folder or ask your IDE agent to research suitable sources.</p>
@@ -446,7 +483,7 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
                     <a href={source.url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-300 hover:underline">{source.slug}</a>
                     <p className="mt-0.5 break-all font-mono text-[10px] text-zinc-500">{source.local_path} · {source.file_count} files</p>
                   </div>
-                  <button onClick={() => { setEdaDataPath(source.local_path); void runEda(source.local_path); }} disabled={busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">Profile dataset</button>
+                  <button type="button" onClick={() => setEdaDataPath(source.local_path)} className="shrink-0 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800">Select for EDA</button>
                 </div>
               ))}
               {!datasetSources.length && <p className="text-[10px] text-zinc-500">No Kaggle datasets downloaded to this workspace.</p>}
@@ -457,17 +494,17 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-white">Exploratory data analysis</h3>
+              <h3 className="text-sm font-bold text-white">Then: profile the selected data</h3>
               <p className="mt-1 text-xs text-zinc-400">Profiles the selected data locally. Reports omit raw rows and are saved under this task's artifact tree; the selected source is included in the next phase prompt.</p>
             </div>
-            <button onClick={() => void runEda()} disabled={busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">
-              {busy === 'eda' ? 'Running…' : 'Run EDA'}
+            <button onClick={() => void runEda()} disabled={!edaDataPath || busy === 'eda' || busy === 'dataset-import'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">
+              {busy === 'eda' ? 'Profiling…' : 'Profile selected data'}
             </button>
           </div>
           <label className="mt-3 block text-[10px] text-zinc-500">
             Data to profile
             <select value={edaDataPath} onChange={(event) => setEdaDataPath(event.target.value)} className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-300 outline-none focus:border-indigo-600">
-              <option value="">Task's declared training data</option>
+              <option value="">Choose a local data source</option>
               {localDatasets.task_data.map((source) => <option key={`task:${source.path}`} value={source.path}>{source.label} · {source.path}</option>)}
               {localDatasets.local_files.map((source) => <option key={`local:${source.path}`} value={source.path}>{source.label} · {source.path}</option>)}
               {datasetSources.map((source) => <option key={`kaggle:${source.slug}`} value={source.local_path}>{source.slug} · {source.local_path}</option>)}
@@ -494,13 +531,16 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
           </div>
         </div>
 
+        <details className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
+          <summary className="cursor-pointer text-sm font-bold text-zinc-100">Cloud connections and upload consent (optional)</summary>
+          <div className="mt-4">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-white">Kaggle and Modal accounts</h3>
               <p className="mt-1 text-xs text-zinc-400">The harness reads official CLI profiles and credentials. Provider quotas and charges depend on the account.</p>
             </div>
-            <button onClick={onOpenEnvironmentModal} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">Account setup</button>
+            <button onClick={onOpenEnvironmentModal} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">Manage connections</button>
           </div>
           <div className="mt-4 space-y-3">
             {providers.map((provider) => {
@@ -550,9 +590,12 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
             {!providers.length && <p className="text-xs text-zinc-500">Provider status is unavailable. Refresh after connecting an official CLI account.</p>}
           </div>
         </div>
-      </section>
+        </div>
+        </details>
 
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
+      <details className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
+        <summary className="cursor-pointer text-sm font-bold text-zinc-100">Recent cloud jobs</summary>
+        <section className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-bold text-white">Execution jobs</h3>
@@ -580,6 +623,8 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
             </tbody>
           </table>
         </div>
+        </section>
+      </details>
       </section>
     </div>
   );

@@ -202,6 +202,9 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   }, [initialTab]);
 
   if (!isOpen) return null;
+  const contractNeedsReview = ['needs_review', 'unverified', 'draft'].includes(
+    String(currentTask?.contract_status || '').toLowerCase(),
+  );
   const isCustomTaskPlugin = Boolean(currentTask?.task_plugin?.id && currentTask.task_plugin.id !== 'default');
 
   const handleApplyPreset = (preset: TaskPreset) => {
@@ -298,6 +301,9 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       .filter((l) => l.length > 0);
 
     const updatedTask: TaskInfo = {
+      ...currentTask,
+      contract_status: currentTask?.contract_status === 'confirmed' ? 'needs_review' : currentTask?.contract_status,
+      contract_review_summary: currentTask?.contract_status === 'confirmed' ? undefined : currentTask?.contract_review_summary,
       platform,
       task_name: name.trim(),
       name: name.trim(),
@@ -312,6 +318,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       languages: langList,
       description: description.trim(),
       data_config: {
+        ...(currentTask?.data_config || {}),
         train_path: trainPath.trim(),
         test_path: testPath.trim(),
         sample_submission_path: sampleSubPath.trim(),
@@ -324,6 +331,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
         missing_data_policy: missingDataPolicy.trim(),
       },
       competition_rules: {
+        ...(currentTask?.competition_rules || {}),
         allow_llm: allowLlm,
         allow_api: allowApi,
         allow_external_data: allowExternalData,
@@ -336,6 +344,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
         reproducibility_required: reproducibilityRequired,
       },
       submission_spec: {
+        ...(currentTask?.submission_spec || {}),
         file_name: submissionFileName.trim(),
         archive_format: archiveFormat,
         ...(isCustomTaskPlugin ? {} : {
@@ -384,6 +393,33 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
           </button>
         </div>
 
+        {contractNeedsReview ? (
+          <div className="flex-1 p-6 flex items-center justify-center">
+            <div className="max-w-xl space-y-4 rounded-xl border border-amber-700/50 bg-amber-950/20 p-5">
+              <div>
+                <h3 className="text-sm font-semibold text-amber-200">Review the task before editing its contract</h3>
+                <p className="mt-2 text-xs leading-5 text-zinc-300">
+                  This workspace contains an onboarding draft. The full setup form uses example defaults for fields
+                  that may not apply to this competition, so it is hidden until the official metric, data rules,
+                  validation split, and submission format have been checked.
+                </p>
+              </div>
+              <ol className="list-decimal space-y-1 pl-5 text-xs text-zinc-400">
+                <li>Return to Guided workflow and render the Setup prompt.</li>
+                <li>Have the IDE agent inspect the supplied brief and official task sources.</li>
+                <li>Show the proposed <code className="text-zinc-200">configs/task.yaml</code> changes and sources to the user for approval.</li>
+              </ol>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md bg-zinc-100 px-3 py-2 text-xs font-semibold text-zinc-950 hover:bg-white"
+              >
+                Return to Guided workflow
+              </button>
+            </div>
+          </div>
+        ) : (
+        <>
         {/* 5-Tab Navigation */}
         <div className="px-5 pt-2 pb-0 border-b border-zinc-800 bg-zinc-950/40 flex flex-wrap gap-1">
           <button
@@ -454,6 +490,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-5 space-y-4">
+          {currentTask?.contract_status === 'confirmed' && (
+            <div className="rounded-lg border border-amber-800/70 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-200">
+              Saving task settings marks the contract for review again. Check the updated fields against official sources before running another experiment.
+            </div>
+          )}
           {error && (
             <div className="p-3 bg-red-950/40 border border-red-800/80 rounded-lg text-xs text-red-300">
               {error}
@@ -1229,6 +1270,8 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             </button>
           </div>
         </form>
+        </>
+        )}
       </div>
     </div>
   );

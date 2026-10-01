@@ -35,7 +35,7 @@ from harness.io_utils import (
     setup_logger,
     update_experiments_leaderboard,
 )
-from harness.task_spec import UniversalTaskSpec, load_active_task_spec
+from harness.task_spec import UniversalTaskSpec, assert_task_contract_confirmed, load_active_task_spec
 from harness.plugins import TaskPluginContext, load_task_plugin
 from harness.project import HarnessProject
 from harness.tree_journal import Node, TreeJournal
@@ -694,6 +694,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     project = HarnessProject.discover(args.project_root, args.task_config)
+    try:
+        assert_task_contract_confirmed(project.task_config_path)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     if str(project.root) not in sys.path:

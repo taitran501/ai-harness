@@ -98,7 +98,7 @@ ml-harness-bootstrap --project-root . --dataset dataset --context docs/TASK.md
 Get-Content configs/task.yaml
 ~~~
 
-Review the generated target, metric, IDs, and split settings against the organizer instructions. Then attach the task. Bootstrap creates a starter skill, so use --force for this first attachment:
+Bootstrap prints `NEEDS_REVIEW` and lists every local data file as an unclassified candidate. It does not choose train/test roles, infer a metric or platform, generate splits, or create a baseline. Keep the task config as a draft until the official contract has been checked. Then attach the task. Bootstrap writes a starter skill, so use `--force` for this first attachment:
 
 ~~~powershell
 # General declarative task
@@ -108,7 +108,7 @@ ml-harness attach --project-root . --task-config configs/task.yaml --force
 ml-harness attach --project-root . --task-config configs/task.yaml --plugin stereoqueereval --force
 ~~~
 
-The bootstrap creates configs/exp000_baseline.yaml as a starter experiment config when it can infer the required data fields. Review it before running. For specialized task contracts, use the relevant task adapter.
+For specialized task contracts, install and select the relevant task adapter. Do not create experiment configs or splits until the task contract is confirmed.
 
 ## 4. Give the IDE agent the phase prompt
 
@@ -123,13 +123,19 @@ ml-harness-agent --project-root . context
 
 Ask the IDE agent to follow .agents/skills/ml-harness/SKILL.md and the rendered phase prompt. Reuse this request, changing the phase and output paths as needed:
 
-> Work on the current ML-Harness phase for this competition. Read the task context, dataset profile, and phase prompt. Use your native web search when useful; cite the pages you actually inspected. Save the completed response to notes/setup.md and inspected sources as a JSON array in notes/sources.json. Save generated code and other outputs in this task workspace. Do not claim an experiment or score that you did not run and measure.
+> Work on the current ML-Harness phase for this competition. Read the supplied task brief, local file inventory, and phase prompt. Use your native web search when useful; cite the official pages you actually inspected. Save the completed response to notes/setup.md and inspected sources as a JSON array in notes/sources.json. Save generated code and other outputs in this task workspace. Do not claim an experiment or score that you did not run and measure.
+
+For a new onboarding draft, the first response should identify the competition and cite official task, scoring, and submission sources. Have the agent propose updates only for fields those sources support in `configs/task.yaml`, and leave unknowns unset. Review the source links and proposed values yourself before approving the contract. Run the approval-gated Agent Bridge action only after you approve:
+
+~~~powershell
+ml-harness-agent --project-root . act --action confirm_task_spec --user-approved --params '{"official_sources":[{"url":"https://example.org/official-rules","title":"Official rules"}],"review_summary":"Metric, validation rules, and submission format checked against official sources."}'
+~~~
 
 After the agent writes its response and sources, record them:
 
 ~~~powershell
 New-Item -ItemType Directory -Force notes | Out-Null
-ml-harness phase record --project-root . --phase setup --response-file notes/setup.md
+ml-harness phase record --project-root . --phase setup --response-file notes/setup.md --sources-file notes/sources.json
 ml-harness phase status --project-root .
 ~~~
 
@@ -144,10 +150,10 @@ ml-harness eda run --project-root .
 ml-harness-agent --project-root . context
 ~~~
 
-For a workspace created by bootstrap, run its generated baseline config. Existing workspaces should use their own experiment config; set $ExperimentConfig to that file.
+Bootstrap does not create an experiment config. After the contract is confirmed, ask the IDE agent to create a task-appropriate config from the adapter and official contract. Existing workspaces should use their own experiment config; set $ExperimentConfig to that file.
 
 ~~~powershell
-$ExperimentConfig = "configs/exp000_baseline.yaml"
+$ExperimentConfig = "configs/exp001_baseline.yaml"
 if (-not (Test-Path $ExperimentConfig)) { throw 'Set $ExperimentConfig to an experiment YAML that exists in this task workspace.' }
 ml-harness-run --project-root . --config $ExperimentConfig --debug --fold 0
 ml-harness-run --project-root . --config $ExperimentConfig
@@ -185,9 +191,8 @@ $HarnessEnvPath = Join-Path $env:USERPROFILE ".venvs/ml-harness"
 uv pip install "ml-harness[ml,kaggle] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
 kaggle auth login --force
 
-# For Modal instead, run these two commands:
+# For Modal instead, run these commands:
 # uv pip install "ml-harness[ml,modal] @ git+https://github.com/taitran501/ml-harness.git@feature/ml-harness-installable-plugin"
-# modal setup
 modal setup
 ~~~
 
@@ -196,8 +201,8 @@ Back in the task workspace, run the provider check. Replace the example config i
 ~~~powershell
 Set-Location $TaskRoot
 ml-harness cloud status --project-root .
-ml-harness cloud preflight --project-root . --provider kaggle --config configs/exp000_baseline.yaml
-ml-harness cloud preflight --project-root . --provider modal --config configs/exp000_baseline.yaml
+ml-harness cloud preflight --project-root . --provider kaggle --config $ExperimentConfig
+ml-harness cloud preflight --project-root . --provider modal --config $ExperimentConfig
 ~~~
 
 Uploading a local dataset requires explicit, task-scoped consent for each provider and current dataset fingerprint. Review the files before running the relevant consent command:
@@ -212,9 +217,9 @@ ml-harness cloud consent --project-root . --provider modal --confirm-upload
 Dispatch a tracked full-validation job through the Agent Bridge:
 
 ~~~powershell
-ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path":"configs/exp000_baseline.yaml","backend":"kaggle"}'
+ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path":"configs/exp001_baseline.yaml","backend":"kaggle"}'
 # Or change backend to modal:
-ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path":"configs/exp000_baseline.yaml","backend":"modal"}'
+ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path":"configs/exp001_baseline.yaml","backend":"modal"}'
 ~~~
 
 The returned job ID and status are shared with the dashboard. When the provider finishes, the harness imports verified outputs and metrics into the task artifact tree for the IDE agent to inspect. Provider capacity, quotas, and charges can change; Kaggle or Modal is not guaranteed to be free.

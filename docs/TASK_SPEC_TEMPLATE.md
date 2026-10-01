@@ -250,7 +250,7 @@ task:
 
 ## 4. Human Onboarding Context Template (`docs/TASK.md`)
 
-When dropping raw context into `docs/TASK.md`, use this exact Markdown structure so `tools/bootstrap_task.py` can parse it deterministically:
+Use this outline to organize the brief in `docs/TASK.md`. Bootstrap may copy explicit name, platform, modality, task type, target, ID/group columns, metric, and direction into a draft. These values remain unverified until checked against official sources; bootstrap does not infer missing contract fields or assign local files to train/test roles.
 
 ```markdown
 # Competition Context: [Insert Benchmark Name]

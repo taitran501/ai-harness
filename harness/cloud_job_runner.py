@@ -313,6 +313,9 @@ class CloudJobManager:
         """Launch an asynchronous execution job."""
         if backend not in {"local", "modal", "kaggle"}:
             raise ValueError(f"Unsupported execution backend: {backend}")
+        from harness.task_spec import assert_task_contract_confirmed
+
+        assert_task_contract_confirmed(self.project.task_config_path)
         is_custom_plugin = self.project.plugin_id not in (None, "default")
         upload_fingerprint = None
         if backend in {"modal", "kaggle"}:

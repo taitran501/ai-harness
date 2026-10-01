@@ -40,6 +40,9 @@ from harness.data_bundle import declared_data_roots
 
 def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[str | Path] = None) -> Dict[str, Any]:
     project = HarnessProject.discover(project_root)
+    from harness.task_spec import assert_task_contract_confirmed
+
+    assert_task_contract_confirmed(project.task_config_path)
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     config = Path(config_path).expanduser()

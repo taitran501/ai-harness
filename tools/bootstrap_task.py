@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Autonomous Task Bootstrapper and Data Ingestion Engine for ML-Harness.
+"""Inventory local competition data and prepare an unverified onboarding draft.
 
-Enables zero-touch task onboarding:
-1. Discovers and auto-extracts data archives (.zip, .tar.gz) in dataset/
-2. Inspects arbitrary data formats (.csv, .tsv, .parquet, .feather, .jsonl, .sqlite)
-3. Synthesizes task specification from docs/TASK.md or heuristics
-4. Generates configs/task.yaml conforming to UniversalTaskSpec
-5. Generates leakage-proof validation folds in splits/fold_assignments.tsv
-6. Synchronizes the AI Agent skill in .agents/skills/ml-harness/SKILL.md
+Bootstrap records all discovered files and preserves task context, but it does
+not infer a competition contract, assign data roles, generate splits, or create
+a baseline. The IDE agent and user review official sources before experiments.
 """
 
 from __future__ import annotations
@@ -97,8 +93,8 @@ def extract_context_from_markdown(task_md_path: Path) -> Dict[str, Any]:
     return extracted
 
 
-def find_data_files(dataset_dir: Path) -> Dict[str, Optional[Path]]:
-    """Scan dataset directory and group candidate files into train, test, and sample submission."""
+def find_data_files(dataset_dir: Path) -> Dict[str, Any]:
+    """Inventory dataset files without guessing which file defines the task."""
     extract_archives_in_directory(dataset_dir)
 
     all_files: List[Path] = []
@@ -109,30 +105,37 @@ def find_data_files(dataset_dir: Path) -> Dict[str, Optional[Path]]:
             if p.suffix.lower() in exts:
                 all_files.append(p)
 
-    train_file = None
-    test_file = None
-    sub_file = None
+    all_files = sorted(all_files, key=lambda path: path.as_posix().casefold())
+    sample_candidates = [
+        path for path in all_files
+        if "sample_sub" in path.name.lower() or "submission" in path.name.lower()
+    ]
+    test_candidates = [
+        path for path in all_files
+        if path not in sample_candidates and "test" in path.name.lower()
+    ]
+    train_candidates = [
+        path for path in all_files
+        if path not in sample_candidates
+        and path not in test_candidates
+        and "train" in path.name.lower()
+    ]
 
-    for f in all_files:
-        name_lower = f.name.lower()
-        if "sample_sub" in name_lower or "submission" in name_lower:
-            sub_file = f
-        elif "test" in name_lower:
-            test_file = f
-        elif "train" in name_lower:
-            train_file = f
-
-    # Fallback if no explicit train file
-    if not train_file and all_files:
-        non_sub_test = [f for f in all_files if f != sub_file and f != test_file]
-        if non_sub_test:
-            # Pick largest file as train
-            train_file = max(non_sub_test, key=lambda p: p.stat().st_size)
+    # Only expose a convenience selection when it is unambiguous.  The complete
+    # inventory remains available so multilingual/multi-split tasks are not
+    # silently reduced to whichever file happened to be scanned last.
+    train_file = train_candidates[0] if len(train_candidates) == 1 else None
+    test_file = test_candidates[0] if len(test_candidates) == 1 else None
+    sub_file = sample_candidates[0] if len(sample_candidates) == 1 else None
 
     return {
         "train": train_file,
         "test": test_file,
         "sample_submission": sub_file,
+        "train_candidates": train_candidates,
+        "test_candidates": test_candidates,
+        "sample_submission_candidates": sample_candidates,
+        "files": all_files,
     }
 
 
@@ -427,8 +430,14 @@ def bootstrap_competition_task(
     context_file: Path | str = "docs/TASK.md",
     output_config: Path | str = "configs/task.yaml",
     project_root: Optional[Path | str] = None,
+    overwrite: bool = False,
 ) -> Dict[str, Any]:
-    """End-to-end task onboarding pipeline."""
+    """Create a reviewable task draft and inventory without inventing a contract.
+
+    Dataset names and observed columns are not sufficient evidence for a metric,
+    task type, split policy, platform, or submission contract.  Bootstrap leaves
+    those fields explicitly unconfirmed and never creates a baseline artifact.
+    """
     root = Path(project_root).resolve() if project_root else PROJECT_ROOT.resolve()
     data_dir = Path(dataset_dir).resolve() if Path(dataset_dir).is_absolute() else (root / dataset_dir).resolve()
     ctx_path = Path(context_file).resolve() if Path(context_file).is_absolute() else (root / context_file).resolve()
@@ -437,98 +446,138 @@ def bootstrap_competition_task(
     if not data_dir.is_dir():
         raise FileNotFoundError(f"Dataset directory '{data_dir}' does not exist.")
 
-    # 1. Discover data files & extract archives
+    if cfg_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"Task config already exists: {cfg_path}. Review it first or pass --force to replace it with an onboarding draft."
+        )
+
+    # 1. Inventory every local data file. Do not choose a single language/split
+    # merely because its name sorts last.
     data_files = find_data_files(data_dir)
-    train_file = data_files["train"]
-    if not train_file or not train_file.exists():
-        raise FileNotFoundError(f"No suitable train dataset found in '{data_dir}'.")
+    files: List[Path] = data_files["files"]
+    if not files:
+        raise FileNotFoundError(f"No supported dataset files found in '{data_dir}'.")
 
-    # 2. Extract Context from Markdown
+    # 2. Preserve the supplied task brief as prompt context. If it is outside
+    # the workspace, copy it into the task-owned context directory so rendered
+    # prompts remain workspace-relative and portable.
     context = extract_context_from_markdown(ctx_path)
-    task_name = context.get("name") or train_file.stem.capitalize()
-    platform = context.get("platform") or "kaggle"
-
-    # 3. Load & Analyze Dataset Schema
-    df_train = load_dataframe_file(train_file)
-    schema = analyze_dataset_schema(df_train, context)
-
-    # 4. Generate Task YAML Spec
     try:
-        rel_train = str(train_file.resolve().relative_to(root)).replace("\\", "/")
+        context_rel = ctx_path.relative_to(root).as_posix() if ctx_path.is_file() else None
     except ValueError:
-        rel_train = str(train_file).replace("\\", "/")
+        context_dir = root / ".ml-harness" / "context"
+        context_dir.mkdir(parents=True, exist_ok=True)
+        context_copy = context_dir / "TASK.md"
+        context_copy.write_text(ctx_path.read_text(encoding="utf-8"), encoding="utf-8")
+        context_rel = context_copy.relative_to(root).as_posix()
 
-    task_yaml_data = generate_task_yaml(
-        task_name=task_name,
-        platform=platform,
-        schema=schema,
-        train_rel_path=rel_train,
-        output_path=cfg_path,
-    )
+    def relative_path(path: Path) -> str:
+        try:
+            return path.resolve().relative_to(root).as_posix()
+        except ValueError:
+            return str(path.resolve())
 
-    # 5. Generate Grounded Baseline Config
-    baseline_cfg_path = cfg_path.parent / "exp000_baseline.yaml"
-    generate_baseline_config(
-        task_name=task_name,
-        schema=schema,
-        train_rel_path=rel_train,
-        output_path=baseline_cfg_path,
-    )
+    inventory = [
+        {
+            "path": relative_path(path),
+            "role": "unclassified",
+            "format": path.suffix.lower().lstrip("."),
+            "size_bytes": path.stat().st_size,
+        }
+        for path in files
+    ]
+    task_name = context.get("name") or "Task contract pending review"
+    explicit_targets = [
+        item.strip() for item in str(context.get("target_columns") or "").split(",") if item.strip()
+    ]
+    data_config: Dict[str, Any] = {
+        "candidate_files": inventory,
+        "target_columns": explicit_targets,
+    }
+    for key in ("id_column", "group_column"):
+        if context.get(key):
+            data_config[key] = context[key]
+    if len(explicit_targets) == 1:
+        data_config["target_column"] = explicit_targets[0]
 
-    # 6. Generate Validation Splits
-    splits_dir = cfg_path.parent.parent / "splits" if "configs" in cfg_path.parts else root / "splits"
-    splits_path = splits_dir / "fold_assignments.tsv"
-    generate_validation_splits(
-        df=df_train,
-        id_col=schema["id_column"],
-        target_col=schema["target_column"],
-        group_col=schema["group_column"],
-        task_type=schema["task_type"],
-        output_path=splits_path,
-        num_folds=5,
-    )
+    task_data: Dict[str, Any] = {
+        "name": task_name,
+        "task_name": task_name,
+        "platform": context.get("platform") or "unconfirmed",
+        "task_type": context.get("task_type") or "unconfirmed",
+        "type": context.get("task_type") or "unconfirmed",
+        "modality": context.get("modality") or "unconfirmed",
+        "primary_metric": context.get("primary_metric") or "unconfirmed",
+        "direction": context.get("direction") or "unconfirmed",
+        "contract_status": "needs_review",
+        "description": "Task details are supplied as context and must be checked against official competition sources before execution.",
+        "data_config": data_config,
+        "subtasks": [],
+        "competition_rules": {},
+        "submission_spec": {},
+        "validation": {"strategy": "needs_review"},
+        "competition_context_files": [context_rel] if context_rel else [],
+        "contract_sources": ([{"path": context_rel, "status": "user_supplied_context"}] if context_rel else []),
+    }
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    with cfg_path.open("w", encoding="utf-8") as stream:
+        yaml.safe_dump({"task": task_data}, stream, sort_keys=False, allow_unicode=True)
 
-    # 7. Inject AI Agent Skill
+    onboarding_path = root / ".ml-harness" / "onboarding.json"
+    atomic_write_json(onboarding_path, {
+        "schema_version": 1,
+        "status": "NEEDS_REVIEW",
+        "task_config": relative_path(cfg_path),
+        "context_file": context_rel,
+        "contract_status": "needs_review",
+        "candidate_files": inventory,
+        "pending_contract_fields": [
+            field for field, value in (
+                ("platform", task_data["platform"]),
+                ("task_type", task_data["task_type"]),
+                ("modality", task_data["modality"]),
+                ("primary_metric", task_data["primary_metric"]),
+                ("direction", task_data["direction"]),
+                ("validation", "unconfirmed"),
+                ("submission_spec", "unconfirmed"),
+            ) if value == "unconfirmed" or field in {"validation", "submission_spec"}
+        ],
+        "next_action": "Review the task brief and verify the official metric, rules, validation, and submission contract.",
+    })
+
+    # 3. Inject a setup-first skill. It will explicitly state that this config
+    # is a draft and that no baseline or split has been established.
     skill_output = root / ".agents" / "skills" / "ml-harness" / "SKILL.md"
     injected_skill = inject_skill_file(config_path=cfg_path, output_path=skill_output)
 
-    try:
-        splits_rel = str(splits_path.resolve().relative_to(root)).replace("\\", "/")
-    except ValueError:
-        splits_rel = str(splits_path).replace("\\", "/")
-
-    try:
-        cfg_rel = str(cfg_path.resolve().relative_to(root)).replace("\\", "/")
-    except ValueError:
-        cfg_rel = str(cfg_path).replace("\\", "/")
-
-    try:
-        baseline_rel = str(baseline_cfg_path.resolve().relative_to(root)).replace("\\", "/")
-    except ValueError:
-        baseline_rel = str(baseline_cfg_path).replace("\\", "/")
-
-    try:
-        skill_rel = str(injected_skill.resolve().relative_to(root)).replace("\\", "/")
-    except ValueError:
-        skill_rel = str(injected_skill).replace("\\", "/")
-
+    pending_fields = [
+        field for field, value in (
+            ("platform", task_data["platform"]),
+            ("task_type", task_data["task_type"]),
+            ("modality", task_data["modality"]),
+            ("primary_metric", task_data["primary_metric"]),
+            ("direction", task_data["direction"]),
+        ) if value == "unconfirmed"
+    ]
     report = {
-        "status": "SUCCESS",
+        "status": "NEEDS_REVIEW",
         "task_name": task_name,
-        "platform": platform,
-        "modality": schema["modality"],
-        "task_type": schema["task_type"],
-        "primary_metric": schema["primary_metric"],
-        "direction": schema["direction"],
-        "id_column": schema["id_column"],
-        "target_column": schema["target_column"],
-        "group_column": schema["group_column"],
-        "samples_count": len(df_train),
-        "train_file": rel_train,
-        "splits_file": splits_rel,
-        "config_file": cfg_rel,
-        "baseline_config": baseline_rel,
-        "skill_file": skill_rel,
+        "contract_status": "needs_review",
+        "platform": task_data["platform"],
+        "modality": task_data["modality"],
+        "task_type": task_data["task_type"],
+        "primary_metric": task_data["primary_metric"],
+        "direction": task_data["direction"],
+        "candidate_file_count": len(inventory),
+        "candidate_files": inventory,
+        "pending_contract_fields": pending_fields,
+        "context_file": context_rel,
+        "config_file": relative_path(cfg_path),
+        "onboarding_file": relative_path(onboarding_path),
+        "skill_file": relative_path(injected_skill),
+        "baseline_config": None,
+        "splits_file": None,
+        "next_action": "Review the task brief and verify the official contract before creating splits or running a baseline.",
     }
     return report
 
@@ -539,6 +588,7 @@ def main() -> None:
     parser.add_argument("--dataset", type=str, default="dataset", help="Directory containing dataset files or archives")
     parser.add_argument("--context", type=str, default="docs/TASK.md", help="Markdown context document describing task")
     parser.add_argument("--output", type=str, default="configs/task.yaml", help="Destination path for generated task.yaml")
+    parser.add_argument("--force", action="store_true", help="Replace an existing task config with an unverified onboarding draft")
     args = parser.parse_args()
 
     try:
@@ -550,8 +600,9 @@ def main() -> None:
             context_file=args.context,
             output_config=args.output,
             project_root=project_root,
+            overwrite=args.force,
         )
-        print("\n✔ Autonomous Task Onboarding Completed Successfully:")
+        print("\nTask workspace inventoried. Contract review is required before setup is complete:")
         print(json.dumps(report, indent=2))
     except Exception as e:
         print(f"\n❌ Error during task bootstrapping: {e}", file=sys.stderr)

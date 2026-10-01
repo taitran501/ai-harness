@@ -18,7 +18,7 @@ interface PrimingCenterProps {
 
 export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = '', taskInfo }) => {
   const [selectedIde, setSelectedIde] = useState<'antigravity' | 'codex'>('antigravity');
-  const [selectedIntent, setSelectedIntent] = useState<'attach' | 'iterate'>('iterate');
+  const [selectedIntent, setSelectedIntent] = useState<'attach' | 'iterate'>('attach');
   const [promptText, setPromptText] = useState<string>(initialPrompt);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -182,8 +182,8 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
             <div>
               <div className="flex items-center gap-1.5 font-medium text-xs text-zinc-200">
                 <span>Continue Iteration (New Chat)</span>
-                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50">
-                  Active
+                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50">
+                  Ongoing
                 </span>
               </div>
               <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">

@@ -979,11 +979,63 @@ class AgentBridge:
 
         try:
             if act == TypedActionName.CONFIRM_TASK_SPEC.value:
+                task_document = yaml.safe_load(self.project.task_config_path.read_text(encoding="utf-8")) or {}
+                task_data = task_document.get("task", task_document)
+                contract_status = str(task_data.get("contract_status", "")).casefold()
+                reviewed_sources: List[Dict[str, str]] = []
+                if contract_status in {"needs_review", "unverified", "draft"}:
+                    raw_sources = params.get("official_sources") or params.get("source_urls") or []
+                    if isinstance(raw_sources, str):
+                        raw_sources = [raw_sources]
+                    for item in raw_sources if isinstance(raw_sources, list) else []:
+                        source = item if isinstance(item, dict) else {"url": item}
+                        url = str(source.get("url") or "").strip()
+                        if url.startswith(("https://", "http://")):
+                            reviewed_sources.append({
+                                "url": url,
+                                "title": str(source.get("title") or "").strip(),
+                                "status": "reviewed_by_agent_and_user",
+                            })
+                    if not reviewed_sources:
+                        raise ValueError(
+                            "Before confirming this bootstrap draft, inspect an official task source, update the task config with its metric and rules, then pass official_sources URLs to confirm_task_spec."
+                        )
+                    review_summary = str(params.get("review_summary") or "").strip()
+                    if not review_summary:
+                        raise ValueError("Provide a short review_summary describing the official metric, data/split rules, and submission contract.")
+                    required_values = ("platform", "task_type", "modality", "primary_metric", "direction")
+                    missing_values = [
+                        field for field in required_values
+                        if not str(task_data.get(field) or "").strip()
+                        or str(task_data.get(field)).casefold() in {"unconfirmed", "unknown", "needs review", "needs_review"}
+                    ]
+                    if missing_values:
+                        raise ValueError(
+                            "Task config still has unconfirmed fields: " + ", ".join(missing_values)
+                            + ". Update configs/task.yaml from the inspected task sources before confirming."
+                        )
+                    task_data["contract_status"] = "confirmed"
+                    task_data["contract_review_summary"] = review_summary
+                    previous_sources = task_data.get("contract_sources", [])
+                    if not isinstance(previous_sources, list):
+                        previous_sources = []
+                    task_data["contract_sources"] = previous_sources + reviewed_sources
+                    from harness.io_utils import atomic_write_text
+
+                    atomic_write_text(
+                        self.project.task_config_path,
+                        yaml.safe_dump(task_document, sort_keys=False, allow_unicode=True),
+                    )
+                    self._refresh_task_context()
                 self.comp_state.state["gates"]["spec_confirmed"] = True
                 self.comp_state._append_audit_event(
                     "TASK_SPEC_CONFIRMED",
                     "A user approved the attached task specification.",
-                    {"task_config": str(self.project.task_config_path)},
+                    {
+                        "task_config": str(self.project.task_config_path),
+                        "official_sources": [source["url"] for source in reviewed_sources],
+                        "review_summary": params.get("review_summary"),
+                    },
                 )
                 self.comp_state.save()
                 return ActionObservation(

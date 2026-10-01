@@ -28,7 +28,7 @@ With pip, create and activate a virtual environment, then run the same package c
 
 ## Attach and work with a task
 
-Run these commands from a competition workspace containing `configs/task.yaml`:
+Run these commands from a competition workspace containing `configs/task.yaml`. If the workspace has only local data and a competition brief, start with the [onboarding cookbook](docs/cookbook.md); bootstrap creates a reviewable draft and inventories the files, then the IDE agent checks official task sources before modeling.
 
 ~~~powershell
 ml-harness attach --project-root . --task-config configs/task.yaml
@@ -41,9 +41,11 @@ For EDA, model runs, full diagnostics, and the dashboard, install the `ml` extra
 
 ~~~powershell
 ml-harness eda run --project-root .
-ml-harness-run --project-root . --config configs/exp000_baseline.yaml --debug --fold 0
+ml-harness phase render --project-root . --phase setup
 ml-harness-dashboard --project-root .
 ~~~
+
+Create an experiment config only after the task metric, data roles, validation rules, and submission contract have been confirmed. Bootstrap does not fabricate a baseline config or split file.
 
 ## Documentation
 

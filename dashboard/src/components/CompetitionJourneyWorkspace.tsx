@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Compass,
   Trophy,
@@ -53,6 +53,7 @@ interface CompetitionJourneyWorkspaceProps {
   onOpenConfigModal: (targetPath?: string, parentId?: string) => void;
   onOpenEnvModal: () => void;
   onRefreshAll: () => Promise<void>;
+  onOpenWorkspace: () => void;
 }
 
 export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspaceProps> = ({
@@ -69,39 +70,35 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
   onOpenConfigModal,
   onOpenEnvModal,
   onRefreshAll,
+  onOpenWorkspace,
 }) => {
   const specSummary = compState?.spec_summary || {};
-  const baselineScore = Number(specSummary.baseline_goal ?? 0);
   const evalProto = specSummary.evaluation_protocol || {};
   const finalPolicy = specSummary.final_selection_policy || { max_candidates: 2, slots: [] };
   const hud = compState?.hud || {};
   const whereAmI = hud.where_am_i || {
-    phase_index: 4,
-    phase_title: '4. Experiment Loop',
-    phase_question: 'What are we testing, against what benchmark, and what is the next hypothesis?',
+    phase_index: 1,
+    phase_title: '1. Review the task contract',
+    phase_question: 'What does the official task ask us to predict, and how is it scored?',
     mode: 'EXPLORE',
-    active_tracks: {
-      experimentation: 'active',
-      candidate_management: 'active',
-      external_evaluation: 'active',
-    },
+    active_tracks: {},
   };
   const currentBest = hud.what_is_current_best || {
-    baseline: { id: 'baseline', score: baselineScore },
-    cv_best: { id: 'baseline', score: baselineScore, delta: 0 },
-    public_lb_best: { enabled: true, label: 'Public Leaderboard', sub_id: null, score: null, quota_used_today: 0, daily_quota: 5 },
-    private_frozen: { label: 'Private Evaluation', max_candidates: 2, is_frozen: false, slot_1_safe_cv: null, slot_2_aggressive_lb: null },
+    baseline: { id: null, score: null },
+    cv_best: { id: null, score: null, delta: null },
+    public_lb_best: { enabled: false, label: 'External score not recorded', sub_id: null, score: null, quota_used_today: null, daily_quota: null },
+    private_frozen: { label: 'Final selection not recorded', max_candidates: null, is_frozen: false, slot_1_safe_cv: null, slot_2_aggressive_lb: null },
   };
   const blockers: any[] = hud.what_is_blocking_me || [];
   const nextAction = hud.what_should_i_do_next || {
-    target_phase: 4,
-    title: 'Investigate errors in current best candidate',
-    detail: 'Compare branches and synthesize next candidate.',
-    cta_label: 'Open phase',
+    target_phase: 1,
+    title: 'Review the task brief and official rules',
+    detail: 'Confirm the metric, data contract, validation, and submission format before running a baseline.',
+    cta_label: 'Open guided workflow',
     agent_plan: [
-      'Inspect parent diagnostics & failure slices',
-      'Compare recent experiments in solution tree',
-      'Formulate atomic hypothesis & build next candidate',
+      'Read the supplied competition brief',
+      'Search and cite official organizer instructions',
+      'Keep unverified fields unknown until confirmed',
     ],
   };
 
@@ -123,7 +120,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
   const freezeSelection = compState?.freeze_selection || {};
   const finalization = compState?.finalization || {};
 
-  const [selectedPhase, setSelectedPhase] = useState<number>(whereAmI.phase_index || 4);
+  const [selectedPhase, setSelectedPhase] = useState<number>(whereAmI.phase_index || 1);
   const [phase4SubView, setPhase4SubView] = useState<'cards' | 'tree' | 'cloud' | 'runner'>('cards');
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -176,6 +173,10 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
   );
   const [generatedReportMd, setGeneratedReportMd] = useState<string | null>(null);
 
+  useEffect(() => {
+    setSelectedPhase(whereAmI.phase_index || 1);
+  }, [whereAmI.phase_index]);
+
   const runAction = async (action: string, payload: Record<string, any>, targetPhaseAfter?: number) => {
     setBusy(true);
     setStatusMsg(null);
@@ -195,16 +196,33 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
     }
   };
 
-  const [agentGoal, setAgentGoal] = useState<string>(
-    agentCopilot.goal || (taskInfo?.primary_metric ? `Improve ${taskInfo.primary_metric}` : 'Improve primary validation metric')
-  );
-  const [maxExpBudget, setMaxExpBudget] = useState<number>(
-    agentCopilot.budget?.max_experiments || 3
-  );
-
   const activeTracks = whereAmI.active_tracks || {};
   const subtasksList: any[] = specSummary.subtasks || taskInfo?.subtasks || [];
   const rulesObj = specSummary.competition_rules || taskInfo?.competition_rules || {};
+
+  const contractNeedsReview = ['needs_review', 'unverified', 'draft'].includes(
+    String(taskInfo?.contract_status || '').toLowerCase(),
+  );
+
+  if (!compState || contractNeedsReview) {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl flex-1 items-start justify-center p-6">
+        <section className="w-full rounded-2xl border border-amber-700/50 bg-zinc-900 p-6 shadow-xl">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-amber-300">Start here</p>
+          <h1 className="mt-2 text-xl font-bold text-white">Review the task before planning experiments</h1>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-300">
+            {taskInfo?.task_name || taskInfo?.name || 'This workspace'} needs an official task-contract review. The guided workflow carries the supplied brief to your IDE agent, checks local data first, and records what the agent verifies.
+          </p>
+          <p className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 text-xs leading-relaxed text-zinc-400">
+            Do not treat a guessed metric, task type, data split, quota, or submission format as official. A baseline becomes real only after a completed run records a measured score.
+          </p>
+          <button onClick={onOpenWorkspace} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">
+            Open guided workflow <ArrowRight className="h-4 w-4" />
+          </button>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-5 p-6 max-w-[1600px] mx-auto w-full">
@@ -217,7 +235,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
           <div className="lg:col-span-7 space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-300">
               <Rocket className="w-4 h-4 text-indigo-400" />
-              <span>AGENT RUNTIME CONTROLLER</span>
+              <span>COMPETITION WORKFLOW</span>
               {agentCopilot.last_run_id && (
                 <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px]">
                   Run ID: {agentCopilot.last_run_id} ({agentCopilot.status})
@@ -230,42 +248,11 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             <h1 className="text-xl font-extrabold text-white leading-snug">{nextAction.title}</h1>
             <p className="text-xs text-zinc-300 leading-relaxed">{nextAction.detail}</p>
 
-            {/* Goal & Run Budget Inputs */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1 text-xs">
-              <div className="sm:col-span-3">
-                <label className="block text-[10px] uppercase text-indigo-300 font-bold mb-1">
-                  Autonomous Run Goal:
-                </label>
-                <input
-                  type="text"
-                  value={agentGoal}
-                  onChange={(e) => setAgentGoal(e.target.value)}
-                  className="w-full bg-zinc-950/90 border border-indigo-500/30 rounded-lg px-3 py-1.5 text-white text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] uppercase text-indigo-300 font-bold mb-1">
-                  Budget (Max Exps):
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={15}
-                  value={maxExpBudget}
-                  onChange={(e) => setMaxExpBudget(Number(e.target.value))}
-                  className="w-full bg-zinc-950/90 border border-indigo-500/30 rounded-lg px-3 py-1.5 text-white font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            {/* Agent Will Checklist */}
+            {/* Recommended IDE-agent checklist */}
             <div className="bg-zinc-950/80 border border-indigo-500/20 rounded-xl p-3.5 space-y-1.5">
               <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
-                  <Bot className="w-3.5 h-3.5" /> Typed Action Contract & Plan:
-                </span>
-                <span className="text-[10px] font-mono text-zinc-400">
-                  AUTO / AUTO_WITH_LIMIT / USER_APPROVAL
+                  <Bot className="w-3.5 h-3.5" /> Recommended next actions:
                 </span>
               </div>
               <ul className="grid grid-cols-1 md:grid-cols-2 gap-1.5 text-xs text-zinc-300">
@@ -279,34 +266,13 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             </div>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">
-              <button
-                onClick={() =>
-                  runAction('agent-run', { goal: agentGoal, max_experiments: maxExpBudget })
-                }
-                disabled={busy}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg transition"
-              >
-                <Bot className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
-                <span>{busy ? 'Agent Loop Running...' : 'Launch AgentRun Loop'}</span>
+              <button onClick={onOpenWorkspace} className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg transition">
+                <Bot className="w-4 h-4" />
+                <span>Open guided workflow</span>
               </button>
 
-              {agentCopilot.pending_approval_action && (
-                <button
-                  onClick={() =>
-                    runAction('agent-approve', { run_id: agentCopilot.last_run_id })
-                  }
-                  disabled={busy}
-                  className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg animate-pulse"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>
-                    Approve `{agentCopilot.pending_approval_action.action}` ({agentCopilot.last_run_id})
-                  </span>
-                </button>
-              )}
-
               <button
-                onClick={() => setSelectedPhase(nextAction.target_phase || 4)}
+                onClick={() => setSelectedPhase(nextAction.target_phase || 1)}
                 className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-xs flex items-center gap-1.5 transition"
               >
                 <span>{nextAction.cta_label}</span>
@@ -375,7 +341,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                 ))
               ) : (
                 <div className="text-zinc-500 text-xs italic py-2">
-                  Click “Run with Agent” to execute the next scientific step automatically.
+                  The dashboard does not run an internal agent. Copy a phase prompt in the guided workflow and continue with your IDE agent.
                 </div>
               )}
             </div>
@@ -419,13 +385,17 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-2">
               <div className="text-zinc-400 text-[10px]">Baseline Anchor</div>
               <div className="font-mono font-bold text-zinc-200 text-sm">
-                {Number(currentBest.baseline?.score ?? baselineScore).toFixed(4)}
+                {currentBest.baseline?.score === null || currentBest.baseline?.score === undefined
+                  ? 'No measured run'
+                  : Number(currentBest.baseline.score).toFixed(4)}
               </div>
             </div>
             <div className="bg-zinc-950 border border-emerald-500/30 rounded-lg p-2">
               <div className="text-emerald-400 text-[10px]">Best Local CV</div>
               <div className="font-mono font-bold text-emerald-300 text-sm">
-                {Number(currentBest.cv_best?.score ?? baselineScore).toFixed(4)}
+                {currentBest.cv_best?.score === null || currentBest.cv_best?.score === undefined
+                  ? 'No measured run'
+                  : Number(currentBest.cv_best.score).toFixed(4)}
               </div>
             </div>
             <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-2">

@@ -27,6 +27,49 @@ PHASES = (
 PHASE_IDS = tuple(phase_id for phase_id, _ in PHASES)
 ITERATIVE_PHASES = frozenset(("experiment", "select", "public_lb"))
 
+DEFAULT_PHASE_INSTRUCTIONS = {
+    "setup": (
+        "Before modeling, identify the task from the supplied brief and verify its official rules. "
+        "Use native web search to inspect organizer/task pages, scorer documentation, data instructions, "
+        "and submission format. Record the exact URLs inspected. Separate user-provided statements, "
+        "officially verified facts, and unresolved questions. Do not infer a metric, split policy, "
+        "platform, quota, or submission rule from filenames or data columns. Propose edits to `configs/task.yaml` "
+        "only for facts supported by those sources; show the user the sources, proposed contract, and unknowns "
+        "for approval before confirming it. Do not run a model."
+    ),
+    "understand": (
+        "Inspect every local candidate data file before researching replacements. Summarize schemas, "
+        "labels, missingness, class balance, duplicates, and likely leakage risks without exposing raw "
+        "rows. Confirm the split design from the task contract; do not invent one. Recommend whether "
+        "additional public data is needed and cite its source and license before any download."
+    ),
+    "baseline": (
+        "Propose the smallest task-appropriate baseline only after the metric, target, and validation "
+        "contract are confirmed. State the config and run command. Treat no score as measured until a "
+        "completed run writes metrics to this workspace."
+    ),
+    "experiment": (
+        "Use the latest measured baseline as the control. Propose one atomic intervention, its rationale, "
+        "expected diagnostic change, and a bounded local probe before a full or remote run."
+    ),
+    "select": (
+        "Compare candidates using recorded validation artifacts and the confirmed primary metric. Explain "
+        "tradeoffs and select only candidates supported by measured results."
+    ),
+    "public_lb": (
+        "Review external scores only when the user provides them or a platform adapter retrieves them. "
+        "Record the source, split, metric, and score; do not fabricate missing values."
+    ),
+    "freeze": (
+        "Recommend a final candidate only after the submission contract and measured results are reviewed. "
+        "Do not freeze or submit without explicit user approval."
+    ),
+    "finalization": (
+        "Summarize verified results, submission artifacts, unresolved issues, and lessons. Distinguish "
+        "local validation from official platform scores."
+    ),
+}
+
 
 class PromptPackError(ValueError):
     """Raised when a workspace prompt pack or phase transition is invalid."""
@@ -61,9 +104,10 @@ def initialize_prompt_pack(project_root: Path | str, force: bool = False) -> Dic
         if force or not prompt_path.exists():
             prompt_path.write_text(
                 f"# {title}\n\n"
-                "<!-- Replace this starter with the phase instructions for your task. -->\n\n"
-                "## User prompt\n\n"
-                "Add the task-specific instruction here. The IDE agent owns reasoning and any web search.\n",
+                "## What to do\n\n"
+                f"{DEFAULT_PHASE_INSTRUCTIONS[phase_id]}\n\n"
+                "## User additions\n\n"
+                "Add task-specific instructions here. The IDE agent owns reasoning and native web search.\n",
                 encoding="utf-8",
             )
         phase_docs.append(
@@ -208,7 +252,16 @@ class PhaseWorkflow:
         except (OSError, json.JSONDecodeError):
             state = {}
         gates = state.get("gates", {}) if isinstance(state, dict) else {}
-        blocked: Dict[str, Optional[str]] = {"baseline": None, "freeze": None}
+        blocked: Dict[str, Optional[str]] = {"understand": None, "baseline": None, "freeze": None}
+        try:
+            task_document = yaml.safe_load(self.project.task_config_path.read_text(encoding="utf-8")) or {}
+            task = task_document.get("task", task_document)
+        except (OSError, yaml.YAMLError):
+            task = {}
+        if str(task.get("contract_status", "")).casefold() in {"needs_review", "unverified", "draft"}:
+            blocked["understand"] = (
+                "Review the official task rules and confirm the task contract before continuing to data interpretation or experiments."
+            )
         if not gates.get("baseline_locked"):
             blocked["baseline"] = "Run validation and establish the baseline anchor using its measured primary metric first."
         else:
@@ -254,6 +307,10 @@ class PhaseWorkflow:
             raise PromptPackError("All eight phases have an initial result. Choose a changed-evidence loop phase (4–6) to continue.")
         self._assert_recordable(selected)
         phase = next(item for item in phases if item["id"] == selected)
+        if selected == "understand":
+            blocked_reason = self._phase_gate_state().get(selected)
+            if blocked_reason:
+                raise PromptPackError(blocked_reason)
         prompt_file = _safe_workspace_path(self.root, phase["prompt_file"])
         task = yaml.safe_load(self.project.task_config_path.read_text(encoding="utf-8")) or {}
         task = task.get("task", task)
@@ -265,7 +322,8 @@ class PhaseWorkflow:
             f"- Task: {task.get('name') or task.get('task_name') or 'Unnamed task'}",
             f"- Task config: `{self.project.task_config_path.relative_to(self.root).as_posix()}`",
             f"- Plugin: `{self.project.plugin_id or 'default'}`",
-            f"- Primary metric: `{task.get('primary_metric', 'not declared')}` ({task.get('direction', 'not declared')})",
+            f"- Contract review status: `{task.get('contract_status', 'not declared')}`",
+            f"- Primary metric: `{task.get('primary_metric') or 'unconfirmed'}` ({task.get('direction') or 'unconfirmed'})",
             f"- Artifact directory: `{self.project.artifacts_dir.relative_to(self.root).as_posix()}`",
             f"- Phase history: `{self.history_path.relative_to(self.root).as_posix()}`",
             f"- Current phase evidence revision: `{state['current_evidence_revision']}`",
@@ -281,6 +339,23 @@ class PhaseWorkflow:
             lines.extend(["```yaml", yaml.safe_dump(task_context, sort_keys=False, allow_unicode=True).strip(), "```"])
         else:
             lines.append("No optional competition context fields are declared in the task configuration.")
+
+        if str(task.get("contract_status", "")).casefold() in {"needs_review", "unverified", "draft"}:
+            lines.extend([
+                "",
+                "## Contract is not verified",
+                "Treat every generated task field as a draft. Do not present platform, metric, task type, split rules, quotas, or submission requirements as official unless an inspected organizer source supports them.",
+                "The first task is to locate and cite the official competition instructions. If a fact cannot be verified, leave it unknown and list the question for the user.",
+            ])
+
+        candidate_files = (task.get("data_config") or {}).get("candidate_files", [])
+        if candidate_files:
+            lines.extend(["", "## Local data inventory", "These files were found in the task workspace. Their roles are unclassified; inspect all of them before assigning train/test roles."])
+            for item in candidate_files:
+                if isinstance(item, dict):
+                    lines.append(f"- `{item.get('path', 'unknown path')}` ({item.get('format', 'unknown format')}; role: {item.get('role', 'unclassified')})")
+                else:
+                    lines.append(f"- `{item}` (role unclassified)")
 
         declared_context_files = (
             task.get("competition_context_files")

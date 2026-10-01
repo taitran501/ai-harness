@@ -94,6 +94,9 @@ def generate_skill_content(
     task: Dict[str, Any], artifact_path: str = ".ml-harness/artifacts/<task-id>"
 ) -> str:
     """Generate Markdown content for SKILL.md dynamically tailored to the target task."""
+    contract_pending = str(task.get("contract_status", "")).casefold() in {
+        "needs_review", "unverified", "draft"
+    }
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
     platform = (task.get("platform") or "generic").capitalize()
     task_type = task.get("task_type") or task.get("type") or "Supervised Learning"
@@ -118,7 +121,11 @@ def generate_skill_content(
         f"# ML Experiment Harness Skill — {task_name}",
         "",
         f"> **Active Benchmark**: **{task_name}** | **Platform**: {platform} | **Modality**: {mod_info['title']}",
-        f"> **Objective**: {direction.capitalize()} `{primary_metric}` across cross-validation folds.",
+        (
+            "> **Objective**: Not confirmed. Verify the official metric and validation rules before modeling."
+            if contract_pending
+            else f"> **Objective**: {direction.capitalize()} `{primary_metric}` across cross-validation folds."
+        ),
         "",
         f"Use this skill whenever planning model architectures, engineering features, formulating hypotheses,",
         f"auditing predictions, or registering verified submissions for **{task_name}**.",
@@ -130,6 +137,13 @@ def generate_skill_content(
         f"- **Task Type**: `{task_type}`",
         f"- **Primary Target Metric**: `{primary_metric}` (Optimization Direction: `{direction}`)",
     ]
+
+    if contract_pending:
+        lines.extend([
+            "",
+            "> **Setup required:** This task config is an onboarding draft. Treat all inferred or missing fields as unverified. Do not create a baseline, generate splits, or run experiments until official task sources have been reviewed and the user confirms the contract.",
+            "- Update `configs/task.yaml` only with contract facts supported by official sources. Then use the approval-gated `confirm_task_spec` action with `official_sources` and `review_summary` parameters.",
+        ])
 
     if base_score is not None:
         lines.append(f"- **Baseline Reference Score**: `{base_score}`")
@@ -283,19 +297,20 @@ def generate_skill_content(
         "### 3.6 Approval Governance (`AUTO` / `AUTO_WITH_LIMIT` / `USER_APPROVAL`)",
         "- **AUTO**: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
         "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation`, `promote_candidate`, `synthesize_candidate`, `build_ensemble`",
-        "- **USER_APPROVAL (Mandatory Human Confirmation)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
+        "- **USER_APPROVAL (Mandatory Human Confirmation)**: `confirm_task_spec`, `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
         "",
         "---",
         "",
         "## 4. Standard Operating Procedure (SOP) for Antigravity in IDE",
         "",
         "1. **Read Bridge Context Packet**: Run `ml-harness-agent context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
-        "2. **Start / Configure Session (Optional Budgets)**: Run `ml-harness-agent start-session --goal \"...\" --max-experiments 3`.",
-        "3. **Create Grounded Experiment**: Run `ml-harness-agent act --action create_experiment --params '{...}'` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
-        "4. **Execute Smoke Test**: Run `ml-harness-agent act --action run_smoke_test --params '{\"config_path\": \"configs/<exp>.yaml\"}'`.",
-        "5. **Execute Task-Declared Validation**: Run `ml-harness-agent act --action run_full_validation --params '{\"config_path\": \"configs/<exp>.yaml\", \"backend\": \"local\"}'`.",
-        "6. **Observe & Decide Next Step**: Antigravity analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
-        "7. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
+        "2. **For an onboarding draft, stop after setup research**: show official sources, proposed task fields, and unresolved questions to the user; wait for approval before `confirm_task_spec`. Do not create splits or run a model while the contract is unverified.",
+        "3. **Start / Configure Session (Optional Budgets)**: Run `ml-harness-agent start-session --goal \"...\" --max-experiments 3`.",
+        "4. **Create Grounded Experiment**: Run `ml-harness-agent act --action create_experiment --params '{...}'` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
+        "5. **Execute Smoke Test**: Run `ml-harness-agent act --action run_smoke_test --params '{\"config_path\": \"configs/<exp>.yaml\"}'`.",
+        "6. **Execute Task-Declared Validation**: Run `ml-harness-agent act --action run_full_validation --params '{\"config_path\": \"configs/<exp>.yaml\", \"backend\": \"local\"}'`.",
+        "7. **Observe & Decide Next Step**: Antigravity analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
+        "8. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
         "",
     ])
 

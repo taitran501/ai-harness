@@ -52,14 +52,14 @@ In the dashboard's **Agent workspace**, start with the local data paths and file
 
 If you already selected a public Kaggle dataset, open **Import a Kaggle public dataset** and enter its page slug (`owner/dataset-name`). This works for datasets published outside competitions too. ML-Harness downloads it into `dataset/sources/kaggle/`, keeps its source link in the workspace, and does not change the task's train/test configuration. Choose **Profile dataset** to create an EDA report; the next phase prompt includes its workspace path and source URL for the IDE agent. Review the source license and relevance before using it. The import is local; sending data to Kaggle Kernels or Modal remains a separate action.
 
-Use an experiment config already owned by the task workspace. For a new workspace, ml-harness-bootstrap can produce a starter task config, baseline config, and grouped splits from the provided dataset and context. Review the generated contract against official instructions before running it. Then probe and validate the generated baseline config:
+For a new workspace, `ml-harness-bootstrap` creates an unverified task draft and inventories local files. It does not assign data roles, choose a metric or split, or create a baseline. Use the Setup prompt to check official sources, update `configs/task.yaml`, and confirm the contract first. Then ask the IDE agent to create a task-appropriate experiment config and probe it before a full run:
 
 ~~~powershell
-ml-harness-run --project-root . --config configs/exp000_baseline.yaml --debug --fold 0
-ml-harness-run --project-root . --config configs/exp000_baseline.yaml
+ml-harness-run --project-root . --config configs/exp001_baseline.yaml --debug --fold 0
+ml-harness-run --project-root . --config configs/exp001_baseline.yaml
 ~~~
 
-If bootstrap created the starter agent skill, finish attachment with --force as described in [Installation](installation.md).
+If bootstrap created the starter agent skill, finish attachment with `--force` as described in [Installation](installation.md).
 
 Lock the baseline only after a completed run produced the task's primary metric. The bridge and task adapter enforce the baseline and submission capabilities they can verify.
 
