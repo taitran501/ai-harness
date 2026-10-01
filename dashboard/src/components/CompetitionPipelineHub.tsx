@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Sliders,
   Play,
   Square,
   Upload,
   Download,
-  RefreshCw,
   CheckCircle2,
   AlertTriangle,
   ExternalLink,
@@ -61,10 +60,15 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
 
   // Step 3: Execution & Cloud sync state
   const [execMode, setExecMode] = useState<'local' | 'kaggle' | 'modal'>('local');
-  const [smokeTestOnly, setSmokeTestOnly] = useState<boolean>(false);
   const [modalGpu, setModalGpu] = useState<string>('A10G');
   const [kaggleGpu, setKaggleGpu] = useState<string>('T4 x 2');
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
+  const [cloudDataStatus, setCloudDataStatus] = useState<{
+    ready: boolean;
+    paths: string[];
+    error?: string | null;
+  } | null>(null);
+  const [checkingCloudData, setCheckingCloudData] = useState(false);
 
   // Dataset push state
   const [pushingDataset, setPushingDataset] = useState<boolean>(false);
@@ -75,17 +79,6 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const [jobLogs, setJobLogs] = useState<string[]>([]);
   const [isLaunching, setIsLaunching] = useState<boolean>(false);
   const [isStopping, setIsStopping] = useState<boolean>(false);
-
-  // Kaggle status & Pull output state
-  const [checkingStatus, setCheckingStatus] = useState<boolean>(false);
-  const [kernelStatusText, setKernelStatusText] = useState<string | null>(null);
-  const [pullingOutput, setPullingOutput] = useState<boolean>(false);
-  const [pulledResult, setPulledResult] = useState<{
-    exp_id: string;
-    migrated_files: string[];
-    metrics?: Record<string, any>;
-    raw_output: string;
-  } | null>(null);
 
   // Step 4: Packaging & LB score recording
   const [packagingSub, setPackagingSub] = useState<boolean>(false);
@@ -100,6 +93,25 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  const refreshCloudDataStatus = useCallback(async () => {
+    setCheckingCloudData(true);
+    try {
+      const status = await api.getCloudDataStatus();
+      setCloudDataStatus(status);
+      return status;
+    } catch (err: any) {
+      const status = {
+        ready: false,
+        paths: [],
+        error: err.message || 'Could not inspect task data paths.',
+      };
+      setCloudDataStatus(status);
+      return status;
+    } finally {
+      setCheckingCloudData(false);
+    }
+  }, []);
 
   const currentExpId = selectedConfig
     .replace(/^configs\//, '')
@@ -129,6 +141,14 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   }, [taskInfo?.name]);
 
   useEffect(() => {
+    if (execMode === 'local' || isCustomTaskPlugin) {
+      setCloudDataStatus(null);
+      return;
+    }
+    void refreshCloudDataStatus();
+  }, [execMode, isCustomTaskPlugin, refreshCloudDataStatus, taskInfo?.name]);
+
+  useEffect(() => {
     if (submissions.length > 0 && !activeSubmissionId) {
       setActiveSubmissionId(submissions[submissions.length - 1].id);
     }
@@ -149,8 +169,14 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const handlePushDataset = async () => {
     const targetPlatform = execMode === 'modal' ? 'modal' : 'kaggle';
     setPushingDataset(true);
-    setDatasetPushLog(`Syncing dataset/ and splits/ to ${targetPlatform.toUpperCase()}...`);
+    setDatasetPushLog('Checking task data paths before upload...');
     try {
+      const dataStatus = await refreshCloudDataStatus();
+      if (!dataStatus.ready) {
+        setDatasetPushLog(`Nothing was uploaded. ${dataStatus.error || 'Fix the task data paths before using cloud execution.'}`);
+        return;
+      }
+      setDatasetPushLog(`Syncing ${dataStatus.paths.join(', ')} privately to ${targetPlatform.toUpperCase()}...`);
       const res = await api.pushDatasetToCloud({
         platform: targetPlatform,
       });
@@ -165,10 +191,28 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   // Step 3B: Run Experiment (Local CPU or Cloud GPU)
   const handleRunExperiment = async () => {
     setIsLaunching(true);
-    setJobLogs([`>>> Starting [${execMode.toUpperCase()}] execution for ${selectedConfig}...`]);
-    setPulledResult(null);
+    setActiveJob(null);
+    setJobLogs([execMode === 'local'
+      ? `>>> Starting local execution for ${selectedConfig}...`
+      : '>>> Checking task data before starting a private cloud run...']);
 
     try {
+      if (execMode !== 'local') {
+        const dataStatus = await refreshCloudDataStatus();
+        if (!dataStatus.ready) {
+          const missingPath = (dataStatus.error || '').replace('Declared task data path does not exist: ', '');
+          setJobLogs([
+            'Cloud run stopped before upload; no job was started.',
+            missingPath ? `Missing task data path: ${missingPath}` : (dataStatus.error || 'Task data paths are not ready.'),
+            /tf.?idf/i.test(selectedConfig)
+              ? 'This TF-IDF baseline is a CPU workload. Choose Local CPU to run it without cloud sync.'
+              : 'To use cloud execution, update Step 1 > Task & Data Setup so every declared data path exists.',
+          ]);
+          return;
+        }
+      }
+
+      setJobLogs([`>>> Starting [${execMode.toUpperCase()}] execution for ${selectedConfig}...`]);
       const gpuToUse =
         execMode === 'modal' ? modalGpu : execMode === 'kaggle' ? kaggleGpu : 'CPU';
 
@@ -222,41 +266,6 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
       setJobLogs((prev) => [...prev, `[ERROR] ${err.message}`]);
     } finally {
       setIsStopping(false);
-    }
-  };
-
-  // Step 3C: Check Kaggle Status & Pull Output from Cloud
-  const handleCheckStatus = async () => {
-    setCheckingStatus(true);
-    try {
-      const res = await api.getKaggleKernelStatus({
-        config_path: selectedConfig,
-        exp_id: currentExpId,
-      });
-      setKernelStatusText(`[${res.status}] ${res.raw_output}`);
-    } catch (err: any) {
-      setKernelStatusText(`Status check failed: ${err.message}`);
-    } finally {
-      setCheckingStatus(false);
-    }
-  };
-
-  const handlePullOutput = async () => {
-    setPullingOutput(true);
-    try {
-      const targetPlatform = execMode === 'modal' ? 'modal' : 'kaggle';
-      const res = await api.pullCloudOutput({
-        platform: targetPlatform,
-        job_id: activeJob?.job_id || '',
-        config_path: selectedConfig,
-        exp_id: currentExpId,
-      });
-      setPulledResult(res);
-      await onRefreshAll();
-    } catch (err: any) {
-      setKernelStatusText(`Pull output failed: ${err.message}`);
-    } finally {
-      setPullingOutput(false);
     }
   };
 
@@ -328,6 +337,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   const dataCfg = taskInfo?.data_config || {};
   const subSpec = taskInfo?.submission_spec || {};
   const activeSubObj = submissions.find((s) => s.id === activeSubmissionId);
+  const missingRemoteDataPath = cloudDataStatus?.error?.match(/^Declared task data path does not exist: (.+)$/)?.[1];
 
   return (
     <div className="space-y-5">
@@ -601,81 +611,85 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
       )}
 
       {/* =====================================================================
-          STEP 3: EXECUTE (LOCAL CPU / CLOUD GPU), PUSH DATASET & PULL OUTPUT
+          STEP 3: RUN LOCALLY OR ON A CLOUD PROVIDER
          ===================================================================== */}
       {activeStep === 3 && (
         <div className="space-y-4">
-          {/* Top Cloud Account Status Bar */}
-          <div className="bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3 text-xs">
-              <span className="font-semibold text-zinc-300">Optional Cloud Accounts:</span>
-              <span className="px-2.5 py-1 rounded border bg-zinc-900 border-zinc-800 text-zinc-300 font-mono">
-                Kaggle: <strong>{envStatus?.kaggle.username || 'Not logged in'}</strong>
-              </span>
-              <span className="px-2.5 py-1 rounded border bg-zinc-900 border-zinc-800 text-zinc-300 font-mono">
-                Modal: <strong>{envStatus?.modal.active_profile || 'Not configured'}</strong>
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
+          {execMode !== 'local' && (
+            <div className="bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-zinc-300">
+                {execMode === 'kaggle'
+                  ? <>Kaggle account: <strong>{envStatus?.kaggle.username || 'Not connected'}</strong></>
+                  : <>Modal profile: <strong>{envStatus?.modal.active_profile || 'Not configured'}</strong></>}
+              </div>
               <button
                 type="button"
                 onClick={onOpenEnvModal}
                 className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 rounded-lg border border-zinc-800 text-xs font-medium transition"
               >
-                Kaggle Login / Account Settings
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveStep(4)}
-                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5"
-              >
-                <span>Next: Package & Submit (Step 4)</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                Provider account settings
               </button>
             </div>
-          </div>
+          )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* Card 3.1: Push Dataset to Cloud (1-Click Sync) */}
-            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
-              <div className="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2">
-                1. Sync Dataset & Splits to Cloud
-              </div>
-              {isCustomTaskPlugin && (
-                <p className="text-xs text-amber-200">
-                  Dataset upload is disabled until the selected task adapter is available in the remote runtime.
-                </p>
-              )}
-              <p className="text-xs text-zinc-400">
-                Push declared task data and splits to a private resource named from this task and its current data fingerprint. Every subsequent run mounts the matching resource.
-              </p>
-
-              <button
-                type="button"
-                onClick={handlePushDataset}
-                disabled={pushingDataset || isCustomTaskPlugin}
-                className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
-              >
-                <Upload className={`w-3.5 h-3.5 ${pushingDataset ? 'animate-bounce' : ''}`} />
-                <span>
-                  {pushingDataset
-                    ? 'Pushing Dataset & Splits...'
-                    : `Push Dataset to ${execMode === 'modal' ? 'Modal Volume' : 'Kaggle Datasets'}`}
-                </span>
-              </button>
-
-              {datasetPushLog && (
-                <pre className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-300 max-h-28 overflow-y-auto whitespace-pre-wrap">
-                  {datasetPushLog}
-                </pre>
-              )}
-            </div>
+          <div className="grid grid-cols-1 gap-3">
 
             {/* Card 3.2: Choose Execution Mode & Run */}
             <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
               <div className="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2">
-                2. Execute Experiment ({currentExpId})
+                Run experiment: {currentExpId}
               </div>
+
+              {execMode === 'local' ? (
+                <div className="p-2.5 bg-emerald-950/30 border border-emerald-900/70 rounded-lg text-xs text-emerald-200">
+                  This runs on your computer. No Kaggle login, dataset upload, GPU selection, or output download is needed.
+                  {/tf.?idf/i.test(selectedConfig) && ' A TF-IDF baseline is a good fit for Local CPU.'}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {checkingCloudData ? (
+                    <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-300">
+                      Checking the task data paths before enabling cloud execution…
+                    </div>
+                  ) : cloudDataStatus?.ready ? (
+                    <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-300">
+                      Data is ready. The Run action uploads it privately if needed, tracks the job, and saves results under <code>{artifactDir}/{currentExpId}/</code>.
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-amber-950/40 border border-amber-800/70 rounded-lg space-y-2 text-xs text-amber-100">
+                      <div className="font-semibold">Cloud run is blocked before upload.</div>
+                      <div>
+                        {missingRemoteDataPath
+                          ? <>The task setup expects <code>{missingRemoteDataPath}</code>, but that path is missing here. Nothing has been uploaded.</>
+                          : cloudDataStatus?.error || 'Task data paths could not be checked yet.'}
+                      </div>
+                      {/tf.?idf/i.test(selectedConfig) && (
+                        <div>This TF-IDF baseline is a CPU workload. Switch to Local CPU to run it without cloud sync.</div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setExecMode('local')}
+                          className="px-3 py-1.5 bg-amber-200 text-zinc-900 rounded-md font-semibold"
+                        >
+                          Use Local CPU
+                        </button>
+                      </div>
+                      <details>
+                        <summary className="cursor-pointer text-amber-200">Set up cloud data instead</summary>
+                        <p className="mt-2">Update the declared data paths in Task & Data Setup so they point to files or folders that exist locally.</p>
+                        <button
+                          type="button"
+                          onClick={() => onOpenTaskConfig('data')}
+                          className="mt-2 underline underline-offset-2"
+                        >
+                          Review task data paths
+                        </button>
+                      </details>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-3 gap-1.5 bg-zinc-900 p-1 rounded-lg border border-zinc-800">
                 <button
@@ -724,22 +738,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </p>
               )}
 
-              {execMode === 'local' ? (
-                <div className="p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg space-y-2 text-xs text-zinc-300">
-                  <div>
-                Runs the configured experiment through the selected task adapter on this machine.
-                  </div>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={smokeTestOnly}
-                      onChange={(e) => setSmokeTestOnly(e.target.checked)}
-                      className="rounded bg-zinc-950 border-zinc-700"
-                    />
-                    <span>Quick Smoke Test (--debug --fold 0)</span>
-                  </label>
-                </div>
-              ) : execMode === 'kaggle' ? (
+              {execMode === 'kaggle' ? (
                 <div>
                   <label className="block text-xs text-zinc-400 mb-1">Kaggle Cloud GPU:</label>
                   <select
@@ -781,69 +780,47 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 <button
                   type="button"
                   onClick={handleRunExperiment}
-                  disabled={isLaunching}
+                  disabled={isLaunching || (execMode !== 'local' && (checkingCloudData || cloudDataStatus?.ready !== true))}
                   className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>{isLaunching ? 'Starting...' : 'Run'}</span>
+                  <span>
+                    {isLaunching
+                      ? 'Starting...'
+                      : execMode === 'local'
+                        ? 'Run locally'
+                        : `Run on ${execMode === 'kaggle' ? 'Kaggle' : 'Modal'}`}
+                  </span>
                 </button>
               )}
             </div>
 
-            {/* Card 3.3: Monitor Cloud Status & Pull Output to Local */}
-            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
-              <div className="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2">
-                3. Monitor & Pull Output to Local
-              </div>
-              <p className="text-xs text-zinc-400">
-                Check remote job progress and pull run outputs into <code>{artifactDir}/{currentExpId}/</code>.
-              </p>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={handleCheckStatus}
-                  disabled={checkingStatus}
-                  className="py-2 px-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${checkingStatus ? 'animate-spin' : ''}`} />
-                  <span>Check Status</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handlePullOutput}
-                  disabled={pullingOutput}
-                  className="py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{pullingOutput ? 'Pulling...' : 'Pull Output'}</span>
-                </button>
-              </div>
-
-              {kernelStatusText && (
-                <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-300">
-                  {kernelStatusText}
-                </div>
-              )}
-
-              {pulledResult && (
-                <div className="p-3 bg-emerald-950/30 border border-emerald-800/60 rounded-lg space-y-1.5 text-xs">
-                  <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Pulled {pulledResult.migrated_files.length} files to {artifactDir}/{pulledResult.exp_id}/</span>
-                  </div>
-                  <div className="font-mono text-zinc-300">
-                    Files: {pulledResult.migrated_files.join(', ') || 'None'}
-                  </div>
-                  {pulledResult.metrics && (
-                    <div className="font-mono text-emerald-400">
-                      Local CV Score: {JSON.stringify(pulledResult.metrics.overall || pulledResult.metrics)}
-                    </div>
+            {execMode !== 'local' && !isCustomTaskPlugin && (
+              <details className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+                <summary className="cursor-pointer text-xs font-semibold text-zinc-200">
+                  Advanced: sync task data separately
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <p className="text-xs text-zinc-400">
+                    Usually you can skip this. Run will sync the approved task data, monitor the remote job, and save its output locally.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handlePushDataset}
+                    disabled={pushingDataset || checkingCloudData || cloudDataStatus?.ready !== true}
+                    className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700 rounded-lg text-xs font-medium disabled:opacity-50"
+                  >
+                    <Upload className="inline w-3.5 h-3.5 mr-1.5" />
+                    {pushingDataset ? 'Syncing…' : `Sync separately to ${execMode === 'kaggle' ? 'Kaggle' : 'Modal'}`}
+                  </button>
+                  {datasetPushLog && (
+                    <pre className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-300 max-h-28 overflow-y-auto whitespace-pre-wrap">
+                      {datasetPushLog}
+                    </pre>
                   )}
                 </div>
-              )}
-            </div>
+              </details>
+            )}
           </div>
 
           {/* Live Console Logs */}
@@ -852,7 +829,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               <div className="px-4 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2 font-mono text-zinc-200">
                   <Terminal className="w-4 h-4 text-emerald-400" />
-                  <span>Execution Log Stream ({currentExpId})</span>
+                  <span>Run progress ({currentExpId})</span>
                 </div>
                 <span className="font-mono text-zinc-400">{activeJob?.status || 'IDLE'}</span>
               </div>
@@ -864,6 +841,12 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 ))}
                 <div ref={logEndRef} />
               </div>
+            </div>
+          )}
+
+          {activeJob?.status === 'COMPLETED' && (
+            <div className="p-3 bg-emerald-950/30 border border-emerald-800/60 rounded-lg text-xs text-emerald-200">
+              Run complete. Results were saved to <code>{artifactDir}/{activeJob.exp_id}/</code>. Open the leaderboard or experiment details to review the metrics before deciding what to try next.
             </div>
           )}
         </div>

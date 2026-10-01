@@ -221,6 +221,13 @@ export const api = {
     return `${API_BASE}/submissions/download?id=${encodeURIComponent(subId)}`;
   },
 
+  async getCloudDataStatus(): Promise<{ ready: boolean; paths: string[]; error?: string | null }> {
+    const res = await fetch(`${API_BASE}/cloud/data-status`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Failed to inspect task data: ${res.statusText}`);
+    return data;
+  },
+
   async pushDatasetToCloud(params: {
     platform: 'kaggle' | 'modal';
     dataset_slug?: string;

@@ -944,6 +944,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_api_get_config(parsed_url.query)
         elif path == "/api/cloud/preflight":
             self.handle_api_cloud_preflight(parsed_url.query)
+        elif path == "/api/cloud/data-status":
+            try:
+                from harness.data_bundle import declared_data_roots
+                roots = declared_data_roots(HARNESS_PROJECT)
+                self.send_json({
+                    "ready": True,
+                    "paths": [relative for _, relative in roots],
+                    "error": None,
+                })
+            except Exception as exc:
+                self.send_json({"ready": False, "paths": [], "error": str(exc)})
         elif path == "/api/cloud/job":
             self.handle_api_cloud_get_job(parsed_url.query)
         elif path == "/api/cloud/jobs":
