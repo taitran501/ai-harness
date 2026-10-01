@@ -147,14 +147,39 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
       }
       setKaggleSuccessMsg(res.message || 'Kaggle OAuth started. Approve access in the browser.');
       const finishLogin = async () => {
-        const refreshed = await fetchStatus();
-        if (refreshed?.kaggle.authenticated) {
-          setKaggleSuccessMsg(
-            `Kaggle connected${refreshed.kaggle.username ? ` as ${refreshed.kaggle.username}` : ''}.`
-          );
-          onStatusChanged?.();
-        } else {
-          setError('Kaggle CLI finished login, but the active account could not be verified. Refresh status and check CLI configuration.');
+        // Stop presenting the browser approval step as active as soon as the
+        // CLI exits. Account detection and provider quota checks can take
+        // longer, so do not keep the OAuth button in its waiting state.
+        setSavingKaggle(false);
+        setEnvStatus((previous) => previous ? {
+          ...previous,
+          kaggle: {
+            ...previous.kaggle,
+            auth_flow: {
+              ...previous.kaggle.auth_flow,
+              status: 'completed',
+              return_code: 0,
+            },
+          },
+        } : previous);
+        setKaggleSuccessMsg('Kaggle OAuth completed. Checking account status...');
+
+        try {
+          const refreshed = await api.getEnvironmentStatus();
+          setEnvStatus(refreshed);
+          if (refreshed.kaggle.authenticated) {
+            setKaggleSuccessMsg(
+              'Kaggle connected' + (refreshed.kaggle.username ? ' as ' + refreshed.kaggle.username : '') + '.'
+            );
+            onStatusChanged?.();
+            // Quotas and API verification are useful follow-up information,
+            // but must not delay confirmation that OAuth itself completed.
+            void api.getCloudStatus().then(setCloudStatus).catch(() => undefined);
+          } else {
+            setError('Kaggle CLI finished login, but the active account could not be verified. Refresh status and check CLI configuration.');
+          }
+        } catch (err: any) {
+          setError('Kaggle OAuth completed, but account status could not be refreshed: ' + (err.message || 'Unknown error.'));
         }
       };
 
