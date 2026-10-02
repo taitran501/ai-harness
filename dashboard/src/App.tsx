@@ -154,21 +154,7 @@ const DashboardContent: React.FC = () => {
                   : 'text-zinc-300 hover:text-white hover:bg-zinc-800/60'
               }`}
             >
-              <span>Guided workflow</span>
-            </button>
-            <button
-              disabled={contractNeedsReview}
-              title={contractNeedsReview ? 'Confirm the official task contract in Guided workflow first.' : undefined}
-              onClick={() => setActiveTab('pipeline')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                contractNeedsReview
-                  ? 'cursor-not-allowed text-zinc-600'
-                  : activeTab === 'pipeline'
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
-            >
-              <span>{contractNeedsReview ? 'Run experiment · after setup' : 'Run experiment'}</span>
+              <span>Workspace</span>
             </button>
             <details className="relative">
               <summary className="cursor-pointer list-none rounded-md px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800/60 hover:text-white">
@@ -209,7 +195,13 @@ const DashboardContent: React.FC = () => {
         )}
 
         {activeTab === 'workspace' && (
-          <WorkspaceHub taskInfo={taskInfo} onOpenEnvironmentModal={() => setIsEnvModalOpen(true)} />
+          <WorkspaceHub
+            taskInfo={taskInfo}
+            onOpenEnvironmentModal={() => setIsEnvModalOpen(true)}
+            onOpenExperiments={() => setActiveTab('pipeline')}
+            onOpenResults={() => setActiveTab('experiments')}
+            onOpenSubmissions={() => setActiveTab('submissions')}
+          />
         )}
 
         {/* Unified 4-Step Competition Pipeline Hub */}
