@@ -49,6 +49,12 @@ class RuntimeContracts(unittest.TestCase):
             self.assertEqual(len(pd.read_csv(runner.exp_dir/"oof_predictions.csv")),12)
             from harness.artifacts import validate_run, sha256
             validate_run(runner.exp_dir,task_spec=runner.task_spec,plugin=runner.task_plugin)
+            from harness.candidates import build_candidate,validate_candidate
+            candidate=build_candidate(runner.project,"control","single_model",{"source_exp":"exp001"})
+            validate_candidate(runner.project,candidate)
+            with self.assertRaises((ValueError,FileNotFoundError)):
+                build_candidate(runner.project,"missing","single_model",{"source_exp":"missing"})
+
             original=sha256(runner.exp_dir/"metrics.json")
             with self.assertRaisesRegex(ValueError,"overwrite"):
                 UniversalRunner(cfg,"config.yaml",args)

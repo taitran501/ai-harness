@@ -688,143 +688,15 @@ class AgentBridge:
 
     def _evaluate_oof_dataframe(self, oof_csv_path: Path) -> Tuple[float, Dict[str, float]]:
         """Evaluate an OOF predictions CSV against the ground-truth training dataset."""
-        # 1. If metrics.json already exists in the artifact folder, read it directly
-        parent_dir = oof_csv_path.parent
-        metrics_file = parent_dir / "metrics.json"
-        if metrics_file.exists():
-            try:
-                metrics_data = json.loads(metrics_file.read_text(encoding="utf-8"))
-                if isinstance(metrics_data, list) and metrics_data:
-                    metrics_data = metrics_data[0]
-                comp_score = float(metrics_data.get("composite_score") or metrics_data.get("macro_f1") or metrics_data.get("score") or 0.0)
-                scores_by_target = {k: float(v) for k, v in metrics_data.items() if isinstance(v, (int, float))}
-                return comp_score, scores_by_target
-            except Exception:
-                pass
-
-        # 2. Try loading ground truth from dataset
-        df_gt = None
-        task_spec = None
-        try:
-            from harness.task_spec import load_active_task_spec
-            task_spec = load_active_task_spec()
-            df_gt = task_spec.load_dataset_split("train", project_root=self.project_root)
-        except Exception:
-            pass
-
-        if df_gt is None and (self.project_root / "dataset").is_dir():
-            dfs = []
-            for f in sorted((self.project_root / "dataset").glob("*.tsv")) + sorted((self.project_root / "dataset").glob("*.csv")):
-                sep = "\t" if f.suffix == ".tsv" else ","
-                try:
-                    dfs.append(pd.read_csv(f, sep=sep))
-                except Exception:
-                    pass
-            if dfs:
-                df_gt = pd.concat(dfs, ignore_index=True)
-
-        if df_gt is None:
-            for fname in ["train.csv", "train.tsv", "dataset/train.csv", "dataset/train.tsv"]:
-                fpath = self.project_root / fname
-                if fpath.exists():
-                    sep = "\t" if fname.endswith(".tsv") else ","
-                    try:
-                        df_gt = pd.read_csv(fpath, sep=sep)
-                        break
-                    except Exception:
-                        pass
-
-        if df_gt is None or not oof_csv_path.exists():
-            return 0.0, {}
-
-        df_oof = pd.read_csv(oof_csv_path)
-
-        if "input_variant" in df_oof.columns and df_oof["input_variant"].nunique() > 1:
-            preferred = "specialist_router" if "specialist_router" in df_oof["input_variant"].values else "comment"
-            if preferred in df_oof["input_variant"].values:
-                df_oof = df_oof[df_oof["input_variant"] == preferred].copy()
-            else:
-                first_var = df_oof["input_variant"].iloc[0]
-                df_oof = df_oof[df_oof["input_variant"] == first_var].copy()
-
-        # Resolve ID column dynamically
-        id_col = None
-        spec = getattr(self.comp_state, "spec", {}) if hasattr(self, "comp_state") else {}
-        declared_id = spec.get("data_config", {}).get("id_column") if isinstance(spec, dict) else None
-        if declared_id and declared_id in df_gt.columns and declared_id in df_oof.columns:
-            id_col = declared_id
-        else:
-            for candidate_id in ["id", "ID", "sample_id", "row_id", "uid", "item_id"]:
-                if candidate_id in df_gt.columns and candidate_id in df_oof.columns:
-                    id_col = candidate_id
-                    break
-        if not id_col:
-            common_ids = [c for c in df_gt.columns if c in df_oof.columns and c.lower().endswith("id")]
-            if common_ids:
-                id_col = common_ids[0]
-        if not id_col:
-            id_col = df_gt.columns[0]
-
-        merged = pd.merge(
-            df_gt,
-            df_oof,
-            on=id_col,
-            suffixes=("", "_oof"),
-        )
-        if len(merged) == 0:
-            return 0.0, {}
-
-        # 3. Dynamic Subtask Evaluation via TaskSpec if configured
-        from sklearn.metrics import f1_score, accuracy_score
-        if task_spec and getattr(task_spec, "subtasks", None):
-            scores_by_target = {}
-            weighted_sum = 0.0
-            total_weight = 0.0
-            for st_id, st in task_spec.subtasks.items():
-                col = st.column or st_id
-                pred_col = f"pred_{col}" if f"pred_{col}" in merged.columns else f"pred_{st_id}"
-                if col in merged.columns and pred_col in merged.columns:
-                    eval_mask = np.ones(len(merged), dtype=bool)
-                    if st.condition is not None and st.condition.eval_condition_only:
-                        parent_st = task_spec.subtasks.get(st.condition.parent_target)
-                        parent_col = parent_st.column if parent_st else st.condition.parent_target
-                        if parent_col in merged.columns:
-                            eval_mask = st.condition.evaluate_condition(merged[parent_col])
-                    
-                    eval_sub = merged[eval_mask]
-                    if len(eval_sub) > 0:
-                        try:
-                            if st.primary_metric in ("macro_f1", "f1"):
-                                sc = float(f1_score(eval_sub[col].astype(str), eval_sub[pred_col].astype(str), average="macro"))
-                            elif st.primary_metric == "accuracy":
-                                sc = float(accuracy_score(eval_sub[col], eval_sub[pred_col]))
-                            else:
-                                sc = float(f1_score(eval_sub[col].astype(str), eval_sub[pred_col].astype(str), average="macro"))
-                        except Exception:
-                            sc = float(accuracy_score(eval_sub[col], eval_sub[pred_col]))
-
-                        scores_by_target[st_id] = round(sc, 4)
-                        weighted_sum += sc * st.weight
-                        total_weight += st.weight
-
-            if scores_by_target and total_weight > 0:
-                composite = round(weighted_sum / total_weight, 4)
-                scores_by_target["composite_score"] = composite
-                return composite, scores_by_target
-
-        # 5. Generic Task Evaluation Fallback
-        scores_by_target = {}
-        for col in df_gt.columns:
-            pred_col = f"pred_{col}"
-            if pred_col in merged.columns:
-                try:
-                    scores_by_target[col] = round(float(f1_score(merged[col], merged[pred_col], average="macro")), 4)
-                except Exception:
-                    scores_by_target[col] = round(float(accuracy_score(merged[col], merged[pred_col])), 4)
-
-        composite = round(sum(scores_by_target.values()) / len(scores_by_target), 4) if scores_by_target else 0.0
-        scores_by_target["composite_score"] = composite
-        return composite, scores_by_target
+        from harness.artifacts import validate_run
+        directory=oof_csv_path.parent
+        if (directory/"candidate_manifest.json").is_file():
+            from harness.candidates import validate_candidate
+            entry=json.loads((directory/"candidate_manifest.json").read_text())
+            validate_candidate(self.project,entry)
+        else: validate_run(directory,task_spec=self.task_spec,plugin=self.task_plugin)
+        metrics=json.loads((directory/"metrics.json").read_text())
+        return float(metrics["primary_score"]),metrics.get("subtasks",{})
 
     def _run_subprocess_safe(
         self, cmd: List[str], timeout: float = 1800.0
@@ -1538,24 +1410,17 @@ class AgentBridge:
                 name = params.get("name", f"{session.session_id}_router")
                 mode = params.get("mode", "specialist_router")
                 source_map = params.get("source_map")
-                if not source_map:
-                    subtasks = self.comp_state.spec.get("subtasks", [])
-                    best_node = journal.get_best_node() if hasattr(journal, "get_best_node") else None
-                    best_id = (best_node.id if best_node else None) or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
-                    if subtasks:
-                        source_map = {f"{st.get('id', 'subtask')}_exp": best_id for st in subtasks if isinstance(st, dict)}
-                    else:
-                        source_map = {"model_exp": best_id}
-
+                if act==TypedActionName.PROMOTE_CANDIDATE.value:
+                    if not params.get("exp_id"): raise ValueError("Promotion requires exp_id")
+                    mode="single_model"; source_map={"source_exp":params["exp_id"]}
+                if not source_map: raise ValueError("Explicit source_map is required")
                 entry = self.comp_state.synthesize_candidate(name=name, mode=mode, source_map=source_map)
-                session.compute_usage["experiments_used"] = int(session.compute_usage.get("experiments_used", 0)) + 1
-                if entry["id"] not in session.experiments_run:
-                    session.experiments_run.append(entry["id"])
+                session.compute_usage["candidate_operations_used"]=int(session.compute_usage.get("candidate_operations_used",0))+1
 
                 oof_abs = self.project_root / entry["oof_path"]
                 synth_score, detail_scores = self._evaluate_oof_dataframe(oof_abs)
                 base_score = float(self.comp_state.compute_candidate_pool(journal).get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
-                delta = round(synth_score - base_score, 4)
+                delta = round((synth_score-base_score)*(1 if self.task_spec.direction=="maximize" else -1),4)
 
                 min_imp = self._get_spec_min_improvement(session)
                 max_rej = int(session.budget.get("max_consecutive_rejections") or 3)
@@ -1572,7 +1437,7 @@ class AgentBridge:
                     summary=f"Synthesized candidate '{entry['id']}' via '{mode}' (Real OOF Composite={synth_score:.4f}, Δ={delta:+.4f}).",
                     composite_score=synth_score,
                     metric_delta=delta,
-                    fold_variance=0.011,
+                    fold_variance=None,
                     advisory="REASSESS_RECOMMENDED" if session.reassess_recommended else None,
                     artifact_path=entry["oof_path"],
                     data={**entry, "scores": detail_scores},
@@ -1585,6 +1450,12 @@ class AgentBridge:
                 default_exp = best_cand.get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
                 exp_id = params.get("exp_id", default_exp)
                 cand_csv = params.get("candidate_csv")
+                if not cand_csv: raise ValueError("Explicit test candidate_csv is required")
+                from harness.artifacts import validate_test_prediction
+                validate_test_prediction(self.project_root/cand_csv,task_spec=self.task_spec,plugin=self.task_plugin)
+                capabilities=self.task_plugin.capabilities()
+                if not capabilities.get("submission_builder") or not capabilities.get("submission_validator"):
+                    raise ValueError("Task plugin must implement submission hooks")
                 if self.project.plugin_id not in (None, "default"):
                     capabilities = self.task_plugin.capabilities()
                     if not capabilities.get("submission_builder") or not capabilities.get("submission_validator"):

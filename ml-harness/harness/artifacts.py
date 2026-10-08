@@ -61,3 +61,11 @@ def validate_run(directory, *, task_spec=None, plugin=None, expected=None):
 
 def frame_hash(frame):
     return hashlib.sha256(frame.to_csv(index=False).encode()).hexdigest()
+
+
+def validate_test_prediction(path, *, task_spec, plugin=None):
+    path=Path(path).resolve()
+    manifest=validate_run(path.parent,task_spec=task_spec,plugin=plugin)
+    if path.name!="test_predictions.csv" or path.name not in manifest["files"] or manifest.get("prediction_splits",{}).get(path.name)!="test":
+        raise ValueError("Submission requires proven test predictions; OOF is validation evidence")
+    return manifest

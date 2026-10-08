@@ -505,7 +505,7 @@ class CompetitionStateMachine:
     # =========================================================================
     def compute_candidate_pool(self, journal: TreeJournal) -> Dict[str, Any]:
         """Classify completed runs and list supported candidate synthesis strategies from Spec."""
-        completed = [n for n in journal.nodes.values() if not n.is_buggy and n.status == "COMPLETED"]
+        completed = [n for n in journal.nodes.values() if not n.is_buggy and n.status == "COMPLETED" and n.verified and n.eligible]
         baseline_id = self.state["gates"].get("baseline_exp_id") or self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
         baseline_node = journal.nodes.get(baseline_id) or (completed[0] if completed else None)
         base_score = baseline_node.get_score() if baseline_node else float(self.spec.get("primary_metric_baseline") or 0.0)
@@ -551,21 +551,21 @@ class CompetitionStateMachine:
                     val = float(metric_value or 0.0)
                 subtasks_scores[crit_key] = round(val, 4)
 
-            fold_std = 0.015
+            fold_std = None
             exp_dir = (self.project_root / n.artifact_dir).resolve() if n.artifact_dir else (self.artifacts_dir / n.id).resolve()
             summary_csv = exp_dir / "summary.csv"
             oof_csv = exp_dir / "oof_predictions.csv"
             if summary_csv.exists():
                 try:
                     sdf = pd.read_csv(summary_csv)
-                    metric_cols = [c for c in sdf.columns if c.endswith("_f1") or c.endswith("_macro_f1") or c == "score"]
+                    metric_cols = [c for c in sdf.columns if c.endswith("_f1") or c.endswith("_macro_f1") or c in {"score","primary_score"}]
                     if metric_cols:
                         fold_std = round(float(sdf[metric_cols[0]].std()), 4)
                 except Exception:
                     pass
 
-            delta = round(score - base_score, 4)
-            verdict = "KEEP" if (score >= base_score or delta >= -0.005) else "REJECT"
+            delta = round((score-base_score)*(1 if n.direction=="maximize" else -1),4)
+            verdict = "KEEP" if (delta >= -0.005) else "REJECT"
 
             cand_entry = {
                 "id": n.id,
@@ -623,237 +623,10 @@ class CompetitionStateMachine:
         source_map: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Build a verified candidate artifact in Phase 5 according to the selected strategy."""
-        clean_name = "".join(c if c.isalnum() or c == "_" else "_" for c in name.strip()).strip("_") or "cand_synth"
-        cand_id = f"cand_{clean_name}"
-        out_dir = self.artifacts_dir / cand_id
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_csv = out_dir / "oof_predictions.csv"
-        baseline_id = self.state["gates"].get("baseline_exp_id") or self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
-
-        def _get_id_col(df_in: pd.DataFrame) -> str:
-            declared = self.spec.get("data_config", {}).get("id_column")
-            if declared and declared in df_in.columns:
-                return declared
-            for candidate in ["id", "ID", "sample_id", "row_id", "uid", "item_id"]:
-                if candidate in df_in.columns:
-                    return candidate
-            common_id = [c for c in df_in.columns if c.lower().endswith("id")]
-            if common_id:
-                return common_id[0]
-            return df_in.columns[0]
-
-        def _load_oof(exp_id_or_path: str, preferred_variant: Optional[str] = None) -> pd.DataFrame:
-            p = Path(exp_id_or_path)
-            if not p.exists():
-                p = self.artifacts_dir / exp_id_or_path / "predictions.csv"
-            if not p.exists():
-                p = self.artifacts_dir / exp_id_or_path / "oof_predictions.csv"
-            if not p.exists():
-                for base_folder in [baseline_id, "baseline_v1", "baseline"]:
-                    alt = self.artifacts_dir / base_folder / "predictions.csv"
-                    if not alt.exists():
-                        alt = self.artifacts_dir / base_folder / "oof_predictions.csv"
-                    if alt.exists():
-                        p = alt
-                        if not preferred_variant and exp_id_or_path.startswith("baseline_v1_"):
-                            preferred_variant = exp_id_or_path[len("baseline_v1_") :]
-                        break
-            if not p.exists():
-                for cand_oof in sorted(list(self.artifacts_dir.glob("*/predictions.csv")) + list(self.artifacts_dir.glob("*/oof_predictions.csv"))):
-                    if cand_oof.parent.name != cand_id:
-                        p = cand_oof
-                        break
-            if not p.exists():
-                parent_artifacts = self.project_root.parent / "artifacts"
-                if parent_artifacts.is_dir():
-                    for cand_oof in sorted(list(parent_artifacts.glob("*/predictions.csv")) + list(parent_artifacts.glob("*/oof_predictions.csv"))):
-                        if cand_oof.parent.name != cand_id:
-                            p = cand_oof
-                            break
-            if not p.exists():
-                id_col = self.spec.get("data_config", {}).get("id_column") or "id"
-                dummy_rows = 10
-                synth_data = {id_col: [f"sample_{i}" for i in range(dummy_rows)]}
-                subtasks = self.spec.get("subtasks", [])
-                if subtasks:
-                    for st in subtasks:
-                        st_id = st.get("id", "subtask") if isinstance(st, dict) else getattr(st, "id", "subtask")
-                        col = (st.get("column") if isinstance(st, dict) else getattr(st, "column", None)) or st_id
-                        classes = (st.get("classes") if isinstance(st, dict) else getattr(st, "classes", ["0", "1"])) or ["0", "1"]
-                        synth_data[f"pred_{col}"] = [classes[i % len(classes)] for i in range(dummy_rows)]
-                        synth_data[col] = [classes[i % len(classes)] for i in range(dummy_rows)]
-                else:
-                    synth_data["prediction"] = [0.5 for _ in range(dummy_rows)]
-                    synth_data["pred_target"] = [0.5 for _ in range(dummy_rows)]
-                    synth_data["target"] = [0.5 for _ in range(dummy_rows)]
-                df = pd.DataFrame(synth_data)
-            else:
-                df = pd.read_csv(p)
-
-            if "input_variant" in df.columns:
-                variants = df["input_variant"].unique()
-                chosen_var = preferred_variant if (preferred_variant in variants) else variants[0]
-                df = df[df["input_variant"] == chosen_var].copy()
-
-            id_col = _get_id_col(df)
-            if id_col in df.columns:
-                return df.sort_values(id_col).reset_index(drop=True)
-            return df.reset_index(drop=True)
-
-        audit_notes: Dict[str, Any] = {}
-        if mode in ("single_model", "checkpoint_selection"):
-            src_exp = source_map.get("source_exp") or source_map.get("model_exp") or (list(source_map.values())[0] if source_map else baseline_id)
-            merged = _load_oof(src_exp)
-            merged.to_csv(out_csv, index=False)
-            merged.to_csv(out_dir / "predictions.csv", index=False)
-            audit_notes = {"strategy": mode, "source_exp": src_exp}
-        elif mode == "specialist_router":
-            routing = source_map.get("routing", {}) or source_map.get("target_routing", {})
-            if not routing:
-                subtasks = self.spec.get("subtasks", [])
-                if subtasks:
-                    for st in subtasks:
-                        st_id = st.get("id") if isinstance(st, dict) else getattr(st, "id", "subtask")
-                        col = (st.get("column") if isinstance(st, dict) else getattr(st, "column", None)) or st_id
-                        st_exp = source_map.get(f"{st_id}_exp") or source_map.get(st_id) or baseline_id
-                        routing[f"pred_{col}"] = st_exp
-                else:
-                    for k, v in source_map.items():
-                        if k.endswith("_exp"):
-                            target_key = k[:-4]
-                            routing[f"pred_{target_key}"] = v
-                    if not routing:
-                        routing = {"pred_target": source_map.get("source_exp") or baseline_id}
-
-            distinct_exps = {exp for exp in routing.values() if exp}
-            loaded_dfs = {exp: _load_oof(exp) for exp in distinct_exps}
-            first_df = next(iter(loaded_dfs.values()))
-            id_col = _get_id_col(first_df)
-
-            data_cfg = self.spec.get("data_config") or self.spec.get("data", {})
-            meta_candidates = [
-                id_col,
-                data_cfg.get("group_column"),
-                data_cfg.get("partition_column") or self.spec.get("partition_column"),
-                "fold",
-            ]
-            meta_cols = list(dict.fromkeys(c for c in meta_candidates if c and c in first_df.columns))
-            merged = first_df[meta_cols].copy()
-            merged["input_variant"] = "specialist_router"
-
-            for target_col, exp_id in routing.items():
-                col_name = target_col if target_col.startswith("pred_") else f"pred_{target_col}"
-                if exp_id in loaded_dfs and col_name in loaded_dfs[exp_id].columns:
-                    merged[col_name] = loaded_dfs[exp_id][col_name].values
-                elif exp_id in loaded_dfs and target_col in loaded_dfs[exp_id].columns:
-                    merged[col_name] = loaded_dfs[exp_id][target_col].values
-                else:
-                    merged[col_name] = [0 for _ in range(len(merged))]
-
-            # Apply conditional rules declared in UniversalTaskSpec or CompetitionSpec
-            try:
-                from harness.task_spec import load_active_task_spec
-                task_spec = load_active_task_spec(self.project.task_config_path)
-                raw_preds = {c.replace("pred_", ""): merged[c].values for c in merged.columns if c.startswith("pred_")}
-                routed_preds = task_spec.apply_routing(raw_preds, n_samples=len(merged))
-                for k, v in routed_preds.items():
-                    if f"pred_{k}" in merged.columns:
-                        merged[f"pred_{k}"] = v
-            except Exception:
-                pass
-
-            for chk in self.spec.get("data_checks", []):
-                if chk.get("type") == "conditional_label":
-                    p_name = chk.get("parent_target")
-                    if p_name:
-                        parent_col = f"pred_{p_name}"
-                        if parent_col in merged.columns:
-                            non_cond_mask = merged[parent_col] == chk.get("if_equals", "no")
-                            c_name = chk.get("child_target")
-                            if c_name:
-                                child_type_col = f"pred_{c_name}"
-                                if child_type_col in merged.columns:
-                                    merged.loc[non_cond_mask, child_type_col] = chk.get("require_value", "none")
-
-            merged.to_csv(out_csv, index=False)
-            merged.to_csv(out_dir / "predictions.csv", index=False)
-            audit_notes = {"routing": routing}
-        else:
-            comp_ids: List[str] = source_map.get("components", [])
-            if len(comp_ids) < 2:
-                raise ValueError("Ensemble strategy requires at least 2 constituent models.")
-            dfs = [_load_oof(cid) for cid in comp_ids]
-            id_col = _get_id_col(dfs[0])
-
-            pred_cols = [c for c in dfs[0].columns if c.startswith("pred_")]
-            if not pred_cols:
-                pred_cols = [c for c in dfs[0].columns if c not in {*meta_cols, "input_variant"}]
-
-            audit_col = next((c for c in pred_cols if "pred_" in c), pred_cols[0])
-            submission_spec = self.spec.get("submission_spec") or {}
-            passed, errs, div_details = EnsembleGuard.audit_constituent_diversity(
-                dfs,
-                col=audit_col,
-                max_kappa=float(submission_spec.get("max_kappa", 0.85)),
-                min_disagreement_pct=float(submission_spec.get("min_disagreement", 5.0)),
-            )
-            data_cfg = self.spec.get("data_config") or self.spec.get("data", {})
-            meta_candidates = [
-                id_col,
-                data_cfg.get("group_column"),
-                data_cfg.get("partition_column") or self.spec.get("partition_column"),
-                "fold",
-            ]
-            meta_cols = list(dict.fromkeys(c for c in meta_candidates if c and c in dfs[0].columns))
-            merged = dfs[0][meta_cols].copy()
-
-            if mode in ("weighted_blend", "probability_blend"):
-                raw_weights = source_map.get("weights") or [1.0] * len(dfs)
-                if len(raw_weights) != len(dfs) or sum(raw_weights) <= 0:
-                    raw_weights = [1.0] * len(dfs)
-                total_w = sum(raw_weights)
-                weights = [w / total_w for w in raw_weights]
-
-                merged["input_variant"] = "weighted_blend"
-                for col in pred_cols:
-                    if pd.api.types.is_numeric_dtype(dfs[0][col]):
-                        merged[col] = sum(weights[i] * dfs[i][col] for i in range(len(dfs)))
-                    else:
-                        def weighted_choice(row):
-                            acc = {}
-                            for i, val in enumerate(row):
-                                acc[val] = acc.get(val, 0.0) + weights[i]
-                            return max(acc.items(), key=lambda x: x[1])[0]
-                        stacked = pd.DataFrame({f"m_{i}": d[col] for i, d in enumerate(dfs)})
-                        merged[col] = stacked.apply(weighted_choice, axis=1)
-                audit_notes = {"components": comp_ids, "weights": weights, "diversity_passed": passed, "diversity_errors": errs}
-            else:
-                merged["input_variant"] = "ensemble_vote"
-                for col in pred_cols:
-                    if pd.api.types.is_numeric_dtype(dfs[0][col]):
-                        merged[col] = pd.DataFrame({f"m_{i}": d[col] for i, d in enumerate(dfs)}).mean(axis=1)
-                    else:
-                        stacked = pd.DataFrame({f"m_{i}": d[col] for i, d in enumerate(dfs)})
-                        modes = stacked.mode(axis=1)
-                        # Fair tie-breaking: modes[0] is primary mode (first mode encountered)
-                        merged[col] = modes[0]
-                audit_notes = {"components": comp_ids, "diversity_passed": passed, "diversity_errors": errs}
-
-            merged.to_csv(out_csv, index=False)
-
-        entry = {
-            "id": cand_id,
-            "name": name,
-            "mode": mode,
-            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "oof_path": str(out_csv.relative_to(self.project_root)).replace("\\", "/"),
-            "rows": int(len(merged)),
-            "details": audit_notes,
-        }
-        synth_list = [c for c in self.state["candidate_pool"].get("synthesized_candidates", []) if c["id"] != cand_id]
-        synth_list.insert(0, entry)
-        self.state["candidate_pool"]["synthesized_candidates"] = synth_list
-        self._append_audit_event("CANDIDATE_SYNTHESIZED", f"Created candidate '{cand_id}' via strategy '{mode}'", entry)
+        from harness.candidates import build_candidate
+        entry=build_candidate(self.project,name,mode,source_map)
+        self.state["candidate_pool"].setdefault("synthesized_candidates",[]).insert(0,entry)
+        self._append_audit_event("CANDIDATE_SYNTHESIZED",f"Created verified candidate {entry['id']}",entry)
         self.save()
         return entry
 

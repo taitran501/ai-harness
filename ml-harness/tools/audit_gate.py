@@ -59,149 +59,47 @@ def audit_prediction_integrity(
     spec: Optional[Any] = None,
 ) -> List[str]:
     """Verify structural validity and constraints of the predictions DataFrame."""
-    errors = []
-
+    import numpy as np
     if spec is None:
-        try:
-            from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec()
-        except Exception:
-            spec = None
-
-    if spec is None or (not getattr(spec, "subtasks", None) and not getattr(spec, "data_checks", None)):
-        try:
-            from harness.task_spec import UniversalTaskSpec
-            tasks_dir = Path("configs/tasks")
-            if tasks_dir.is_dir():
-                for preset in tasks_dir.glob("*.yaml"):
-                    try:
-                        cand_spec = UniversalTaskSpec.from_yaml(preset)
-                        sub_cols = [
-                            getattr(s, "column", None) or getattr(s, "target_column", None) or getattr(s, "id", None)
-                            for s in (cand_spec.subtasks.values() if isinstance(cand_spec.subtasks, dict) else getattr(cand_spec, "subtasks", []))
-                        ]
-                        if any(c and (c in df.columns or f"pred_{c}" in df.columns) for c in sub_cols):
-                            spec = cand_spec
-                            break
-                    except Exception:
-                        continue
-        except Exception:
-            pass
-
-    resolved_id = id_col or getattr(spec, "id_column", None)
-    if not resolved_id:
-        id_candidates = [
-            c for c in df.columns
-            if c.lower() in ("id", "sample_id", "uid", "uuid")
-            or c.lower().endswith("_id")
-            or c.lower().endswith("id")
-        ]
-        resolved_id = id_candidates[0] if id_candidates else "id"
-
-    data_checks = getattr(spec, "data_checks", []) if spec else []
-
-    if resolved_id in df.columns and df[resolved_id].isnull().any():
-        errors.append(f"Column '{resolved_id}' contains null values.")
-
-    # Apply declarative conditional checks from task spec
-    for chk in data_checks:
-        if chk.get("type") == "conditional_label":
-            parent = f"pred_{chk.get('parent_target', '')}"
-            child = f"pred_{chk.get('child_target', '')}"
-            if parent in df.columns and child in df.columns:
-                cond_val = chk.get("if_equals", "no")
-                req_val = chk.get("require_value", "none")
-                violated = df[(df[parent] == cond_val) & (df[child] != req_val)]
-                if len(violated) > 0:
-                    errors.append(
-                        f"Conditional constraint violated: {len(violated)} rows where {parent}=='{cond_val}' have {child} != '{req_val}'."
-                    )
-
-    # Dynamic class validation from TaskSpec subtasks if available
-    checked_cols = set()
-    if spec:
-        try:
-            subtasks_iterable = spec.subtasks.values() if isinstance(getattr(spec, "subtasks", None), dict) else getattr(spec, "subtasks", [])
-            for subtask in subtasks_iterable:
-                col_name = getattr(subtask, "column", None) or getattr(subtask, "target_column", None) or getattr(subtask, "id", None)
-                classes = list(getattr(subtask, "classes", []))
-                cond = getattr(subtask, "condition", None)
-                if cond and getattr(cond, "fallback_value", None) and cond.fallback_value not in classes:
-                    classes.append(cond.fallback_value)
-                if col_name and classes:
-                    target_col = f"pred_{col_name}" if f"pred_{col_name}" in df.columns else (col_name if col_name in df.columns else None)
-                    if target_col:
-                        checked_cols.add(target_col)
-                        invalid = df[~df[target_col].isin(classes)]
-                        if len(invalid) > 0:
-                            errors.append(f"Subtask '{subtask.id}' column '{target_col}' has {len(invalid)} invalid values (expected {classes}).")
-        except Exception:
-            pass
-
+        from harness.task_spec import load_active_task_spec
+        spec=load_active_task_spec()
+    key=id_col or spec.id_column
+    errors=[]
+    if key not in df: errors.append("Missing declared ID column")
+    elif df[key].isna().any() or df[key].duplicated().any(): errors.append("IDs must be non-null and unique")
+    if df.empty: errors.append("Prediction coverage is empty")
+    for target,st in spec.subtasks.items():
+        col=next((c for c in ("pred_"+target,"pred_"+(st.column or target),st.column or target) if c in df),None)
+        if col is None:
+            errors.append("Missing prediction: "+target); continue
+        if df[col].isna().any(): errors.append("Null prediction: "+target)
+        if st.task_type=="regression":
+            values=pd.to_numeric(df[col],errors="coerce")
+            if not np.isfinite(values).all(): errors.append("Non-finite prediction: "+target)
+        elif st.task_type=="multi_label":
+            try:
+                values=np.asarray([json.loads(x) if isinstance(x,str) else x for x in df[col]])
+                if values.shape!=(len(df),len(st.classes)) or not np.isin(values,[0,1]).all(): errors.append("Invalid multilabel shape/domain")
+            except (ValueError,TypeError): errors.append("Invalid multilabel encoding")
+        elif not df[col].astype(str).isin(list(map(str,st.classes))).all():
+            errors.append("Prediction outside declared classes: "+target)
     return errors
 
 
-def compute_diff_metrics(
-    cand_df: pd.DataFrame,
-    base_df: pd.DataFrame,
-    id_col: Optional[str] = None,
-) -> Tuple[int, Dict[str, Any]]:
-    """Compute exact row-by-row prediction deltas between candidate and baseline."""
-    resolved_id = id_col
-    if not resolved_id:
-        try:
-            from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec()
-            resolved_id = getattr(spec, "id_column", None)
-        except Exception:
-            resolved_id = None
-
-    if not resolved_id or (resolved_id not in cand_df.columns and resolved_id not in base_df.columns):
-        id_candidates = [
-            c for c in cand_df.columns
-            if c.lower() in ("id", "sample_id", "uid", "uuid")
-            or c.lower().endswith("_id")
-            or c.lower().endswith("id")
-        ]
-        if id_candidates:
-            resolved_id = id_candidates[0]
-        else:
-            non_preds = [c for c in cand_df.columns if not c.startswith("pred_")]
-            if non_preds:
-                resolved_id = non_preds[0]
-            else:
-                resolved_id = "id"
-
-    if resolved_id in cand_df.columns and resolved_id in base_df.columns:
-        cand = cand_df.sort_values(resolved_id).reset_index(drop=True)
-        base = base_df.sort_values(resolved_id).reset_index(drop=True)
-    else:
-        cand = cand_df.reset_index(drop=True)
-        base = base_df.reset_index(drop=True)
-
-    if len(cand) != len(base):
-        raise ValueError(
-            f"Row count mismatch! Candidate has {len(cand)} rows, baseline has {len(base)} rows."
-        )
-
-    common_cols = [c for c in cand.columns if c in base.columns and c != resolved_id]
-    if not common_cols:
-        common_cols = [c for c in cand.columns if c != resolved_id]
-
-    diff_per_col = {}
-    any_diff_mask = pd.Series([False] * len(cand))
-
-    for col in common_cols:
-        col_diff = cand[col] != base[col]
-        n_col_diff = int(col_diff.sum())
-        diff_per_col[col] = {
-            "different_count": n_col_diff,
-            "pct_changed": round(n_col_diff / len(cand) * 100, 2),
-        }
-        any_diff_mask = any_diff_mask | col_diff
-
-    total_diff_rows = int(any_diff_mask.sum())
-    return total_diff_rows, diff_per_col
+def compute_diff_metrics(cand_df,base_df,id_col=None):
+    key=id_col or "id"
+    for frame in (cand_df,base_df):
+        if key not in frame or frame[key].isna().any() or frame[key].duplicated().any(): raise ValueError("Invalid comparison IDs")
+    if set(cand_df[key])!=set(base_df[key]): raise ValueError("Prediction ID sets differ")
+    cand=cand_df.set_index(key); base=base_df.set_index(key).reindex(cand.index)
+    cols=[c for c in cand if c.startswith(("pred_","proba_"))]
+    if not cols: raise ValueError("No prediction columns to compare")
+    if set(cols)!={c for c in base if c.startswith(("pred_","proba_"))}: raise ValueError("Prediction schemas differ")
+    details={}; changed=pd.Series(False,index=cand.index)
+    for col in cols:
+        diff=cand[col]!=base[col]; changed|=diff
+        details[col]={"different_count":int(diff.sum()),"pct_changed":float(diff.mean()*100)}
+    return int(changed.sum()),details
 
 
 def compute_mcnemar_significance(
