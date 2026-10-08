@@ -240,7 +240,7 @@ class KaggleKernelManager:
         # Bundle only code/config; dataset contents use the separately consented provider dataset.
         import tempfile
         runtime = runtime_manifest or {
-            "schema_version": 1,
+            "schema_version": 2,
             "core": {"distribution": "ml-harness", "version": "0.2.0", "source": "bundled"},
             "plugin": {"id": project.plugin_id or "default", "version": "1", "install": None},
             "requirements": [],
@@ -390,6 +390,7 @@ essential_files = [
     "summary.md",
     "predictions.csv",
     "oof_predictions.csv",
+        "evaluation_truth.csv",
     "test_predictions.csv",
     "submission.csv",
     "DIAGNOSTICS.md",
@@ -403,8 +404,9 @@ if exp_dir.exists():
     records = metrics if isinstance(metrics, list) else [metrics]
     if not any(isinstance(row, dict) and row.get("experiment_id", row.get("exp_id")) == "{exp_id}" for row in records):
         raise RuntimeError("Run metrics are missing the expected experiment identity.")
-    manifest = {{
-        "schema_version": 1,
+    manifest = json.loads((exp_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+    manifest.update({{
+        "schema_version": 2,
         "job_id": {json.dumps(job_id)},
         "task_id": {json.dumps(str(task_id))},
         "exp_id": "{exp_id}",
@@ -412,7 +414,7 @@ if exp_dir.exists():
         "core_version": (runtime.get("core") or {{}}).get("version"),
         "plugin_id": (runtime.get("plugin") or {{}}).get("id"),
         "files": {{}},
-    }}
+    }})
     for fname in essential_files:
         src_file = exp_dir / fname
         if src_file.exists():
@@ -623,6 +625,7 @@ print("Training completed. Lightweight output artifacts copied to working root."
             "summary.md",
             "predictions.csv",
             "oof_predictions.csv",
+        "evaluation_truth.csv",
             "test_predictions.csv",
             "submission.csv",
             "DIAGNOSTICS.md",

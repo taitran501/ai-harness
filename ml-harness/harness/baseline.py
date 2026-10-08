@@ -51,6 +51,8 @@ def validate_baseline_artifact(
 ) -> Dict[str, Any]:
     """Require a run artifact and finite primary metric; config defaults never qualify."""
     exp_dir = Path(artifacts_dir).resolve() / exp_id
+    from harness.artifacts import validate_run
+    validate_run(exp_dir)
     metrics_path = exp_dir / "metrics.json"
     if not exp_dir.is_dir() or not metrics_path.is_file():
         raise ValueError(

@@ -47,6 +47,19 @@ class RuntimeContracts(unittest.TestCase):
             self.assertGreaterEqual(result["primary_score"],0)
             self.assertEqual(result["utility"],-result["primary_score"])
             self.assertEqual(len(pd.read_csv(runner.exp_dir/"oof_predictions.csv")),12)
+            from harness.artifacts import validate_run, sha256
+            validate_run(runner.exp_dir,task_spec=runner.task_spec,plugin=runner.task_plugin)
+            original=sha256(runner.exp_dir/"metrics.json")
+            with self.assertRaisesRegex(ValueError,"overwrite"):
+                UniversalRunner(cfg,"config.yaml",args)
+            args.debug=True
+            probe=UniversalRunner(cfg,"config.yaml",args)
+            probe.run()
+            self.assertEqual(original,sha256(runner.exp_dir/"metrics.json"))
+            self.assertEqual(probe.run_kind,"probe")
+            with self.assertRaises(ValueError): validate_run(probe.exp_dir)
+            (runner.exp_dir/"metrics.json").write_text("{}")
+            with self.assertRaisesRegex(ValueError,"hash"): validate_run(runner.exp_dir)
 
     def test_llm_false_label_and_invalid_output(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -258,6 +258,7 @@ def run_training_remote(config_path: str, exp_id: str):
         "summary.md",
         "predictions.csv",
         "oof_predictions.csv",
+        "evaluation_truth.csv",
         "test_predictions.csv",
         "submission.csv",
         "DIAGNOSTICS.md",
@@ -280,8 +281,9 @@ def run_training_remote(config_path: str, exp_id: str):
         if p.exists():
             bundle[fname] = p.read_bytes()
 
-    artifact_manifest = {{
-        "schema_version": 1,
+    artifact_manifest = json.loads((exp_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+    artifact_manifest.update({{
+        "schema_version": 2,
         "job_id": {job_id!r},
         "task_id": {task_id!r},
         "exp_id": exp_id,
@@ -289,7 +291,7 @@ def run_training_remote(config_path: str, exp_id: str):
         "core_version": {runtime_manifest.get('core', {}).get('version')!r},
         "plugin_id": {runtime_manifest.get('plugin', {}).get('id')!r},
         "files": {{name: hashlib.sha256(value).hexdigest() for name, value in bundle.items()}},
-    }}
+    }})
     bundle["artifact_manifest.json"] = json.dumps(artifact_manifest, indent=2).encode("utf-8")
 
     print(f"[Modal Remote] Returning {{len(bundle)}} lightweight artifact files to local host.")

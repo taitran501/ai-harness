@@ -35,6 +35,8 @@ class Node:
     llm_spec: Optional[Dict[str, Any]] = None
     commit_hash: Optional[str] = None
     status: str = "COMPLETED"  # COMPLETED, BUGGY, PRUNED, RUNNING
+    verified: bool = False
+    eligible: bool = False
     is_buggy: bool = False
     artifact_dir: Optional[str] = None
     timestamp: float = field(default_factory=time.time)
@@ -46,6 +48,8 @@ class Node:
         if not self.metrics or self.is_buggy:
             return 0.0
 
+        if key is None and "primary_score" in self.metrics:
+            return float(self.metrics["primary_score"])
         target_key = key or self.primary_metric_name
         val = self.metrics.get(target_key)
         if isinstance(val, (int, float)):
@@ -65,6 +69,10 @@ class Node:
                         scores.append(float(task_val[m_cand]))
                         break
         return sum(scores) / len(scores) if scores else 0.0
+
+    def get_utility(self):
+        from harness.evaluation import utility
+        return utility(self.get_score(), self.direction)
 
 
 class TreeJournal:
@@ -139,211 +147,30 @@ class TreeJournal:
 
     def sync_from_artifacts(self, artifacts_dir: Optional[str | Path] = None) -> int:
         """Scan artifacts/ directory and auto-discover completed experiment runs."""
+        from harness.artifacts import validate_run
+        import yaml
         art_path = Path(artifacts_dir) if artifacts_dir is not None else self.artifacts_dir
-        if not art_path.exists():
-            return 0
-
-        synced_count = 0
-        for exp_dir in art_path.iterdir():
-            if not exp_dir.is_dir():
-                continue
-
-            exp_id = exp_dir.name
-            if "template" in exp_id.lower():
-                continue
-
-            metrics_file = exp_dir / "metrics.json"
-            cfg_file = exp_dir / "run_config.yaml"
-            summary_csv = exp_dir / "summary.csv"
-
-            if not metrics_file.exists() and not summary_csv.exists():
-                continue
-
-            if exp_id in self.nodes and self.nodes[exp_id].status == "COMPLETED" and self.nodes[exp_id].get_score() > 0:
-                continue
-
-            cfg_data = {}
-            if cfg_file.exists():
-                try:
-                    import yaml
-                    with open(cfg_file, "r", encoding="utf-8") as f:
-                        cfg_data = yaml.safe_load(f) or {}
-                except Exception:
-                    pass
-
-            exp_info = cfg_data.get("experiment", {})
-            task_info = cfg_data.get("task", {})
-            model_info = cfg_data.get("model", {})
-
-            parent_id = exp_info.get("parent_id")
-            if parent_id in ("none", "null", "ROOT", ""):
-                parent_id = None
-
-            branch = exp_info.get("branch", "baseline")
-            hypothesis = exp_info.get("hypothesis", "")
-            intervention = exp_info.get("intervention", "")
-            approach_type = task_info.get("approach_type")
-            if not approach_type:
-                lower_id = exp_id.lower()
-                if any(k in lower_id for k in ["llm", "gemini", "gpt", "claude", "deepseek", "qwen", "llama", "qlora", "peft", "fewshot", "cot"]):
-                    approach_type = "llm"
-                elif "deberta" in lower_id or "xlm" in lower_id or "roberta" in lower_id or "bert" in lower_id:
-                    approach_type = "dl"
-                else:
-                    approach_type = "ml"
-
-            model_family = task_info.get("model_family")
-            if not model_family:
-                if approach_type == "llm":
-                    model_family = "llm_peft" if "qlora" in exp_id.lower() or "peft" in exp_id.lower() else "llm_api"
-                elif approach_type == "dl":
-                    model_family = "transformer"
-                else:
-                    model_family = "linear"
-            primary_metric_name = task_info.get("primary_metric", "macro_f1")
-            direction = task_info.get("direction", "maximize")
-
-            metrics_dict: Dict[str, Any] = {"model": model_info.get("name", exp_id)}
-            calculated_score = 0.0
-
-            if summary_csv.exists():
-                try:
-                    import pandas as pd
-                    df_sum = pd.read_csv(summary_csv)
-                    num_cols = df_sum.select_dtypes(include=["number"]).columns
-                    for col in num_cols:
-                        if col not in ("dev_fold", "train_rows", "dev_rows", "fold"):
-                            metrics_dict[col] = round(float(df_sum[col].mean()), 4)
-
-                    for candidate in [primary_metric_name, "score", "macro_f1", "overall_composite", "val_score", "accuracy", "auc_roc", "f1"]:
-                        if candidate in df_sum.columns:
-                            calculated_score = round(float(df_sum[candidate].mean()), 4)
-                            metrics_dict["overall_composite"] = calculated_score
-                            metrics_dict["macro_f1"] = calculated_score
-                            break
-
-                    if calculated_score == 0.0:
-                        try:
-                            from harness.task_spec import load_active_task_spec
-                            task_spec = load_active_task_spec()
-                            st_scores = []
-                            total_weight = 0.0
-                            for st_id, st in task_spec.subtasks.items():
-                                for cand_col in [f"{st_id}_macro_f1", f"{st_id}_f1", f"{st.column}_f1", st_id]:
-                                    if cand_col in df_sum.columns:
-                                        sc = float(df_sum[cand_col].mean())
-                                        st_scores.append(sc * st.weight)
-                                        total_weight += st.weight
-                                        metrics_dict[st_id] = round(sc, 4)
-                                        break
-                            if st_scores and total_weight > 0:
-                                calculated_score = round(sum(st_scores) / total_weight, 4)
-                                metrics_dict["overall_composite"] = calculated_score
-                                metrics_dict["macro_f1"] = calculated_score
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-            if calculated_score == 0.0 and metrics_file.exists():
-                try:
-                    with open(metrics_file, "r", encoding="utf-8") as f:
-                        m_data = json.load(f)
-                    if isinstance(m_data, list) and len(m_data) > 0:
-                        first_m = m_data[0]
-                        for candidate in [primary_metric_name, "overall_composite", "macro_f1", "score", "accuracy"]:
-                            if candidate in first_m:
-                                calculated_score = round(float(first_m[candidate]), 4)
-                                metrics_dict["overall_composite"] = calculated_score
-                                break
-                        if calculated_score == 0.0:
-                            try:
-                                from harness.task_spec import load_active_task_spec
-                                task_spec = load_active_task_spec()
-                                st_scores = []
-                                total_weight = 0.0
-                                for st_id, st in task_spec.subtasks.items():
-                                    val = first_m.get(st_id)
-                                    if isinstance(val, (int, float)):
-                                        sc = float(val)
-                                    elif isinstance(val, dict):
-                                        sc = float(val.get("macro_f1") or val.get("score") or val.get("f1", 0.0))
-                                    else:
-                                        sc = None
-                                    if sc is not None:
-                                        st_scores.append(sc * st.weight)
-                                        total_weight += st.weight
-                                        metrics_dict[st_id] = round(sc, 4)
-                                if st_scores and total_weight > 0:
-                                    calculated_score = round(sum(st_scores) / total_weight, 4)
-                                    metrics_dict["overall_composite"] = calculated_score
-                                    metrics_dict["macro_f1"] = calculated_score
-                            except Exception:
-                                pass
-                    elif isinstance(m_data, dict):
-                        for candidate in [primary_metric_name, "overall_composite", "macro_f1", "score", "accuracy"]:
-                            if candidate in m_data:
-                                calculated_score = round(float(m_data[candidate]), 4)
-                                metrics_dict["overall_composite"] = calculated_score
-                                break
-                        metrics_dict.update({k: v for k, v in m_data.items() if isinstance(v, (int, float, dict))})
-                except Exception:
-                    pass
-
-            diag_summary = {}
-            diag_file = exp_dir / "diagnostics.json"
-            if diag_file.exists():
-                try:
-                    with open(diag_file, "r", encoding="utf-8") as f:
-                        diag_summary = json.load(f)
-                except Exception:
-                    pass
-
-            param_count = cfg_data.get("constraints", {}).get("max_params_limit")
-            llm_spec = cfg_data.get("llm") or model_info.get("llm_spec")
-            param_size = (
-                (cfg_data.get("llm") or {}).get("param_size")
-                or model_info.get("param_size")
-            )
-            if not param_size:
-                if param_count:
-                    if param_count >= 1_000_000_000:
-                        param_size = f"{round(param_count / 1e9, 1)}B"
-                    elif param_count >= 1_000_000:
-                        param_size = f"{round(param_count / 1e6, 1)}M"
-                else:
-                    id_lower = exp_id.lower()
-                    for sz in ["70b", "32b", "14b", "8b", "7b", "3b", "1.5b", "1b"]:
-                        if sz in id_lower or (model_info.get("name") and sz in model_info["name"].lower()):
-                            param_size = sz.upper()
-                            break
-
-            node = Node(
-                id=exp_id,
-                parent_id=parent_id,
-                branch=branch,
-                approach_type=approach_type,
-                model_family=model_family,
-                primary_metric_name=primary_metric_name,
-                direction=direction,
-                atomic_hypothesis=hypothesis,
-                intervention=intervention,
-                metrics=metrics_dict,
-                param_count=param_count,
-                param_size=param_size,
-                llm_spec=llm_spec,
-                status="COMPLETED",
-                artifact_dir=str(exp_dir),
-                timestamp=exp_dir.stat().st_mtime,
-                notes=exp_info.get("description", ""),
-                diagnostics_summary=diag_summary,
-            )
-            self.nodes[exp_id] = node
-            synced_count += 1
-
-        if synced_count > 0:
-            self.save()
-        return synced_count
+        count = 0
+        if not art_path.exists(): return 0
+        for directory in art_path.iterdir():
+            if not directory.is_dir() or not (directory/"metrics.json").is_file(): continue
+            metrics = json.loads((directory/"metrics.json").read_text(encoding="utf-8"))
+            cfg = yaml.safe_load((directory/"run_config.yaml").read_text(encoding="utf-8")) if (directory/"run_config.yaml").is_file() else {}
+            try:
+                validate_run(directory, task_spec=self.task_spec)
+                verified = True
+            except (ValueError, KeyError, OSError):
+                verified = False
+            exp = cfg.get("experiment", {})
+            node = Node(id=directory.name,parent_id=exp.get("parent_id"),branch=exp.get("branch","baseline"),
+                metrics=metrics if isinstance(metrics,dict) else {"legacy_folds":metrics},
+                primary_metric_name=metrics.get("primary_metric","unknown") if isinstance(metrics,dict) else "unknown",
+                direction=metrics.get("direction","maximize") if isinstance(metrics,dict) else "maximize",
+                verified=verified,eligible=verified,status="COMPLETED" if verified else "LEGACY_UNVERIFIED",
+                artifact_dir=str(directory),atomic_hypothesis=exp.get("hypothesis",""))
+            self.nodes[node.id]=node; count+=1
+        if count: self.save()
+        return count
 
     def save(self) -> None:
         """Save the journal to disk."""
@@ -379,7 +206,7 @@ class TreeJournal:
             delta = None
             if n.parent_id and n.parent_id in self.nodes:
                 parent_node = self.nodes[n.parent_id]
-                delta = round(n.get_score() - parent_node.get_score(), 4)
+                delta = round(n.get_utility() - parent_node.get_utility(), 4)
                 edges_list.append({
                     "from": n.parent_id,
                     "to": n.id,
@@ -400,6 +227,7 @@ class TreeJournal:
                 "param_size": getattr(n, "param_size", None),
                 "llm_spec": getattr(n, "llm_spec", None),
                 "status": n.status,
+                "verified":n.verified,"eligible":n.eligible,"direction":n.direction,"primary_metric":n.primary_metric_name,
                 "is_best": (n.id == best_id),
                 "is_buggy": n.is_buggy,
                 "atomic_hypothesis": n.atomic_hypothesis,
@@ -415,7 +243,7 @@ class TreeJournal:
         self, metric_key: Optional[str] = None, max_params: Optional[int] = None
     ) -> Optional[Node]:
         """Find the top-performing valid node adhering to parameter constraints."""
-        candidates = [n for n in self.nodes.values() if not n.is_buggy]
+        candidates = [n for n in self.nodes.values() if not n.is_buggy and n.eligible and n.verified]
         if max_params is not None:
             candidates = [
                 n for n in candidates if n.param_count is None or n.param_count <= max_params
@@ -463,7 +291,7 @@ class TreeJournal:
         lines = [
             f"# TreeJournal Summary (Total Runs: {len(self.nodes)})",
             f"Best Run: {best_node.id if best_node else 'None'} "
-            f"(Score: {best_node.get_score():.4f}, Params: {best_node.param_count or 'N/A'})\n",
+            f"(Score: {best_node.get_score() if best_node else 'N/A'})\n",
             "| ID | Type | Branch | Parent | Score | Params | Hypothesis & Delta | Status |",
             "|---|---|---|---|---:|---:|---|---|",
         ]
@@ -503,7 +331,7 @@ class TreeJournal:
 
         Prevents agents from arbitrary pivoting, quitting, or performing pseudo-ensembling.
         """
-        valid_nodes = [n for n in self.nodes.values() if not n.is_buggy]
+        valid_nodes = [n for n in self.nodes.values() if not n.is_buggy and n.eligible and n.verified]
         if not valid_nodes:
             return {
                 "recommendation": "INITIAL_BASELINE",
@@ -521,7 +349,7 @@ class TreeJournal:
         total_runs = len(self.nodes)
 
         # Compute scores and range for UCB normalization across candidates
-        raw_scores = [n.get_score() for n in valid_nodes]
+        raw_scores = [n.get_utility() for n in valid_nodes]
         min_s = min(raw_scores) if raw_scores else 0.0
         max_s = max(raw_scores) if raw_scores else 1.0
         range_s = (max_s - min_s) if (max_s - min_s) > 1e-6 else 1.0

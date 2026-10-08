@@ -555,6 +555,14 @@ class CloudJobManager:
             digest = __import__("hashlib").sha256(path.read_bytes()).hexdigest()
             if digest != expected_hash:
                 raise ValueError(f"Artifact SHA-256 mismatch: {filename}")
+        from harness.artifacts import validate_run
+        from harness.task_spec import load_active_task_spec
+        from harness.project import HarnessProject
+        from harness.plugins import TaskPluginContext, load_task_plugin
+        project = HarnessProject.discover(self.project_root)
+        spec = load_active_task_spec(project.task_config_path)
+        plugin = load_task_plugin(project.plugin_id, TaskPluginContext(project.root, project.task_config_path, spec, project.plugin_id or "default"))
+        validate_run(artifact_dir, task_spec=spec, plugin=plugin, expected=expected)
         job.artifact_identity_verified = True
         try:
             metrics = json.loads(metrics_path.read_text(encoding="utf-8"))

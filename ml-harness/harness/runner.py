@@ -58,6 +58,8 @@ from harness.evaluation import resolve_evaluation
 import json
 import importlib
 import inspect
+import uuid
+from harness.artifacts import contract_identity, digest, frame_hash, sha256
 
 
 class UniversalRunner:
@@ -71,10 +73,16 @@ class UniversalRunner:
         if Path(self.exp_id).name != self.exp_id or self.exp_id in {".",".."} or "/" in self.exp_id or "\\" in self.exp_id:
             raise ValueError("Experiment ID must be a simple directory name")
         self.artifacts_dir = self.project.artifacts_dir
-        self.exp_dir = self.artifacts_dir / self.exp_id
+        self.run_id = uuid.uuid4().hex
+        self.run_kind = "probe" if (getattr(args,"debug",False) or getattr(args,"probe_samples",None) or getattr(args,"fold",None) is not None) else "full"
+        self.exp_dir = self.artifacts_dir / self.exp_id if self.run_kind=="full" else self.artifacts_dir/"probes"/self.exp_id/self.run_id
         self.plugin_context = TaskPluginContext(self.project_root,self.project.task_config_path,self.task_spec,self.project.plugin_id or "default",cfg)
         self.task_plugin = load_task_plugin(self.project.plugin_id,self.plugin_context)
-        self.exp_dir.mkdir(parents=True,exist_ok=True)
+        self.exp_dir.parent.mkdir(parents=True,exist_ok=True)
+        try: self.exp_dir.mkdir(exist_ok=False)
+        except FileExistsError: raise ValueError("Refusing to overwrite an existing run; use a new experiment ID. --force cannot overwrite artifacts")
+        self.manifest = {"schema_version":2,"run_id":self.run_id,"run_kind":self.run_kind,"exp_id":self.exp_id,"status":"RUNNING","plugin_id":self.project.plugin_id or "default",**contract_identity(self.task_spec,self.task_plugin)}
+        save_json(self.exp_dir/"artifact_manifest.json",self.manifest)
         self.logger = __import__("logging").getLogger("ml-harness.runner")
         (self.exp_dir/"run.log").write_text("Starting run\n", encoding="utf-8")
         self.seed = self.task_spec.resolve_seed(cfg.get("runtime",{}).get("seed",42))
@@ -118,6 +126,8 @@ class UniversalRunner:
         if approach in {"dl","llm_peft"} and not (self.cfg.get("model",{}).get("factory") or self.task_plugin.capabilities()["custom_model_factory"]):
             raise ValueError("This approach requires an implemented task model factory")
         self.data_frame = frame
+        self.manifest["data_sha256"] = frame_hash(frame)
+        self.manifest["resolved_config_sha256"] = sha256(self.exp_dir/"run_config.yaml")
         strategy = self.cfg.get("validation",{}).get("strategy",self.task_spec.validation.strategy)
         return self._run_llm_prompting(frame,git_hash) if approach=="llm_prompt" else self._run_model_training(frame,strategy,git_hash)
 
@@ -157,6 +167,7 @@ class UniversalRunner:
             if set(train[key]) & set(dev[key]): raise ValueError("Training/validation ID overlap")
             ExperimentValidator.assert_no_group_data_leakage(train,dev,self.task_spec.group_column)
             self.task_plugin.validate_split(self.plugin_context,fold,train,dev)
+        self.manifest["split_sha256"] = digest([(str(f), t[self.task_spec.id_column].tolist(), v[self.task_spec.id_column].tolist()) for f,t,v in result])
         return result
 
     def _get_model_factory(self):
@@ -286,8 +297,11 @@ class UniversalRunner:
         except Exception as error:
             result["diagnostics_status"]="FAILED"; result["diagnostics_error"]=str(error)
         save_json(self.exp_dir/"metrics.json",result)
-        journal=TreeJournal(journal_path=self.artifacts_dir/"journal.json",artifacts_dir=self.artifacts_dir,task_spec=self.task_spec)
-        journal.add_node(self.exp_id,parent_id=self.cfg.get("experiment",{}).get("parent_id"),score=aggregate["primary_score"],metrics=aggregate)
+        self.manifest.update(status="COMPLETED", estimator=self.estimator_metadata, files={p.name:sha256(p) for p in self.exp_dir.iterdir() if p.is_file() and p.name!="artifact_manifest.json"})
+        save_json(self.exp_dir/"artifact_manifest.json",self.manifest)
+        if self.run_kind=="full":
+            journal=TreeJournal(journal_path=self.artifacts_dir/"journal.json",artifacts_dir=self.artifacts_dir,task_spec=self.task_spec)
+            journal.sync_from_artifacts()
         return result
 
 
@@ -348,30 +362,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     exp_cfg = load_yaml_config(config_path)
     cfg = merge_configs(base_cfg, exp_cfg)
 
-    # Immutability check
     exp_id = cfg.get("experiment", {}).get("id", config_path.stem)
-    paths = cfg.get("paths", {})
-    artifacts_root = project.artifacts_dir if project.manifest else Path(
-        paths.get("artifacts_dir") or project.artifacts_dir
-    )
-    if not artifacts_root.is_absolute():
-        artifacts_root = project.root / artifacts_root
-    exp_dir = artifacts_root / exp_id
-    if exp_dir.exists() and (exp_dir / "metrics.json").exists() and not args.force:
-        if args.job_id:
-            from harness.job_state import update_worker_state
-            update_worker_state(
-                project.root, args.job_id, status="FAILED", provider_status="FAILED",
-                error_message=f"Experiment directory `{exp_dir}` already has completed metrics.",
-                exp_id=str(exp_id), config_sha256=__import__("hashlib").sha256(config_path.read_bytes()).hexdigest(),
-            )
-        print(
-            f"ERROR: Experiment directory '{exp_dir}' already exists with completed metrics.\n"
-            f"Pass --force or define a new experiment ID in configs/.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
     args.project_root = str(project.root)
     args.task_config = str(project.task_config_path)
     try:
@@ -389,6 +380,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.job_id:
         import json
         from harness.job_state import update_worker_state
+        exp_dir = runner.exp_dir
         metrics_path = exp_dir / "metrics.json"
         metrics = json.loads(metrics_path.read_text(encoding="utf-8")) if metrics_path.is_file() else {}
         files = sorted(path for path in exp_dir.iterdir() if path.is_file()) if exp_dir.is_dir() else []
