@@ -123,7 +123,7 @@ class TestUniversalPlugin(unittest.TestCase):
     def test_agent_bridge_accepts_task_spec_path(self):
         """AgentBridge must accept a custom task_spec_path and load spec for new competition."""
         # Should not raise
-        bridge = AgentBridge(task_spec_path=self.task_yaml)
+        bridge = AgentBridge(project_root=self.test_dir, task_spec_path=self.task_yaml)
         # Competition spec should reference the new task
         spec = bridge.comp_state.spec
         self.assertEqual(spec.get("name"), "SentimentPulse-2027")

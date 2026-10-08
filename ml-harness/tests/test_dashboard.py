@@ -11,6 +11,10 @@ from unittest.mock import patch
 from tools.dashboard_server import DashboardHandler, generate_priming_prompt
 from harness.tree_journal import Node, TreeJournal
 import socketserver
+from tests.workspace_fixtures import (
+    cleanup_dashboard_workspace,
+    prepare_dashboard_workspace,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -19,8 +23,9 @@ class DashboardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Spin up a background instance of the HTTP server on a random free port."""
-        cls.port = 8765
-        cls.server = socketserver.TCPServer(("127.0.0.1", cls.port), DashboardHandler)
+        prepare_dashboard_workspace(cls, "test_dashboard_")
+        cls.server = socketserver.TCPServer(("127.0.0.1", 0), DashboardHandler)
+        cls.port = cls.server.server_address[1]
         cls.server_thread = threading.Thread(
             target=cls.server.serve_forever, daemon=True
         )
@@ -32,6 +37,7 @@ class DashboardTests(unittest.TestCase):
         """Shut down the background HTTP server."""
         cls.server.shutdown()
         cls.server.server_close()
+        cleanup_dashboard_workspace(cls)
 
     def fetch_json(self, path: str):
         url = f"http://127.0.0.1:{self.port}{path}"
@@ -369,6 +375,9 @@ class DashboardTests(unittest.TestCase):
             self.assertTrue(data.get("error"))
         else:
             self.assertTrue(data.get("success"))
+        self.assertTrue(
+            (self.workspace_root / "configs" / "exp999_test_dummy.yaml").is_file()
+        )
 
 
 if __name__ == "__main__":

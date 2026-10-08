@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+import shutil
+import tempfile
 import yaml
 
 from harness.agent_bridge import AgentBridge, TypedActionName
 from harness.agent_runtime import AgentRuntime
 from harness.grounding_gate import GroundingGate
 
+SOURCE_ROOT = Path(__file__).resolve().parent.parent
+
 
 class TestAgentBridge(unittest.TestCase):
     def setUp(self) -> None:
-        from harness.io_utils import get_project_root
-        self.project_root = get_project_root()
+        self._workspace = tempfile.TemporaryDirectory(prefix="test_agent_bridge_")
+        self.project_root = Path(self._workspace.name)
+        shutil.copytree(SOURCE_ROOT / "configs", self.project_root / "configs")
         self.bridge = AgentBridge(self.project_root)
+
+    def tearDown(self) -> None:
+        self._workspace.cleanup()
 
     def test_context_packet_and_markdown(self) -> None:
         pkt = self.bridge.get_context_packet()

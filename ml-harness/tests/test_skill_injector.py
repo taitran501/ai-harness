@@ -11,6 +11,10 @@ from pathlib import Path
 
 from harness.skill_injector import generate_skill_content, inject_skill_file
 from tools.dashboard_server import DashboardHandler
+from tests.workspace_fixtures import (
+    cleanup_dashboard_workspace,
+    prepare_dashboard_workspace,
+)
 
 
 class SkillInjectorTests(unittest.TestCase):
@@ -126,8 +130,9 @@ class SkillInjectorTests(unittest.TestCase):
 class SkillInjectorAPITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.port = 8799
-        cls.server = socketserver.TCPServer(("127.0.0.1", cls.port), DashboardHandler)
+        prepare_dashboard_workspace(cls, "test_skill_injector_api_")
+        cls.server = socketserver.TCPServer(("127.0.0.1", 0), DashboardHandler)
+        cls.port = cls.server.server_address[1]
         cls.server_thread = threading.Thread(
             target=cls.server.serve_forever, daemon=True
         )
@@ -138,6 +143,7 @@ class SkillInjectorAPITests(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
+        cleanup_dashboard_workspace(cls)
 
     def test_api_skill_inject(self):
         """POST /api/skill/inject should re-generate and update SKILL.md."""
@@ -154,6 +160,7 @@ class SkillInjectorAPITests(unittest.TestCase):
             data = json.loads(resp.read().decode())
             self.assertTrue(data.get("success"))
             self.assertIn("skill_path", data)
+            self.assertTrue((self.workspace_root / data["skill_path"]).is_file())
 
     def test_api_task_info_auto_inject(self):
         """POST /api/task_info should save task config and automatically inject skill."""

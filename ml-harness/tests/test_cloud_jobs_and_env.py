@@ -1,26 +1,43 @@
 """Tests for environment detection, cloud jobs, and per-task workspace isolation."""
 
 import json
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from harness.environment_detector import EnvironmentDetector
 from harness.cloud_job_runner import CloudJobManager, CloudJob
+from harness.project import HarnessProject
 from tools.dashboard_server import (
     get_next_experiment_id,
     list_available_tasks,
     switch_task,
 )
+from tests.workspace_fixtures import (
+    cleanup_dashboard_workspace,
+    prepare_dashboard_workspace,
+)
 
 
 class TestEnvironmentAndCloudJobs(unittest.TestCase):
     def setUp(self):
-        self.task_file = Path("configs/task.yaml")
-        self.original_task_yaml = self.task_file.read_text(encoding="utf-8") if self.task_file.exists() else None
+        self.root = prepare_dashboard_workspace(self, "test_cloud_jobs_")
+        project = HarnessProject.discover(self.root)
+        self._module_patches = [
+            patch("harness.cloud_job_runner.PROJECT_ROOT", self.root),
+            patch("harness.cloud_job_runner.HARNESS_PROJECT", project),
+            patch("harness.cloud_job_runner.ARTIFACTS_DIR", project.artifacts_dir),
+            patch("harness.environment_detector.PROJECT_ROOT", self.root),
+        ]
+        for module_patch in self._module_patches:
+            module_patch.start()
 
     def tearDown(self):
-        if self.original_task_yaml and self.task_file.exists():
-            self.task_file.write_text(self.original_task_yaml, encoding="utf-8")
+        for module_patch in reversed(self._module_patches):
+            module_patch.stop()
+        cleanup_dashboard_workspace(self)
 
     def test_environment_detector_full_status(self):
         status = EnvironmentDetector.get_full_status()
@@ -53,28 +70,43 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         self.assertIn("own workspace", switch_res["error"])
 
     def test_cloud_job_manager_lifecycle(self):
-        manager = CloudJobManager()
-        # Test start dummy local job (e.g. invalid config or debug)
-        configs = list(Path("configs").glob("*.yaml"))
-        self.assertTrue(len(configs) > 0)
-        cfg_path = str(configs[0].relative_to(Path("."))).replace("\\", "/")
+        manager = CloudJobManager(self.root)
+        cfg_path = "configs/exp000_template.yaml"
+        finished = threading.Event()
+        process = Mock(pid=12345)
+        process.wait.side_effect = lambda: (finished.wait(2), 1)[1]
 
-        job = manager.start_job(
-            backend="local",
-            config_path=cfg_path,
-            auto_audit=False,
-            auto_sync=False,
-        )
+        with patch("harness.cloud_job_runner.subprocess.Popen", return_value=process):
+            job = manager.start_job(
+                backend="local",
+                config_path=cfg_path,
+                auto_audit=False,
+                auto_sync=False,
+            )
+            finished.set()
+
         self.assertIsNotNone(job.job_id)
         self.assertEqual(job.backend, "local")
-        self.assertIn(job.status, ("PENDING", "RUNNING", "COMPLETED", "FAILED"))
 
+        deadline = time.monotonic() + 2
+        terminal_statuses = {"FAILED", "COMPLETED", "CANCELLED"}
         fetched = manager.get_job(job.job_id)
+        while (
+            not fetched
+            or fetched["status"] not in terminal_statuses
+            or job.job_id in manager._processes
+        ):
+            if time.monotonic() >= deadline:
+                self.fail("Mocked local job monitor did not finish cleanly.")
+            time.sleep(0.01)
+            fetched = manager.get_job(job.job_id)
         self.assertIsNotNone(fetched)
         self.assertEqual(fetched["job_id"], job.job_id)
+        self.assertEqual(fetched["status"], "FAILED")
 
         jobs_list = manager.list_jobs(limit=5)
         self.assertTrue(len(jobs_list) >= 1)
+        self.assertEqual(jobs_list[0]["job_id"], job.job_id)
 
     def test_modal_and_kaggle_auth_helpers(self):
         # 1. Parse token inputs
