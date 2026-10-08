@@ -273,13 +273,28 @@ class UniversalTaskSpec:
     def id_column(self) -> Optional[str]:
         """ID column from data config."""
         data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
-        return data_cfg.get("id_column")
+        return data_cfg.get("id_column", "id")
 
     @property
     def group_column(self) -> Optional[str]:
         """Group column for leakage prevention."""
         data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
         return data_cfg.get("group_column") or self.metadata.get("group_column")
+
+    @property
+    def modality(self):
+        return self.metadata.get("modality", "tabular")
+
+    @property
+    def inputs_dict(self):
+        return {item.name: item for item in self.inputs}
+
+    @property
+    def data_config(self):
+        return self.metadata.get("data_config") or self.metadata.get("data", {})
+
+    def resolve_seed(self, runtime_seed=42):
+        return int(self.metadata.get("validation", {}).get("seed", self.data_config.get("seed", runtime_seed)))
 
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> UniversalTaskSpec:
@@ -378,136 +393,25 @@ class UniversalTaskSpec:
                     parent_vals = ground_truth_df[parent_col]
                     masks[subtask_id] = spec.condition.evaluate_condition(parent_vals)
                 else:
-                    masks[subtask_id] = np.ones(n_samples, dtype=bool)
+                    raise ValueError(f"Missing conditional parent target {parent_col}")
             else:
                 masks[subtask_id] = np.ones(n_samples, dtype=bool)
 
         return masks
 
-    def evaluate_predictions(
-        self,
-        ground_truth_df: pd.DataFrame,
-        predictions: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Compute metrics across all declared subtasks dynamically according to spec."""
-        from sklearn.metrics import accuracy_score, f1_score, classification_report
-
-        results: Dict[str, Any] = {}
-        masks = self.compute_evaluation_masks(ground_truth_df)
-        total_weight = 0.0
-        weighted_score_sum = 0.0
-
-        for subtask_id, spec in self.subtasks.items():
-            mask = masks.get(subtask_id, np.ones(len(ground_truth_df), dtype=bool))
-            df_eval = ground_truth_df[mask].reset_index(drop=True)
-
-            # Retrieve predictions for this subtask
-            pred_vals = None
-            cand_keys = [
-                subtask_id,
-                spec.column,
-                f"pred_{spec.column}" if spec.column else None,
-                f"pred_{subtask_id}",
-            ]
-            for k in cand_keys:
-                if k and k in predictions:
-                    pred_vals = predictions[k]
-                    break
-
-            if pred_vals is None or len(df_eval) == 0:
-                results[subtask_id] = {"macro_f1": 0.0, "accuracy": 0.0, "score": 0.0}
-                continue
-
-            # Apply mask to predictions if needed
-            if len(pred_vals) == len(ground_truth_df):
-                eval_preds = np.array(pred_vals)[mask]
-            else:
-                eval_preds = np.array(pred_vals)
-
-            if spec.task_type in ("binary_classification", "multiclass_classification"):
-                col = spec.column
-                if not col or col not in df_eval.columns:
-                    continue
-                y_true = df_eval[col].astype(str)
-                y_pred = pd.Series(eval_preds).astype(str)
-                labels = [str(c) for c in spec.classes] if spec.classes else sorted(list(y_true.unique()))
-                macro_f1 = float(f1_score(y_true, y_pred, labels=labels, average="macro", zero_division=0))
-                acc = float(accuracy_score(y_true, y_pred))
-                st_res = {
-                    "macro_f1": macro_f1,
-                    "accuracy": acc,
-                    "per_class": classification_report(y_true, y_pred, labels=labels, output_dict=True, zero_division=0),
-                }
-                results[subtask_id] = st_res
-                if spec.condition and spec.condition.eval_condition_only:
-                    results[f"{subtask_id}_oracle"] = st_res
-
-                primary = macro_f1 if spec.primary_metric == "macro_f1" else acc
-                weighted_score_sum += primary * spec.weight
-                total_weight += spec.weight
-
-            elif spec.task_type == "multilabel_classification":
-                label_cols = []
-                if spec.column_prefix:
-                    label_cols = [f"{spec.column_prefix}{l}" for l in spec.labels]
-                elif spec.column and spec.column in df_eval.columns:
-                    label_cols = [spec.column]
-
-                if label_cols and all(c in df_eval.columns for c in label_cols):
-                    y_true = df_eval[label_cols].to_numpy()
-                    y_pred = np.array(eval_preds)
-                    macro_f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
-                    micro_f1 = float(f1_score(y_true, y_pred, average="micro", zero_division=0))
-                    acc = float(accuracy_score(y_true, y_pred))
-                    st_res = {
-                        "macro_f1": macro_f1,
-                        "micro_f1": micro_f1,
-                        "exact_match": acc,
-                    }
-                    results[subtask_id] = st_res
-                    if spec.condition and spec.condition.eval_condition_only:
-                        results[f"{subtask_id}_oracle"] = st_res
-
-                    primary = macro_f1 if spec.primary_metric == "macro_f1" else micro_f1
-                    weighted_score_sum += primary * spec.weight
-                    total_weight += spec.weight
-
-            elif spec.task_type == "regression":
-                from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-                col = spec.column
-                if col and col in df_eval.columns:
-                    y_true = df_eval[col].astype(float)
-                    y_pred = pd.Series(eval_preds).astype(float)
-                    rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
-                    mae = float(mean_absolute_error(y_true, y_pred))
-                    r2 = float(r2_score(y_true, y_pred))
-                    results[subtask_id] = {"rmse": rmse, "mae": mae, "r2": r2}
-                    primary = r2 if spec.primary_metric == "r2" else -rmse
-                    weighted_score_sum += primary * spec.weight
-                    total_weight += spec.weight
-
-        results["composite_score"] = float(weighted_score_sum / total_weight) if total_weight > 0 else 0.0
-        return results
-
-    @property
-    def id_column(self) -> str:
-        """Resolve primary ID column declared in task data_config."""
-        return self.metadata.get("data_config", {}).get("id_column", "id")
-
-    @property
-    def group_column(self) -> Optional[str]:
-        """Resolve anti-leakage group column if defined."""
-        return self.metadata.get("data_config", {}).get("group_column")
+    def evaluate_predictions(self, ground_truth_df, predictions):
+        from harness.evaluation import evaluate
+        return evaluate(self, ground_truth_df, predictions)
 
     @property
     def train_path(self) -> str:
         """Resolve raw training dataset directory or file."""
-        return self.metadata.get("data_config", {}).get("train_path", "dataset/")
+        return self.data_config.get("train_path", "dataset/")
 
     @property
     def test_path(self) -> str:
         """Resolve raw test dataset directory or file."""
-        return self.metadata.get("data_config", {}).get("test_path", "dataset/test/")
+        return self.data_config.get("test_path", "dataset/test/")
 
     @property
     def primary_target(self) -> Optional[str]:
