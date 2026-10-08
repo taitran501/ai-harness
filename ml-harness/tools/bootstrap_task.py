@@ -261,6 +261,7 @@ def generate_task_yaml(
                 "id_column": schema["id_column"],
                 "target_column": schema["target_column"],
             },
+            "inputs": [{"name": "features", "type": "text" if schema["modality"] == "text" else "tabular", "source_columns": schema.get("feature_columns", [])}],
             "subtasks": [
                 {
                     "id": schema["target_column"],
@@ -346,7 +347,7 @@ def generate_baseline_config(
             "folds": [0, 1, 2, 3, 4],
         },
         "model": {
-            "name": model_name,
+            "name": "baseline",
             "params": {"C": 1.0} if not is_reg else {"alpha": 1.0},
         },
         "training": {
@@ -451,6 +452,7 @@ def bootstrap_competition_task(
     # 3. Load & Analyze Dataset Schema
     df_train = load_dataframe_file(train_file)
     schema = analyze_dataset_schema(df_train, context)
+    schema["feature_columns"] = [c for c in df_train if c not in {schema["target_column"], schema["id_column"], schema["group_column"], "fold"}]
 
     # 4. Generate Task YAML Spec
     try:
