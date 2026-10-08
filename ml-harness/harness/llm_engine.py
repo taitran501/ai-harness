@@ -30,27 +30,9 @@ _CACHE: Dict[str, Tuple[float, Any]] = {}
 
 
 def _safe_urlopen(req: Union[urllib.request.Request, str], timeout: float = 12.0):
-    """Execute urlopen with default SSL, automatically falling back to unverified context if certificates fail."""
-    try:
-        return urllib.request.urlopen(req, timeout=timeout)
-    except urllib.error.URLError as e:
-        err_str = str(e).lower()
-        if "certificate" in err_str or "ssl" in err_str or "verify failed" in err_str:
-            try:
-                unverified = ssl._create_unverified_context()
-                return urllib.request.urlopen(req, timeout=timeout, context=unverified)
-            except Exception:
-                raise e
-        raise e
-    except Exception as e:
-        err_str = str(e).lower()
-        if "certificate" in err_str or "ssl" in err_str or "verify failed" in err_str:
-            try:
-                unverified = ssl._create_unverified_context()
-                return urllib.request.urlopen(req, timeout=timeout, context=unverified)
-            except Exception:
-                pass
-        raise e
+    """Verify certificates on every request; accept an explicit trusted CA bundle."""
+    context=ssl.create_default_context(cafile=os.environ.get("HARNESS_CA_BUNDLE") or None)
+    return urllib.request.urlopen(req,timeout=timeout,context=context)
 
 
 def _get_cached(key: str, ttl: float = 120.0) -> Optional[Any]:

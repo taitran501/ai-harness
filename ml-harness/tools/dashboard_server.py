@@ -1080,9 +1080,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 comp = CompetitionStateMachine(PROJECT_ROOT)
                 action = path.replace("/api/competition-state/", "").strip()
 
+                aliases={"synthesize-candidate":"synthesize_candidate","freeze":"freeze_candidate","unfreeze":"emergency_unfreeze","finalize":"finalize_competition","data-audit":"inspect_data_readiness"}
+                if action in aliases:
+                    params=dict(data)
+                    params["slot_1_id"]=data.get("slot_1_safe_cv",data.get("slot_1_id"))
+                    params["slot_2_id"]=data.get("slot_2_aggressive_lb",data.get("slot_2_id"))
+                    sess,obs=AgentBridge(PROJECT_ROOT).execute_action(aliases[action],params=params,session_id=data.get("session_id"),user_approved=bool(data.get("user_approved",False)))
+                    self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs),"session":asdict(sess)})
+                    return
                 if action == "gate":
                     for gk, gv in data.get("gates", {}).items():
-                        if gk in {"baseline_locked", "baseline_evidence", "freeze_locked", "finalized"} and gv:
+                        if gk in {"baseline_locked", "baseline_evidence", "freeze_locked", "finalized", "baseline_exp_id"}:
                             self.send_json({"error": f"Gate `{gk}` can only be changed by its verified harness action."}, status=409)
                             return
                         comp.state["gates"][gk] = gv
@@ -2225,16 +2233,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         auto_sync = bool(data.get("auto_sync", True))
         baseline_csv = data.get("baseline_csv")
 
-        manager = CloudJobManager(PROJECT_ROOT)
-        job = manager.start_job(
-            backend=backend,
-            config_path=config_path,
-            gpu=gpu,
-            auto_audit=auto_audit,
-            auto_sync=auto_sync,
-            baseline_csv=baseline_csv,
-        )
-        self.send_json({"success": True, "job": job.to_dict()})
+        sess,obs=AgentBridge(PROJECT_ROOT).execute_action("run_full_validation",params=data,session_id=data.get("session_id"),budget=data.get("budget"))
+        self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs),"session":asdict(sess),"job":obs.data})
 
     def handle_api_cloud_stop(self, data: Dict[str, Any]) -> None:
         job_id = data.get("job_id")

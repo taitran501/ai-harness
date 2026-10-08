@@ -274,7 +274,7 @@ class CompetitionStateMachine:
                 "details": details or {},
             },
         )
-        self.state["audit_trail"] = trail[:50]
+        self.state["audit_trail"] = trail
 
     # =========================================================================
     # PHASE 2: DECLARATIVE SPEC-DRIVEN DATA CHECKS
@@ -647,6 +647,13 @@ class CompetitionStateMachine:
         if slot_2_id and max_cands >= 2:
             slots_map["slot_2"] = slot_2_id
 
+        if not slots_map or len(slots_map)>max_cands or any(not v for v in slots_map.values()) or len(set(slots_map.values()))!=len(slots_map):
+            raise ValueError("Freeze requires unique eligible candidate IDs within the slot limit")
+        from harness.candidates import validate_candidate
+        entries={c["id"]:c for c in self.state["candidate_pool"].get("synthesized_candidates",[])}
+        for candidate in slots_map.values():
+            if candidate not in entries: raise ValueError("Unknown candidate: "+candidate)
+            validate_candidate(self.project,entries[candidate])
         try:
             git_commit = (
                 subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.project_root, stderr=subprocess.DEVNULL)
@@ -692,6 +699,7 @@ class CompetitionStateMachine:
 
     def emergency_unfreeze(self, reason: str = "User requested emergency unfreeze") -> Dict[str, Any]:
         """Unlock Phase 7 Freeze mode and record a permanent cryptographic audit trail entry."""
+        if not reason or not reason.strip(): raise ValueError("Unfreeze requires a reason")
         self.state["mode"] = "OPTIMIZE"
         self.state["gates"]["freeze_locked"] = False
         self.state["gates"]["finalized"] = False

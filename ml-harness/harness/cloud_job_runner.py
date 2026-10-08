@@ -104,6 +104,13 @@ class CloudJobManager:
 
     def _persist_job(self, job: CloudJob) -> None:
         atomic_write_json(self._job_path(job.job_id), job.to_dict(), indent=2, ensure_ascii=False)
+        ledger_path=self.project.artifacts_dir/"resource_ledger.json"
+        if job.status in {"COMPLETED","FAILED","CANCELLED"} and ledger_path.is_file():
+            from harness.resource_ledger import terminal
+            ledger=json.loads(ledger_path.read_text())
+            for token,row in ledger.get("reservations",{}).items():
+                if row.get("job_id")==job.job_id:
+                    terminal(ledger_path,token,job.status,max(0,(job.ended_at or time.time())-job.started_at))
 
     def _load_saved_jobs(self) -> None:
         field_names = set(CloudJob.__dataclass_fields__)
@@ -464,6 +471,7 @@ class CloudJobManager:
             cwd=str(self.project_root),
             text=True,
             env=child_env,
+            start_new_session=sys.platform!="win32",
         )
         job.pid = proc.pid
         job.status = "RUNNING"
@@ -666,11 +674,11 @@ class CloudJobManager:
         proc = self._processes.get(job_id)
         process_running = bool(proc and proc.poll() is None) or self._pid_running(job.pid)
         if process_running:
-            if job.backend == "kaggle":
+            if job.backend in {"kaggle","modal"}:
                 return {
                     "success": False,
                     "error": (
-                        "The Kaggle CLI cannot cancel a running kernel. The harness is still monitoring it; "
+                        "The monitor cannot prove remote cancellation. The harness is still monitoring it; "
                         "stop it in Kaggle if the provider offers that control."
                     ),
                     "job_id": job_id,
@@ -685,7 +693,7 @@ class CloudJobManager:
                 if sys.platform == "win32" and pid:
                     subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], check=False)
                 else:
-                    os.kill(int(pid), signal.SIGTERM)
+                    os.killpg(int(pid), signal.SIGTERM)
             except Exception as e:
                 pass
             from harness.job_state import update_worker_state

@@ -170,7 +170,7 @@ class AgentRuntime:
         sub_mgr: SubmissionManager,
     ) -> ActionObservation:
         sess = self.bridge.get_active_or_create_session(goal=run.goal, session_id=run.id)
-        return self.bridge._dispatch_typed_action(call, sess, journal, sub_mgr)
+        return self.bridge.execute_action(call.action,params=call.params,rationale=call.rationale,session_id=sess.session_id,user_approved=call.user_approved)[1]
 
     def start_run(
         self,

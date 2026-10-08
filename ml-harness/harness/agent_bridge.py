@@ -106,6 +106,8 @@ class SessionBudget:
     """Optional session-level resource & stopping limits enforced by AgentBridge."""
 
     max_experiments: Optional[int] = None
+    max_probes: Optional[int] = None
+    max_candidate_operations: Optional[int] = None
     max_gpu_hours: Optional[float] = None
     max_cloud_runs: Optional[int] = None
     max_wall_seconds: Optional[float] = None
@@ -124,7 +126,7 @@ class ComputeUsage:
     cloud_runs: int = 0
     smoke_runs: int = 0
     wall_seconds_used: float = 0.0
-    gpu_hours_used: float = 0.0
+    gpu_hours_used: Optional[float] = None
     submissions_used: int = 0
 
 
@@ -656,9 +658,7 @@ class AgentBridge:
         max_exp = budget.get("max_experiments")
         if max_exp is not None and action in (
             TypedActionName.RUN_FULL_VALIDATION.value,
-            TypedActionName.BUILD_ENSEMBLE.value,
-            TypedActionName.SYNTHESIZE_CANDIDATE.value,
-            TypedActionName.PROMOTE_CANDIDATE.value,
+
         ):
             if int(usage.get("experiments_used", 0)) >= int(max_exp):
                 return (
@@ -676,9 +676,16 @@ class AgentBridge:
                     f"Session cloud run budget exhausted ({usage.get('cloud_runs')}/{max_cloud}).",
                 )
 
+        execution=action in {"run_full_validation","run_smoke_test","run_probe"}
+        if execution and (budget.get("max_wall_seconds") is not None or budget.get("max_gpu_hours") is not None):
+            if backend!="local": return ("BLOCKED_BY_BUDGET","Backend cannot prove termination and allocation accounting for a hard runtime budget")
+            if budget.get("max_gpu_hours") is not None: return ("BLOCKED_BY_BUDGET","Local backend has no verified GPU allocation measurement; use a wall-time budget")
+            remaining=float(budget["max_wall_seconds"])-float(usage.get("wall_seconds_used",0))
+            if remaining<=0: return ("BLOCKED_BY_BUDGET","Wall-time budget exhausted")
+            params["_deadline_seconds"]=remaining
         # 5. Hard Stop: GPU hours budget
         max_gpu = budget.get("max_gpu_hours")
-        if max_gpu is not None and float(usage.get("gpu_hours_used", 0.0)) >= float(max_gpu):
+        if max_gpu is not None and float(usage.get("gpu_hours_used") or 0.0) >= float(max_gpu):
             return (
                 "BLOCKED_BY_BUDGET",
                 f"Session GPU hour budget exhausted ({usage.get('gpu_hours_used'):.2f}h / {max_gpu}h).",
@@ -709,6 +716,7 @@ class AgentBridge:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            start_new_session=sys.platform!="win32",
         )
         try:
             stdout, _ = proc.communicate(timeout=timeout)
@@ -719,7 +727,8 @@ class AgentBridge:
             if sys.platform == "win32":
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], check=False, stderr=subprocess.DEVNULL)
             else:
-                proc.kill()
+                import os,signal
+                os.killpg(proc.pid,signal.SIGKILL)
             try:
                 stdout, _ = proc.communicate(timeout=5)
             except Exception:
@@ -800,7 +809,25 @@ class AgentBridge:
         session.status = "ACTIVE"
         session.actions.append(asdict(call))
 
+        resource_actions={"run_full_validation","run_smoke_test","run_probe","promote_candidate","synthesize_candidate","build_ensemble"}
+        token=None
+        if action in resource_actions:
+            from harness.resource_ledger import reserve
+            try:
+                token,deadline=reserve(self.artifacts_dir/"resource_ledger.json",session.session_id,action,params.get("backend","local"),session.budget,params.get("_deadline_seconds"))
+                if deadline is not None: params["_deadline_seconds"]=deadline
+            except ValueError as error:
+                obs=ActionObservation(step_index=step_idx,action=action,status="BLOCKED_BY_BUDGET",summary=str(error))
+                session.observations.append(asdict(obs)); self.save_session(session)
+                return session,obs
         obs = self._dispatch_typed_action(call, session, journal, sub_mgr)
+        if token:
+            from harness.resource_ledger import terminal
+            if obs.data.get("job_id"):
+                from harness.state_store import transaction
+                with transaction(self.artifacts_dir/"resource_ledger.json") as ledger:
+                    ledger["reservations"][token]["job_id"]=obs.data["job_id"]
+            else: terminal(self.artifacts_dir/"resource_ledger.json",token,"COMPLETED" if obs.status=="SUCCESS" else "FAILED",obs.elapsed_seconds)
         session.observations.append(asdict(obs))
 
         # Update wall clock usage
@@ -1173,7 +1200,6 @@ class AgentBridge:
                     "--debug",
                     "--fold",
                     fold,
-                    "--force",
                     "--skip-leaderboard",
                 ]
                 passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=180.0)
@@ -1210,10 +1236,9 @@ class AgentBridge:
                     fold,
                     "--probe-samples",
                     probe_samples,
-                    "--force",
                     "--skip-leaderboard",
                 ]
-                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=120.0)
+                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=min(120.0,float(params.get("_deadline_seconds",120))))
                 session.compute_usage["smoke_runs"] = int(session.compute_usage.get("smoke_runs", 0)) + 1
                 return ActionObservation(
                     step_index=call.step_index,
@@ -1231,7 +1256,7 @@ class AgentBridge:
                     raise ValueError("Parameter 'config_path' is required for 'run_full_validation'.")
 
                 backend = str(params.get("backend", "local")).lower()
-                force = bool(params.get("force", True))
+                force = bool(params.get("force", False))
 
                 full_cfg_file = self.project_root / cfg_path
                 raw_cfg = yaml.safe_load(full_cfg_file.read_text(encoding="utf-8")) if full_cfg_file.exists() else {}
@@ -1278,7 +1303,7 @@ class AgentBridge:
                 if force:
                     cmd.append("--force")
 
-                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=1800.0)
+                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=min(1800.0,float(params.get("_deadline_seconds",1800))))
 
                 # Update compute usage
                 session.compute_usage["experiments_used"] = int(session.compute_usage.get("experiments_used", 0)) + 1
@@ -1315,7 +1340,7 @@ class AgentBridge:
                     comp_score = node.get_score() if node else 0.0
                     detail_scores = {"composite_score": comp_score}
 
-                delta = round(comp_score - base_score, 4)
+                delta = round((comp_score-base_score)*(1 if self.task_spec.direction=="maximize" else -1),4)
                 min_imp = self._get_spec_min_improvement(session)
                 if delta >= min_imp:
                     session.consecutive_rejections = 0
@@ -1550,7 +1575,7 @@ class AgentBridge:
                 s1 = params.get("slot_1_id")
                 s2 = params.get("slot_2_id")
                 if not s1:
-                    candidates = self.comp_state.candidates
+                    candidates = self.comp_state.state["candidate_pool"].get("synthesized_candidates",[])
                     if candidates:
                         s1 = candidates[0].get("id")
                         if len(candidates) > 1 and not s2:
@@ -1573,7 +1598,8 @@ class AgentBridge:
                 )
 
             elif act == TypedActionName.EMERGENCY_UNFREEZE.value:
-                reason = params.get("reason", f"Emergency unfreeze via AgentBridge session {session.session_id}")
+                reason = params.get("reason")
+                if not reason: raise ValueError("Unfreeze requires an explicit reason")
                 res = self.comp_state.emergency_unfreeze(reason=reason)
                 return ActionObservation(
                     step_index=call.step_index,
