@@ -69,6 +69,7 @@ class SubmissionManager:
         self.registry_file = self.submissions_dir / "registry.json"
         self.submissions: Dict[str, SubmissionEntry] = {}
         self.load()
+        self._snapshot=[asdict(n) for n in self.submissions.values()]
 
     def load(self) -> None:
         """Load registry from disk."""
@@ -92,7 +93,10 @@ class SubmissionManager:
             "submissions": [asdict(s) for s in self.submissions.values()],
         }
         from harness.io_utils import atomic_write_json
-        atomic_write_json(self.registry_file, data, indent=2, ensure_ascii=False)
+        from harness.state_store import save_registry
+        records=save_registry(self.registry_file,"submissions",data["submissions"],getattr(self,"_snapshot",[]))
+        self.submissions={r["id"]:SubmissionEntry(**r) for r in records}
+        self._snapshot=records
         self.render_submissions_markdown()
 
     def get_next_submission_id(self) -> str:

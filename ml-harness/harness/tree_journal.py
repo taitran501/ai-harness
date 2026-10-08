@@ -99,6 +99,7 @@ class TreeJournal:
         self.task_spec = task_spec
         self.nodes: Dict[str, Node] = {}
         self.load()
+        self._snapshot=[asdict(n) for n in self.nodes.values()]
         if auto_sync:
             self.sync_from_artifacts(self.artifacts_dir)
 
@@ -174,15 +175,10 @@ class TreeJournal:
 
     def save(self) -> None:
         """Save the journal to disk."""
-        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "version": "1.0",
-            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "total_experiments": len(self.nodes),
-            "nodes": [asdict(n) for n in self.nodes.values()],
-        }
-        from harness.io_utils import atomic_write_json
-        atomic_write_json(self.storage_path, data, indent=2, ensure_ascii=False)
+        from harness.state_store import save_registry
+        records=save_registry(self.storage_path,"nodes",[asdict(n) for n in self.nodes.values()],getattr(self,"_snapshot",[]))
+        self.nodes={r["id"]:Node(**r) for r in records}
+        self._snapshot=records
 
     def append(self, node: Node) -> None:
         """Register or update a node in the journal."""

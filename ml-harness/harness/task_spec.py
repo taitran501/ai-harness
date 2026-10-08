@@ -519,11 +519,13 @@ def load_active_task_spec(
             p = resolve_project_root() / p
         p = p.resolve()
     if p.is_file():
+        import hashlib
+        content_hash=hashlib.sha256(p.read_bytes()).hexdigest()
         cached = _ACTIVE_TASK_SPECS.get(p)
-        if cached is not None and not force_reload:
-            return cached
+        if cached is not None and cached[0]==content_hash and not force_reload:
+            return cached[1]
         spec = UniversalTaskSpec.from_yaml(p)
-        _ACTIVE_TASK_SPECS[p] = spec
+        _ACTIVE_TASK_SPECS[p] = (content_hash,spec)
         return spec
     return UniversalTaskSpec(
         name="universal_task",

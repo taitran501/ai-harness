@@ -82,6 +82,8 @@ class CompetitionStateMachine:
 
         self.spec: Dict[str, Any] = self.load_competition_spec()
         self.state: Dict[str, Any] = self._load_or_init_state()
+        import copy
+        self._state_snapshot=copy.deepcopy(self.state)
 
     def load_competition_spec(self) -> Dict[str, Any]:
         """Load the declarative Competition Spec from configs/task.yaml."""
@@ -261,7 +263,10 @@ class CompetitionStateMachine:
         atomic_write_json(self.state_file, data, indent=2, ensure_ascii=False)
 
     def save(self) -> None:
-        self._save_raw(self.state)
+        import copy
+        from harness.state_store import save_snapshot
+        self.state=save_snapshot(self.state_file,getattr(self,"_state_snapshot",{}),self.state)
+        self._state_snapshot=copy.deepcopy(self.state)
 
     def _append_audit_event(self, event_type: str, summary: str, details: Optional[Dict[str, Any]] = None) -> None:
         trail = self.state.setdefault("audit_trail", [])

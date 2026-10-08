@@ -217,6 +217,7 @@ class AgentBridge:
         self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
         from harness.phase_workflow import PhaseWorkflow
         self.phase_workflow = PhaseWorkflow(self.project_root, self.project.task_config_path)
+        self._session_snapshots=getattr(self,"_session_snapshots",{})
 
     def _new_journal(self, auto_sync: bool = True) -> TreeJournal:
         return TreeJournal(
@@ -254,6 +255,7 @@ class AgentBridge:
         self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
         from harness.phase_workflow import PhaseWorkflow
         self.phase_workflow = PhaseWorkflow(self.project_root, self.project.task_config_path)
+        self._session_snapshots=getattr(self,"_session_snapshots",{})
 
     def _get_spec_min_improvement(self, session_or_budget: Optional[Any] = None) -> float:
         """Resolve min_meaningful_improvement from SessionBudget or CompetitionSpec (`configs/task.yaml`)."""
@@ -315,7 +317,12 @@ class AgentBridge:
         payload = asdict(session)
         path = self.sessions_dir / f"{session.session_id}.json"
         from harness.io_utils import atomic_write_json
-        atomic_write_json(path, payload, indent=2, ensure_ascii=False)
+        import copy
+        from harness.state_store import save_snapshot
+        payload=save_snapshot(path,self._session_snapshots.get(session.session_id,{}),payload)
+        self._session_snapshots[session.session_id]=copy.deepcopy(payload)
+        for key,value in payload.items():
+            if key in BridgeSession.__dataclass_fields__: setattr(session,key,value)
 
         # Mirror into legacy agent_runs dir (`run_XXXX.json`) for UI/backward compatibility
         run_num = session.session_id.split("_")[-1]
@@ -362,6 +369,8 @@ class AgentBridge:
         filtered = {k: v for k, v in data.items() if k in valid_fields}
         if "session_id" not in filtered:
             filtered["session_id"] = data.get("id", session_id)
+        import copy
+        self._session_snapshots[filtered["session_id"]]=copy.deepcopy(filtered)
         return BridgeSession(**filtered)
 
     def get_active_or_create_session(
@@ -403,7 +412,8 @@ class AgentBridge:
         sub_mgr = self._new_submission_manager()
         snap = self.comp_state.evaluate_journey_snapshot(journal, sub_mgr)
 
-        sid = session_id or self.get_next_session_id()
+        import uuid
+        sid = session_id or "session_"+uuid.uuid4().hex
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         sess_budget = asdict(SessionBudget())
         sess_budget["min_meaningful_improvement"] = self._get_spec_min_improvement(budget)
@@ -746,6 +756,7 @@ class AgentBridge:
         user_approved: bool = False,
     ) -> Tuple[BridgeSession, ActionObservation]:
         """Execute a single Typed Action from Antigravity and update the stateful BridgeSession."""
+        self._refresh_task_context()
         params = params or {}
         session = self.get_active_or_create_session(
             goal=goal or "Iterative competition optimization via Antigravity IDE",

@@ -42,29 +42,26 @@ def update_worker_state(
     project = HarnessProject.discover(project_root)
     path = worker_state_path(project, job_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        value = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    except (OSError, json.JSONDecodeError):
-        value = {}
-    value.update({
-        "job_id": job_id,
-        "task_id": project.manifest.get("task_id") or project.plugin_id or "task",
-        "status": normalized_status,
-        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-    })
-    if provider_status is not None:
-        value["provider_status"] = str(provider_status).upper()
-    if remote_id is not None:
-        value["remote_id"] = remote_id
-    if result_metrics is not None:
-        value["result_metrics"] = result_metrics
-    if artifact_paths is not None:
-        value["artifact_paths"] = artifact_paths
-    if error_message is not None:
-        value["error_message"] = error_message
-    if exp_id is not None:
-        value["exp_id"] = exp_id
-    if config_sha256 is not None:
-        value["config_sha256"] = config_sha256
-    atomic_write_json(path, value, indent=2, ensure_ascii=False)
+    from harness.state_store import transaction
+    with transaction(path) as value:
+        value.update({
+            "job_id": job_id,
+            "task_id": project.manifest.get("task_id") or project.plugin_id or "task",
+            "status": normalized_status,
+            "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        })
+        if provider_status is not None:
+            value["provider_status"] = str(provider_status).upper()
+        if remote_id is not None:
+            value["remote_id"] = remote_id
+        if result_metrics is not None:
+            value["result_metrics"] = result_metrics
+        if artifact_paths is not None:
+            value["artifact_paths"] = artifact_paths
+        if error_message is not None:
+            value["error_message"] = error_message
+        if exp_id is not None:
+            value["exp_id"] = exp_id
+        if config_sha256 is not None:
+            value["config_sha256"] = config_sha256
     return value

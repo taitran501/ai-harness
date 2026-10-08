@@ -112,13 +112,14 @@ class DiagnosticEngine:
         cls,
         eval_df: pd.DataFrame,
         oof_df: pd.DataFrame,
+        task_spec=None,
     ) -> Dict[str, Any]:
         """Produce full structured diagnostic dictionary dynamically adapted to task schema."""
         # 1. Dynamically resolve ID column from TaskSpec first
         id_col = None
         try:
             from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec()
+            spec = task_spec or load_active_task_spec()
             if spec.id_column and spec.id_column in eval_df.columns and spec.id_column in oof_df.columns:
                 id_col = spec.id_column
         except Exception:
@@ -205,7 +206,7 @@ class DiagnosticEngine:
         try:
             from harness.task_spec import load_active_task_spec
 
-            task_spec = load_active_task_spec()
+            task_spec = task_spec or load_active_task_spec()
             data_cfg = task_spec.metadata.get("data_config") or task_spec.metadata.get("data", {})
             declared_slices = [
                 value
@@ -316,12 +317,13 @@ class DiagnosticEngine:
         oof_df: pd.DataFrame,
         output_dir: Path,
         exp_id: str,
+        task_spec=None,
     ) -> Dict[str, Any]:
         """Save both diagnostics.json and DIAGNOSTICS.md into output_dir."""
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        diag = cls.generate_diagnostics(eval_df, oof_df)
+        diag = cls.generate_diagnostics(eval_df, oof_df,task_spec=task_spec)
 
         from harness.io_utils import atomic_write_json, atomic_write_text
         atomic_write_json(output_dir / "diagnostics.json", diag, indent=2, ensure_ascii=False)

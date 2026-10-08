@@ -292,7 +292,7 @@ class UniversalRunner:
         truth.to_csv(self.exp_dir/"evaluation_truth.csv",index=False)
         (self.exp_dir/"EXPERIMENT_CARD.md").write_text(f"# {self.exp_id}\n\n{aggregate['primary_metric']}: {aggregate['primary_score']} ({aggregate['direction']})\n",encoding="utf-8")
         try:
-            DiagnosticEngine.save_diagnostics_bundle(truth,oof,self.exp_dir,self.exp_id)
+            DiagnosticEngine.save_diagnostics_bundle(truth,oof,self.exp_dir,self.exp_id,task_spec=self.task_spec)
             result["diagnostics_status"]="COMPLETED"
         except Exception as error:
             result["diagnostics_status"]="FAILED"; result["diagnostics_error"]=str(error)

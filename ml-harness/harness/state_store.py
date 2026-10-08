@@ -57,5 +57,28 @@ def merge_changed(current,before,after):
             removed=[x for x in before[key] if x not in value]
             current[key]=[x for x in current.get(key,[]) if x not in removed]
             current[key].extend(x for x in added if x not in current[key])
+        elif key in before and key in current and current[key]!=before[key] and current[key]!=value:
+            if isinstance(value,(int,float)) and isinstance(before[key],(int,float)) and not isinstance(value,bool):
+                current[key]+=value-before[key]
+            else: raise ValueError("Concurrent state conflict: "+key)
         else: current[key]=copy.deepcopy(value)
     return current
+
+
+def save_snapshot(path,before,after):
+    with transaction(path,before) as current:
+        merge_changed(current,before,after)
+        result=copy.deepcopy(current)
+    return result
+
+def save_registry(path,key,records,before=None):
+    with transaction(path,{key:[]}) as value:
+        existing={r["id"]:r for r in value.get(key,[])}
+        previous={r["id"]:r for r in (before or [])}
+        for record in records:
+            if record==previous.get(record["id"]): continue
+            if record["id"] in existing and record["id"] in previous:
+                merge_changed(existing[record["id"]],previous[record["id"]],record)
+            else: existing[record["id"]]=record
+        value[key]=list(existing.values())
+    return value[key]
