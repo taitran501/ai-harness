@@ -1,0 +1,692 @@
+import React, { useState } from 'react';
+import {
+  Send,
+  CheckCircle2,
+  AlertTriangle,
+  FileArchive,
+  Award,
+  PlusCircle,
+  ExternalLink,
+  HelpCircle,
+  X,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-react';
+import { SubmissionEntry, TaskInfo } from '../types/experiment';
+import { api } from '../services/api';
+
+interface SubmissionsTabProps {
+  submissions: SubmissionEntry[];
+  taskInfo?: TaskInfo | null;
+  onRefresh: () => Promise<void>;
+  onSelectExperiment: (expId: string) => void;
+}
+
+export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
+  submissions,
+  taskInfo,
+  onRefresh,
+  onSelectExperiment,
+}) => {
+  const [selectedSubForScore, setSelectedSubForScore] = useState<SubmissionEntry | null>(null);
+  const [submittingScore, setSubmittingScore] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Form State
+  const [dynamicScores, setDynamicScores] = useState<Record<string, string>>({});
+  const [splitType, setSplitType] = useState<string>('public');
+  const [notes, setNotes] = useState<string>('');
+
+  // Register New Submission State
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [regExpId, setRegExpId] = useState('');
+  const [regCandidateCsv, setRegCandidateCsv] = useState('');
+  const [regBaselineCsv, setRegBaselineCsv] = useState('');
+  const [regNotes, setRegNotes] = useState('');
+  const [regMinDiffPct, setRegMinDiffPct] = useState('2.0');
+  const [registering, setRegistering] = useState(false);
+  const [regError, setRegError] = useState<string | null>(null);
+  const [regSuccess, setRegSuccess] = useState<string | null>(null);
+  const artifactDir = taskInfo?.artifacts_dir || 'artifacts';
+  const isCustomTaskPlugin = Boolean(taskInfo?.task_plugin?.id && taskInfo.task_plugin.id !== 'default');
+  const pluginCanSubmit = Boolean(
+    taskInfo?.task_plugin?.capabilities?.submission_builder &&
+    taskInfo?.task_plugin?.capabilities?.submission_validator,
+  );
+
+  const handleRegisterSubmission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regExpId.trim()) {
+      setRegError('Please provide an Experiment ID.');
+      return;
+    }
+    if (isCustomTaskPlugin && !pluginCanSubmit) {
+      setRegError('The selected task plugin has not implemented its submission builder and validator.');
+      return;
+    }
+    if (isCustomTaskPlugin && !regCandidateCsv.trim()) {
+      setRegError('Provide a CSV with predictions for the competition test set. OOF predictions are not a submission.');
+      return;
+    }
+    setRegistering(true);
+    setRegError(null);
+    setRegSuccess(null);
+    try {
+      const res = await api.registerSubmission({
+        exp_id: regExpId.trim(),
+        candidate_csv: regCandidateCsv.trim() || undefined,
+        baseline_csv: regBaselineCsv.trim() || null,
+        notes: regNotes.trim(),
+        min_diff_pct: parseFloat(regMinDiffPct) || 2.0,
+      });
+      setRegSuccess(`Submission ${res.submission.id} built and validated!`);
+      await onRefresh();
+      setTimeout(() => {
+        setIsRegisterModalOpen(false);
+        setRegSuccess(null);
+        setRegExpId('');
+        setRegCandidateCsv('');
+        setRegBaselineCsv('');
+        setRegNotes('');
+      }, 1500);
+    } catch (err: any) {
+      console.error(err);
+      setRegError(err.message || 'Failed to build or validate the submission.');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  const openScoreModal = (sub: SubmissionEntry) => {
+    setSelectedSubForScore(sub);
+    const dyn: Record<string, string> = {};
+    if (taskInfo?.metrics && taskInfo.metrics.length > 0) {
+      for (const m of taskInfo.metrics) {
+        const val = sub.official_scores?.[m.id];
+        dyn[m.id] = val !== undefined && val !== null ? String(val) : '';
+      }
+    } else if (taskInfo?.subtasks && taskInfo.subtasks.length > 0) {
+      for (const st of taskInfo.subtasks) {
+        const val = sub.official_scores?.[st.id];
+        dyn[st.id] = val !== undefined && val !== null ? String(val) : '';
+      }
+    } else {
+      const primary =
+        sub.official_scores?.primary_metric ??
+        sub.official_scores?.score;
+      dyn['primary_metric'] = primary !== undefined && primary !== null ? String(primary) : '';
+    }
+    setDynamicScores(dyn);
+    setSplitType(sub.official_scores?.split_type || 'public');
+    setNotes(sub.notes || '');
+    setFormError(null);
+  };
+
+  const closeScoreModal = () => {
+    setSelectedSubForScore(null);
+    setFormError(null);
+  };
+
+  const handleSubmitScore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSubForScore) return;
+
+    setSubmittingScore(true);
+    setFormError(null);
+
+    try {
+      const scoresPayload: Record<string, any> = {
+        split_type: splitType,
+      };
+
+      for (const [k, v] of Object.entries(dynamicScores)) {
+        if (v !== '') {
+          const num = parseFloat(v);
+          if (!isNaN(num)) {
+            scoresPayload[k] = num;
+            if (k === 'primary_metric') {
+              scoresPayload.score = num;
+            }
+          }
+        }
+      }
+
+      await api.recordOfficialScore(selectedSubForScore.id, scoresPayload, notes);
+      await onRefresh();
+      closeScoreModal();
+    } catch (err: any) {
+      console.error(err);
+      setFormError(err.message || 'Failed to record official score.');
+    } finally {
+      setSubmittingScore(false);
+    }
+  };
+
+  const renderScoreSet = (scores: Record<string, any> | undefined) => {
+    if (!scores || Object.keys(scores).length === 0) return <span className="text-slate-500">-</span>;
+    if (taskInfo?.metrics && taskInfo.metrics.length > 0) {
+      const items = taskInfo.metrics.map((m) => {
+        const val = scores[m.id] ?? scores[`${m.id}_macro`];
+        return val !== undefined && val !== null ? Number(val).toFixed(4) : '-';
+      });
+      return (
+        <div className="space-x-1.5 font-mono">
+          {items.map((val, idx) => (
+            <React.Fragment key={idx}>
+              {idx > 0 && <span className="text-slate-500">/</span>}
+              <span className={idx === 0 ? "text-slate-200 font-semibold" : "text-slate-400"}>
+                {val}
+              </span>
+            </React.Fragment>
+          ))}
+        </div>
+      );
+    }
+    const numeric = Object.entries(scores).filter(([k, v]) => typeof v === 'number');
+    if (numeric.length === 0) return <span className="text-slate-500">-</span>;
+    return (
+      <div className="space-x-1.5 font-mono">
+        {numeric.slice(0, 3).map(([k, v], idx) => (
+          <React.Fragment key={k}>
+            {idx > 0 && <span className="text-slate-500">/</span>}
+            <span className={idx === 0 ? "text-slate-200 font-semibold" : "text-slate-400"} title={k}>
+              {Number(v).toFixed(4)}
+            </span>
+          </React.Fragment>
+        ))}
+      </div>
+    );
+  };
+
+  const totalSubs = submissions.length;
+  const scoredSubs = submissions.filter((s) => s.status === 'SCORED').length;
+  const divergenceCount = submissions.filter((s) => s.divergence_warning).length;
+
+  return (
+    <div className="space-y-3">
+      {/* Compact Stats Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-zinc-900/50 border border-zinc-800/80 px-3.5 py-2 rounded-lg text-xs">
+        <div className="flex items-center gap-4 text-zinc-400 font-mono text-[11px]">
+          <span>Registered: <strong className="text-zinc-100">{totalSubs}</strong></span>
+          <span>Scored: <strong className="text-zinc-100">{scoredSubs}</strong></span>
+          <span>Verified Packages: <strong className="text-zinc-100">{submissions.filter((s) => s.archive_path).length}</strong></span>
+        </div>
+        {divergenceCount > 0 ? (
+          <div className="flex items-center gap-1.5 text-rose-400 text-xs font-medium">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span>{divergenceCount} Divergence Alert (LB drops below CV)</span>
+          </div>
+        ) : (
+          <div className="text-zinc-500 font-mono text-[11px]">
+            CV & LB aligned
+          </div>
+        )}
+      </div>
+
+      {/* Main Submissions Table */}
+      <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-4 shadow-xl space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 pb-3">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+              <Award className="w-4 h-4 text-zinc-400" />
+              <span>
+                {taskInfo?.platform ? `${taskInfo.platform.toUpperCase()} Submissions` : 'Submissions'}
+              </span>
+            </h2>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Verified submission packages, cross-validation scores, and official leaderboard results.
+            </p>
+          </div>
+
+          <button
+            onClick={() => setIsRegisterModalOpen(true)}
+            className="flex items-center gap-1.5 bg-zinc-100 hover:bg-white active:scale-95 text-zinc-950 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span>Build / Register Submission</span>
+          </button>
+        </div>
+
+        {submissions.length === 0 ? (
+          <div className="p-8 text-center space-y-3">
+            <FileArchive className="w-10 h-10 text-slate-600 mx-auto" />
+            <h3 className="text-sm font-semibold text-slate-300">No Submissions Registered Yet</h3>
+            <p className="text-xs text-slate-400 max-w-lg mx-auto leading-relaxed">
+              {isCustomTaskPlugin
+                ? pluginCanSubmit
+                  ? 'Provide predictions for the competition test set. The selected task plugin builds and validates its submission format.'
+                  : `The selected task plugin (${taskInfo?.task_plugin?.id}) has no submission builder and validator. Submission packaging is unavailable until both hooks are implemented.`
+                : 'Build a package from candidate predictions using the configured submission checks.'}
+            </p>
+            {!isCustomTaskPlugin && (
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300 max-w-xl mx-auto text-left">
+                ml-harness-audit --candidate {artifactDir}/&lt;exp_id&gt;/oof_predictions.csv --output-zip submission.zip
+                <br />
+                ml-harness-agent --project-root . act --action prepare_submission --params {'{'}"exp_id": "&lt;exp_id&gt;"{'}'}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px]">
+                  <th className="py-3 px-3">Submission ID</th>
+                  <th className="py-3 px-3">Exp ID</th>
+                  <th className="py-3 px-3">Status</th>
+                  <th className="py-3 px-3 text-right">Local CV ({taskInfo?.primary_metric || 'Metric'})</th>
+                  <th className="py-3 px-3 text-right">Remote LB ({taskInfo?.primary_metric || 'Metric'})</th>
+                  <th className="py-3 px-3 text-right">Delta (Δ LB - CV)</th>
+                  <th className="py-3 px-3">Validation Receipt</th>
+                  <th className="py-3 px-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-mono">
+                {submissions.map((sub) => {
+                  const hasScores = sub.status === 'SCORED' && sub.official_scores;
+                  const deltaValues = sub.score_deltas
+                    ? Object.values(sub.score_deltas).filter((v) => typeof v === 'number')
+                    : [];
+                  const mainDelta =
+                    (taskInfo?.primary_metric ? sub.score_deltas?.[taskInfo.primary_metric] : undefined) ??
+                    sub.score_deltas?.primary_metric ??
+                    (deltaValues.length > 0 ? (deltaValues[0] as number) : undefined);
+
+                  return (
+                    <tr key={sub.id} className="hover:bg-slate-800/40 transition">
+                      <td className="py-3.5 px-3 font-semibold text-slate-200">
+                        <div className="flex items-center gap-1.5">
+                          {sub.divergence_warning && (
+                            <span title="Divergence Alert: LB drop > 0.05">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+                            </span>
+                          )}
+                          <span>{sub.id}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-sans mt-0.5">
+                          {sub.created_at}
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-3">
+                        <button
+                          onClick={() => onSelectExperiment(sub.exp_id)}
+                          className="text-indigo-400 hover:text-indigo-300 hover:underline font-mono"
+                        >
+                          {sub.exp_id}
+                        </button>
+                      </td>
+
+                      <td className="py-3.5 px-3">
+                        {sub.status === 'SCORED' ? (
+                          <span className="bg-indigo-900/60 text-indigo-300 border border-indigo-700/50 px-2 py-0.5 rounded text-[10px] font-semibold">
+                            SCORED ({sub.official_scores?.split_type || 'public'})
+                          </span>
+                        ) : (
+                          <span className="bg-emerald-900/60 text-emerald-300 border border-emerald-700/50 px-2 py-0.5 rounded text-[10px] font-semibold">
+                            LOCAL_VERIFIED
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Local CV */}
+                      <td className="py-3.5 px-3 text-right">
+                        {renderScoreSet(sub.local_cv_scores)}
+                      </td>
+
+                      {/* Official Remote LB */}
+                      <td className="py-3.5 px-3 text-right">
+                        {hasScores ? (
+                          renderScoreSet(sub.official_scores)
+                        ) : (
+                          <span className="text-slate-500 font-sans italic text-[11px]">
+                            Pending Remote
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Deltas */}
+                      <td className="py-3.5 px-3 text-right">
+                        {mainDelta !== undefined && mainDelta !== null ? (
+                          <div
+                            className={`flex items-center justify-end gap-1 font-bold ${
+                              mainDelta >= 0 ? 'text-emerald-400' : mainDelta < -0.05 ? 'text-rose-400' : 'text-amber-400'
+                            }`}
+                          >
+                            {mainDelta >= 0 ? (
+                              <TrendingUp className="w-3.5 h-3.5" />
+                            ) : (
+                              <TrendingDown className="w-3.5 h-3.5" />
+                            )}
+                            <span>
+                              {mainDelta > 0 ? `+${mainDelta.toFixed(4)}` : mainDelta.toFixed(4)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-600">-</span>
+                        )}
+                      </td>
+
+                      {/* Receipt from the active submission validator */}
+                      <td className="py-3.5 px-3 text-slate-400 font-sans text-[11px]">
+                        <span className="font-mono text-emerald-400">✓ Verified</span>
+                        {sub.notes && (
+                          <div className="text-slate-500 text-[10px] truncate max-w-[180px]">
+                            {sub.notes}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Action */}
+                      <td className="py-3.5 px-3 text-right">
+                        <button
+                          onClick={() => openScoreModal(sub)}
+                          className="bg-indigo-600/80 hover:bg-indigo-600 active:scale-95 text-white px-2.5 py-1 rounded text-[11px] font-sans font-medium transition shadow-sm"
+                        >
+                          {sub.status === 'SCORED' ? 'Update Score' : 'Record LB Score'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Record Score Modal */}
+      {selectedSubForScore && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">Record Remote / Leaderboard Score</h3>
+                <p className="text-xs text-slate-400 font-mono mt-0.5">
+                  {selectedSubForScore.id}
+                </p>
+              </div>
+              <button
+                onClick={closeScoreModal}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {formError && (
+              <div className="bg-rose-950/40 border border-rose-800/60 p-3 rounded-lg text-xs text-rose-300">
+                {formError}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitScore} className="space-y-3.5 text-xs">
+              {taskInfo?.metrics && taskInfo.metrics.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {taskInfo.metrics.map((m) => (
+                    <div key={m.id}>
+                      <label className="block text-slate-400 font-medium mb-1 truncate" title={m.name}>
+                        {m.name} ({m.metric})
+                      </label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        placeholder="e.g. 0.6850"
+                        value={dynamicScores[m.id] ?? ''}
+                        onChange={(e) =>
+                          setDynamicScores((prev) => ({ ...prev, [m.id]: e.target.value }))
+                        }
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : taskInfo?.subtasks && taskInfo.subtasks.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {taskInfo.subtasks.map((st: any) => (
+                    <div key={st.id || st.name}>
+                      <label className="block text-slate-400 font-medium mb-1 truncate" title={st.name}>
+                        {st.name} ({st.metric || 'Score'})
+                      </label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        placeholder="e.g. 0.7500"
+                        value={dynamicScores[st.id] ?? ''}
+                        onChange={(e) =>
+                          setDynamicScores((prev) => ({ ...prev, [st.id]: e.target.value }))
+                        }
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <label className="block text-slate-400 font-medium mb-1">
+                      {taskInfo?.primary_metric || 'Primary Metric'} Score
+                    </label>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      placeholder="e.g. 0.8500"
+                      value={dynamicScores['primary_metric'] ?? ''}
+                      onChange={(e) => {
+                        setDynamicScores((prev) => ({ ...prev, primary_metric: e.target.value }));
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Split Type</label>
+                <select
+                  value={splitType}
+                  onChange={(e) => setSplitType(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="public">Public Leaderboard</option>
+                  <option value="private">Private Test Leaderboard</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 font-medium mb-1">Evaluation Notes / Run ID</label>
+                <input
+                  type="text"
+                  placeholder={`e.g. ${taskInfo?.platform || 'competition'} submission ID`}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeScoreModal}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingScore}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-medium rounded-lg transition shadow-lg shadow-indigo-600/30 disabled:opacity-50"
+                >
+                  {submittingScore ? 'Saving...' : 'Save Official Score'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Register New Submission Modal */}
+      {isRegisterModalOpen && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Award className="w-4 h-4 text-indigo-400" />
+                  <span>{isCustomTaskPlugin ? 'Build & Validate Submission' : 'Register Submission'}</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {isCustomTaskPlugin
+                    ? pluginCanSubmit
+                      ? 'Provide competition test-set predictions. The task plugin owns package creation and validation.'
+                      : `Task plugin “${taskInfo?.task_plugin?.id}” must implement both submission hooks before packaging is available.`
+                    : 'The configured submission checks validate candidate predictions and create the declared package.'}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsRegisterModalOpen(false);
+                  setRegError(null);
+                  setRegSuccess(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {regError && (
+              <div className="bg-rose-950/40 border border-rose-800/60 p-3 rounded-lg text-xs text-rose-300">
+                {regError}
+              </div>
+            )}
+
+            {regSuccess && (
+              <div className="bg-emerald-950/40 border border-emerald-800/60 p-3 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{regSuccess}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleRegisterSubmission} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Experiment ID <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. exp001_baseline_tfidf"
+                  value={regExpId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setRegExpId(id);
+                    if (!isCustomTaskPlugin && (!regCandidateCsv || regCandidateCsv.startsWith(artifactDir))) {
+                      setRegCandidateCsv(id ? `${artifactDir}/${id}/oof_predictions.csv` : '');
+                    }
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Candidate Predictions CSV Path
+                </label>
+                <input
+                  type="text"
+                  placeholder={isCustomTaskPlugin ? 'path/to/test_predictions.csv' : `${artifactDir}/<exp_id>/oof_predictions.csv`}
+                  value={regCandidateCsv}
+                  onChange={(e) => setRegCandidateCsv(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  {isCustomTaskPlugin
+                    ? 'Use test-set predictions; validation OOF files are not accepted as submissions.'
+                    : <>Leave blank to auto-detect <code className="text-slate-400">{artifactDir}/{regExpId || '&lt;exp_id&gt;'}/oof_predictions.csv</code></>}
+                </p>
+              </div>
+
+              {!isCustomTaskPlugin && <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Parent Baseline CSV Path (for prediction delta check)
+                </label>
+                <input
+                  type="text"
+                  placeholder={`e.g. ${artifactDir}/<exp_id>/oof_predictions.csv (leave blank if initial baseline)`}
+                  value={regBaselineCsv}
+                  onChange={(e) => setRegBaselineCsv(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Optional. If omitted, candidate is registered as the initial baseline package.
+                </p>
+              </div>}
+
+              {!isCustomTaskPlugin && <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Min Prediction Delta (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={regMinDiffPct}
+                    onChange={(e) => setRegMinDiffPct(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Uses the configured prediction-difference threshold.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Target Platform
+                  </label>
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-300 font-mono">
+                    {taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Not configured'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    From Task Config.
+                  </p>
+                </div>
+              </div>}
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Submission Notes / Rationale
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. LightGBM baseline with feature selection"
+                  value={regNotes}
+                  onChange={(e) => setRegNotes(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsRegisterModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={registering || (isCustomTaskPlugin && !pluginCanSubmit)}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold rounded-lg transition shadow-lg shadow-indigo-600/30 disabled:opacity-50"
+                >
+                  {registering ? 'Building & Validating...' : isCustomTaskPlugin ? 'Build & Validate Submission' : 'Verify Audit & Register'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

@@ -1,0 +1,7 @@
+paths:
+  data_dir: dataset
+  leaderboard_path: .ml-harness/EXPERIMENTS.md
+
+runtime:
+  seed: 42
+  n_splits: 5

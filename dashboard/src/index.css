@@ -1,0 +1,81 @@
+@import '@xyflow/react/dist/style.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-size: 18px;
+  }
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Global typography scale boost so no text is tiny */
+.text-\[9px\],
+.text-\[10px\] {
+  font-size: 0.78rem !important;
+  line-height: 1.35 !important;
+}
+
+.text-\[11px\],
+.text-xs {
+  font-size: 0.85rem !important;
+  line-height: 1.45 !important;
+}
+
+.text-sm {
+  font-size: 0.95rem !important;
+  line-height: 1.5 !important;
+}
+
+/* Custom React Flow styling for dark mode */
+.react-flow__background {
+  background-color: #030712 !important;
+}
+
+.react-flow__controls {
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid #1e293b;
+  background-color: #0f172a;
+}
+
+.react-flow__controls-button {
+  background-color: #0f172a !important;
+  border-bottom: 1px solid #1e293b !important;
+  fill: #94a3b8 !important;
+}
+
+.react-flow__controls-button:hover {
+  background-color: #1e293b !important;
+  fill: #f8fafc !important;
+}
+
+.react-flow__minimap {
+  background-color: #0b0f19 !important;
+  border: 1px solid #1e293b !important;
+  border-radius: 0.5rem;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
