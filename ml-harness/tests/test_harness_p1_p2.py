@@ -40,6 +40,7 @@ class TestTreeJournalDirectionAndUCB(unittest.TestCase):
         """When direction='minimize', lower loss should receive higher exploit score and UCB."""
         # Node 1: High loss (worse)
         node_bad = Node(
+            verified=True,eligible=True,
             id="exp001_high_loss",
             branch="baseline",
             direction="minimize",
@@ -48,6 +49,7 @@ class TestTreeJournalDirectionAndUCB(unittest.TestCase):
         )
         # Node 2: Low loss (better)
         node_good = Node(
+            verified=True,eligible=True,
             id="exp002_low_loss",
             branch="feat",
             parent_id="exp001_high_loss",
@@ -65,6 +67,7 @@ class TestTreeJournalDirectionAndUCB(unittest.TestCase):
     def test_ucb_maximization_prioritizes_higher_score(self):
         """When direction='maximize', higher score should receive higher exploit score and UCB."""
         node_low = Node(
+            verified=True,eligible=True,
             id="exp001_low_f1",
             branch="baseline",
             direction="maximize",
@@ -72,6 +75,7 @@ class TestTreeJournalDirectionAndUCB(unittest.TestCase):
             metrics={"f1": 0.60},
         )
         node_high = Node(
+            verified=True,eligible=True,
             id="exp002_high_f1",
             branch="feat",
             parent_id="exp001_low_f1",
@@ -88,6 +92,7 @@ class TestTreeJournalDirectionAndUCB(unittest.TestCase):
     def test_generic_bottleneck_cue_handling(self):
         """Diagnostics with generic words like 'imbalance' or 'underfitting' trigger appropriate branch cues."""
         node = Node(
+            verified=True,eligible=True,
             id="exp001_imbalanced",
             branch="baseline",
             direction="maximize",
@@ -201,19 +206,8 @@ class TestCandidateSynthesisEnhancements(unittest.TestCase):
         from harness.competition_state import CompetitionState
 
         comp_state = CompetitionState(project_root=self.test_dir)
-        entry = comp_state.synthesize_candidate(
-            name="prob_blend_v1",
-            mode="weighted_blend",
-            source_map={
-                "components": ["exp01_model", "exp02_model"],
-                "weights": [0.75, 0.25],
-            },
-        )
-        self.assertEqual(entry["mode"], "weighted_blend")
-        out_df = pd.read_csv(self.test_dir / entry["oof_path"])
-        self.assertIn("pred_prob", out_df.columns)
-        # Row 0: 0.75 * 0.2 + 0.25 * 0.4 = 0.15 + 0.10 = 0.25
-        self.assertAlmostEqual(out_df["pred_prob"].iloc[0], 0.25)
+        with self.assertRaisesRegex(ValueError,"LEGACY_UNVERIFIED"):
+            comp_state.synthesize_candidate(name="prob_blend_v1",mode="weighted_blend",source_map={"components":["exp01_model","exp02_model"],"weights":[.75,.25]})
 
 
 class TestSubmissionManagerDynamic(unittest.TestCase):
@@ -253,11 +247,11 @@ class TestAuditGateDynamicIntegrity(unittest.TestCase):
 
     def test_compute_diff_metrics_dynamic(self):
         """Row-by-row diffs computed cleanly without hardcoded ID col."""
-        cand = pd.DataFrame({"sample_id": [1, 2, 3], "target": ["a", "b", "c"]})
-        base = pd.DataFrame({"sample_id": [1, 2, 3], "target": ["a", "b", "b"]})
+        cand = pd.DataFrame({"sample_id": [1, 2, 3], "pred_target": ["a", "b", "c"]})
+        base = pd.DataFrame({"sample_id": [1, 2, 3], "pred_target": ["a", "b", "b"]})
         diff_count, diff_details = compute_diff_metrics(cand, base, id_col="sample_id")
         self.assertEqual(diff_count, 1)
-        self.assertEqual(diff_details["target"]["different_count"], 1)
+        self.assertEqual(diff_details["pred_target"]["different_count"], 1)
 
 
 if __name__ == "__main__":

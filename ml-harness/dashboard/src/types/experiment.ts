@@ -29,6 +29,10 @@ export interface GraphNode {
   approach_type: ApproachType;
   model_family: string;
   score: number;
+  verified?: boolean;
+  eligible?: boolean;
+  direction?: string;
+  primary_metric?: string;
   parent_delta?: number | null;
   param_count: number | null;
   param_size?: string | null;
@@ -66,6 +70,10 @@ export interface ExperimentSummary {
   approach_type: ApproachType;
   model_family: string;
   score: number;
+  verified?: boolean;
+  eligible?: boolean;
+  direction?: string;
+  primary_metric?: string;
   param_count: number | null;
   param_size?: string | null;
   llm_spec?: LLMSpec | null;
@@ -85,6 +93,10 @@ export interface NodeDetail {
   approach_type: ApproachType;
   model_family: string;
   score: number;
+  verified?: boolean;
+  eligible?: boolean;
+  direction?: string;
+  primary_metric?: string;
   param_count: number | null;
   param_size?: string | null;
   llm_spec?: LLMSpec | null;

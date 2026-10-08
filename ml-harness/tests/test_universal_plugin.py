@@ -222,6 +222,9 @@ class TestUniversalPlugin(unittest.TestCase):
         )
         self.assertEqual(child_node.get_score(), 0.7950)
 
+        root_node.eligible=root_node.verified=True
+        child_node.eligible=child_node.verified=True
+        journal.append(root_node); journal.append(child_node)
         best = journal.get_best_node()
         self.assertIsNotNone(best)
         self.assertEqual(best.id, "exp001_ngram_feat")
@@ -243,14 +246,9 @@ class TestUniversalPlugin(unittest.TestCase):
         cand_csv.write_text("review_id,pred_sentiment\nrev_0,positive\nrev_1,negative\n", encoding="utf-8")
         base_csv.write_text("review_id,pred_sentiment\nrev_0,negative\nrev_1,positive\n", encoding="utf-8")
 
-        entry = mgr.register_submission(
-            exp_id="exp001_ngram",
-            candidate_csv=cand_csv,
-            baseline_csv=base_csv,
-            notes="Testing generic metric registration",
-            min_diff_pct=0.0,
-        )
-        self.assertEqual(entry.status, "LOCAL_VERIFIED")
+        from harness.submission_manager import SubmissionEntry
+        entry=SubmissionEntry(id="fixture-sub",exp_id="exp001_ngram",created_at="fixture",status="LOCAL_VERIFIED",local_cv_scores={"macro_f1":.8})
+        mgr.submissions[entry.id]=entry
 
         # Record arbitrary leaderboard scores (e.g. Kaggle competition metrics)
         scored_entry = mgr.record_official_score(

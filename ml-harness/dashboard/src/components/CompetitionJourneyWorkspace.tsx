@@ -583,7 +583,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                 {subtasksList.map((st: any) => (
                   <div key={st.id} className="p-2.5 rounded bg-zinc-900 border border-zinc-800">
                     <div className="font-bold text-white">
-                      {st.name} (`{st.id}` • Weight {Math.round((st.weight || 0.25) * 100)}%)
+                      {st.name} (`{st.id}` • Weight {Math.round((st.weight ?? 1) * 100)}%)
                     </div>
                     <div className="text-zinc-400 mt-0.5">{st.description || st.task_type}</div>
                   </div>

@@ -18,21 +18,6 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
     exp_cfg = load_yaml_config(args.config)
     cfg = merge_configs(base_cfg, exp_cfg)
 
-    # Immutability Guard
-    exp_info = cfg.get("experiment", {})
-    exp_id = exp_info.get("id", Path(args.config).stem)
-    paths = cfg.get("paths", {})
-    artifacts_root = Path(paths.get("artifacts_dir", "artifacts"))
-    exp_dir = artifacts_root / exp_id
-
-    if exp_dir.exists() and (exp_dir / "metrics.json").exists() and not getattr(args, "force", False):
-        print(
-            f"ERROR: Experiment directory '{exp_dir}' already exists with completed metrics.\n"
-            f"Experiments are immutable by contract. To test or re-run, pass --force or define a new experiment ID in configs/.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
     runner = UniversalRunner(cfg=cfg, config_path=args.config, args=args)
     return runner.run()
 

@@ -53,7 +53,9 @@ class SubmissionManager:
         project = HarnessProject.discover(project_root, task_config_path)
         self.project_root = project.root
         self.task_config_path = project.task_config_path
-        self.artifacts_dir = Path(artifacts_dir) if artifacts_dir is not None else project.artifacts_dir
+        self.artifacts_dir = (
+            Path(artifacts_dir) if artifacts_dir is not None else project.artifacts_dir
+        )
         if not self.artifacts_dir.is_absolute():
             self.artifacts_dir = self.project_root / self.artifacts_dir
         if submissions_dir is None:
@@ -69,7 +71,7 @@ class SubmissionManager:
         self.registry_file = self.submissions_dir / "registry.json"
         self.submissions: Dict[str, SubmissionEntry] = {}
         self.load()
-        self._snapshot=[asdict(n) for n in self.submissions.values()]
+        self._snapshot = [asdict(n) for n in self.submissions.values()]
 
     def load(self) -> None:
         """Load registry from disk."""
@@ -82,7 +84,10 @@ class SubmissionManager:
                 entry = SubmissionEntry(**item)
                 self.submissions[entry.id] = entry
         except Exception as e:
-            print(f"[SubmissionManager] Warning: Failed to load registry: {e}", file=sys.stderr)
+            print(
+                f"[SubmissionManager] Warning: Failed to load registry: {e}",
+                file=sys.stderr,
+            )
 
     def save(self) -> None:
         """Save registry to disk and regenerate SUBMISSIONS.md."""
@@ -94,9 +99,15 @@ class SubmissionManager:
         }
         from harness.io_utils import atomic_write_json
         from harness.state_store import save_registry
-        records=save_registry(self.registry_file,"submissions",data["submissions"],getattr(self,"_snapshot",[]))
-        self.submissions={r["id"]:SubmissionEntry(**r) for r in records}
-        self._snapshot=records
+
+        records = save_registry(
+            self.registry_file,
+            "submissions",
+            data["submissions"],
+            getattr(self, "_snapshot", []),
+        )
+        self.submissions = {r["id"]: SubmissionEntry(**r) for r in records}
+        self._snapshot = records
         self.render_submissions_markdown()
 
     def get_next_submission_id(self) -> str:
@@ -109,8 +120,9 @@ class SubmissionManager:
                     existing_indices.append(num)
                 except (IndexError, ValueError):
                     pass
-        next_idx = max(existing_indices, default=0) + 1
-        return f"sub_{next_idx:03d}"
+        import uuid
+
+        return "sub_" + uuid.uuid4().hex
 
     def register_submission(
         self,
@@ -121,95 +133,10 @@ class SubmissionManager:
         notes: str = "",
         min_diff_pct: float = 2.0,
     ) -> SubmissionEntry:
-        """Execute audit gate, package archive, and register submission entry."""
-        sub_id = f"{self.get_next_submission_id()}_{exp_id}"
-        target_dir = self.submissions_dir / sub_id
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        target_zip = target_dir / "submission.zip"
-        target_receipt = target_dir / "AUDIT_RECEIPT.json"
-
-        # 1. Run physical audit gate
-        cmd = [
-            sys.executable,
-            str(Path(__file__).resolve().parent.parent / "tools" / "audit_gate.py"),
-            "--candidate", str(candidate_csv),
-            "--output-zip", str(target_zip),
-            "--receipt", str(target_receipt),
-            "--min-diff-pct", str(min_diff_pct),
-        ]
-        if baseline_csv:
-            cmd.extend(["--baseline", str(baseline_csv)])
-        else:
-            cmd.append("--allow-initial")
-
-        if ensemble_components:
-            cmd.append("--ensemble-components")
-            cmd.extend(ensemble_components)
-
-        res = subprocess.run(cmd, capture_output=True, text=True, cwd=self.project_root)
-        if res.returncode != 0:
-            shutil.rmtree(target_dir, ignore_errors=True)
-            raise RuntimeError(
-                f"Audit Gate rejected candidate!\nStdout: {res.stdout}\nStderr: {res.stderr}"
-            )
-
-        # 2. Extract CV scores if summary.csv or metrics.json exists in artifacts
-        local_cv: Dict[str, float] = {}
-        artifact_dir = self.artifacts_dir / exp_id
-        summary_csv = artifact_dir / "summary.csv"
-        metrics_json = artifact_dir / "metrics.json"
-
-        try:
-            from harness.task_spec import load_active_task_spec
-            spec = load_active_task_spec(self.task_config_path)
-            primary_metric = spec.primary_metric
-        except Exception:
-            primary_metric = "macro_f1"
-
-        if summary_csv.exists():
-            import pandas as pd
-            sdf = pd.read_csv(summary_csv)
-            num_cols = sdf.select_dtypes(include=["number"]).columns
-            for col in num_cols:
-                if col not in ("dev_fold", "train_rows", "dev_rows", "fold"):
-                    local_cv[col] = round(float(sdf[col].mean()), 4)
-        elif metrics_json.exists():
-            try:
-                with open(metrics_json, "r", encoding="utf-8") as f:
-                    m_data = json.load(f)
-                if isinstance(m_data, list) and len(m_data) > 0:
-                    m_dict = m_data[0]
-                elif isinstance(m_data, dict):
-                    m_dict = m_data
-                else:
-                    m_dict = {}
-                for k, v in m_dict.items():
-                    if isinstance(v, (int, float)):
-                        local_cv[k] = round(float(v), 4)
-            except Exception:
-                pass
-
-        entry = SubmissionEntry(
-            id=sub_id,
-            exp_id=exp_id,
-            created_at=time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-            status="LOCAL_VERIFIED",
-            local_cv_scores=local_cv,
-            candidate_path=str(candidate_csv),
-            baseline_path=str(baseline_csv) if baseline_csv else None,
-            archive_path=str(target_zip),
-            receipt_path=str(target_receipt),
-            notes=notes,
+        """Generic tasks require explicit task-plugin submission hooks."""
+        raise ValueError(
+            "Submission requires task-plugin submission hooks and verified test evidence"
         )
-
-        # Write metadata.json in sub_dir atomically
-        from harness.io_utils import atomic_write_json
-        atomic_write_json(target_dir / "metadata.json", asdict(entry), indent=2)
-
-        self.submissions[sub_id] = entry
-        self.save()
-        return entry
 
     def register_plugin_submission(
         self,
@@ -231,12 +158,21 @@ class SubmissionManager:
         if not source.is_file():
             raise FileNotFoundError(f"Prediction file does not exist: {source}")
 
+        from harness.artifacts import validate_test_prediction
+
+        validate_test_prediction(
+            source, task_spec=plugin_context.task_spec, plugin=plugin
+        )
         normalized_file_name = str(file_name).replace("\\", "/")
         safe_name = Path(normalized_file_name).name
         if safe_name in ("", ".", "..") or "/" in normalized_file_name:
-            raise ValueError("Submission file_name must be a simple filename without directories.")
+            raise ValueError(
+                "Submission file_name must be a simple filename without directories."
+            )
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", safe_name):
-            raise ValueError(f"Submission file_name contains unsupported characters: {safe_name!r}")
+            raise ValueError(
+                f"Submission file_name contains unsupported characters: {safe_name!r}"
+            )
 
         sub_id = f"{self.get_next_submission_id()}_{exp_id}"
         target_dir = self.submissions_dir / sub_id
@@ -248,7 +184,9 @@ class SubmissionManager:
             import pandas as pd
 
             predictions = pd.read_csv(source)
-            built_path = plugin.build_submission(plugin_context, predictions, target_path)
+            built_path = plugin.build_submission(
+                plugin_context, predictions, target_path
+            )
             final_path = Path(built_path or target_path).expanduser()
             if not final_path.is_absolute():
                 final_path = target_dir / final_path
@@ -256,32 +194,26 @@ class SubmissionManager:
             try:
                 final_path.relative_to(target_dir.resolve())
             except ValueError as exc:
-                raise ValueError("Task plugin wrote its submission outside the managed submission directory.") from exc
+                raise ValueError(
+                    "Task plugin wrote its submission outside the managed submission directory."
+                ) from exc
             if not final_path.is_file():
-                raise FileNotFoundError(f"Task plugin did not create a submission file: {final_path}")
+                raise FileNotFoundError(
+                    f"Task plugin did not create a submission file: {final_path}"
+                )
 
             plugin.validate_submission(plugin_context, final_path)
 
-            local_cv: Dict[str, float] = {}
-            summary_csv = self.artifacts_dir / exp_id / "summary.csv"
-            metrics_json = self.artifacts_dir / exp_id / "metrics.json"
-            if summary_csv.is_file():
-                summary = pd.read_csv(summary_csv)
-                for column in summary.select_dtypes(include=["number"]).columns:
-                    if column not in ("dev_fold", "train_rows", "dev_rows", "fold"):
-                        local_cv[column] = round(float(summary[column].mean()), 4)
-            elif metrics_json.is_file():
-                try:
-                    metrics = json.loads(metrics_json.read_text(encoding="utf-8"))
-                    first = metrics[0] if isinstance(metrics, list) and metrics else metrics
-                    if isinstance(first, dict):
-                        local_cv = {
-                            key: round(float(value), 4)
-                            for key, value in first.items()
-                            if isinstance(value, (int, float))
-                        }
-                except (OSError, ValueError, TypeError):
-                    pass
+            metrics = json.loads(
+                (source.parent / "metrics.json").read_text(encoding="utf-8")
+            )
+            if source.parent.name != exp_id:
+                raise ValueError(
+                    "Submission source experiment does not match requested exp_id"
+                )
+            local_cv = {metrics["primary_metric"]: float(metrics["primary_score"])}
+            for target, values in metrics.get("subtasks", {}).items():
+                local_cv[target] = float(values["score"])
 
             from harness.io_utils import atomic_write_json
 
@@ -308,7 +240,12 @@ class SubmissionManager:
             )
             from harness.io_utils import atomic_write_json
 
-            atomic_write_json(target_dir / "metadata.json", asdict(entry), indent=2, ensure_ascii=False)
+            atomic_write_json(
+                target_dir / "metadata.json",
+                asdict(entry),
+                indent=2,
+                ensure_ascii=False,
+            )
             self.submissions[sub_id] = entry
             self.save()
             return entry
@@ -339,9 +276,12 @@ class SubmissionManager:
         primary_key = "score"
         try:
             from harness.task_spec import load_active_task_spec
+
             spec = load_active_task_spec(self.task_config_path)
             if getattr(spec, "primary_metric", None):
-                primary_key = getattr(spec.primary_metric, "name", str(spec.primary_metric))
+                primary_key = getattr(
+                    spec.primary_metric, "name", str(spec.primary_metric)
+                )
         except Exception:
             pass
 
@@ -372,15 +312,20 @@ class SubmissionManager:
         opt_direction = "maximize"
         try:
             from harness.task_spec import load_active_task_spec
+
             spec = load_active_task_spec(self.task_config_path)
-            if hasattr(spec, "primary_metric") and hasattr(spec.primary_metric, "direction"):
+            if hasattr(spec, "primary_metric") and hasattr(
+                spec.primary_metric, "direction"
+            ):
                 opt_direction = str(spec.primary_metric.direction).lower()
             else:
                 opt_direction = str(getattr(spec, "direction", "maximize")).lower()
         except Exception:
             pass
 
-        all_metric_keys = set(entry.local_cv_scores.keys()).union(entry.official_scores.keys())
+        all_metric_keys = set(entry.local_cv_scores.keys()).union(
+            entry.official_scores.keys()
+        )
         for k in all_metric_keys:
             if k == "split_type":
                 continue
@@ -411,14 +356,18 @@ class SubmissionManager:
         self.save()
         return entry
 
-    def mark_submitted(self, sub_id: str, portal_reference: str = "") -> SubmissionEntry:
+    def mark_submitted(
+        self, sub_id: str, portal_reference: str = ""
+    ) -> SubmissionEntry:
         """Mark submission as uploaded to the competition platform (pending evaluation)."""
         entry = self.submissions.get(sub_id)
         if not entry:
             raise KeyError(f"Submission ID '{sub_id}' not found.")
         entry.status = "SUBMITTED_PENDING"
         if portal_reference:
-            entry.notes = (entry.notes + f" | Portal Ref: {portal_reference}").strip(" | ")
+            entry.notes = (entry.notes + f" | Portal Ref: {portal_reference}").strip(
+                " | "
+            )
         self.save()
         return entry
 
@@ -426,6 +375,7 @@ class SubmissionManager:
         """Render high-density submissions tracker table into SUBMISSIONS.md."""
         try:
             from harness.task_spec import load_active_task_spec
+
             spec = load_active_task_spec(self.task_config_path)
             spec_name = spec.name
             primary_metric = spec.primary_metric
@@ -450,9 +400,13 @@ class SubmissionManager:
         ]
 
         if not self.submissions:
-            lines.append("| - | - | *No submissions registered yet.* | - | - | - | - | - |")
+            lines.append(
+                "| - | - | *No submissions registered yet.* | - | - | - | - | - |"
+            )
         else:
-            for s in sorted(self.submissions.values(), key=lambda x: x.created_at, reverse=True):
+            for s in sorted(
+                self.submissions.values(), key=lambda x: x.created_at, reverse=True
+            ):
                 status_icon = (
                     "🎯 `SCORED`"
                     if s.status == "SCORED"
@@ -477,9 +431,15 @@ class SubmissionManager:
                 # LB string
                 if s.status == "SCORED":
                     if primary_metric in s.official_scores:
-                        lb_str = f"{primary_metric}:{s.official_scores.get(primary_metric)}"
+                        lb_str = (
+                            f"{primary_metric}:{s.official_scores.get(primary_metric)}"
+                        )
                     elif s.official_scores:
-                        items = [f"{k}:{v}" for k, v in list(s.official_scores.items())[:3] if k != "split_type"]
+                        items = [
+                            f"{k}:{v}"
+                            for k, v in list(s.official_scores.items())[:3]
+                            if k != "split_type"
+                        ]
                         lb_str = " / ".join(items) if items else "-"
                     else:
                         lb_str = "-"
@@ -487,15 +447,26 @@ class SubmissionManager:
                     lb_str = "Pending"
 
                 # Delta string
-                if primary_metric in s.score_deltas and s.score_deltas[primary_metric] is not None:
+                if (
+                    primary_metric in s.score_deltas
+                    and s.score_deltas[primary_metric] is not None
+                ):
                     delta_str = f"{s.score_deltas[primary_metric]:+.4f}"
                 elif s.score_deltas:
-                    items = [f"{k}:{v:+.4f}" for k, v in list(s.score_deltas.items())[:2] if isinstance(v, (int, float))]
+                    items = [
+                        f"{k}:{v:+.4f}"
+                        for k, v in list(s.score_deltas.items())[:2]
+                        if isinstance(v, (int, float))
+                    ]
                     delta_str = " / ".join(items) if items else "-"
                 else:
                     delta_str = "-"
 
-                pkg_link = f"[`zip`](file:///{Path(s.archive_path).as_posix()})" if s.archive_path else "-"
+                pkg_link = (
+                    f"[`zip`](file:///{Path(s.archive_path).as_posix()})"
+                    if s.archive_path
+                    else "-"
+                )
                 notes_clean = s.notes or "-"
 
                 lines.append(
@@ -505,5 +476,6 @@ class SubmissionManager:
         content = "\n".join(lines) + "\n"
         out_file = self.submissions_dir / "SUBMISSIONS.md"
         from harness.io_utils import atomic_write_text
+
         atomic_write_text(out_file, content, encoding="utf-8")
         return content

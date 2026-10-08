@@ -3,7 +3,7 @@ task:
   platform: kaggle
   task_name: Titanic Survival Prediction
   name: Titanic Survival Prediction
-  task_type: Tabular Binary Classification
+  task_type: classification
   type: Tabular Binary Classification
   modality: tabular
   primary_metric: Accuracy

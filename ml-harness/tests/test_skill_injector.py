@@ -128,7 +128,9 @@ class SkillInjectorAPITests(unittest.TestCase):
     def setUpClass(cls):
         cls.port = 8799
         cls.server = socketserver.TCPServer(("127.0.0.1", cls.port), DashboardHandler)
-        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread = threading.Thread(
+            target=cls.server.serve_forever, daemon=True
+        )
         cls.server_thread.start()
         time.sleep(0.2)
 
@@ -141,7 +143,12 @@ class SkillInjectorAPITests(unittest.TestCase):
         """POST /api/skill/inject should re-generate and update SKILL.md."""
         url = f"http://127.0.0.1:{self.port}/api/skill/inject"
         payload = json.dumps({}).encode("utf-8")
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode())
@@ -151,15 +158,18 @@ class SkillInjectorAPITests(unittest.TestCase):
     def test_api_task_info_auto_inject(self):
         """POST /api/task_info should save task config and automatically inject skill."""
         url = f"http://127.0.0.1:{self.port}/api/task_info"
-        current_req = urllib.request.Request(url)
-        with urllib.request.urlopen(current_req) as resp:
-            current_data = json.loads(resp.read().decode())
+        from tools.dashboard_server import load_task_config
 
-        payload = json.dumps(current_data).encode("utf-8")
-        post_req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        payload = json.dumps(load_task_config()).encode("utf-8")
+        post_req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
         with urllib.request.urlopen(post_req) as resp:
             self.assertEqual(resp.status, 200)
-            data = json.loads(resp.read().decode())
+            data = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(data.get("success"))
             self.assertTrue(data.get("skill_injected"))
 

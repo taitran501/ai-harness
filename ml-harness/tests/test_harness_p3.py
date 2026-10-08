@@ -38,7 +38,7 @@ class TestAuditGateRefinements(unittest.TestCase):
             "pred_col": ["a", "x", "c"],
         })
 
-        diff_count, diff_details = compute_diff_metrics(cand_df, base_df, id_col=None)
+        diff_count, diff_details = compute_diff_metrics(cand_df, base_df, id_col="sample_id")
         self.assertEqual(diff_count, 1)
         self.assertIn("pred_col", diff_details)
         self.assertNotIn("sample_id", diff_details)
@@ -53,7 +53,7 @@ class TestAuditGateRefinements(unittest.TestCase):
             "pred_target_type": ["none", "individual"],
         })
         spec = UniversalTaskSpec(
-            name="Stereo fixture",
+            name="Stereo fixture",metadata={"data":{"id_column":"sample_id"}},
             task_type="multi_task_classification",
             primary_metric="macro_f1",
             subtasks={
@@ -153,10 +153,8 @@ class TestAgentBridgeDynamicCandidateSlots(unittest.TestCase):
             session_id=self.session.session_id,
             user_approved=True,
         )
-        self.assertEqual(obs.status, "SUCCESS")
-        freeze_sel = self.bridge.comp_state.state["freeze_selection"]
-        self.assertEqual(freeze_sel["slot_1_safe_cv"], "cand_alpha")
-        self.assertEqual(freeze_sel["slot_2_aggressive_lb"], "cand_beta")
+        self.assertEqual(obs.status,"FAILED")
+        self.assertFalse(self.bridge.comp_state.state["gates"]["freeze_locked"])
 
     def test_record_external_score_forwards_custom_scores(self):
         """RECORD_EXTERNAL_SCORE action correctly passes arbitrary scores dictionary."""

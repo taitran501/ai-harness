@@ -47,20 +47,22 @@ const DashboardContent: React.FC = () => {
   const [isEnvModalOpen, setIsEnvModalOpen] = useState(false);
   const [configModalTarget, setConfigModalTarget] = useState<string | undefined>(undefined);
   const [configModalParentId, setConfigModalParentId] = useState<string | undefined>(undefined);
-  const [, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setApiError(null);
     try {
       const [treeRes, expRes, recRes, statusRes, promptRes, taskRes, subRes, compRes] = await Promise.all([
-        api.getTree().catch(() => ({ nodes: [], edges: [], best_id: null })),
-        api.getExperiments().catch(() => ({ total: 0, experiments: [] })),
-        api.getRecommendation().catch(() => ({ guideline: 'No recommendations available.', parent_id: null })),
-        api.getStatus().catch(() => null),
-        api.getPrimingPrompt().catch(() => ({ prompt: '', character_count: 0 })),
-        api.getTaskInfo().catch(() => null),
-        api.getSubmissions().catch(() => ({ total: 0, submissions: [] })),
-        api.getCompetitionState().catch(() => null),
+        api.getTree(),
+        api.getExperiments(),
+        api.getRecommendation(),
+        api.getStatus(),
+        api.getPrimingPrompt(),
+        api.getTaskInfo(),
+        api.getSubmissions(),
+        api.getCompetitionState(),
       ]);
 
       setGraphData(treeRes);
@@ -72,7 +74,7 @@ const DashboardContent: React.FC = () => {
       setSubmissions(subRes.submissions);
       setCompState(compRes);
     } catch (err) {
-      console.error('Error fetching dashboard data:', err);
+      setApiError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -117,6 +119,9 @@ const DashboardContent: React.FC = () => {
     setIsConfigModalOpen(true);
   };
 
+  if (loading) return <main className="min-h-screen bg-zinc-950 text-zinc-100 p-8"><h1>ML-Harness</h1><p role="status">Loading workspace…</p></main>;
+  if (apiError) return <main className="min-h-screen bg-zinc-950 text-zinc-100 p-8"><h1>ML-Harness</h1><p role="alert">API error: {apiError}</p><button onClick={loadData}>Retry</button></main>;
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans">
       <Header
@@ -133,6 +138,10 @@ const DashboardContent: React.FC = () => {
       />
 
       <main className="flex-1 w-full px-5 py-3 space-y-3 flex flex-col">
+        {loading && <p role="status">Loading workspace…</p>}
+        {apiError && <div role="alert" className="border border-red-700 bg-red-950 p-3">API error: {apiError} <button onClick={loadData}>Retry</button></div>}
+        {!loading && !apiError && graphData.nodes.length === 0 && <p role="status">Workspace has no recorded runs.</p>}
+        {!loading && !apiError && <p className="text-xs text-zinc-400">Verified evidence is required for eligible runs. Legacy artifacts are display only. Hard runtime budgets: local wall-time; remote allocation limits unavailable.</p>}
         {/* Segmented Navigation */}
         <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
           <nav className="flex flex-wrap gap-1 bg-zinc-900/70 p-1 rounded-lg border border-zinc-800">

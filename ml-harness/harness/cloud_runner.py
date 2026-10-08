@@ -108,9 +108,16 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
 
 
 def _sync_completed_run(project: HarnessProject, exp_id: str) -> Dict[str, Any]:
+    from harness.artifacts import validate_run
+    from harness.task_spec import load_active_task_spec
+    from harness.plugins import TaskPluginContext,load_task_plugin
+    spec=load_active_task_spec(project.task_config_path)
+    context=TaskPluginContext(project.root,project.task_config_path,spec,project.plugin_id or "default")
+    plugin=load_task_plugin(project.plugin_id,context)
+    validate_run(project.artifacts_dir/exp_id,task_spec=spec,plugin=plugin,expected={"exp_id":exp_id})
     journal = TreeJournal(
         journal_path=project.artifacts_dir / "journal.json",
-        artifacts_dir=project.artifacts_dir,
+        artifacts_dir=project.artifacts_dir,task_spec=spec,task_plugin=plugin,
     )
     synced = journal.sync_from_artifacts(project.artifacts_dir)
     metrics_path = project.artifacts_dir / exp_id / "metrics.json"

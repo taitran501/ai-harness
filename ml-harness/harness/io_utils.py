@@ -152,6 +152,8 @@ def setup_logger(
 
     logger = logging.getLogger(actual_name)
     logger.setLevel(logging.INFO)
+    for handler in logger.handlers:
+        handler.close()
     logger.handlers = []
 
     formatter = logging.Formatter(

@@ -83,7 +83,8 @@ class CompetitionStateMachine:
         self.spec: Dict[str, Any] = self.load_competition_spec()
         self.state: Dict[str, Any] = self._load_or_init_state()
         import copy
-        self._state_snapshot=copy.deepcopy(self.state)
+
+        self._state_snapshot = copy.deepcopy(self.state)
 
     def load_competition_spec(self) -> Dict[str, Any]:
         """Load the declarative Competition Spec from configs/task.yaml."""
@@ -111,15 +112,29 @@ class CompetitionStateMachine:
             },
             "data_checks": [],
             "candidate_strategies": [
-                {"id": "single_model", "label": "Single Model Candidate", "enabled": True},
-                {"id": "ensemble_blend", "label": "Diverse Ensemble Blend", "enabled": True},
+                {
+                    "id": "single_model",
+                    "label": "Single Model Candidate",
+                    "enabled": True,
+                },
+                {
+                    "id": "ensemble_blend",
+                    "label": "Diverse Ensemble Blend",
+                    "enabled": True,
+                },
             ],
             "final_selection_policy": {
                 "max_candidates": 2,
                 "selection_strategy": "risk_balanced_portfolio",
                 "slots": [
-                    {"id": "slot_1", "label": "Primary Safe Candidate (Stable Validation)"},
-                    {"id": "slot_2", "label": "Secondary Candidate (Ensemble / Specialist)"},
+                    {
+                        "id": "slot_1",
+                        "label": "Primary Safe Candidate (Stable Validation)",
+                    },
+                    {
+                        "id": "slot_2",
+                        "label": "Secondary Candidate (Ensemble / Specialist)",
+                    },
                 ],
             },
         }
@@ -129,7 +144,9 @@ class CompetitionStateMachine:
         eval_proto = self.spec.get("evaluation_protocol", {})
         ext_label = eval_proto.get("external_eval_label", "External Evaluation")
         final_label = eval_proto.get("final_eval_label", "Private Evaluation")
-        max_cands = int(self.spec.get("final_selection_policy", {}).get("max_candidates", 2))
+        max_cands = int(
+            self.spec.get("final_selection_policy", {}).get("max_candidates", 2)
+        )
 
         return [
             {
@@ -200,7 +217,10 @@ class CompetitionStateMachine:
                 "spec_confirmed": False,
                 "data_risks_confirmed": False,
                 "baseline_locked": False,
-                "baseline_exp_id": self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline",
+                "baseline_exp_id": self.spec.get("baseline_anchor", {}).get(
+                    "default_exp_id"
+                )
+                or "baseline",
                 "baseline_evidence": None,
                 "freeze_locked": False,
                 "finalized": False,
@@ -242,7 +262,10 @@ class CompetitionStateMachine:
     def _load_or_init_state(self) -> Dict[str, Any]:
         default = self._default_state()
         if not self.state_file.exists():
-            self._save_raw(default)
+            from harness.state_store import transaction
+
+            with transaction(self.state_file, default) as current:
+                default = dict(current)
             return default
         try:
             loaded = json.loads(self.state_file.read_text(encoding="utf-8"))
@@ -254,21 +277,27 @@ class CompetitionStateMachine:
                         if sk not in loaded[k]:
                             loaded[k][sk] = sv
             return loaded
-        except Exception:
-            return default
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("Required competition state is unreadable") from error
 
     def _save_raw(self, data: Dict[str, Any]) -> None:
         data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         from harness.io_utils import atomic_write_json
+
         atomic_write_json(self.state_file, data, indent=2, ensure_ascii=False)
 
     def save(self) -> None:
         import copy
         from harness.state_store import save_snapshot
-        self.state=save_snapshot(self.state_file,getattr(self,"_state_snapshot",{}),self.state)
-        self._state_snapshot=copy.deepcopy(self.state)
 
-    def _append_audit_event(self, event_type: str, summary: str, details: Optional[Dict[str, Any]] = None) -> None:
+        self.state = save_snapshot(
+            self.state_file, getattr(self, "_state_snapshot", {}), self.state
+        )
+        self._state_snapshot = copy.deepcopy(self.state)
+
+    def _append_audit_event(
+        self, event_type: str, summary: str, details: Optional[Dict[str, Any]] = None
+    ) -> None:
         trail = self.state.setdefault("audit_trail", [])
         trail.insert(
             0,
@@ -284,7 +313,9 @@ class CompetitionStateMachine:
     # =========================================================================
     # PHASE 2: DECLARATIVE SPEC-DRIVEN DATA CHECKS
     # =========================================================================
-    def run_data_readiness_audit(self, custom_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def run_data_readiness_audit(
+        self, custom_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Run declarative data checks defined in CompetitionSpec (`configs/task.yaml`)."""
         if custom_config:
             self.state["data_audit_config"].update(custom_config)
@@ -323,15 +354,21 @@ class CompetitionStateMachine:
                 }
             )
             from harness.io_utils import atomic_write_json
-            atomic_write_json(self.data_report_file, report, indent=2, ensure_ascii=False)
+
+            atomic_write_json(
+                self.data_report_file, report, indent=2, ensure_ascii=False
+            )
             return report
 
         try:
             merged = None
             try:
                 from harness.task_spec import load_active_task_spec
+
                 spec = load_active_task_spec(self.project.task_config_path)
-                merged = spec.load_dataset_split("train", project_root=self.project_root)
+                merged = spec.load_dataset_split(
+                    "train", project_root=self.project_root
+                )
             except Exception:
                 pass
 
@@ -342,7 +379,9 @@ class CompetitionStateMachine:
                     merged = pd.read_csv(data_dir, sep=sep)
                 elif data_dir.is_dir():
                     dfs = []
-                    for f in sorted(data_dir.glob("*.tsv")) + sorted(data_dir.glob("*.csv")):
+                    for f in sorted(data_dir.glob("*.tsv")) + sorted(
+                        data_dir.glob("*.csv")
+                    ):
                         sep = "\t" if f.suffix == ".tsv" else ","
                         try:
                             dfs.append(pd.read_csv(f, sep=sep))
@@ -358,26 +397,44 @@ class CompetitionStateMachine:
             if split_path.exists() and "fold" not in merged.columns and len(merged) > 0:
                 try:
                     splits_df = pd.read_csv(split_path, sep="\t")
-                    common_cols = [c for c in merged.columns if c in splits_df.columns and c != "fold"]
+                    common_cols = [
+                        c
+                        for c in merged.columns
+                        if c in splits_df.columns and c != "fold"
+                    ]
                     if common_cols:
-                        merged = merged.merge(splits_df[common_cols + ["fold"]], on=common_cols[0], how="left")
+                        merged = merged.merge(
+                            splits_df[common_cols + ["fold"]],
+                            on=common_cols[0],
+                            how="left",
+                        )
                 except Exception:
                     pass
 
             data_cfg = self.spec.get("data_config") or self.spec.get("data", {})
-            partition_col = data_cfg.get("partition_column") or self.spec.get("partition_column")
+            partition_col = data_cfg.get("partition_column") or self.spec.get(
+                "partition_column"
+            )
             partition_counts = (
                 merged[partition_col].value_counts().to_dict()
                 if partition_col and partition_col in merged.columns
                 else {}
             )
-            fold_counts = merged["fold"].value_counts().sort_index().to_dict() if "fold" in merged.columns else {}
+            fold_counts = (
+                merged["fold"].value_counts().sort_index().to_dict()
+                if "fold" in merged.columns
+                else {}
+            )
             report["dataset_overview"] = {
                 "total_rows": int(len(merged)),
                 "partition_column": partition_col,
                 "partitions": {str(k): int(v) for k, v in partition_counts.items()},
                 "folds": {str(k): int(v) for k, v in fold_counts.items()},
-                "unique_groups": int(merged[group_col].nunique()) if group_col in merged.columns else 0,
+                "unique_groups": (
+                    int(merged[group_col].nunique())
+                    if group_col in merged.columns
+                    else 0
+                ),
                 "group_column": group_col,
             }
 
@@ -392,8 +449,12 @@ class CompetitionStateMachine:
                         report["checks_performed"].append(chk_id)
                         leaked = 0
                         for f_idx in sorted(merged["fold"].unique()):
-                            tr_g = set(merged[merged["fold"] != f_idx][g_key].dropna().unique())
-                            va_g = set(merged[merged["fold"] == f_idx][g_key].dropna().unique())
+                            tr_g = set(
+                                merged[merged["fold"] != f_idx][g_key].dropna().unique()
+                            )
+                            va_g = set(
+                                merged[merged["fold"] == f_idx][g_key].dropna().unique()
+                            )
                             leaked += len(tr_g.intersection(va_g))
                         report["leakage_audit"] = {
                             "group_column": g_key,
@@ -430,7 +491,9 @@ class CompetitionStateMachine:
                         mask = merged[if_col] == if_val
                         violations = int((merged[mask][req_col] != req_val).sum())
                         active_pct = round(float((~mask).mean()) * 100, 2)
-                        report.setdefault("label_distribution", {})["active_conditioned_pct"] = active_pct
+                        report.setdefault("label_distribution", {})[
+                            "active_conditioned_pct"
+                        ] = active_pct
                         report["warnings"].append(
                             {
                                 "id": chk_id,
@@ -448,12 +511,19 @@ class CompetitionStateMachine:
                     f_neq = chk.get("filter_not_equals")
                     prefix = chk.get("prefix", "label_")
                     thresh = float(chk.get("min_pct_threshold", 5.0))
-                    sub_df = merged[merged[f_col] != f_neq] if (f_col and f_col in merged.columns) else merged
+                    sub_df = (
+                        merged[merged[f_col] != f_neq]
+                        if (f_col and f_col in merged.columns)
+                        else merged
+                    )
                     pref_cols = [c for c in sub_df.columns if c.startswith(prefix)]
                     if pref_cols:
                         report["checks_performed"].append(chk_id)
                         rates = {
-                            c.replace(prefix, ""): round(float(sub_df[c].mean()) * 100, 2) for c in pref_cols
+                            c.replace(prefix, ""): round(
+                                float(sub_df[c].mean()) * 100, 2
+                            )
+                            for c in pref_cols
                         }
                         rare = [k for k, v in rates.items() if v < thresh]
                         if rare:
@@ -468,14 +538,22 @@ class CompetitionStateMachine:
                                 }
                             )
 
-                elif chk_type == "context_length_ratio" and cfg.check_text_length_outliers and cfg.auto_scan_mode == "deep":
+                elif (
+                    chk_type == "context_length_ratio"
+                    and cfg.check_text_length_outliers
+                    and cfg.auto_scan_mode == "deep"
+                ):
                     p_col = chk.get("primary_text_column", "text")
                     c_col = chk.get("context_column", "yt_description")
                     max_r = float(chk.get("max_ratio", 3.0))
                     if p_col in merged.columns and c_col in merged.columns:
                         report["checks_performed"].append(chk_id)
-                        p_med = float(merged[p_col].fillna("").astype(str).str.len().median())
-                        c_med = float(merged[c_col].fillna("").astype(str).str.len().median())
+                        p_med = float(
+                            merged[p_col].fillna("").astype(str).str.len().median()
+                        )
+                        c_med = float(
+                            merged[c_col].fillna("").astype(str).str.len().median()
+                        )
                         if p_med > 0 and (c_med / p_med) > max_r:
                             report["warnings"].append(
                                 {
@@ -494,6 +572,7 @@ class CompetitionStateMachine:
             report["error"] = str(e)
 
         from harness.io_utils import atomic_write_json
+
         atomic_write_json(self.data_report_file, report, indent=2, ensure_ascii=False)
         return report
 
@@ -510,10 +589,22 @@ class CompetitionStateMachine:
     # =========================================================================
     def compute_candidate_pool(self, journal: TreeJournal) -> Dict[str, Any]:
         """Classify completed runs and list supported candidate synthesis strategies from Spec."""
-        completed = [n for n in journal.nodes.values() if not n.is_buggy and n.status == "COMPLETED" and n.verified and n.eligible]
-        baseline_id = self.state["gates"].get("baseline_exp_id") or self.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
-        baseline_node = journal.nodes.get(baseline_id) or (completed[0] if completed else None)
-        base_score = baseline_node.get_score() if baseline_node else float(self.spec.get("primary_metric_baseline") or 0.0)
+        completed = [
+            n
+            for n in journal.nodes.values()
+            if not n.is_buggy and n.status == "COMPLETED" and n.verified and n.eligible
+        ]
+        baseline_id = (
+            self.state["gates"].get("baseline_exp_id")
+            or self.spec.get("baseline_anchor", {}).get("default_exp_id")
+            or "baseline"
+        )
+        baseline_node = next((n for n in completed if n.id == baseline_id), None)
+        base_score = (
+            baseline_node.get_score()
+            if baseline_node
+            else self.spec.get("primary_metric_baseline")
+        )
 
         candidates_list: List[Dict[str, Any]] = []
         criteria = self.spec.get("evaluation_criteria", {})
@@ -534,12 +625,21 @@ class CompetitionStateMachine:
 
             # 1. Dynamically extract declared criteria
             for crit_key, crit_meta in criteria.items():
-                val = 0.0
+                if crit_key in n.metrics.get("subtasks", {}):
+                    subtasks_scores[crit_key] = float(
+                        n.metrics["subtasks"][crit_key]["score"]
+                    )
+                    continue
+                val = None
                 if isinstance(n.metrics.get(crit_key), (int, float)):
                     val = float(n.metrics[crit_key])
                 elif isinstance(n.metrics.get(crit_key), dict):
                     metric_key = (
-                        str(crit_meta.get("metric_key") or crit_meta.get("primary_metric") or "score")
+                        str(
+                            crit_meta.get("metric_key")
+                            or crit_meta.get("primary_metric")
+                            or "score"
+                        )
                         if isinstance(crit_meta, dict)
                         else "score"
                     )
@@ -551,26 +651,47 @@ class CompetitionStateMachine:
                                 for key in ("score", "macro_f1", "f1", "accuracy")
                                 if key in n.metrics[crit_key]
                             ),
-                            0.0,
+                            None,
                         )
-                    val = float(metric_value or 0.0)
-                subtasks_scores[crit_key] = round(val, 4)
+                    val = None if metric_value is None else float(metric_value)
+                if val is not None:
+                    subtasks_scores[crit_key] = round(val, 4)
 
             fold_std = None
-            exp_dir = (self.project_root / n.artifact_dir).resolve() if n.artifact_dir else (self.artifacts_dir / n.id).resolve()
+            exp_dir = (
+                (self.project_root / n.artifact_dir).resolve()
+                if n.artifact_dir
+                else (self.artifacts_dir / n.id).resolve()
+            )
             summary_csv = exp_dir / "summary.csv"
             oof_csv = exp_dir / "oof_predictions.csv"
             if summary_csv.exists():
                 try:
                     sdf = pd.read_csv(summary_csv)
-                    metric_cols = [c for c in sdf.columns if c.endswith("_f1") or c.endswith("_macro_f1") or c in {"score","primary_score"}]
+                    metric_cols = [
+                        c
+                        for c in sdf.columns
+                        if c.endswith("_f1")
+                        or c.endswith("_macro_f1")
+                        or c in {"score", "primary_score"}
+                    ]
                     if metric_cols:
                         fold_std = round(float(sdf[metric_cols[0]].std()), 4)
                 except Exception:
                     pass
 
-            delta = round((score-base_score)*(1 if n.direction=="maximize" else -1),4)
-            verdict = "KEEP" if (delta >= -0.005) else "REJECT"
+            delta = (
+                None
+                if base_score is None
+                else round(
+                    (score - base_score) * (1 if n.direction == "maximize" else -1), 4
+                )
+            )
+            verdict = (
+                "UNANCHORED"
+                if delta is None
+                else ("KEEP" if delta >= -0.005 else "REJECT")
+            )
 
             cand_entry = {
                 "id": n.id,
@@ -578,39 +699,71 @@ class CompetitionStateMachine:
                 "parent_id": n.parent_id,
                 "model": n.metrics.get("model", n.model_family),
                 "composite_score": round(score, 4),
+                "utility": n.get_utility(),
+                "verified": n.verified,
+                "eligible": n.eligible,
+                "direction": n.direction,
                 "delta_vs_baseline": delta,
                 "subtasks": subtasks_scores,
                 "fold_std": fold_std,
                 "has_oof": oof_csv.exists(),
-                "oof_path": str(oof_csv.relative_to(self.project_root)).replace("\\", "/") if oof_csv.exists() else None,
+                "oof_path": (
+                    str(oof_csv.relative_to(self.project_root)).replace("\\", "/")
+                    if oof_csv.exists()
+                    else None
+                ),
                 "verdict": verdict,
-                "is_pinned": n.id in self.state["candidate_pool"].get("pinned_candidates", []),
+                "is_pinned": n.id
+                in self.state["candidate_pool"].get("pinned_candidates", []),
             }
             candidates_list.append(cand_entry)
 
-        candidates_list.sort(key=lambda x: x["composite_score"], reverse=True)
+        candidates_list.sort(key=lambda x: x["utility"], reverse=True)
 
         overall_best = candidates_list[0] if candidates_list else None
         specialists = {}
         for crit_key in criteria.keys():
             matching = [c for c in candidates_list if crit_key in c.get("subtasks", {})]
             if matching:
-                specialists[crit_key] = max(matching, key=lambda x: x["subtasks"][crit_key])
+                specialists[crit_key] = max(
+                    matching,
+                    key=lambda x: x["subtasks"][crit_key]
+                    * (
+                        1
+                        if self.spec.get("direction", "maximize") == "maximize"
+                        else -1
+                    ),
+                )
         stable_candidates = sorted(
             [c for c in candidates_list if c["verdict"] == "KEEP"],
-            key=lambda x: (x["fold_std"], -x["composite_score"]),
+            key=lambda x: (
+                x["fold_std"] if x["fold_std"] is not None else float("inf"),
+                -x["utility"],
+            ),
         )[:3]
         rejected = [c for c in candidates_list if c["verdict"] == "REJECT"]
 
         return {
             "baseline_id": baseline_id,
-            "baseline_score": round(base_score, 4),
+            "baseline_score": None if base_score is None else round(base_score, 4),
             "available_strategies": self.spec.get(
                 "candidate_strategies",
                 [
-                    {"id": "single_model", "label": "Single Model Promotion", "enabled": True},
-                    {"id": "ensemble_blend", "label": "Diverse Ensemble Blend", "enabled": True},
-                    {"id": "specialist_routing", "label": "Subtask Specialist Routing", "enabled": True},
+                    {
+                        "id": "single_model",
+                        "label": "Single Model Promotion",
+                        "enabled": True,
+                    },
+                    {
+                        "id": "ensemble_blend",
+                        "label": "Diverse Ensemble Blend",
+                        "enabled": True,
+                    },
+                    {
+                        "id": "specialist_routing",
+                        "label": "Subtask Specialist Routing",
+                        "enabled": True,
+                    },
                 ],
             ),
             "overall_best": overall_best,
@@ -618,7 +771,9 @@ class CompetitionStateMachine:
             "stable_candidates": stable_candidates,
             "rejected_experiments": rejected,
             "all_candidates": candidates_list,
-            "synthesized_candidates": self.state["candidate_pool"].get("synthesized_candidates", []),
+            "synthesized_candidates": self.state["candidate_pool"].get(
+                "synthesized_candidates", []
+            ),
         }
 
     def synthesize_candidate(
@@ -629,9 +784,14 @@ class CompetitionStateMachine:
     ) -> Dict[str, Any]:
         """Build a verified candidate artifact in Phase 5 according to the selected strategy."""
         from harness.candidates import build_candidate
-        entry=build_candidate(self.project,name,mode,source_map)
-        self.state["candidate_pool"].setdefault("synthesized_candidates",[]).insert(0,entry)
-        self._append_audit_event("CANDIDATE_SYNTHESIZED",f"Created verified candidate {entry['id']}",entry)
+
+        entry = build_candidate(self.project, name, mode, source_map)
+        self.state["candidate_pool"].setdefault("synthesized_candidates", []).insert(
+            0, entry
+        )
+        self._append_audit_event(
+            "CANDIDATE_SYNTHESIZED", f"Created verified candidate {entry['id']}", entry
+        )
         self.save()
         return entry
 
@@ -649,19 +809,35 @@ class CompetitionStateMachine:
         policy = self.spec.get("final_selection_policy", {})
         max_cands = int(policy.get("max_candidates", 2))
         slots_map = selected_slots or {"slot_1": slot_1_id}
-        if slot_2_id and max_cands >= 2:
+        if slot_2_id:
             slots_map["slot_2"] = slot_2_id
 
-        if not slots_map or len(slots_map)>max_cands or any(not v for v in slots_map.values()) or len(set(slots_map.values()))!=len(slots_map):
-            raise ValueError("Freeze requires unique eligible candidate IDs within the slot limit")
+        if (
+            not slots_map
+            or len(slots_map) > max_cands
+            or any(not v for v in slots_map.values())
+            or len(set(slots_map.values())) != len(slots_map)
+        ):
+            raise ValueError(
+                "Freeze requires unique eligible candidate IDs within the slot limit"
+            )
         from harness.candidates import validate_candidate
-        entries={c["id"]:c for c in self.state["candidate_pool"].get("synthesized_candidates",[])}
+
+        entries = {
+            c["id"]: c
+            for c in self.state["candidate_pool"].get("synthesized_candidates", [])
+        }
         for candidate in slots_map.values():
-            if candidate not in entries: raise ValueError("Unknown candidate: "+candidate)
-            validate_candidate(self.project,entries[candidate])
+            if candidate not in entries:
+                raise ValueError("Unknown candidate: " + candidate)
+            validate_candidate(self.project, entries[candidate])
         try:
             git_commit = (
-                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.project_root, stderr=subprocess.DEVNULL)
+                subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=self.project_root,
+                    stderr=subprocess.DEVNULL,
+                )
                 .decode("utf-8")
                 .strip()
             )
@@ -672,7 +848,9 @@ class CompetitionStateMachine:
             "freeze_version": "2.0_policy_driven",
             "status": "FROZEN_FOR_FINAL_EVALUATION",
             "max_candidates_allowed": max_cands,
-            "selection_strategy": policy.get("selection_strategy", "risk_balanced_portfolio"),
+            "selection_strategy": policy.get(
+                "selection_strategy", "risk_balanced_portfolio"
+            ),
             "frozen_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "git_commit": git_commit,
             "selected_slots": slots_map,
@@ -681,7 +859,10 @@ class CompetitionStateMachine:
             "notes": notes,
         }
         from harness.io_utils import atomic_write_json
-        atomic_write_json(self.freeze_lock_file, lock_payload, indent=2, ensure_ascii=False)
+
+        atomic_write_json(
+            self.freeze_lock_file, lock_payload, indent=2, ensure_ascii=False
+        )
 
         self.state["mode"] = "FROZEN"
         self.state["gates"]["freeze_locked"] = True
@@ -691,7 +872,9 @@ class CompetitionStateMachine:
             "slot_2_aggressive_lb": slot_2_id if max_cands >= 2 else None,
             "frozen_at": lock_payload["frozen_at"],
             "freeze_notes": notes,
-            "lock_receipt_path": str(self.freeze_lock_file.relative_to(self.project_root)).replace("\\", "/"),
+            "lock_receipt_path": str(
+                self.freeze_lock_file.relative_to(self.project_root)
+            ).replace("\\", "/"),
             "git_commit": git_commit,
         }
         self._append_audit_event(
@@ -702,9 +885,12 @@ class CompetitionStateMachine:
         self.save()
         return lock_payload
 
-    def emergency_unfreeze(self, reason: str = "User requested emergency unfreeze") -> Dict[str, Any]:
+    def emergency_unfreeze(
+        self, reason: str = "User requested emergency unfreeze"
+    ) -> Dict[str, Any]:
         """Unlock Phase 7 Freeze mode and record a permanent cryptographic audit trail entry."""
-        if not reason or not reason.strip(): raise ValueError("Unfreeze requires a reason")
+        if not reason or not reason.strip():
+            raise ValueError("Unfreeze requires a reason")
         self.state["mode"] = "OPTIMIZE"
         self.state["gates"]["freeze_locked"] = False
         self.state["gates"]["finalized"] = False
@@ -717,7 +903,10 @@ class CompetitionStateMachine:
         self._append_audit_event(
             "EMERGENCY_UNFREEZE",
             f"Freeze lock broken! Reason: {reason}",
-            {"reason": reason, "previous_freeze": self.state["freeze_selection"].get("frozen_at")},
+            {
+                "reason": reason,
+                "previous_freeze": self.state["freeze_selection"].get("frozen_at"),
+            },
         )
         self.save()
         return self.state["freeze_selection"]
@@ -731,108 +920,66 @@ class CompetitionStateMachine:
         sub_mgr: SubmissionManager,
         task_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Execute the currently recommended Next Action with the Agent Co-Pilot and record live step trace."""
-        snap = self.evaluate_journey_snapshot(journal, sub_mgr, task_info)
-        nxt = snap["hud"]["what_should_i_do_next"]
-        action_id = nxt.get("action_id")
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        """Compatibility entrypoint: all mutations use the canonical action layer."""
+        from harness.agent_bridge import AgentBridge
 
-        steps_log: List[Dict[str, str]] = []
-
-        if action_id == "CONFIRM_TASK_SPEC":
-            steps_log.append({"step": "Task config and adapter capabilities are ready for review", "status": "completed"})
-            steps_log.append({"step": "Waiting for explicit user approval to confirm the task contract", "status": "pending_approval"})
-
-        elif action_id == "CONFIRM_DATA_RISKS":
-            report = self.run_data_readiness_audit()
-            steps_log.append({"step": "Ran declarative data checks from the task specification", "status": "completed"})
-            steps_log.append({"step": "Waiting for explicit user approval to confirm the reviewed data risks", "status": "pending_approval"})
-
-        elif action_id == "LOCK_BASELINE_ANCHOR":
-            from harness.baseline import validate_baseline_artifact
-            if not self.state["gates"].get("spec_confirmed") or not self.state["gates"].get("data_risks_confirmed"):
-                raise ValueError("Review the task contract and confirm data risks before establishing the baseline.")
-            base_id = (
-                snap.get("candidate_pool", {}).get("baseline_id")
-                or self.state["gates"].get("baseline_exp_id")
-                or "baseline"
+        bridge = AgentBridge(self.project_root)
+        snapshot = self.evaluate_journey_snapshot(journal, sub_mgr, task_info)
+        recommendation = snapshot["hud"]["what_should_i_do_next"]
+        action_id = recommendation.get("action_id")
+        action = {
+            "CONFIRM_TASK_SPEC": "confirm_task_spec",
+            "CONFIRM_DATA_RISKS": "inspect_data_readiness",
+            "LOCK_BASELINE_ANCHOR": "establish_baseline_anchor",
+        }.get(action_id, "inspect_diagnostics")
+        params = {}
+        if action == "establish_baseline_anchor":
+            params["exp_id"] = self.state["gates"].get("baseline_exp_id") or (
+                snapshot.get("candidate_pool", {}).get("baseline_id")
             )
-            evidence = validate_baseline_artifact(
-                self.artifacts_dir,
-                str(base_id),
-                str(self.spec.get("primary_metric") or "score"),
-            )
-            self.state["gates"]["baseline_exp_id"] = base_id
-            self.state["gates"]["baseline_locked"] = True
-            self.state["gates"]["baseline_evidence"] = evidence
-            steps_log.append({"step": f"Verified run metrics for baseline `{base_id}` ({evidence['score']})", "status": "completed"})
-            steps_log.append({"step": "Official Baseline Anchor established from measured validation output", "status": "completed"})
-
-        elif action_id in ("BUILD_SPECIALIST_ROUTER", "ITERATE_EXPERIMENTS"):
-            steps_log.append({"step": "Inspecting parent diagnostics & failure slices", "status": "completed"})
-            steps_log.append({"step": "Comparing candidate branches in Solution Tree", "status": "completed"})
-            steps_log.append({"step": "Synthesizing multi-task candidate in Candidate Pool", "status": "completed"})
-            try:
-                subtasks = self.spec.get("subtasks", [])
-                pool = snap["candidate_pool"]
-                best_id = (pool.get("overall_best") or {}).get("id") or self.state["gates"].get("baseline_exp_id") or "baseline"
-                if subtasks:
-                    src_map = {f"{st.get('id', 'subtask')}_exp": best_id for st in subtasks if isinstance(st, dict)}
-                else:
-                    src_map = {"model_exp": best_id}
-                self.synthesize_candidate(
-                    name="agent_copilot_candidate",
-                    mode="specialist_router",
-                    source_map=src_map,
-                )
-                steps_log.append({"step": "Verified candidate artifact created (`cand_agent_copilot_candidate`)", "status": "completed"})
-            except Exception as err:
-                steps_log.append({"step": f"Formulated next experiment recommendation ({err})", "status": "completed"})
-
-        elif action_id == "FREEZE_FOR_PRIVATE_LB":
-            pool = snap["candidate_pool"]
-            best_id = (pool.get("overall_best") or {}).get("id") or self.state["gates"].get("baseline_exp_id") or "baseline"
-            second_id = (pool.get("synthesized_candidates") or [{}])[0].get("id") or (pool.get("pinned_candidates") or [{}, {}])[1].get("id") if len(pool.get("pinned_candidates", [])) > 1 else None
-            steps_log.append({"step": "Auditing candidate variance and diversity across folds", "status": "completed"})
-            self.freeze_final_candidates(slot_1_id=best_id, slot_2_id=second_id, notes="Frozen via Agent Co-Pilot")
-            steps_log.append({"step": f"Locked final selection portfolio ({best_id}, {second_id})", "status": "completed"})
-
-        else:
-            steps_log.append({"step": f"Executed Co-Pilot guidance for '{nxt.get('title')}'", "status": "completed"})
-
-        copilot_record = {
-            "last_run_at": now_iso,
-            "status": "COMPLETED",
-            "current_action_title": nxt.get("title"),
-            "steps": steps_log,
+            if not params["exp_id"]:
+                raise ValueError("Choose an explicit verified baseline experiment")
+        _, observation = bridge.execute_action(action=action, params=params)
+        refreshed = CompetitionState(project_root=self.project_root)
+        return {
+            **refreshed.evaluate_journey_snapshot(journal, sub_mgr, task_info),
+            "observation": observation.__dict__,
         }
-        hist = self.state.get("agent_copilot", {}).get("history", [])
-        hist.insert(0, copilot_record)
-        self.state["agent_copilot"] = {
-            **copilot_record,
-            "history": hist[:20],
-        }
-        self._append_audit_event("AGENT_COPILOT_RUN", f"Agent executed: {nxt.get('title')}", copilot_record)
-        self.save()
-        return self.evaluate_journey_snapshot(journal, sub_mgr, task_info)
 
     # =========================================================================
     # PHASE 8: COMPETITION CLOSURE & REPRODUCIBILITY PACKAGE
     # =========================================================================
-    def finalize_competition(self, payload: Dict[str, Any], journal: TreeJournal, sub_mgr: SubmissionManager) -> Dict[str, Any]:
+    def finalize_competition(
+        self, payload: Dict[str, Any], journal: TreeJournal, sub_mgr: SubmissionManager
+    ) -> Dict[str, Any]:
         """Record final evaluation outcomes and generate Closure & Reproducibility outputs."""
         fin = self.state["finalization"]
-        for k in ["private_score_slot_1", "private_score_slot_2", "winning_slot", "final_rank", "total_teams", "lessons_learned", "paper_title"]:
+        for k in [
+            "private_score_slot_1",
+            "private_score_slot_2",
+            "winning_slot",
+            "final_rank",
+            "total_teams",
+            "lessons_learned",
+            "paper_title",
+        ]:
             if k in payload and payload[k] is not None:
                 fin[k] = payload[k]
 
         self.state["mode"] = "FINALIZED"
         self.state["gates"]["finalized"] = True
-        fin["report_generated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        fin["report_generated_at"] = datetime.datetime.now(
+            datetime.timezone.utc
+        ).isoformat()
 
         pool = self.compute_candidate_pool(journal)
         best_cand = pool.get("overall_best") or {}
-        slot1_id = self.state["freeze_selection"].get("slot_1_safe_cv") or best_cand.get("id") or self.state["gates"].get("baseline_exp_id") or "baseline"
+        slot1_id = (
+            self.state["freeze_selection"].get("slot_1_safe_cv")
+            or best_cand.get("id")
+            or self.state["gates"].get("baseline_exp_id")
+            or "baseline"
+        )
         slot2_id = self.state["freeze_selection"].get("slot_2_aggressive_lb") or "none"
 
         public_scores = [
@@ -841,10 +988,16 @@ class CompetitionStateMachine:
             if s.official_scores.get("primary") is not None
         ]
         best_pub = max(public_scores) if public_scores else None
-        cv_score = best_cand.get("composite_score", float(self.spec.get("primary_metric_baseline") or 0.0))
+        cv_score = best_cand.get(
+            "composite_score", self.spec.get("primary_metric_baseline")
+        )
         priv_1 = fin.get("private_score_slot_1")
         priv_2 = fin.get("private_score_slot_2")
-        rank_str = f"#{fin.get('final_rank')} / {fin.get('total_teams')}" if fin.get("final_rank") else "Pending Official Release"
+        rank_str = (
+            f"#{fin.get('final_rank')} / {fin.get('total_teams')}"
+            if fin.get("final_rank")
+            else "Pending Official Release"
+        )
 
         lines = [
             f"# {fin.get('paper_title', 'Competition Closure & Reproducibility Report')}",
@@ -873,17 +1026,23 @@ class CompetitionStateMachine:
                 "",
                 "## 3. Lessons Learned & Post-Mortem",
                 "",
-                fin.get("lessons_learned") or "Recorded via Competition Closure workspace.",
+                fin.get("lessons_learned")
+                or "Recorded via Competition Closure workspace.",
             ]
         )
         report_md = "\n".join(lines)
         self.final_report_file.write_text(report_md, encoding="utf-8")
-        self._append_audit_event("COMPETITION_FINALIZED", "Generated Competition Closure & Reproducibility Report")
+        self._append_audit_event(
+            "COMPETITION_FINALIZED",
+            "Generated Competition Closure & Reproducibility Report",
+        )
         self.save()
         return {
             "finalization": fin,
             "report_markdown": report_md,
-            "report_path": str(self.final_report_file.relative_to(self.project_root)).replace("\\", "/"),
+            "report_path": str(
+                self.final_report_file.relative_to(self.project_root)
+            ).replace("\\", "/"),
         }
 
     # =========================================================================
@@ -908,7 +1067,9 @@ class CompetitionStateMachine:
         eval_proto = self.spec.get("evaluation_protocol", {})
         has_public_lb = bool(eval_proto.get("has_public_leaderboard", True))
         daily_quota = int(eval_proto.get("daily_quota", 5))
-        max_final_slots = int(self.spec.get("final_selection_policy", {}).get("max_candidates", 2))
+        max_final_slots = int(
+            self.spec.get("final_selection_policy", {}).get("max_candidates", 2)
+        )
 
         has_baseline = len(all_cands) >= 1
         has_submissions = len(subs) > 0
@@ -925,24 +1086,39 @@ class CompetitionStateMachine:
             derived_phase = 3
         elif has_submissions:
             derived_phase = 6
-        elif len(synth_cands) > 0 or len(self.state["candidate_pool"].get("pinned_candidates", [])) > 0:
+        elif (
+            len(synth_cands) > 0
+            or len(self.state["candidate_pool"].get("pinned_candidates", [])) > 0
+        ):
             derived_phase = 5
         else:
             derived_phase = 4
 
         active_phase_idx = self.state.get("manual_phase_override") or derived_phase
-        active_phase_meta = next((p for p in phases_meta if p["index"] == active_phase_idx), phases_meta[3])
+        active_phase_meta = next(
+            (p for p in phases_meta if p["index"] == active_phase_idx), phases_meta[3]
+        )
 
         # Non-Linear Parallel Iteration Tracks (Phases 4, 5, 6 run concurrently once Baseline is locked)
-        baseline_ready = bool(gates.get("data_risks_confirmed") and gates.get("baseline_locked"))
+        baseline_ready = bool(
+            gates.get("data_risks_confirmed") and gates.get("baseline_locked")
+        )
         is_frozen = bool(gates.get("freeze_locked") or gates.get("finalized"))
         active_tracks = {
-            "experimentation": "frozen" if is_frozen else ("active" if baseline_ready else "locked"),
-            "candidate_management": "frozen" if is_frozen else ("active" if baseline_ready else "locked"),
+            "experimentation": (
+                "frozen" if is_frozen else ("active" if baseline_ready else "locked")
+            ),
+            "candidate_management": (
+                "frozen" if is_frozen else ("active" if baseline_ready else "locked")
+            ),
             "external_evaluation": (
                 "disabled"
                 if not has_public_lb
-                else ("frozen" if is_frozen else ("active" if baseline_ready else "locked"))
+                else (
+                    "frozen"
+                    if is_frozen
+                    else ("active" if baseline_ready else "locked")
+                )
             ),
         }
 
@@ -951,7 +1127,11 @@ class CompetitionStateMachine:
 
         overall_best = pool.get("overall_best")
         scored_subs = [s for s in subs if s.official_scores.get("primary") is not None]
-        best_pub_sub = max(scored_subs, key=lambda s: float(s.official_scores["primary"])) if scored_subs else None
+        best_pub_sub = (
+            max(scored_subs, key=lambda s: float(s.official_scores["primary"]))
+            if scored_subs
+            else None
+        )
         any_divergence = any(s.divergence_warning for s in subs)
 
         phases_status = []
@@ -1082,6 +1262,18 @@ class CompetitionStateMachine:
                     "Request explicit user approval before marking the dataset ready for baseline work",
                 ],
             }
+        elif not gates.get("baseline_locked") and pool["baseline_score"] is None:
+            next_action = {
+                "target_phase": 2,
+                "action_id": "ESTABLISH_VERIFIED_BASELINE",
+                "title": "Run a complete verified baseline validation",
+                "detail": "No verified baseline score is available yet.",
+                "cta_label": "Run baseline validation",
+                "agent_plan": [
+                    "Create a declared baseline experiment",
+                    "Run full validation with the active task scorer",
+                ],
+            }
         elif not gates.get("baseline_locked"):
             next_action = {
                 "target_phase": 3,
@@ -1136,6 +1328,15 @@ class CompetitionStateMachine:
                 ],
             }
 
+        baseline_label = (
+            "N/A" if pool["baseline_score"] is None else f"{pool['baseline_score']:.4f}"
+        )
+        best_score = (
+            overall_best.get("composite_score")
+            if overall_best
+            else pool["baseline_score"]
+        )
+        best_label = "N/A" if best_score is None else f"{best_score:.4f}"
         hud = {
             "where_am_i": {
                 "phase_index": active_phase_idx,
@@ -1148,8 +1349,7 @@ class CompetitionStateMachine:
                 "total_submissions": len(subs),
                 "banner": (
                     f"{active_phase_meta['title']} ({self.state['mode']}) — "
-                    f"Baseline: {pool['baseline_score']:.4f} | "
-                    f"Best CV: {overall_best['composite_score'] if overall_best else pool['baseline_score']:.4f}"
+                    f"Baseline: {baseline_label} | Best CV: {best_label}"
                 ),
             },
             "what_is_current_best": {
@@ -1159,17 +1359,35 @@ class CompetitionStateMachine:
                 },
                 "cv_best": {
                     "id": overall_best["id"] if overall_best else pool["baseline_id"],
-                    "score": overall_best["composite_score"] if overall_best else pool["baseline_score"],
-                    "delta": overall_best["delta_vs_baseline"] if overall_best else 0.0,
-                    "subtasks": overall_best.get("subtasks", {}) if overall_best else {},
+                    "score": (
+                        overall_best["composite_score"]
+                        if overall_best
+                        else pool["baseline_score"]
+                    ),
+                    "delta": (
+                        overall_best["delta_vs_baseline"] if overall_best else None
+                    ),
+                    "subtasks": (
+                        overall_best.get("subtasks", {}) if overall_best else {}
+                    ),
                 },
                 "public_lb_best": {
                     "enabled": has_public_lb,
-                    "label": eval_proto.get("external_eval_label", "Public Leaderboard"),
+                    "label": eval_proto.get(
+                        "external_eval_label", "Public Leaderboard"
+                    ),
                     "sub_id": best_pub_sub.id if best_pub_sub else None,
                     "exp_id": best_pub_sub.exp_id if best_pub_sub else None,
-                    "score": best_pub_sub.official_scores.get("primary") if best_pub_sub else None,
-                    "delta_vs_cv": best_pub_sub.score_deltas.get("primary_delta") if best_pub_sub else None,
+                    "score": (
+                        best_pub_sub.official_scores.get("primary")
+                        if best_pub_sub
+                        else None
+                    ),
+                    "delta_vs_cv": (
+                        best_pub_sub.score_deltas.get("primary_delta")
+                        if best_pub_sub
+                        else None
+                    ),
                     "quota_used_today": subs_today,
                     "daily_quota": daily_quota,
                 },
@@ -1177,11 +1395,21 @@ class CompetitionStateMachine:
                     "label": eval_proto.get("final_eval_label", "Private Evaluation"),
                     "max_candidates": max_final_slots,
                     "is_frozen": bool(gates.get("freeze_locked")),
-                    "slot_1_safe_cv": (self.state.get("freeze_selection") or {}).get("slot_1_safe_cv"),
-                    "slot_2_aggressive_lb": (self.state.get("freeze_selection") or {}).get("slot_2_aggressive_lb"),
-                    "private_score_1": (self.state.get("finalization") or {}).get("private_score_slot_1"),
-                    "private_score_2": (self.state.get("finalization") or {}).get("private_score_slot_2"),
-                    "final_rank": (self.state.get("finalization") or {}).get("final_rank"),
+                    "slot_1_safe_cv": (self.state.get("freeze_selection") or {}).get(
+                        "slot_1_safe_cv"
+                    ),
+                    "slot_2_aggressive_lb": (
+                        self.state.get("freeze_selection") or {}
+                    ).get("slot_2_aggressive_lb"),
+                    "private_score_1": (self.state.get("finalization") or {}).get(
+                        "private_score_slot_1"
+                    ),
+                    "private_score_2": (self.state.get("finalization") or {}).get(
+                        "private_score_slot_2"
+                    ),
+                    "final_rank": (self.state.get("finalization") or {}).get(
+                        "final_rank"
+                    ),
                 },
             },
             "what_is_blocking_me": blockers,
@@ -1194,8 +1422,8 @@ class CompetitionStateMachine:
                 "task_type": self.spec.get("task_type", "Predictive Modeling"),
                 "primary_metric": self.spec.get("primary_metric", "Score"),
                 "direction": self.spec.get("direction", "maximize"),
-                "baseline_goal": float(self.spec.get("primary_metric_baseline") or 0.0),
-                "target_goal": float(self.spec.get("primary_metric_target") or 1.0),
+                "baseline_goal": self.spec.get("primary_metric_baseline"),
+                "target_goal": self.spec.get("primary_metric_target"),
                 "subtasks": self.spec.get("subtasks", []),
                 "competition_rules": self.spec.get("competition_rules", {}),
                 "evaluation_protocol": eval_proto,
@@ -1243,9 +1471,21 @@ class CompetitionStateMachine:
 
         if cfg.inject_current_best_anchors:
             b = hud["what_is_current_best"]
-            base_score_str = f"{b['baseline']['score']:.4f}" if b['baseline'].get('score') is not None else "N/A"
-            cv_score_str = f"{b['cv_best']['score']:.4f}" if b['cv_best'].get('score') is not None else "N/A"
-            cv_delta_str = f"Δ `{b['cv_best']['delta']:+.4f}`" if b['cv_best'].get('delta') is not None else ""
+            base_score_str = (
+                f"{b['baseline']['score']:.4f}"
+                if b["baseline"].get("score") is not None
+                else "N/A"
+            )
+            cv_score_str = (
+                f"{b['cv_best']['score']:.4f}"
+                if b["cv_best"].get("score") is not None
+                else "N/A"
+            )
+            cv_delta_str = (
+                f"Δ `{b['cv_best']['delta']:+.4f}`"
+                if b["cv_best"].get("delta") is not None
+                else ""
+            )
             sections.append(
                 "## 🏆 FOUR-TIER EVALUATION ANCHORS (`CV ≠ External ≠ Final ≠ Rank`)\n"
                 f"- **Official Baseline**: `{b['baseline']['id']}` (`{base_score_str}`)\n"
@@ -1259,7 +1499,9 @@ class CompetitionStateMachine:
         if cfg.inject_active_blockers and hud["what_is_blocking_me"]:
             blk_lines = ["## 🚧 ACTIVE BLOCKERS Requiring Resolution"]
             for blk in hud["what_is_blocking_me"]:
-                blk_lines.append(f"- **[{blk['severity'].upper()}] {blk['title']}**: {blk['message']}")
+                blk_lines.append(
+                    f"- **[{blk['severity'].upper()}] {blk['title']}**: {blk['message']}"
+                )
             sections.append("\n".join(blk_lines))
 
         if cfg.inject_next_action:

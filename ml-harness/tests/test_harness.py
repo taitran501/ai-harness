@@ -29,6 +29,7 @@ class TreeJournalTests(unittest.TestCase):
 
     def test_append_and_load(self):
         node = Node(
+            verified=True,eligible=True,
             id="test_node_1",
             parent_id=None,
             branch="baseline",
@@ -47,6 +48,7 @@ class TreeJournalTests(unittest.TestCase):
         """Verify that 50 experiments are compressed into a compact summary without bloat."""
         for i in range(50):
             node = Node(
+            verified=True,eligible=True,
                 id=f"exp{i:03d}_test",
                 parent_id=f"exp{max(0, i-1):03d}_test" if i > 0 else None,
                 branch="feat",
@@ -64,6 +66,7 @@ class TreeJournalTests(unittest.TestCase):
     def test_recommend_next_branch_respects_max_params(self):
         # Add a node exceeding parameter limits
         heavy_node = Node(
+            verified=True,eligible=True,
             id="exp_heavy",
             branch="model",
             metrics={"overall_composite": 0.99},
@@ -71,6 +74,7 @@ class TreeJournalTests(unittest.TestCase):
         )
         # Add a light compliant node
         light_node = Node(
+            verified=True,eligible=True,
             id="exp_light",
             branch="baseline",
             metrics={"overall_composite": 0.70},
@@ -156,7 +160,7 @@ class AuditGateTests(unittest.TestCase):
                 "pred_label": ["pos", "pos", "pos"],  # row 2 differs
             }
         )
-        diff_count, details = compute_diff_metrics(cand_df, base_df)
+        diff_count, details = compute_diff_metrics(cand_df, base_df,id_col="sample_id")
         self.assertEqual(diff_count, 1)
         self.assertEqual(details["pred_label"]["different_count"], 1)
 
@@ -178,6 +182,7 @@ class AuditGateTests(unittest.TestCase):
         cmd = [
             sys.executable,
             "tools/audit_gate.py",
+            "--id-column", "sample_id",
             "--candidate",
             str(cand_file),
             "--baseline",
@@ -219,6 +224,7 @@ class AuditGateTests(unittest.TestCase):
         cmd = [
             sys.executable,
             "tools/audit_gate.py",
+            "--id-column", "sample_id",
             "--candidate",
             str(cand_file),
             "--baseline",

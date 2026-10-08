@@ -64,261 +64,681 @@ from harness.artifacts import contract_identity, digest, frame_hash, sha256
 
 class UniversalRunner:
     """One execution contract for local and packaged remote runs."""
+
     def __init__(self, cfg, config_path, args):
         self.cfg, self.config_path, self.args = cfg, config_path, args
-        self.project = HarnessProject.discover(getattr(args,"project_root",None),getattr(args,"task_config",None))
+        self.project = HarnessProject.discover(
+            getattr(args, "project_root", None), getattr(args, "task_config", None)
+        )
         self.project_root = self.project.root
         self.task_spec = load_active_task_spec(self.project.task_config_path)
-        self.exp_id = str(cfg.get("experiment",{}).get("id",Path(config_path).stem))
-        if Path(self.exp_id).name != self.exp_id or self.exp_id in {".",".."} or "/" in self.exp_id or "\\" in self.exp_id:
+        self.exp_id = str(cfg.get("experiment", {}).get("id", Path(config_path).stem))
+        if (
+            Path(self.exp_id).name != self.exp_id
+            or self.exp_id in {".", ".."}
+            or "/" in self.exp_id
+            or "\\" in self.exp_id
+        ):
             raise ValueError("Experiment ID must be a simple directory name")
         self.artifacts_dir = self.project.artifacts_dir
-        self.run_id = uuid.uuid4().hex
-        self.run_kind = "probe" if (getattr(args,"debug",False) or getattr(args,"probe_samples",None) or getattr(args,"fold",None) is not None) else "full"
-        self.exp_dir = self.artifacts_dir / self.exp_id if self.run_kind=="full" else self.artifacts_dir/"probes"/self.exp_id/self.run_id
-        self.plugin_context = TaskPluginContext(self.project_root,self.project.task_config_path,self.task_spec,self.project.plugin_id or "default",cfg)
-        self.task_plugin = load_task_plugin(self.project.plugin_id,self.plugin_context)
-        self.exp_dir.parent.mkdir(parents=True,exist_ok=True)
-        try: self.exp_dir.mkdir(exist_ok=False)
-        except FileExistsError: raise ValueError("Refusing to overwrite an existing run; use a new experiment ID. --force cannot overwrite artifacts")
-        self.manifest = {"schema_version":2,"run_id":self.run_id,"run_kind":self.run_kind,"exp_id":self.exp_id,"status":"RUNNING","plugin_id":self.project.plugin_id or "default",**contract_identity(self.task_spec,self.task_plugin)}
-        save_json(self.exp_dir/"artifact_manifest.json",self.manifest)
+        self.run_id = getattr(args, "job_id", None) or uuid.uuid4().hex
+        self.run_kind = (
+            "probe"
+            if (
+                getattr(args, "debug", False)
+                or getattr(args, "probe_samples", None)
+                or getattr(args, "fold", None) is not None
+                or cfg.get("validation", {}).get("sample_limit") is not None
+            )
+            else "full"
+        )
+        self.exp_dir = (
+            self.artifacts_dir / self.exp_id
+            if self.run_kind == "full"
+            else self.artifacts_dir / "probes" / self.exp_id / self.run_id
+        )
+        self.plugin_context = TaskPluginContext(
+            self.project_root,
+            self.project.task_config_path,
+            self.task_spec,
+            self.project.plugin_id or "default",
+            cfg,
+        )
+        self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
+        self.exp_dir.parent.mkdir(parents=True, exist_ok=True)
+        from harness.state_store import workspace_lock
+
+        with workspace_lock(self.artifacts_dir):
+            state_path = self.artifacts_dir / "competition_state.json"
+            if state_path.is_file() and json.loads(state_path.read_text()).get(
+                "gates", {}
+            ).get("freeze_locked"):
+                raise ValueError(
+                    "Competition is frozen; mutation requires an approved unfreeze"
+                )
+        try:
+            self.exp_dir.mkdir(exist_ok=False)
+        except FileExistsError:
+            raise ValueError(
+                "Refusing to overwrite an existing run; use a new experiment ID. --force cannot overwrite artifacts"
+            )
+        self.manifest = {
+            "schema_version": 2,
+            "run_id": self.run_id,
+            "run_kind": self.run_kind,
+            "exp_id": self.exp_id,
+            "status": "RUNNING",
+            "plugin_id": self.project.plugin_id or "default",
+            **contract_identity(self.task_spec, self.task_plugin),
+        }
+        save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
         self.logger = __import__("logging").getLogger("ml-harness.runner")
-        (self.exp_dir/"run.log").write_text("Starting run\n", encoding="utf-8")
-        self.seed = self.task_spec.resolve_seed(cfg.get("runtime",{}).get("seed",42))
+        (self.exp_dir / "run.log").write_text("Starting run\n", encoding="utf-8")
+        if not self.task_plugin.capabilities().get("custom_metrics") and not cfg.get(
+            "paths", {}
+        ).get("metrics_evaluator"):
+            from harness.evaluation import metric_name
+
+            allowed = {
+                "regression": {"rmse", "mae", "r2"},
+                "binary_classification": {
+                    "accuracy",
+                    "macro_f1",
+                    "micro_f1",
+                    "roc_auc",
+                    "logloss",
+                },
+                "multiclass_classification": {
+                    "accuracy",
+                    "macro_f1",
+                    "micro_f1",
+                    "roc_auc",
+                    "logloss",
+                },
+                "multilabel_classification": {"accuracy", "macro_f1", "micro_f1"},
+            }
+            if not self.task_spec.subtasks:
+                raise ValueError("Task must declare targets")
+            for st in self.task_spec.subtasks.values():
+                if metric_name(st.primary_metric) not in allowed.get(
+                    st.task_type, set()
+                ):
+                    raise ValueError("Unsupported task metric at preflight")
+        self.seed = self.task_spec.resolve_seed(cfg.get("runtime", {}).get("seed", 42))
         self.estimator_metadata = []
+        hook = cfg.get("paths", {}).get("metrics_evaluator")
+        if hook:
+            module, name = hook.rsplit(".", 1)
+            self.manifest["custom_scorer_sha256"] = digest(
+                inspect.getsource(getattr(importlib.import_module(module), name))
+            )
 
     def _evaluate(self, truth, predictions):
-        result = self.task_plugin.evaluate_predictions(self.plugin_context,truth,predictions)
-        hook = self.cfg.get("paths",{}).get("metrics_evaluator")
+        from harness.evaluation import validate_prediction_contract
+
+        validate_prediction_contract(self.task_spec, truth, predictions)
+        result = self.task_plugin.evaluate_predictions(
+            self.plugin_context, truth, predictions
+        )
+        hook = self.cfg.get("paths", {}).get("metrics_evaluator")
         if hook:
-            module,name = hook.rsplit(".",1)
-            result.update(getattr(importlib.import_module(module),name)(truth,predictions))
-        return resolve_evaluation(self.task_spec,result,len(truth))
+            module, name = hook.rsplit(".", 1)
+            result.update(
+                getattr(importlib.import_module(module), name)(truth, predictions)
+            )
+        return resolve_evaluation(self.task_spec, result, len(truth))
 
     def run(self):
-        _,_,receipt = GroundingGate.verify_config(self.cfg,config_path=self.config_path,raise_on_error=True)
-        GroundingGate.write_receipt(receipt,self.exp_dir/"GROUNDING_RECEIPT.json")
+        try:
+            return self._execute_run()
+        except Exception as error:
+            if self.manifest.get("status") != "COMPLETED":
+                self.manifest.update(status="FAILED", error=str(error))
+                save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
+            raise
+
+    def _execute_run(self):
+        _, _, receipt = GroundingGate.verify_config(
+            self.cfg, config_path=self.config_path, raise_on_error=True
+        )
+        GroundingGate.write_receipt(receipt, self.exp_dir / "GROUNDING_RECEIPT.json")
         set_seed(self.seed)
-        self.cfg.setdefault("runtime",{})["seed"] = self.seed
+        self.cfg.setdefault("runtime", {})["seed"] = self.seed
         git_hash = get_git_commit_hash(self.project_root)
-        self.cfg["resolved_runtime"] = {"git_commit_hash":git_hash,"python_version":platform.python_version(),"seed":self.seed}
-        (self.exp_dir/"run_config.yaml").write_text(yaml.safe_dump(self.cfg,sort_keys=False),encoding="utf-8")
+        self.cfg["resolved_runtime"] = {
+            "git_commit_hash": git_hash,
+            "python_version": platform.python_version(),
+            "seed": self.seed,
+        }
+        (self.exp_dir / "run_config.yaml").write_text(
+            yaml.safe_dump(self.cfg, sort_keys=False), encoding="utf-8"
+        )
         frame = self.task_plugin.load_training_data(self.plugin_context)
-        if isinstance(frame,tuple): frame = frame[0]
-        if frame is None: frame = self.task_spec.load_dataset_split("train",project_root=self.project_root)
-        self.task_plugin.validate_training_data(self.plugin_context,frame)
+        if isinstance(frame, tuple):
+            frame = frame[0]
+        if frame is None:
+            frame = self.task_spec.load_dataset_split(
+                "train", project_root=self.project_root
+            )
+        self.task_plugin.validate_training_data(self.plugin_context, frame)
         id_col = self.task_spec.id_column
-        if id_col not in frame or frame[id_col].isna().any() or frame[id_col].duplicated().any():
+        if (
+            id_col not in frame
+            or frame[id_col].isna().any()
+            or frame[id_col].duplicated().any()
+        ):
             raise ValueError("Training requires declared unique, non-null IDs")
         group = self.task_spec.group_column
         if group and (group not in frame or frame[group].isna().any()):
             raise ValueError("Declared group column must exist and contain no nulls")
-        split_value = self.cfg.get("paths",{}).get("split_path") or self.task_spec.validation.split_file or self.task_spec.data_config.get("split_path")
+        split_value = (
+            self.cfg.get("paths", {}).get("split_path")
+            or self.task_spec.validation.split_file
+            or self.task_spec.data_config.get("split_path")
+        )
         if split_value and "fold" not in frame:
             path = self.project_root / split_value
-            splits = pd.read_csv(path,sep="\t" if path.suffix==".tsv" else ",")
-            if id_col not in splits or "fold" not in splits: raise ValueError("Split file requires ID and fold")
-            frame = frame.merge(splits[[id_col,"fold"]],on=id_col,how="left",validate="one_to_one")
-            if frame["fold"].isna().any(): raise ValueError("Split file does not cover training IDs")
-        approach = self.cfg.get("experiment",{}).get("approach","ml_classical")
-        if approach not in {"ml_classical","ml","dl","llm_peft","llm_prompt"}: raise ValueError(f"Unsupported approach {approach}")
-        if approach in {"dl","llm_peft"} and not (self.cfg.get("model",{}).get("factory") or self.task_plugin.capabilities()["custom_model_factory"]):
+            splits = pd.read_csv(path, sep="\t" if path.suffix == ".tsv" else ",")
+            if id_col not in splits or "fold" not in splits:
+                raise ValueError("Split file requires ID and fold")
+            frame = frame.merge(
+                splits[[id_col, "fold"]], on=id_col, how="left", validate="one_to_one"
+            )
+            if frame["fold"].isna().any():
+                raise ValueError("Split file does not cover training IDs")
+        approach = self.cfg.get("experiment", {}).get("approach", "ml_classical")
+        if approach not in {"ml_classical", "ml", "dl", "llm_peft", "llm_prompt"}:
+            raise ValueError(f"Unsupported approach {approach}")
+        if approach in {"dl", "llm_peft"} and not (
+            self.cfg.get("model", {}).get("factory")
+            or self.task_plugin.capabilities()["custom_model_factory"]
+        ):
             raise ValueError("This approach requires an implemented task model factory")
         self.data_frame = frame
         self.manifest["data_sha256"] = frame_hash(frame)
-        self.manifest["resolved_config_sha256"] = sha256(self.exp_dir/"run_config.yaml")
-        strategy = self.cfg.get("validation",{}).get("strategy",self.task_spec.validation.strategy)
-        return self._run_llm_prompting(frame,git_hash) if approach=="llm_prompt" else self._run_model_training(frame,strategy,git_hash)
+        self.manifest["resolved_config_sha256"] = sha256(
+            self.exp_dir / "run_config.yaml"
+        )
+        strategy = self.cfg.get("validation", {}).get(
+            "strategy", self.task_spec.validation.strategy
+        )
+        return (
+            self._run_llm_prompting(frame, git_hash)
+            if approach == "llm_prompt"
+            else self._run_model_training(frame, strategy, git_hash)
+        )
 
     def _resolve_validation_splits(self, df, strategy):
-        config = {**self.task_spec.metadata.get("validation",{}),**self.cfg.get("validation",{})}
-        result = self.task_plugin.build_validation_splits(self.plugin_context,df,strategy,config)
+        config = {
+            **self.task_spec.metadata.get("validation", {}),
+            **self.cfg.get("validation", {}),
+        }
+        result = self.task_plugin.build_validation_splits(
+            self.plugin_context, df, strategy, config
+        )
         if result is None:
             if strategy == "kfold":
                 if "fold" not in df:
                     from harness.data_strategy import DataStrategyEngine, SplitMode
-                    mode = SplitMode.GROUP_KFOLD if self.task_spec.group_column else (SplitMode.KFOLD if all(s.task_type=="regression" for s in self.task_spec.subtasks.values()) else SplitMode.STRATIFIED_KFOLD)
-                    indices = DataStrategyEngine.generate_splits(df,mode=mode,n_splits=self.task_spec.validation.num_folds,group_col=self.task_spec.group_column,stratify_col=self.task_spec.primary_target,seed=self.seed)
-                    result = [(i,df.iloc[t].copy(),df.iloc[v].copy()) for i,(t,v) in enumerate(indices)]
+
+                    mode = (
+                        SplitMode.GROUP_KFOLD
+                        if self.task_spec.group_column
+                        else (
+                            SplitMode.KFOLD
+                            if all(
+                                s.task_type == "regression"
+                                for s in self.task_spec.subtasks.values()
+                            )
+                            else SplitMode.STRATIFIED_KFOLD
+                        )
+                    )
+                    indices = DataStrategyEngine.generate_splits(
+                        df,
+                        mode=mode,
+                        n_splits=int(
+                            config.get("num_folds", self.task_spec.validation.num_folds)
+                        ),
+                        group_col=self.task_spec.group_column,
+                        stratify_col=self.task_spec.primary_target,
+                        seed=self.seed,
+                    )
+                    result = [
+                        (i, df.iloc[t].copy(), df.iloc[v].copy())
+                        for i, (t, v) in enumerate(indices)
+                    ]
                 else:
-                    if df["fold"].isna().any(): raise ValueError("Null validation folds")
-                    result = [(f,df[df.fold!=f].copy(),df[df.fold==f].copy()) for f in sorted(df.fold.unique())]
-            elif strategy in {"holdout","zero_shot_eval"}:
+                    if df["fold"].isna().any():
+                        raise ValueError("Null validation folds")
+                    if df.fold.nunique() != int(
+                        config.get("num_folds", self.task_spec.validation.num_folds)
+                    ):
+                        raise ValueError("Declared fold count differs from split file")
+                    result = [
+                        (f, df[df.fold != f].copy(), df[df.fold == f].copy())
+                        for f in sorted(df.fold.unique())
+                    ]
+            elif strategy in {"holdout", "zero_shot_eval"}:
                 ratio = config.get("holdout_ratio")
                 if ratio is not None:
-                    if not 0<float(ratio)<1: raise ValueError("holdout_ratio must lie between zero and one")
+                    if not 0 < float(ratio) < 1:
+                        raise ValueError("holdout_ratio must lie between zero and one")
                     from harness.data_strategy import DataStrategyEngine, SplitMode
-                    [(t,v)] = DataStrategyEngine.generate_splits(df,mode=SplitMode.HOLDOUT_TEST,group_col=self.task_spec.group_column,holdout_ratio=float(ratio),seed=self.seed)
-                    result = [(0,df.iloc[t].copy(),df.iloc[v].copy())]
+
+                    [(t, v)] = DataStrategyEngine.generate_splits(
+                        df,
+                        mode=SplitMode.HOLDOUT_TEST,
+                        group_col=self.task_spec.group_column,
+                        holdout_ratio=float(ratio),
+                        seed=self.seed,
+                    )
+                    result = [(0, df.iloc[t].copy(), df.iloc[v].copy())]
                 else:
-                    dev = self.task_spec.load_dataset_split(config.get("dev_split_name",self.task_spec.validation.dev_split_name),project_root=self.project_root)
-                    result = [(0,df,dev)]
-            else: raise ValueError(f"Unsupported validation strategy {strategy}")
-        if not result: raise ValueError("Validation returned no splits")
-        requested = getattr(self.args,"fold",None)
+                    dev = self.task_spec.load_dataset_split(
+                        config.get(
+                            "dev_split_name", self.task_spec.validation.dev_split_name
+                        ),
+                        project_root=self.project_root,
+                    )
+                    result = [(0, df, dev)]
+            else:
+                raise ValueError(f"Unsupported validation strategy {strategy}")
+        if not result:
+            raise ValueError("Validation returned no splits")
+        if strategy == "kfold":
+            held = [x for _, _, dev in result for x in dev[self.task_spec.id_column]]
+            if len(held) != len(set(held)) or set(held) != set(
+                df[self.task_spec.id_column]
+            ):
+                raise ValueError(
+                    "Validation does not cover each training ID exactly once"
+                )
+        requested = getattr(self.args, "fold", None)
         if requested is not None:
-            result = [x for x in result if str(x[0])==str(requested)]
-            if not result: raise ValueError("Requested fold does not exist")
-        for fold,train,dev in result:
-            if train.empty or dev.empty: raise ValueError("Empty training or validation partition")
+            result = [x for x in result if str(x[0]) == str(requested)]
+            if not result:
+                raise ValueError("Requested fold does not exist")
+        for fold, train, dev in result:
+            if train.empty or dev.empty:
+                raise ValueError("Empty training or validation partition")
             key = self.task_spec.id_column
-            if key not in dev or dev[key].isna().any() or dev[key].duplicated().any(): raise ValueError("Invalid validation IDs")
-            if set(train[key]) & set(dev[key]): raise ValueError("Training/validation ID overlap")
-            ExperimentValidator.assert_no_group_data_leakage(train,dev,self.task_spec.group_column)
-            self.task_plugin.validate_split(self.plugin_context,fold,train,dev)
-        self.manifest["split_sha256"] = digest([(str(f), t[self.task_spec.id_column].tolist(), v[self.task_spec.id_column].tolist()) for f,t,v in result])
+            if key not in dev or dev[key].isna().any() or dev[key].duplicated().any():
+                raise ValueError("Invalid validation IDs")
+            if set(train[key]) & set(dev[key]):
+                raise ValueError("Training/validation ID overlap")
+            if self.task_spec.group_column:
+                ExperimentValidator.assert_no_group_data_leakage(
+                    train, dev, self.task_spec.group_column
+                )
+            self.task_plugin.validate_split(self.plugin_context, fold, train, dev)
+        self.expected_validation_ids = {
+            x for _, _, dev in result for x in dev[self.task_spec.id_column]
+        }
+        self.manifest["split_sha256"] = digest(
+            [
+                (
+                    str(f),
+                    t[self.task_spec.id_column].tolist(),
+                    v[self.task_spec.id_column].tolist(),
+                )
+                for f, t, v in result
+            ]
+        )
         return result
 
     def _get_model_factory(self):
-        path = self.cfg.get("model",{}).get("factory")
+        path = self.cfg.get("model", {}).get("factory")
         if path:
-            mod,name = path.rsplit(".",1)
-            return getattr(importlib.import_module(mod),name)
-        return lambda name,**params: GenericBaselineModel(self.task_spec,name,**params)
+            mod, name = path.rsplit(".", 1)
+            return getattr(importlib.import_module(mod), name)
+        return lambda name, **params: GenericBaselineModel(
+            self.task_spec, name, **params
+        )
 
     def _record_predictions(self, dev, predictions, fold, variant):
-        records=[]
+        records = []
         for i in range(len(dev)):
-            record={self.task_spec.id_column:dev[self.task_spec.id_column].iloc[i],"fold":fold,"input_variant":variant}
-            for key,value in predictions.items():
+            record = {
+                self.task_spec.id_column: dev[self.task_spec.id_column].iloc[i],
+                "fold": fold,
+                "input_variant": variant,
+            }
+            for key, value in predictions.items():
                 if key.startswith("classes_"):
-                    record[key]=json.dumps(list(value),default=str)
+                    record[key] = json.dumps(list(value), default=str)
                 else:
-                    if len(value)!=len(dev): raise ValueError(f"Prediction coverage mismatch for {key}")
-                    item=value[i]
-                    column=key if key.startswith(("pred_","proba_")) else "pred_"+key
-                    record[column]=json.dumps(np.asarray(item).tolist()) if isinstance(item,(list,np.ndarray)) else item
+                    if len(value) != len(dev):
+                        raise ValueError(f"Prediction coverage mismatch for {key}")
+                    item = value[i]
+                    column = (
+                        key if key.startswith(("pred_", "proba_")) else "pred_" + key
+                    )
+                    record[column] = (
+                        json.dumps(np.asarray(item).tolist())
+                        if isinstance(item, (list, np.ndarray))
+                        else item
+                    )
             records.append(record)
         return records
 
     def _run_model_training(self, df, val_strategy, git_hash):
-        variants=self.cfg.get("data",{}).get("input_variants") or list(self.task_spec.inputs_dict)
-        if not variants: raise ValueError("No input variants declared")
-        selected=self.cfg.get("data",{}).get("selection_variant")
-        if len(variants)>1 and selected not in variants: raise ValueError("Multiple variants require data.selection_variant")
-        self.selection_variant=selected or variants[0]
-        details,rows,records,truths=[],[],[],[]
-        for fold,train,dev in self._resolve_validation_splits(df,val_strategy):
-            partitions=[("all",train,dev)]
-            partition=self.cfg.get("data",{}).get("partition_column")
+        variants = self.cfg.get("data", {}).get("input_variants") or list(
+            self.task_spec.inputs_dict
+        )
+        if not variants:
+            raise ValueError("No input variants declared")
+        selected = self.cfg.get("data", {}).get("selection_variant")
+        if len(variants) > 1 and selected not in variants:
+            raise ValueError("Multiple variants require data.selection_variant")
+        self.selection_variant = selected or variants[0]
+        details, rows, records, truths = [], [], [], []
+        for fold, train, dev in self._resolve_validation_splits(df, val_strategy):
+            partitions = [("all", train, dev)]
+            partition = self.cfg.get("data", {}).get("partition_column")
             if partition:
-                if partition not in df: raise ValueError("Partition column is missing")
-                partitions=[(p,train[train[partition]==p],dev[dev[partition]==p]) for p in sorted(df[partition].dropna().unique()) if len(dev[dev[partition]==p])]
-            for part,tr,dv in partitions:
-                if tr.empty: raise ValueError("Partition has no training data")
-                limit=getattr(self.args,"probe_samples",None)
-                if getattr(self.args,"debug",False) or limit:
-                    tr=tr.sample(n=min(len(tr),limit or 50),random_state=self.seed)
-                    dv=dv.head(limit or 50)
+                if partition not in df:
+                    raise ValueError("Partition column is missing")
+                partitions = [
+                    (p, train[train[partition] == p], dev[dev[partition] == p])
+                    for p in sorted(df[partition].dropna().unique())
+                    if len(dev[dev[partition] == p])
+                ]
+            for part, tr, dv in partitions:
+                if tr.empty:
+                    raise ValueError("Partition has no training data")
+                limit = getattr(self.args, "probe_samples", None)
+                if getattr(self.args, "debug", False) or limit:
+                    tr = tr.sample(n=min(len(tr), limit or 50), random_state=self.seed)
+                    dv = dv.head(limit or 50)
                 truths.append(dv)
                 for variant in variants:
-                    config=self.cfg.get("model",{})
-                    model=self.task_plugin.build_model(self.plugin_context,config.get("name","baseline"),config.get("params",{}))
-                    if model is None: model=self._get_model_factory()(config.get("name","baseline"),**config.get("params",{}))
-                    start=time.monotonic()
-                    call_model(model,"fit",tr,variant)
-                    ExperimentValidator.assert_parameter_limit(model,max_params=self.cfg.get("constraints",{}).get("max_params_limit"))
-                    pred=call_model(model,"predict",dv,variant)
-                    pred=self.task_plugin.normalize_predictions(self.plugin_context,pred)
-                    pred=self.task_spec.apply_routing(pred,len(dv))
-                    evaluation=self._evaluate(dv,pred)
-                    detail={"experiment_id":self.exp_id,"input_variant":variant,"dev_fold":fold,"partition":part,"train_rows":len(tr),"dev_rows":len(dv),"fit_time_seconds":time.monotonic()-start,**evaluation}
-                    details.append(detail); rows.append({k:v for k,v in detail.items() if isinstance(v,(str,int,float))})
-                    records.extend(self._record_predictions(dv,pred,fold,variant))
-                    self.estimator_metadata.append(getattr(model,"estimator_metadata",{"class":type(model).__name__}))
-        truth=pd.concat(truths).drop_duplicates(self.task_spec.id_column)
-        return self._save_and_finalize(truth,details,rows,records,git_hash)
+                    config = self.cfg.get("model", {})
+                    model = self.task_plugin.build_model(
+                        self.plugin_context,
+                        config.get("name", "baseline"),
+                        config.get("params", {}),
+                    )
+                    if model is None:
+                        model = self._get_model_factory()(
+                            config.get("name", "baseline"), **config.get("params", {})
+                        )
+                    if isinstance(model, GenericBaselineModel):
+                        model.seed = self.seed
+                    start = time.monotonic()
+                    call_model(model, "fit", tr, variant)
+                    ExperimentValidator.assert_parameter_limit(
+                        model,
+                        max_params=self.cfg.get("constraints", {}).get(
+                            "max_params_limit"
+                        ),
+                    )
+                    pred = call_model(model, "predict", dv, variant)
+                    from harness.evaluation import PredictionBatch
+
+                    if isinstance(pred, PredictionBatch):
+                        if pred.ids != dv[self.task_spec.id_column].tolist():
+                            raise ValueError("Prediction IDs mismatch")
+                        pred = {
+                            **pred.labels,
+                            **{"proba_" + k: v for k, v in pred.probabilities.items()},
+                            **{"classes_" + k: v for k, v in pred.class_order.items()},
+                        }
+                    pred = self.task_plugin.normalize_predictions(
+                        self.plugin_context, pred
+                    )
+                    pred = self.task_spec.apply_routing(pred, len(dv))
+                    evaluation = self._evaluate(dv, pred)
+                    detail = {
+                        "experiment_id": self.exp_id,
+                        "input_variant": variant,
+                        "dev_fold": fold,
+                        "partition": part,
+                        "train_rows": len(tr),
+                        "dev_rows": len(dv),
+                        "fit_time_seconds": time.monotonic() - start,
+                        **evaluation,
+                    }
+                    details.append(detail)
+                    rows.append(
+                        {
+                            k: v
+                            for k, v in detail.items()
+                            if isinstance(v, (str, int, float))
+                        }
+                    )
+                    records.extend(self._record_predictions(dv, pred, fold, variant))
+                    self.estimator_metadata.append(
+                        getattr(
+                            model, "estimator_metadata", {"class": type(model).__name__}
+                        )
+                    )
+        truth = pd.concat(truths).drop_duplicates(self.task_spec.id_column)
+        return self._save_and_finalize(truth, details, rows, records, git_hash)
 
     def _run_llm_prompting(self, df, git_hash):
         from harness.llm_engine import LLMEngine
-        config=self.cfg.get("llm",{})
-        records,details,truths=[],[],[]
-        self.selection_variant="llm_prompt"
-        strategy=self.cfg.get("validation",{}).get("strategy",self.task_spec.validation.strategy)
-        targets={s.column or key for key,s in self.task_spec.subtasks.items()}
-        for fold,train,dev in self._resolve_validation_splits(df,strategy):
-            limit=self.cfg.get("validation",{}).get("sample_limit")
-            if getattr(self.args,"debug",False): limit=getattr(self.args,"probe_samples",None) or 50
-            if limit: dev=dev.head(int(limit))
+
+        config = self.cfg.get("llm", {})
+        records, details, truths = [], [], []
+        self.selection_variant = "llm_prompt"
+        strategy = self.cfg.get("validation", {}).get(
+            "strategy", self.task_spec.validation.strategy
+        )
+        targets = {s.column or key for key, s in self.task_spec.subtasks.items()}
+        for fold, train, dev in self._resolve_validation_splits(df, strategy):
+            limit = self.cfg.get("validation", {}).get("sample_limit")
+            if getattr(self.args, "debug", False):
+                limit = getattr(self.args, "probe_samples", None) or 50
+            if limit:
+                dev = dev.head(int(limit))
             truths.append(dev)
-            predictions={key:[] for key in self.task_spec.subtasks}
-            for _,row in dev.iterrows():
-                features={k:v for k,v in row.to_dict().items() if k not in targets}
-                system,user=LLMEngine.format_prompt(config.get("prompt_template","{text}"),features,config.get("system_prompt",""),config.get("few_shot_examples",[]),config.get("use_cot",False))
-                if any("{"+c+"}" in user for c in targets): raise ValueError("LLM prompt references ground-truth labels")
-                response=LLMEngine.generate_completion(provider=config.get("provider","gemini"),model_name=config.get("model_name","gemini-2.0-flash"),system_prompt=system,user_prompt=user,temperature=config.get("temperature",0),max_tokens=config.get("max_tokens",512),top_p=config.get("top_p",.95),base_url=config.get("api_base_url"))
-                text=response.get("text","").strip()
-                if text.startswith("```"): text=text.split("\n",1)[1].rsplit("```",1)[0].strip()
-                try: parsed=json.loads(text)
-                except json.JSONDecodeError: raise ValueError("LLM response is not valid JSON")
-                if not isinstance(parsed,dict): raise ValueError("LLM output must be an object")
-                for key,st in self.task_spec.subtasks.items():
-                    value=next((parsed[k] for k in [key,st.column] if k and k in parsed),None)
-                    if value is None and len(predictions)==1: value=parsed.get("prediction",parsed.get("label"))
-                    if value is None: raise ValueError(f"LLM output omitted {key}")
+            predictions = {key: [] for key in self.task_spec.subtasks}
+            for _, row in dev.iterrows():
+                features = {k: v for k, v in row.to_dict().items() if k not in targets}
+                system, user = LLMEngine.format_prompt(
+                    config.get("prompt_template", "{text}"),
+                    features,
+                    config.get("system_prompt", ""),
+                    config.get("few_shot_examples", []),
+                    config.get("use_cot", False),
+                )
+                if any("{" + c + "}" in user for c in targets):
+                    raise ValueError("LLM prompt references ground-truth labels")
+                response = LLMEngine.generate_completion(
+                    provider=config.get("provider", "gemini"),
+                    model_name=config.get("model_name", "gemini-2.0-flash"),
+                    system_prompt=system,
+                    user_prompt=user,
+                    temperature=config.get("temperature", 0),
+                    max_tokens=config.get("max_tokens", 512),
+                    top_p=config.get("top_p", 0.95),
+                    base_url=config.get("api_base_url"),
+                )
+                text = response.get("text", "").strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    raise ValueError("LLM response is not valid JSON")
+                if not isinstance(parsed, dict):
+                    raise ValueError("LLM output must be an object")
+                for key, st in self.task_spec.subtasks.items():
+                    value = next(
+                        (parsed[k] for k in [key, st.column] if k and k in parsed), None
+                    )
+                    if value is None and len(predictions) == 1:
+                        value = parsed.get("prediction", parsed.get("label"))
+                    if value is None:
+                        raise ValueError(f"LLM output omitted {key}")
                     predictions[key].append(value)
-            predictions=self.task_spec.apply_routing(predictions,len(dev))
-            evaluation=self._evaluate(dev,predictions)
-            details.append({"experiment_id":self.exp_id,"input_variant":"llm_prompt","dev_fold":fold,**evaluation})
-            records.extend(self._record_predictions(dev,predictions,fold,"llm_prompt"))
-        return self._save_and_finalize(pd.concat(truths).drop_duplicates(self.task_spec.id_column),details,[],records,git_hash)
+            predictions = self.task_spec.apply_routing(predictions, len(dev))
+            evaluation = self._evaluate(dev, predictions)
+            details.append(
+                {
+                    "experiment_id": self.exp_id,
+                    "input_variant": "llm_prompt",
+                    "dev_fold": fold,
+                    **evaluation,
+                }
+            )
+            records.extend(
+                self._record_predictions(dev, predictions, fold, "llm_prompt")
+            )
+        return self._save_and_finalize(
+            pd.concat(truths).drop_duplicates(self.task_spec.id_column),
+            details,
+            [],
+            records,
+            git_hash,
+        )
 
     def _save_and_finalize(self, truth, details, rows, records, git_hash):
-        oof=pd.DataFrame(records)
-        variants={}
+        oof = pd.DataFrame(records)
+        variants = {}
         for variant in oof.input_variant.unique():
-            selected=oof[oof.input_variant==variant].copy()
-            key=self.task_spec.id_column
-            if selected[key].duplicated().any(): raise ValueError("Duplicate OOF IDs within input variant")
-            merged=selected[[key]].merge(truth,on=key,how="left",validate="one_to_one")
-            predictions={}
+            selected = oof[oof.input_variant == variant].copy()
+            key = self.task_spec.id_column
+            if (
+                self.run_kind == "full"
+                and set(selected[key]) != self.expected_validation_ids
+            ):
+                raise ValueError("Full validation prediction coverage is incomplete")
+            if selected[key].duplicated().any():
+                raise ValueError("Duplicate OOF IDs within input variant")
+            merged = selected[[key]].merge(
+                truth, on=key, how="left", validate="one_to_one"
+            )
+            predictions = {}
             for col in selected:
                 if col.startswith("pred_"):
-                    values=selected[col].tolist()
-                    predictions[col]=[json.loads(v) if isinstance(v,str) and v.startswith("[") else v for v in values]
-                elif col.startswith("proba_"): predictions[col]=[json.loads(v) for v in selected[col]]
+                    values = selected[col].tolist()
+                    predictions[col] = [
+                        json.loads(v) if isinstance(v, str) and v.startswith("[") else v
+                        for v in values
+                    ]
+                elif col.startswith("proba_"):
+                    predictions[col] = [json.loads(v) for v in selected[col]]
                 elif col.startswith("classes_"):
-                    if selected[col].nunique()!=1: raise ValueError("Class order changed across folds")
-                    predictions[col]=json.loads(selected[col].iloc[0])
-            variants[variant]=self._evaluate(merged,predictions)
-        aggregate=variants[self.selection_variant]
-        result={"schema_version":2,"experiment_id":self.exp_id,"selection_variant":self.selection_variant,**aggregate,"variants":variants,"fold_metrics":details}
-        save_json(self.exp_dir/"metrics.json",result)
-        summary=pd.DataFrame(rows or [{"input_variant":d["input_variant"],"dev_fold":d["dev_fold"],"primary_score":d["primary_score"]} for d in details])
-        summary.to_csv(self.exp_dir/"summary.csv",index=False)
-        oof.to_csv(self.exp_dir/"oof_predictions.csv",index=False)
-        oof.to_csv(self.exp_dir/"predictions.csv",index=False)
-        truth.to_csv(self.exp_dir/"evaluation_truth.csv",index=False)
-        (self.exp_dir/"EXPERIMENT_CARD.md").write_text(f"# {self.exp_id}\n\n{aggregate['primary_metric']}: {aggregate['primary_score']} ({aggregate['direction']})\n",encoding="utf-8")
+                    if selected[col].nunique() != 1:
+                        raise ValueError("Class order changed across folds")
+                    predictions[col] = json.loads(selected[col].iloc[0])
+            variants[variant] = self._evaluate(merged, predictions)
+        aggregate = variants[self.selection_variant]
+        result = {
+            "schema_version": 2,
+            "experiment_id": self.exp_id,
+            "selection_variant": self.selection_variant,
+            **aggregate,
+            "variants": variants,
+            "fold_metrics": details,
+        }
+        save_json(self.exp_dir / "metrics.json", result)
+        summary = pd.DataFrame(
+            rows
+            or [
+                {
+                    "input_variant": d["input_variant"],
+                    "dev_fold": d["dev_fold"],
+                    "primary_score": d["primary_score"],
+                }
+                for d in details
+            ]
+        )
+        summary.to_csv(self.exp_dir / "summary.csv", index=False)
+        oof.to_csv(self.exp_dir / "oof_predictions.csv", index=False)
+        oof.to_csv(self.exp_dir / "predictions.csv", index=False)
+        truth.to_csv(self.exp_dir / "evaluation_truth.csv", index=False)
+        (self.exp_dir / "EXPERIMENT_CARD.md").write_text(
+            f"# {self.exp_id}\n\n{aggregate['primary_metric']}: {aggregate['primary_score']} ({aggregate['direction']})\n",
+            encoding="utf-8",
+        )
         try:
-            DiagnosticEngine.save_diagnostics_bundle(truth,oof,self.exp_dir,self.exp_id,task_spec=self.task_spec)
-            result["diagnostics_status"]="COMPLETED"
+            DiagnosticEngine.save_diagnostics_bundle(
+                truth,
+                oof[oof.input_variant == self.selection_variant],
+                self.exp_dir,
+                self.exp_id,
+                task_spec=self.task_spec,
+            )
+            result["diagnostics_status"] = "COMPLETED"
         except Exception as error:
-            result["diagnostics_status"]="FAILED"; result["diagnostics_error"]=str(error)
-        save_json(self.exp_dir/"metrics.json",result)
-        self.manifest.update(status="COMPLETED", estimator=self.estimator_metadata, files={p.name:sha256(p) for p in self.exp_dir.iterdir() if p.is_file() and p.name!="artifact_manifest.json"})
-        save_json(self.exp_dir/"artifact_manifest.json",self.manifest)
-        if self.run_kind=="full":
-            journal=TreeJournal(journal_path=self.artifacts_dir/"journal.json",artifacts_dir=self.artifacts_dir,task_spec=self.task_spec)
+            result["diagnostics_status"] = "FAILED"
+            result["diagnostics_error"] = str(error)
+        save_json(self.exp_dir / "metrics.json", result)
+        self.manifest.update(
+            status="COMPLETED",
+            estimator=self.estimator_metadata,
+            files={
+                p.name: sha256(p)
+                for p in self.exp_dir.iterdir()
+                if p.is_file() and p.name != "artifact_manifest.json"
+            },
+        )
+        save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
+        if self.run_kind == "full":
+            journal = TreeJournal(
+                journal_path=self.artifacts_dir / "journal.json",
+                artifacts_dir=self.artifacts_dir,
+                task_spec=self.task_spec,
+                task_plugin=self.task_plugin,
+            )
             journal.sync_from_artifacts()
         return result
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     """CLI entrypoint for universal training runner."""
-    parser = argparse.ArgumentParser(description="Universal Competition Experiment Runner")
-    parser.add_argument("--project-root", type=str, default=None, help="Competition workspace root")
-    parser.add_argument("--task-config", type=str, default=None, help="Task specification YAML")
-    parser.add_argument("--job-id", type=str, default=None, help="Persistent dashboard/Agent Bridge job ID")
-    parser.add_argument("--config", type=str, required=True, help="Path to experiment config YAML")
-    parser.add_argument("--base-config", type=str, default=None, help="Path to base config YAML")
-    parser.add_argument("--fold", type=int, default=None, help="Target fold index to train (smoke test / probe)")
-    parser.add_argument("--debug", action="store_true", help="Debug mode with subsampled data")
-    parser.add_argument("--force", action="store_true", help="Force overwrite existing experiment artifacts")
-    parser.add_argument("--probe-samples", type=int, default=None, help="Probe sample count limit")
-    parser.add_argument("--backend", type=str, default="local", choices=["local", "modal", "kaggle"], help="Execution backend")
-    parser.add_argument("--skip-leaderboard", action="store_true", help="Do not write the project leaderboard")
+    parser = argparse.ArgumentParser(
+        description="Universal Competition Experiment Runner"
+    )
+    parser.add_argument(
+        "--project-root", type=str, default=None, help="Competition workspace root"
+    )
+    parser.add_argument(
+        "--task-config", type=str, default=None, help="Task specification YAML"
+    )
+    parser.add_argument(
+        "--job-id",
+        type=str,
+        default=None,
+        help="Persistent dashboard/Agent Bridge job ID",
+    )
+    parser.add_argument(
+        "--config", type=str, required=True, help="Path to experiment config YAML"
+    )
+    parser.add_argument(
+        "--base-config", type=str, default=None, help="Path to base config YAML"
+    )
+    parser.add_argument(
+        "--fold",
+        type=int,
+        default=None,
+        help="Target fold index to train (smoke test / probe)",
+    )
+    parser.add_argument(
+        "--debug", action="store_true", help="Debug mode with subsampled data"
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force overwrite existing experiment artifacts",
+    )
+    parser.add_argument(
+        "--probe-samples", type=int, default=None, help="Probe sample count limit"
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="local",
+        choices=["local", "modal", "kaggle"],
+        help="Execution backend",
+    )
+    parser.add_argument(
+        "--skip-leaderboard",
+        action="store_true",
+        help="Do not write the project leaderboard",
+    )
     args = parser.parse_args(argv)
 
     project = HarnessProject.discover(args.project_root, args.task_config)
@@ -339,6 +759,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # If backend is modal or kaggle, delegate to cloud runner
     if args.backend == "modal":
         from harness.cloud_runner import run_via_modal
+
         run_via_modal(
             config_path=str(config_path),
             project_root=project.root,
@@ -346,6 +767,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     elif args.backend == "kaggle":
         from harness.cloud_runner import run_via_kaggle
+
         run_via_kaggle(
             config_path=str(config_path),
             project_root=project.root,
@@ -355,8 +777,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Local execution
     package_base = Path(__file__).resolve().parent / "defaults" / "base.yaml"
     workspace_base = project.root / "configs" / "base.yaml"
-    base_path = resolve_project_path(args.base_config) if args.base_config else (
-        workspace_base if workspace_base.is_file() else package_base
+    base_path = (
+        resolve_project_path(args.base_config)
+        if args.base_config
+        else (workspace_base if workspace_base.is_file() else package_base)
     )
     base_cfg = load_yaml_config(base_path) if base_path.exists() else {}
     exp_cfg = load_yaml_config(config_path)
@@ -371,28 +795,48 @@ def main(argv: Optional[List[str]] = None) -> int:
     except Exception as exc:
         if args.job_id:
             from harness.job_state import update_worker_state
+
             update_worker_state(
-                project.root, args.job_id, status="FAILED", provider_status="FAILED",
-                error_message=str(exc), exp_id=str(exp_id),
-                config_sha256=__import__("hashlib").sha256(config_path.read_bytes()).hexdigest(),
+                project.root,
+                args.job_id,
+                status="FAILED",
+                provider_status="FAILED",
+                error_message=str(exc),
+                exp_id=str(exp_id),
+                config_sha256=__import__("hashlib")
+                .sha256(config_path.read_bytes())
+                .hexdigest(),
             )
         raise
     if args.job_id:
         import json
         from harness.job_state import update_worker_state
+
         exp_dir = runner.exp_dir
         metrics_path = exp_dir / "metrics.json"
-        metrics = json.loads(metrics_path.read_text(encoding="utf-8")) if metrics_path.is_file() else {}
-        files = sorted(path for path in exp_dir.iterdir() if path.is_file()) if exp_dir.is_dir() else []
+        metrics = (
+            json.loads(metrics_path.read_text(encoding="utf-8"))
+            if metrics_path.is_file()
+            else {}
+        )
+        files = (
+            sorted(path for path in exp_dir.iterdir() if path.is_file())
+            if exp_dir.is_dir()
+            else []
+        )
         update_worker_state(
             project.root,
             args.job_id,
             status="COMPLETED",
             provider_status="COMPLETED",
             result_metrics=metrics if isinstance(metrics, dict) else {"folds": metrics},
-            artifact_paths=[path.relative_to(project.root).as_posix() for path in files],
+            artifact_paths=[
+                path.relative_to(project.root).as_posix() for path in files
+            ],
             exp_id=str(exp_id),
-            config_sha256=__import__("hashlib").sha256(config_path.read_bytes()).hexdigest(),
+            config_sha256=__import__("hashlib")
+            .sha256(config_path.read_bytes())
+            .hexdigest(),
         )
     return 0
 

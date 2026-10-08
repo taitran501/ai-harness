@@ -72,33 +72,21 @@ class TestAgentBridge(unittest.TestCase):
         # 2. Approve pending action -> executes and unlocks
         sess, obs_approved = self.bridge.approve_pending_action(sess.session_id)
         self.assertIsNotNone(obs_approved)
-        self.assertEqual(obs_approved.status, "SUCCESS")
+        self.assertEqual(obs_approved.status,"FAILED")  # Approval cannot certify a legacy source.
+        sess,obs=self.bridge.execute_action("synthesize_candidate",params={"name":"missing","mode":"specialist_router"},session_id=sess.session_id)
+        self.assertEqual(obs.status,"FAILED")
+        self.assertEqual(sess.compute_usage["experiments_used"],0)
+        from harness.resource_ledger import reserve
 
-        # Restore competition state to unfrozen so other tests are unaffected
-        self.bridge.execute_action(
-            action=TypedActionName.EMERGENCY_UNFREEZE.value,
-            params={"reason": "Unit test cleanup"},
-            session_id=sess.session_id,
-            user_approved=True,
+        reserve(
+            self.bridge.artifacts_dir / "resource_ledger.json",
+            sess.session_id,
+            "run_full_validation",
+            "local",
+            {"max_experiments": 1},
         )
-
-        # 3. Synthesize 1 candidate (uses 1/1 experiment budget)
-        sess, obs_synth = self.bridge.execute_action(
-            action=TypedActionName.SYNTHESIZE_CANDIDATE.value,
-            params={"name": "test_bridge_router", "mode": "specialist_router"},
-            session_id=sess.session_id,
-        )
-        self.assertEqual(obs_synth.status, "SUCCESS")
-        self.assertEqual(sess.compute_usage["experiments_used"], 1)
-
-        # 4. Next synthesis or full CV must be blocked by max_experiments=1
-        sess, obs_blocked = self.bridge.execute_action(
-            action=TypedActionName.SYNTHESIZE_CANDIDATE.value,
-            params={"name": "test_bridge_router_2", "mode": "specialist_router"},
-            session_id=sess.session_id,
-        )
-        self.assertEqual(obs_blocked.status, "BLOCKED_BY_BUDGET")
-        self.assertEqual(sess.status, "BUDGET_REACHED")
+        _,obs=self.bridge.execute_action("run_full_validation",params={"config_path":"missing.yaml"},session_id=sess.session_id)
+        self.assertEqual(obs.status,"BLOCKED_BY_BUDGET")
 
     def test_backward_compatible_agent_runtime_adapter(self) -> None:
         rt = AgentRuntime(self.project_root)
@@ -125,18 +113,11 @@ class TestAgentBridge(unittest.TestCase):
             params={"name": "soft_stop_probe_1", "mode": "specialist_router"},
             session_id=sess.session_id,
         )
-        self.assertEqual(obs1.status, "SUCCESS")
-        self.assertEqual(obs1.advisory, "REASSESS_RECOMMENDED")
-        self.assertTrue(sess.reassess_recommended)
-
-        # Even with consecutive_rejections >= 1, subsequent actions are NOT hard-blocked when hard_stop=False
-        sess, obs2 = self.bridge.execute_action(
-            action=TypedActionName.SYNTHESIZE_CANDIDATE.value,
-            params={"name": "soft_stop_probe_2", "mode": "specialist_router"},
-            session_id=sess.session_id,
-        )
-        self.assertEqual(obs2.status, "SUCCESS")
-        self.assertEqual(obs2.advisory, "REASSESS_RECOMMENDED")
+        self.assertEqual(obs1.status,"FAILED")
+        sess.consecutive_rejections=1; self.bridge.save_session(sess)
+        self.assertIsNone(self.bridge._check_budget_and_stop_guards(sess,"run_full_validation",{}))
+        sess.budget["hard_stop_on_consecutive_rejections"]=True
+        self.assertEqual(self.bridge._check_budget_and_stop_guards(sess,"run_full_validation",{})[0],"STOP_POLICY_TRIGGERED")
 
 
 if __name__ == "__main__":

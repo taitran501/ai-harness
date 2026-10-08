@@ -97,7 +97,7 @@ const FALLBACK_STRATEGIES: StrategyCard[] = [
   {
     id: 'ens_threshold_opt',
     branch: 'ens',
-    title: 'Out-of-Fold Threshold Calibration & Ensembling',
+    title: 'Threshold Calibration Utility (requires custom integration)',
     problem_addressed: 'Static decision thresholds produce miscalibrated confidence scores across validation partitions.',
     hypothesis: 'Optimizing decision thresholds per slice on out-of-fold validation probabilities via Nelder-Mead maximizes primary metric.',
     intervention: 'Apply harness ThresholdOptimizer on out-of-fold validation probabilities.',
@@ -191,7 +191,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   );
 
   const [selectedParentId, setSelectedParentId] = useState<string>(defaultParentId);
-  const [strategyCards, setStrategyCards] = useState<StrategyCard[]>(FALLBACK_STRATEGIES);
+  const [strategyCards, setStrategyCards] = useState<StrategyCard[]>(FALLBACK_STRATEGIES.filter(card => card.model_name !== 'threshold_optimizer'));
   const [strategyCategory, setStrategyCategory] = useState<'all' | 'llm' | 'dl' | 'ml'>('all');
   const [selectedIde, setSelectedIde] = useState<'antigravity' | 'codex'>('antigravity');
   const [generatingCardId, setGeneratingCardId] = useState<string | null>(null);
@@ -219,7 +219,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
       .getStrategyCards()
       .then((res) => {
         if (res.strategies && res.strategies.length > 0) {
-          setStrategyCards(res.strategies);
+          setStrategyCards(res.strategies.filter(card => card.model_name !== 'threshold_optimizer'));
         }
       })
       .catch((err) => {

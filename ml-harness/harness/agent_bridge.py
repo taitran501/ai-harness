@@ -49,6 +49,9 @@ class ApprovalTier(str, Enum):
 class TypedActionName(str, Enum):
     """Canonical Typed Actions exposed by AgentBridge to Antigravity in the IDE."""
 
+    UPDATE_TASK_CONTRACT = "update_task_contract"
+    WRITE_EXPERIMENT_CONFIG = "write_experiment_config"
+    UPDATE_WORKSPACE_SETTINGS = "update_workspace_settings"
     BOOTSTRAP_TASK = "bootstrap_task"
     CONFIRM_TASK_SPEC = "confirm_task_spec"
     INSPECT_DATA_READINESS = "inspect_data_readiness"
@@ -177,11 +180,15 @@ class BridgeSession:
     starting_state: Dict[str, Any] = field(default_factory=dict)
     final_state: Optional[Dict[str, Any]] = None
     experiments_run: List[str] = field(default_factory=list)
-    compute_usage: Dict[str, Any] = field(default_factory=lambda: asdict(ComputeUsage()))
+    compute_usage: Dict[str, Any] = field(
+        default_factory=lambda: asdict(ComputeUsage())
+    )
     consecutive_rejections: int = 0
     reassess_recommended: bool = False
     budget: Dict[str, Any] = field(default_factory=lambda: asdict(SessionBudget()))
-    approval_policy: Dict[str, str] = field(default_factory=lambda: dict(DEFAULT_ACTION_APPROVAL_TIERS))
+    approval_policy: Dict[str, str] = field(
+        default_factory=lambda: dict(DEFAULT_ACTION_APPROVAL_TIERS)
+    )
     actions: List[Dict[str, Any]] = field(default_factory=list)
     observations: List[Dict[str, Any]] = field(default_factory=list)
     pending_approval_action: Optional[Dict[str, Any]] = None
@@ -194,7 +201,11 @@ class AgentBridge:
     Motto: Antigravity thinks. AgentBridge coordinates. Harness verifies and executes.
     """
 
-    def __init__(self, project_root: Path | str = ".", task_spec_path: Optional[str | Path] = None):
+    def __init__(
+        self,
+        project_root: Path | str = ".",
+        task_spec_path: Optional[str | Path] = None,
+    ):
         from harness.plugins import TaskPluginContext, load_task_plugin
         from harness.project import HarnessProject
         from harness.task_spec import load_active_task_spec
@@ -206,7 +217,9 @@ class AgentBridge:
         self.legacy_runs_dir = self.artifacts_dir / "agent_runs"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.legacy_runs_dir.mkdir(parents=True, exist_ok=True)
-        self.comp_state = CompetitionStateMachine(self.project_root, self.project.task_config_path)
+        self.comp_state = CompetitionStateMachine(
+            self.project_root, self.project.task_config_path
+        )
         self.task_spec = load_active_task_spec(self.project.task_config_path)
         self.plugin_context = TaskPluginContext(
             project_root=self.project_root,
@@ -216,8 +229,11 @@ class AgentBridge:
         )
         self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
         from harness.phase_workflow import PhaseWorkflow
-        self.phase_workflow = PhaseWorkflow(self.project_root, self.project.task_config_path)
-        self._session_snapshots=getattr(self,"_session_snapshots",{})
+
+        self.phase_workflow = PhaseWorkflow(
+            self.project_root, self.project.task_config_path
+        )
+        self._session_snapshots = getattr(self, "_session_snapshots", {})
 
     def _new_journal(self, auto_sync: bool = True) -> TreeJournal:
         return TreeJournal(
@@ -225,6 +241,7 @@ class AgentBridge:
             artifacts_dir=self.artifacts_dir,
             auto_sync=auto_sync,
             task_spec=self.task_spec,
+            task_plugin=self.task_plugin,
         )
 
     def _new_submission_manager(self) -> SubmissionManager:
@@ -241,11 +258,17 @@ class AgentBridge:
         from harness.project import HarnessProject
         from harness.task_spec import load_active_task_spec
 
-        self.project = HarnessProject.discover(self.project_root, self.project.task_config_path)
+        self.project = HarnessProject.discover(
+            self.project_root, self.project.task_config_path
+        )
         self.project_root = self.project.root
         self.artifacts_dir = self.project.artifacts_dir
-        self.task_spec = load_active_task_spec(self.project.task_config_path, force_reload=True)
-        self.comp_state = CompetitionStateMachine(self.project_root, self.project.task_config_path)
+        self.task_spec = load_active_task_spec(
+            self.project.task_config_path, force_reload=True
+        )
+        self.comp_state = CompetitionStateMachine(
+            self.project_root, self.project.task_config_path
+        )
         self.plugin_context = TaskPluginContext(
             project_root=self.project_root,
             task_config_path=self.project.task_config_path,
@@ -254,10 +277,15 @@ class AgentBridge:
         )
         self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
         from harness.phase_workflow import PhaseWorkflow
-        self.phase_workflow = PhaseWorkflow(self.project_root, self.project.task_config_path)
-        self._session_snapshots=getattr(self,"_session_snapshots",{})
 
-    def _get_spec_min_improvement(self, session_or_budget: Optional[Any] = None) -> float:
+        self.phase_workflow = PhaseWorkflow(
+            self.project_root, self.project.task_config_path
+        )
+        self._session_snapshots = getattr(self, "_session_snapshots", {})
+
+    def _get_spec_min_improvement(
+        self, session_or_budget: Optional[Any] = None
+    ) -> float:
         """Resolve min_meaningful_improvement from SessionBudget or CompetitionSpec (`configs/task.yaml`)."""
         budget_dict = (
             session_or_budget.budget
@@ -287,14 +315,21 @@ class AgentBridge:
                         continue
                     if in_graveyard and line.startswith("## "):
                         break
-                    if in_graveyard and line.strip().startswith("|") and "Tested Intervention" not in line and "---" not in line:
+                    if (
+                        in_graveyard
+                        and line.strip().startswith("|")
+                        and "Tested Intervention" not in line
+                        and "---" not in line
+                    ):
                         cols = [c.strip() for c in line.strip().strip("|").split("|")]
                         if len(cols) >= 5:
                             items.append(f"{cols[0]}: {cols[4]} ({cols[2]})")
             except Exception:
                 pass
         if not items:
-            items.append("No rejected approaches are recorded in the current experiment history.")
+            items.append(
+                "No rejected approaches are recorded in the current experiment history."
+            )
         return items
 
     # =========================================================================
@@ -313,24 +348,41 @@ class AgentBridge:
         return f"session_{(max(existing, default=0) + 1):04d}"
 
     def save_session(self, session: BridgeSession) -> None:
+        if (
+            Path(session.session_id).name != session.session_id
+            or "/" in session.session_id
+            or "\\" in session.session_id
+        ):
+            raise ValueError("Invalid session ID")
         session.updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         payload = asdict(session)
         path = self.sessions_dir / f"{session.session_id}.json"
         from harness.io_utils import atomic_write_json
         import copy
         from harness.state_store import save_snapshot
-        payload=save_snapshot(path,self._session_snapshots.get(session.session_id,{}),payload)
-        self._session_snapshots[session.session_id]=copy.deepcopy(payload)
-        for key,value in payload.items():
-            if key in BridgeSession.__dataclass_fields__: setattr(session,key,value)
+
+        payload = save_snapshot(
+            path, self._session_snapshots.get(session.session_id, {}), payload
+        )
+        self._session_snapshots[session.session_id] = copy.deepcopy(payload)
+        for key, value in payload.items():
+            if key in BridgeSession.__dataclass_fields__:
+                setattr(session, key, value)
 
         # Mirror into legacy agent_runs dir (`run_XXXX.json`) for UI/backward compatibility
         run_num = session.session_id.split("_")[-1]
-        legacy_id = f"run_{run_num}" if not session.session_id.startswith("run_") else session.session_id
+        legacy_id = (
+            f"run_{run_num}"
+            if not session.session_id.startswith("run_")
+            else session.session_id
+        )
         legacy_payload = {
             **payload,
             "id": legacy_id,
-            "plan": [f"[{a.get('approval_tier', 'AUTO')}] {a.get('action')}: {a.get('rationale', '')}" for a in session.actions],
+            "plan": [
+                f"[{a.get('approval_tier', 'AUTO')}] {a.get('action')}: {a.get('rationale', '')}"
+                for a in session.actions
+            ],
             "decisions": [
                 {
                     "step_index": o.get("step_index", idx + 1),
@@ -349,6 +401,12 @@ class AgentBridge:
         self._sync_to_dashboard_state(session)
 
     def load_session(self, session_id: str) -> BridgeSession:
+        if (
+            Path(session_id).name != session_id
+            or "/" in session_id
+            or "\\" in session_id
+        ):
+            raise ValueError("Invalid session ID")
         candidates = [
             self.sessions_dir / f"{session_id}.json",
             self.legacy_runs_dir / f"{session_id}.json",
@@ -362,7 +420,9 @@ class AgentBridge:
 
         target = next((p for p in candidates if p.exists()), None)
         if not target:
-            raise FileNotFoundError(f"BridgeSession '{session_id}' not found in {self.sessions_dir}")
+            raise FileNotFoundError(
+                f"BridgeSession '{session_id}' not found in {self.sessions_dir}"
+            )
 
         data = json.loads(target.read_text(encoding="utf-8"))
         valid_fields = BridgeSession.__dataclass_fields__.keys()
@@ -370,8 +430,38 @@ class AgentBridge:
         if "session_id" not in filtered:
             filtered["session_id"] = data.get("id", session_id)
         import copy
-        self._session_snapshots[filtered["session_id"]]=copy.deepcopy(filtered)
-        return BridgeSession(**filtered)
+
+        self._session_snapshots[filtered["session_id"]] = copy.deepcopy(filtered)
+        session = BridgeSession(**filtered)
+        self._reconcile_session_usage(session)
+        return session
+
+    def _reconcile_session_usage(self, session):
+        path = self.artifacts_dir / "resource_ledger.json"
+        if not path.is_file():
+            return
+        ledger = json.loads(path.read_text(encoding="utf-8"))
+        rows = [
+            r
+            for r in ledger.get("reservations", {}).values()
+            if r["session_id"] == session.session_id
+        ]
+        if not rows:
+            return
+        session.compute_usage.update(
+            experiments_used=sum(r["category"] == "training" for r in rows),
+            smoke_runs=sum(r["category"] == "probe" for r in rows),
+            cloud_runs=sum(r["backend"] != "local" for r in rows),
+            candidate_operations=sum(r["category"] == "candidate" for r in rows),
+            wall_seconds_used=round(
+                sum(float(r.get("wall_seconds") or 0) for r in rows), 3
+            ),
+            gpu_hours_used=(
+                None
+                if any(r.get("gpu_hours") is None for r in rows)
+                else sum(r["gpu_hours"] for r in rows)
+            ),
+        )
 
     def get_active_or_create_session(
         self,
@@ -383,7 +473,9 @@ class AgentBridge:
             try:
                 sess = self.load_session(session_id)
                 if budget:
-                    sess.budget.update({k: v for k, v in budget.items() if v is not None})
+                    sess.budget.update(
+                        {k: v for k, v in budget.items() if v is not None}
+                    )
                     self.save_session(sess)
                 return sess
             except FileNotFoundError:
@@ -393,10 +485,15 @@ class AgentBridge:
         for item in recent:
             if item.get("status") in ("ACTIVE", "PAUSED_FOR_APPROVAL"):
                 sess = self.load_session(item["session_id"])
-                if goal and goal != "Iterative competition optimization via Antigravity IDE":
+                if (
+                    goal
+                    and goal != "Iterative competition optimization via Antigravity IDE"
+                ):
                     sess.goal = goal
                 if budget:
-                    sess.budget.update({k: v for k, v in budget.items() if v is not None})
+                    sess.budget.update(
+                        {k: v for k, v in budget.items() if v is not None}
+                    )
                 self.save_session(sess)
                 return sess
 
@@ -413,10 +510,15 @@ class AgentBridge:
         snap = self.comp_state.evaluate_journey_snapshot(journal, sub_mgr)
 
         import uuid
-        sid = session_id or "session_"+uuid.uuid4().hex
+
+        sid = session_id or "session_" + uuid.uuid4().hex
+        if (self.sessions_dir / f"{sid}.json").exists():
+            raise ValueError("Session ID already exists; resume the existing session")
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         sess_budget = asdict(SessionBudget())
-        sess_budget["min_meaningful_improvement"] = self._get_spec_min_improvement(budget)
+        sess_budget["min_meaningful_improvement"] = self._get_spec_min_improvement(
+            budget
+        )
         if budget:
             sess_budget.update({k: v for k, v in budget.items() if v is not None})
 
@@ -488,7 +590,9 @@ class AgentBridge:
         journal = self._new_journal(auto_sync=True)
         sub_mgr = self._new_submission_manager()
         snap = self.comp_state.evaluate_journey_snapshot(journal, sub_mgr)
-        max_p = self.comp_state.spec.get("competition_rules", {}).get("max_params_limit")
+        max_p = self.comp_state.spec.get("competition_rules", {}).get(
+            "max_params_limit"
+        )
         ucb_rec = journal.recommend_next_branch(max_params=max_p)
 
         active_session = None
@@ -501,7 +605,9 @@ class AgentBridge:
             sessions = self.list_sessions(limit=1)
             active_session = sessions[0] if sessions else None
 
-        parent_id = ucb_rec.get("parent_id") or (snap["hud"]["what_is_current_best"]["cv_best"].get("id"))
+        parent_id = ucb_rec.get("parent_id") or (
+            snap["hud"]["what_is_current_best"]["cv_best"].get("id")
+        )
         bottlenecks = ucb_rec.get("bottlenecks") or []
         if not bottlenecks and parent_id and parent_id in journal.nodes:
             diag = journal.nodes[parent_id].diagnostics_summary or {}
@@ -512,7 +618,9 @@ class AgentBridge:
         packet = {
             "bridge_version": "1.1_antigravity_bridge",
             "project_root": str(self.project_root),
-            "task_config": str(self.project.task_config_path.relative_to(self.project_root)).replace("\\", "/"),
+            "task_config": str(
+                self.project.task_config_path.relative_to(self.project_root)
+            ).replace("\\", "/"),
             "task_plugin": {
                 "id": self.project.plugin_id or "default",
                 "version": self.task_plugin.version,
@@ -531,7 +639,9 @@ class AgentBridge:
                 "baseline_id": snap["candidate_pool"]["baseline_id"],
                 "baseline_score": snap["candidate_pool"]["baseline_score"],
                 "overall_best": snap["candidate_pool"]["overall_best"],
-                "synthesized_count": len(snap["candidate_pool"]["synthesized_candidates"]),
+                "synthesized_count": len(
+                    snap["candidate_pool"]["synthesized_candidates"]
+                ),
             },
             "available_typed_actions": DEFAULT_ACTION_APPROVAL_TIERS,
         }
@@ -550,6 +660,12 @@ class AgentBridge:
         ucb = pkt["ucb_recommendation"]
         sess = pkt["active_session"]
 
+        baseline_score = best["baseline"].get("score")
+        current_score = best["cv_best"].get("score")
+        current_delta = best["cv_best"].get("delta")
+        baseline_label = "N/A" if baseline_score is None else f"{baseline_score:.4f}"
+        current_label = "N/A" if current_score is None else f"{current_score:.4f}"
+        delta_label = "N/A" if current_delta is None else f"{current_delta:+.4f}"
         lines = [
             "# 🌉 ANTIGRAVITY <-> HARNESS CONTEXT PACKET",
             f"> *{pkt['architecture_motto']}*",
@@ -558,23 +674,25 @@ class AgentBridge:
             f"- **Parallel Tracks**: Experimentation=`{where['active_tracks'].get('experimentation')}` | "
             f"Candidates=`{where['active_tracks'].get('candidate_management')}` | "
             f"External Eval=`{where['active_tracks'].get('external_evaluation')}`",
-            f"- **Baseline Anchor**: `{best['baseline']['id']}` (`{best['baseline']['score']:.4f}`)",
-            f"- **Current Best CV**: `{best['cv_best']['id']}` (`{best['cv_best']['score']:.4f}`, Δ `{best['cv_best']['delta']:+.4f}`)",
+            f"- **Baseline Anchor**: `{best['baseline']['id']}` (`{baseline_label}`)",
+            f"- **Current Best CV**: `{best['cv_best']['id']}` (`{current_label}`, Δ `{delta_label}`)",
         ]
 
         if sess:
             cu = sess.get("compute_usage", {})
             bg = sess.get("budget", {})
             max_exp = bg.get("max_experiments") or "∞"
-            lines.extend([
-                "",
-                f"## 📋 Active Bridge Session: `{sess['session_id']}` (`{sess['status']}`)",
-                f"- **Goal**: {sess.get('goal')}",
-                f"- **Experiments Run ({cu.get('experiments_used', 0)}/{max_exp})**: `{sess.get('experiments_run', [])}`",
-                f"- **Compute Usage**: Local=`{cu.get('local_runs', 0)}` | Cloud=`{cu.get('cloud_runs', 0)}` | "
-                f"GPU Hours=`{cu.get('gpu_hours_used', 0.0)}h` | Wall=`{cu.get('wall_seconds_used', 0.0)}s`",
-                f"- **Consecutive Rejections**: `{sess.get('consecutive_rejections', 0)}/{bg.get('max_consecutive_rejections', 3)}`",
-            ])
+            lines.extend(
+                [
+                    "",
+                    f"## 📋 Active Bridge Session: `{sess['session_id']}` (`{sess['status']}`)",
+                    f"- **Goal**: {sess.get('goal')}",
+                    f"- **Experiments Run ({cu.get('experiments_used', 0)}/{max_exp})**: `{sess.get('experiments_run', [])}`",
+                    f"- **Compute Usage**: Local=`{cu.get('local_runs', 0)}` | Cloud=`{cu.get('cloud_runs', 0)}` | "
+                    f"GPU Hours=`{cu.get('gpu_hours_used', 0.0)}h` | Wall=`{cu.get('wall_seconds_used', 0.0)}s`",
+                    f"- **Consecutive Rejections**: `{sess.get('consecutive_rejections', 0)}/{bg.get('max_consecutive_rejections', 3)}`",
+                ]
+            )
             if sess.get("reassess_recommended"):
                 lines.append(
                     "- ⚠️ **SOFT ADVISORY (`REASSESS_RECOMMENDED`)**: Multiple consecutive iterations did not reach "
@@ -590,34 +708,42 @@ class AgentBridge:
         if hud.get("what_is_blocking_me"):
             lines.extend(["", "## 🚧 Active Blockers"])
             for b in hud["what_is_blocking_me"]:
-                lines.append(f"- **[{b['severity'].upper()}] {b['title']}**: {b['message']}")
+                lines.append(
+                    f"- **[{b['severity'].upper()}] {b['title']}**: {b['message']}"
+                )
 
-        lines.extend([
-            "",
-            "## 🧠 AIDE TreeJournal UCB Recommendation & Diagnostics",
-            f"- **Recommended Parent**: `{ucb.get('parent_id')}` (Score: `{ucb.get('parent_score')}`, UCB: `{ucb.get('ucb_score')}`)",
-            f"- **Recommended Branch**: `{ucb.get('recommended_branch')}`",
-            f"- **Diagnostic Cue**: {ucb.get('diagnostic_cue') or 'None'}",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 🧠 AIDE TreeJournal UCB Recommendation & Diagnostics",
+                f"- **Recommended Parent**: `{ucb.get('parent_id')}` (Score: `{ucb.get('parent_score')}`, UCB: `{ucb.get('ucb_score')}`)",
+                f"- **Recommended Branch**: `{ucb.get('recommended_branch')}`",
+                f"- **Diagnostic Cue**: {ucb.get('diagnostic_cue') or 'None'}",
+            ]
+        )
         if pkt["parent_diagnostics_bottlenecks"]:
             for bn in pkt["parent_diagnostics_bottlenecks"]:
                 lines.append(f"  - 🔴 *Bottleneck*: {bn}")
 
-        lines.extend([
-            "",
-            "## 🪦 Idea Graveyard (Forbidden Interventions)",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 🪦 Idea Graveyard (Forbidden Interventions)",
+            ]
+        )
         for g in pkt["idea_graveyard"]:
             lines.append(f"- ❌ {g}")
 
-        lines.extend([
-            "",
-            "## 🛠️ Typed Bridge Actions (`ml-harness-agent act --action <name> ...`)",
-            "- **AUTO**: `inspect_data_readiness`, `run_eda`, `record_phase_output`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
-            "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (dispatches a tracked local/Kaggle/Modal job), `synthesize_candidate`, `build_ensemble`",
-            "- **AUTO (Job lifecycle)**: `inspect_cloud_job`, `wait_cloud_job`",
-            "- **USER_APPROVAL (Requires Human Sign-off / `--user-approved`)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 🛠️ Typed Bridge Actions (`ml-harness-agent act --action <name> ...`)",
+                "- **AUTO**: `inspect_data_readiness`, `run_eda`, `record_phase_output`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
+                "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (dispatches a tracked local/Kaggle/Modal job), `synthesize_candidate`, `build_ensemble`",
+                "- **AUTO (Job lifecycle)**: `inspect_cloud_job`, `wait_cloud_job`",
+                "- **USER_APPROVAL (Requires Human Sign-off / `--user-approved`)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
+            ]
+        )
         return "\n".join(lines) + "\n"
 
     # =========================================================================
@@ -635,14 +761,11 @@ class AgentBridge:
         rather than a hard block unless `hard_stop_on_consecutive_rejections=True` is set.
         """
         # 1. Hard Stop: Freeze lock guard
-        if (
-            self.comp_state.state["gates"].get("freeze_locked")
-            and action not in (
-                TypedActionName.EMERGENCY_UNFREEZE.value,
-                TypedActionName.FINALIZE_COMPETITION.value,
-                TypedActionName.INSPECT_EXPERIMENT.value,
-                TypedActionName.INSPECT_DIAGNOSTICS.value,
-            )
+        if self.comp_state.state["gates"].get("freeze_locked") and action not in (
+            TypedActionName.EMERGENCY_UNFREEZE.value,
+            TypedActionName.FINALIZE_COMPETITION.value,
+            TypedActionName.INSPECT_EXPERIMENT.value,
+            TypedActionName.INSPECT_DIAGNOSTICS.value,
         ):
             return (
                 "STOP_POLICY_TRIGGERED",
@@ -668,7 +791,6 @@ class AgentBridge:
         max_exp = budget.get("max_experiments")
         if max_exp is not None and action in (
             TypedActionName.RUN_FULL_VALIDATION.value,
-
         ):
             if int(usage.get("experiments_used", 0)) >= int(max_exp):
                 return (
@@ -679,23 +801,43 @@ class AgentBridge:
         # 4. Hard Stop: Cloud runs budget
         backend = str(params.get("backend", "local")).lower()
         max_cloud = budget.get("max_cloud_runs")
-        if max_cloud is not None and action == TypedActionName.RUN_FULL_VALIDATION.value and backend in ("modal", "kaggle"):
+        if (
+            max_cloud is not None
+            and action == TypedActionName.RUN_FULL_VALIDATION.value
+            and backend in ("modal", "kaggle")
+        ):
             if int(usage.get("cloud_runs", 0)) >= int(max_cloud):
                 return (
                     "BLOCKED_BY_BUDGET",
                     f"Session cloud run budget exhausted ({usage.get('cloud_runs')}/{max_cloud}).",
                 )
 
-        execution=action in {"run_full_validation","run_smoke_test","run_probe"}
-        if execution and (budget.get("max_wall_seconds") is not None or budget.get("max_gpu_hours") is not None):
-            if backend!="local": return ("BLOCKED_BY_BUDGET","Backend cannot prove termination and allocation accounting for a hard runtime budget")
-            if budget.get("max_gpu_hours") is not None: return ("BLOCKED_BY_BUDGET","Local backend has no verified GPU allocation measurement; use a wall-time budget")
-            remaining=float(budget["max_wall_seconds"])-float(usage.get("wall_seconds_used",0))
-            if remaining<=0: return ("BLOCKED_BY_BUDGET","Wall-time budget exhausted")
-            params["_deadline_seconds"]=remaining
+        execution = action in {"run_full_validation", "run_smoke_test", "run_probe"}
+        if execution and (
+            budget.get("max_wall_seconds") is not None
+            or budget.get("max_gpu_hours") is not None
+        ):
+            if backend != "local":
+                return (
+                    "BLOCKED_BY_BUDGET",
+                    "Backend cannot prove termination and allocation accounting for a hard runtime budget",
+                )
+            if budget.get("max_gpu_hours") is not None:
+                return (
+                    "BLOCKED_BY_BUDGET",
+                    "Local backend has no verified GPU allocation measurement; use a wall-time budget",
+                )
+            remaining = float(budget["max_wall_seconds"]) - float(
+                usage.get("wall_seconds_used", 0)
+            )
+            if remaining <= 0:
+                return ("BLOCKED_BY_BUDGET", "Wall-time budget exhausted")
+            params["_deadline_seconds"] = remaining
         # 5. Hard Stop: GPU hours budget
         max_gpu = budget.get("max_gpu_hours")
-        if max_gpu is not None and float(usage.get("gpu_hours_used") or 0.0) >= float(max_gpu):
+        if max_gpu is not None and float(usage.get("gpu_hours_used") or 0.0) >= float(
+            max_gpu
+        ):
             return (
                 "BLOCKED_BY_BUDGET",
                 f"Session GPU hour budget exhausted ({usage.get('gpu_hours_used'):.2f}h / {max_gpu}h).",
@@ -703,17 +845,22 @@ class AgentBridge:
 
         return None
 
-    def _evaluate_oof_dataframe(self, oof_csv_path: Path) -> Tuple[float, Dict[str, float]]:
+    def _evaluate_oof_dataframe(
+        self, oof_csv_path: Path
+    ) -> Tuple[float, Dict[str, float]]:
         """Evaluate an OOF predictions CSV against the ground-truth training dataset."""
         from harness.artifacts import validate_run
-        directory=oof_csv_path.parent
-        if (directory/"candidate_manifest.json").is_file():
+
+        directory = oof_csv_path.parent
+        if (directory / "candidate_manifest.json").is_file():
             from harness.candidates import validate_candidate
-            entry=json.loads((directory/"candidate_manifest.json").read_text())
-            validate_candidate(self.project,entry)
-        else: validate_run(directory,task_spec=self.task_spec,plugin=self.task_plugin)
-        metrics=json.loads((directory/"metrics.json").read_text())
-        return float(metrics["primary_score"]),metrics.get("subtasks",{})
+
+            entry = json.loads((directory / "candidate_manifest.json").read_text())
+            validate_candidate(self.project, entry)
+        else:
+            validate_run(directory, task_spec=self.task_spec, plugin=self.task_plugin)
+        metrics = json.loads((directory / "metrics.json").read_text())
+        return float(metrics["primary_score"]), metrics.get("subtasks", {})
 
     def _run_subprocess_safe(
         self, cmd: List[str], timeout: float = 1800.0
@@ -726,7 +873,7 @@ class AgentBridge:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            start_new_session=sys.platform!="win32",
+            start_new_session=sys.platform != "win32",
         )
         try:
             stdout, _ = proc.communicate(timeout=timeout)
@@ -735,15 +882,25 @@ class AgentBridge:
         except subprocess.TimeoutExpired:
             elapsed = round(time.time() - t0, 3)
             if sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], check=False, stderr=subprocess.DEVNULL)
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    check=False,
+                    stderr=subprocess.DEVNULL,
+                )
             else:
-                import os,signal
-                os.killpg(proc.pid,signal.SIGKILL)
+                import os, signal
+
+                os.killpg(proc.pid, signal.SIGKILL)
             try:
                 stdout, _ = proc.communicate(timeout=5)
             except Exception:
                 stdout = ""
-            return False, -1, f"Execution timed out after {timeout}s (PID {proc.pid} terminated).\n{stdout or ''}", elapsed
+            return (
+                False,
+                -1,
+                f"Execution timed out after {timeout}s (PID {proc.pid} terminated).\n{stdout or ''}",
+                elapsed,
+            )
 
     def execute_action(
         self,
@@ -767,7 +924,15 @@ class AgentBridge:
         sub_mgr = self._new_submission_manager()
 
         step_idx = len(session.actions) + 1
-        tier = session.approval_policy.get(action, DEFAULT_ACTION_APPROVAL_TIERS.get(action, ApprovalTier.AUTO.value))
+        tier = session.approval_policy.get(
+            action, DEFAULT_ACTION_APPROVAL_TIERS.get(action, ApprovalTier.AUTO.value)
+        )
+
+        if (
+            DEFAULT_ACTION_APPROVAL_TIERS.get(action)
+            == ApprovalTier.USER_APPROVAL.value
+        ):
+            tier = ApprovalTier.USER_APPROVAL.value
 
         call = TypedActionCall(
             step_index=step_idx,
@@ -782,7 +947,9 @@ class AgentBridge:
         guard_violation = self._check_budget_and_stop_guards(session, action, params)
         if guard_violation is not None:
             v_status, v_msg = guard_violation
-            session.status = "BUDGET_REACHED" if v_status == "BLOCKED_BY_BUDGET" else "STOPPED"
+            session.status = (
+                "BUDGET_REACHED" if v_status == "BLOCKED_BY_BUDGET" else "STOPPED"
+            )
             session.stop_reason = f"{v_status}: {v_msg}"
             obs = ActionObservation(
                 step_index=step_idx,
@@ -800,7 +967,9 @@ class AgentBridge:
         if tier == ApprovalTier.USER_APPROVAL.value and not user_approved:
             session.status = "PAUSED_FOR_APPROVAL"
             session.pending_approval_action = asdict(call)
-            session.stop_reason = f"APPROVAL_GATE: Action '{action}' requires explicit USER_APPROVAL."
+            session.stop_reason = (
+                f"APPROVAL_GATE: Action '{action}' requires explicit USER_APPROVAL."
+            )
             obs = ActionObservation(
                 step_index=step_idx,
                 action=action,
@@ -820,31 +989,64 @@ class AgentBridge:
         session.status = "ACTIVE"
         session.actions.append(asdict(call))
 
-        resource_actions={"run_full_validation","run_smoke_test","run_probe","promote_candidate","synthesize_candidate","build_ensemble"}
-        token=None
+        resource_actions = {
+            "run_full_validation",
+            "run_smoke_test",
+            "run_probe",
+            "promote_candidate",
+            "synthesize_candidate",
+            "build_ensemble",
+        }
+        token = None
         if action in resource_actions:
             from harness.resource_ledger import reserve
+
             try:
-                token,deadline=reserve(self.artifacts_dir/"resource_ledger.json",session.session_id,action,params.get("backend","local"),session.budget,params.get("_deadline_seconds"))
-                if deadline is not None: params["_deadline_seconds"]=deadline
+                token, deadline = reserve(
+                    self.artifacts_dir / "resource_ledger.json",
+                    session.session_id,
+                    action,
+                    params.get("backend", "local"),
+                    session.budget,
+                    params.get("_deadline_seconds"),
+                )
+                if deadline is not None:
+                    params["_deadline_seconds"] = deadline
             except ValueError as error:
-                obs=ActionObservation(step_index=step_idx,action=action,status="BLOCKED_BY_BUDGET",summary=str(error))
-                session.observations.append(asdict(obs)); self.save_session(session)
-                return session,obs
+                obs = ActionObservation(
+                    step_index=step_idx,
+                    action=action,
+                    status="BLOCKED_BY_BUDGET",
+                    summary=str(error),
+                )
+                session.observations.append(asdict(obs))
+                self.save_session(session)
+                return session, obs
         obs = self._dispatch_typed_action(call, session, journal, sub_mgr)
         if token:
             from harness.resource_ledger import terminal
+
             if obs.data.get("job_id"):
                 from harness.state_store import transaction
-                with transaction(self.artifacts_dir/"resource_ledger.json") as ledger:
-                    ledger["reservations"][token]["job_id"]=obs.data["job_id"]
-            else: terminal(self.artifacts_dir/"resource_ledger.json",token,"COMPLETED" if obs.status=="SUCCESS" else "FAILED",obs.elapsed_seconds)
+
+                with transaction(self.artifacts_dir / "resource_ledger.json") as ledger:
+                    ledger["reservations"][token]["job_id"] = obs.data["job_id"]
+                from harness.cloud_job_runner import CloudJobManager
+
+                manager = CloudJobManager(self.project_root)
+                job = manager.get_job(obs.data["job_id"])
+                if job and job.get("status") in {"COMPLETED", "FAILED", "CANCELLED"}:
+                    manager._persist_job(manager._jobs[obs.data["job_id"]])
+            else:
+                terminal(
+                    self.artifacts_dir / "resource_ledger.json",
+                    token,
+                    "COMPLETED" if obs.status == "SUCCESS" else "FAILED",
+                    obs.elapsed_seconds,
+                )
         session.observations.append(asdict(obs))
 
-        # Update wall clock usage
-        session.compute_usage["wall_seconds_used"] = round(
-            float(session.compute_usage.get("wall_seconds_used", 0.0)) + obs.elapsed_seconds, 3
-        )
+        self._reconcile_session_usage(session)
 
         # Update final snapshot HUD
         snap_after = self.comp_state.evaluate_journey_snapshot(
@@ -854,7 +1056,9 @@ class AgentBridge:
         self.save_session(session)
         return session, obs
 
-    def approve_pending_action(self, session_id: str) -> Tuple[BridgeSession, Optional[ActionObservation]]:
+    def approve_pending_action(
+        self, session_id: str
+    ) -> Tuple[BridgeSession, Optional[ActionObservation]]:
         """Approve and execute a paused USER_APPROVAL action in the given BridgeSession."""
         session = self.load_session(session_id)
         if not session.pending_approval_action:
@@ -862,7 +1066,10 @@ class AgentBridge:
 
         pending = session.pending_approval_action
         # Remove the PAUSED_FOR_APPROVAL placeholder observation before re-running
-        if session.observations and session.observations[-1].get("status") == "PAUSED_FOR_APPROVAL":
+        if (
+            session.observations
+            and session.observations[-1].get("status") == "PAUSED_FOR_APPROVAL"
+        ):
             session.observations.pop()
         session.pending_approval_action = None
         session.status = "ACTIVE"
@@ -888,6 +1095,68 @@ class AgentBridge:
         params = call.params
 
         try:
+            if act == "update_workspace_settings":
+                if params.get("gates"):
+                    raise ValueError("Gates require their verified actions")
+                for key in ("mode", "manual_phase_override", "agent_context_config"):
+                    if key in params:
+                        self.comp_state.state[key] = params[key]
+                cid = params.get("toggle_pin_candidate")
+                if cid:
+                    pinned = self.comp_state.state["candidate_pool"][
+                        "pinned_candidates"
+                    ]
+                    if cid in pinned:
+                        pinned.remove(cid)
+                    else:
+                        pinned.append(cid)
+                self.comp_state.save()
+                return ActionObservation(
+                    call.step_index, act, "SUCCESS", "Workspace settings updated"
+                )
+            if act == "update_task_contract":
+                from harness.io_utils import atomic_write_text
+                from harness.task_spec import UniversalTaskSpec
+
+                document = params["task"]
+                UniversalTaskSpec.from_dict({"task": document})
+                atomic_write_text(
+                    self.project.task_config_path,
+                    yaml.safe_dump(
+                        {"task": document}, sort_keys=False, allow_unicode=True
+                    ),
+                )
+                self._refresh_task_context()
+                return ActionObservation(
+                    call.step_index,
+                    act,
+                    "SUCCESS",
+                    "Task contract updated; evidence will be rechecked",
+                )
+            if act == "write_experiment_config":
+                from harness.io_utils import atomic_write_text
+
+                path = (self.project_root / params["path"]).resolve()
+                path.relative_to(self.project_root / "configs")
+                if path == self.project.task_config_path:
+                    raise ValueError("Use update_task_contract")
+                cfg = yaml.safe_load(params["content"])
+                GroundingGate.verify_config(
+                    cfg, config_path=str(path), raise_on_error=True
+                )
+                exp = cfg.get("experiment", {}).get("id", path.stem)
+                if (self.artifacts_dir / exp / "artifact_manifest.json").is_file():
+                    raise ValueError(
+                        "Use a new experiment ID to change a run configuration"
+                    )
+                atomic_write_text(path, params["content"])
+                return ActionObservation(
+                    call.step_index,
+                    act,
+                    "SUCCESS",
+                    "Experiment config saved",
+                    artifact_path=str(path),
+                )
             if act == TypedActionName.CONFIRM_TASK_SPEC.value:
                 self.comp_state.state["gates"]["spec_confirmed"] = True
                 self.comp_state._append_audit_event(
@@ -901,12 +1170,15 @@ class AgentBridge:
                     action=act,
                     status="SUCCESS",
                     summary="Task contract marked reviewed and confirmed.",
-                    artifact_path=str(self.project.task_config_path.relative_to(self.project_root)).replace("\\", "/"),
+                    artifact_path=str(
+                        self.project.task_config_path.relative_to(self.project_root)
+                    ).replace("\\", "/"),
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
             elif act == TypedActionName.RUN_EDA.value:
                 from harness.eda import run_eda
+
                 result = run_eda(self.project_root, data_path=params.get("data_path"))
                 return ActionObservation(
                     step_index=call.step_index,
@@ -914,12 +1186,16 @@ class AgentBridge:
                     status="SUCCESS",
                     summary=f"EDA profiled {len(result.get('reports', []))} dataset file(s) without copying raw rows.",
                     artifact_path=result["paths"]["markdown"],
-                    data={"json_report": result["paths"]["json"], "reports": result.get("reports", [])},
+                    data={
+                        "json_report": result["paths"]["json"],
+                        "reports": result.get("reports", []),
+                    },
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
             elif act == TypedActionName.RECORD_PHASE_OUTPUT.value:
                 from harness.phase_workflow import PhaseWorkflow
+
                 phase_id = params.get("phase_id")
                 response = params.get("response")
                 response_file = params.get("response_file")
@@ -928,8 +1204,12 @@ class AgentBridge:
                     response_path.relative_to(self.project_root)
                     response = response_path.read_text(encoding="utf-8")
                 if not isinstance(response, str):
-                    raise ValueError("Provide `response` or a workspace-relative `response_file`.")
-                workflow = PhaseWorkflow(self.project_root, self.project.task_config_path)
+                    raise ValueError(
+                        "Provide `response` or a workspace-relative `response_file`."
+                    )
+                workflow = PhaseWorkflow(
+                    self.project_root, self.project.task_config_path
+                )
                 record = workflow.record(
                     str(phase_id or ""),
                     response,
@@ -949,6 +1229,7 @@ class AgentBridge:
 
             if act == TypedActionName.BOOTSTRAP_TASK.value:
                 from tools.bootstrap_task import bootstrap_competition_task
+
                 dataset_dir = params.get("dataset_dir", "dataset")
                 context_file = params.get("context_file", "docs/TASK.md")
                 output_config = params.get("output_config", "configs/task.yaml")
@@ -981,22 +1262,34 @@ class AgentBridge:
                     status="SUCCESS",
                     summary=f"Executed {len(report.get('checks_performed', []))} declarative data checks; {len(warns)} warnings logged.",
                     diagnostics_bottlenecks=warns,
-                    artifact_path=str(self.comp_state.data_report_file.relative_to(self.project_root)).replace("\\", "/"),
-                    data={"checks_performed": report.get("checks_performed", []), "warnings": warns},
+                    artifact_path=str(
+                        self.comp_state.data_report_file.relative_to(self.project_root)
+                    ).replace("\\", "/"),
+                    data={
+                        "checks_performed": report.get("checks_performed", []),
+                        "warnings": warns,
+                    },
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
             elif act == TypedActionName.CONFIRM_DATA_RISKS.value:
                 if not self.comp_state.state["gates"].get("spec_confirmed"):
-                    raise ValueError("Review and confirm the task specification before confirming data risks.")
+                    raise ValueError(
+                        "Review and confirm the task specification before confirming data risks."
+                    )
                 report = self.comp_state.get_data_readiness_report()
                 if report.get("status") == "BLOCKED":
-                    raise ValueError("The latest data readiness report is BLOCKED; fix its critical checks first.")
+                    raise ValueError(
+                        "The latest data readiness report is BLOCKED; fix its critical checks first."
+                    )
                 self.comp_state.state["gates"]["data_risks_confirmed"] = True
                 self.comp_state._append_audit_event(
                     "DATA_RISKS_CONFIRMED",
                     "A user reviewed and confirmed the latest data readiness report.",
-                    {"report_status": report.get("status"), "report_path": str(self.comp_state.data_report_file)},
+                    {
+                        "report_status": report.get("status"),
+                        "report_path": str(self.comp_state.data_report_file),
+                    },
                 )
                 self.comp_state.save()
                 return ActionObservation(
@@ -1004,22 +1297,39 @@ class AgentBridge:
                     action=act,
                     status="SUCCESS",
                     summary=f"Data readiness report ({report.get('status')}) reviewed and confirmed.",
-                    artifact_path=str(self.comp_state.data_report_file.relative_to(self.project_root)).replace("\\", "/"),
+                    artifact_path=str(
+                        self.comp_state.data_report_file.relative_to(self.project_root)
+                    ).replace("\\", "/"),
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
             elif act == TypedActionName.ESTABLISH_BASELINE_ANCHOR.value:
                 gates = self.comp_state.state.get("gates", {})
-                if not gates.get("spec_confirmed") or not gates.get("data_risks_confirmed"):
-                    raise ValueError("Review the task contract and confirm data risks before establishing the baseline.")
+                if not gates.get("spec_confirmed") or not gates.get(
+                    "data_risks_confirmed"
+                ):
+                    raise ValueError(
+                        "Review the task contract and confirm data risks before establishing the baseline."
+                    )
                 pool = self.comp_state.compute_candidate_pool(journal)
-                default_base_id = self.comp_state.state["gates"].get("baseline_exp_id") or self.comp_state.spec.get("baseline_anchor", {}).get("default_exp_id") or "baseline"
-                base_id = params.get("baseline_id") or pool.get("baseline_id", default_base_id)
+                default_base_id = (
+                    self.comp_state.state["gates"].get("baseline_exp_id")
+                    or self.comp_state.spec.get("baseline_anchor", {}).get(
+                        "default_exp_id"
+                    )
+                    or "baseline"
+                )
+                base_id = params.get("baseline_id") or pool.get(
+                    "baseline_id", default_base_id
+                )
                 from harness.baseline import validate_baseline_artifact
+
                 baseline = validate_baseline_artifact(
                     self.artifacts_dir,
                     str(base_id),
                     str(self.comp_state.spec.get("primary_metric") or "score"),
+                    task_spec=self.task_spec,
+                    plugin=self.task_plugin,
                 )
                 base_score = float(baseline["score"])
                 self.comp_state.state["gates"]["baseline_locked"] = True
@@ -1033,20 +1343,35 @@ class AgentBridge:
                     summary=f"Locked official baseline anchor '{base_id}' at {base_score:.4f}.",
                     composite_score=base_score,
                     metric_delta=0.0,
-                    fold_variance=0.012,
-                    artifact_path=str(Path(baseline["metrics_path"]).relative_to(self.project_root)).replace("\\", "/"),
-                    data={"baseline_id": base_id, "baseline_score": base_score, "evidence": baseline},
+                    fold_variance=None,
+                    artifact_path=str(
+                        Path(baseline["metrics_path"]).relative_to(self.project_root)
+                    ).replace("\\", "/"),
+                    data={
+                        "baseline_id": base_id,
+                        "baseline_score": base_score,
+                        "evidence": baseline,
+                    },
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
             elif act == TypedActionName.INSPECT_EXPERIMENT.value:
-                default_exp_id = (pool.get("overall_best") or {}).get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
+                default_exp_id = (
+                    (pool.get("overall_best") or {}).get("id")
+                    or self.comp_state.state["gates"].get("baseline_exp_id")
+                    or "baseline"
+                )
                 exp_id = params.get("exp_id", default_exp_id)
                 pool = self.comp_state.compute_candidate_pool(journal)
-                cand = next((c for c in pool["all_candidates"] if c["id"] == exp_id), None) or (
-                    pool["overall_best"] if pool["overall_best"] else {}
+                cand = next(
+                    (c for c in pool["all_candidates"] if c["id"] == exp_id), None
+                ) or (pool["overall_best"] if pool["overall_best"] else {})
+                cand_score = float(
+                    cand.get("composite_score")
+                    or cand.get("score")
+                    or self.comp_state.spec.get("primary_metric_baseline")
+                    or 0.0
                 )
-                cand_score = float(cand.get("composite_score") or cand.get("score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
@@ -1061,13 +1386,19 @@ class AgentBridge:
 
             elif act == TypedActionName.INSPECT_DIAGNOSTICS.value:
                 pool = self.comp_state.compute_candidate_pool(journal)
-                default_exp_id = (pool.get("overall_best") or {}).get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
+                default_exp_id = (
+                    (pool.get("overall_best") or {}).get("id")
+                    or self.comp_state.state["gates"].get("baseline_exp_id")
+                    or "baseline"
+                )
                 exp_id = params.get("exp_id", default_exp_id)
                 diag_file = self.artifacts_dir / exp_id / "DIAGNOSTICS.md"
                 node = journal.nodes.get(exp_id)
                 bottlenecks = []
                 if node and isinstance(node.diagnostics_summary, dict):
-                    bottlenecks = node.diagnostics_summary.get("critical_bottlenecks", [])
+                    bottlenecks = node.diagnostics_summary.get(
+                        "critical_bottlenecks", []
+                    )
                 if not bottlenecks:
                     bottlenecks = [
                         f"Initial baseline validation established for '{exp_id}'.",
@@ -1079,7 +1410,11 @@ class AgentBridge:
                     status="SUCCESS",
                     summary=f"Extracted {len(bottlenecks)} critical bottlenecks from '{exp_id}'.",
                     diagnostics_bottlenecks=bottlenecks,
-                    artifact_path=str(diag_file.relative_to(self.project_root)).replace("\\", "/") if diag_file.exists() else None,
+                    artifact_path=(
+                        str(diag_file.relative_to(self.project_root)).replace("\\", "/")
+                        if diag_file.exists()
+                        else None
+                    ),
                     data={"exp_id": exp_id, "bottlenecks": bottlenecks},
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
@@ -1088,7 +1423,11 @@ class AgentBridge:
                 pool = self.comp_state.compute_candidate_pool(journal)
                 branch = params.get("branch", "feat")
                 descriptor = params.get("descriptor", "iteration")
-                default_parent = (pool.get("overall_best") or {}).get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
+                default_parent = (
+                    (pool.get("overall_best") or {}).get("id")
+                    or self.comp_state.state["gates"].get("baseline_exp_id")
+                    or "baseline"
+                )
                 parent_id = params.get("parent_id", default_parent)
                 configs_dir = self.project_root / "configs"
                 configs_dir.mkdir(parents=True, exist_ok=True)
@@ -1109,8 +1448,18 @@ class AgentBridge:
                 uncertainty = str(params.get("uncertainty_level", "low")).lower()
                 task_name = self.comp_state.spec.get("name", "Competition Task")
                 primary_metric = self.comp_state.spec.get("primary_metric", "score")
-                parent_node = journal.get_node(parent_id) if hasattr(journal, "get_node") else journal.nodes.get(parent_id)
-                parent_score = parent_node.get_score() if parent_node else float(self.comp_state.spec.get("primary_metric_baseline") or 0.0)
+                parent_node = (
+                    journal.get_node(parent_id)
+                    if hasattr(journal, "get_node")
+                    else journal.nodes.get(parent_id)
+                )
+                parent_score = (
+                    parent_node.get_score()
+                    if parent_node
+                    else float(
+                        self.comp_state.spec.get("primary_metric_baseline") or 0.0
+                    )
+                )
 
                 # Strict GroundingGate-compliant YAML structure (task-agnostic defaults)
                 cfg_payload: Dict[str, Any] = {
@@ -1134,7 +1483,9 @@ class AgentBridge:
                     },
                     "grounding": {
                         "source_type": params.get("source_type", "verified_baseline"),
-                        "source_id": params.get("source_id", f"{branch}_{descriptor}_registry"),
+                        "source_id": params.get(
+                            "source_id", f"{branch}_{descriptor}_registry"
+                        ),
                         "retrieval_summary": params.get(
                             "retrieval_summary",
                             f"Grounded hypothesis targeting {primary_metric} bottlenecks on {task_name}.",
@@ -1178,9 +1529,16 @@ class AgentBridge:
                 }
 
                 # Pre-verify with GroundingGate before writing to disk
-                GroundingGate.verify_config(cfg_payload, config_path=cfg_path, raise_on_error=True)
-                cfg_path.write_text(yaml.safe_dump(cfg_payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
-                rel_cfg = str(cfg_path.relative_to(self.project_root)).replace("\\", "/")
+                GroundingGate.verify_config(
+                    cfg_payload, config_path=cfg_path, raise_on_error=True
+                )
+                cfg_path.write_text(
+                    yaml.safe_dump(cfg_payload, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8",
+                )
+                rel_cfg = str(cfg_path.relative_to(self.project_root)).replace(
+                    "\\", "/"
+                )
 
                 return ActionObservation(
                     step_index=call.step_index,
@@ -1188,15 +1546,27 @@ class AgentBridge:
                     status="SUCCESS",
                     summary=f"Created & GroundingGate-verified config '{rel_cfg}' (Parent: {parent_id}).",
                     artifact_path=rel_cfg,
-                    data={"exp_id": exp_id, "config_path": rel_cfg, "grounding_status": "PASSED"},
+                    data={
+                        "exp_id": exp_id,
+                        "config_path": rel_cfg,
+                        "grounding_status": "PASSED",
+                    },
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
             elif act == TypedActionName.RUN_SMOKE_TEST.value:
                 cfg_path = params.get("config_path")
                 if not cfg_path:
-                    available = sorted(list((self.project_root / "configs").glob("exp*.yaml")))
-                    cfg_path = str(available[0].relative_to(self.project_root)).replace("\\", "/") if available else "configs/baseline.yaml"
+                    available = sorted(
+                        list((self.project_root / "configs").glob("exp*.yaml"))
+                    )
+                    cfg_path = (
+                        str(available[0].relative_to(self.project_root)).replace(
+                            "\\", "/"
+                        )
+                        if available
+                        else "configs/baseline.yaml"
+                    )
                 fold = str(params.get("fold", 0))
                 cmd = [
                     sys.executable,
@@ -1213,8 +1583,12 @@ class AgentBridge:
                     fold,
                     "--skip-leaderboard",
                 ]
-                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=180.0)
-                session.compute_usage["smoke_runs"] = int(session.compute_usage.get("smoke_runs", 0)) + 1
+                passed, retcode, out_text, elapsed = self._run_subprocess_safe(
+                    cmd, timeout=min(180.0, float(params.get("_deadline_seconds", 180)))
+                )
+                session.compute_usage["smoke_runs"] = (
+                    int(session.compute_usage.get("smoke_runs", 0)) + 1
+                )
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
@@ -1228,8 +1602,16 @@ class AgentBridge:
             elif act == TypedActionName.RUN_PROBE.value:
                 cfg_path = params.get("config_path")
                 if not cfg_path:
-                    available = sorted(list((self.project_root / "configs").glob("exp*.yaml")))
-                    cfg_path = str(available[0].relative_to(self.project_root)).replace("\\", "/") if available else "configs/baseline.yaml"
+                    available = sorted(
+                        list((self.project_root / "configs").glob("exp*.yaml"))
+                    )
+                    cfg_path = (
+                        str(available[0].relative_to(self.project_root)).replace(
+                            "\\", "/"
+                        )
+                        if available
+                        else "configs/baseline.yaml"
+                    )
                 probe_samples = str(params.get("probe_samples", 100))
                 fold = str(params.get("fold", 0))
                 cmd = [
@@ -1249,8 +1631,12 @@ class AgentBridge:
                     probe_samples,
                     "--skip-leaderboard",
                 ]
-                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=min(120.0,float(params.get("_deadline_seconds",120))))
-                session.compute_usage["smoke_runs"] = int(session.compute_usage.get("smoke_runs", 0)) + 1
+                passed, retcode, out_text, elapsed = self._run_subprocess_safe(
+                    cmd, timeout=min(120.0, float(params.get("_deadline_seconds", 120)))
+                )
+                session.compute_usage["smoke_runs"] = (
+                    int(session.compute_usage.get("smoke_runs", 0)) + 1
+                )
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
@@ -1264,17 +1650,24 @@ class AgentBridge:
             elif act == TypedActionName.RUN_FULL_VALIDATION.value:
                 cfg_path = params.get("config_path")
                 if not cfg_path:
-                    raise ValueError("Parameter 'config_path' is required for 'run_full_validation'.")
+                    raise ValueError(
+                        "Parameter 'config_path' is required for 'run_full_validation'."
+                    )
 
                 backend = str(params.get("backend", "local")).lower()
                 force = bool(params.get("force", False))
 
                 full_cfg_file = self.project_root / cfg_path
-                raw_cfg = yaml.safe_load(full_cfg_file.read_text(encoding="utf-8")) if full_cfg_file.exists() else {}
+                raw_cfg = (
+                    yaml.safe_load(full_cfg_file.read_text(encoding="utf-8"))
+                    if full_cfg_file.exists()
+                    else {}
+                )
                 exp_id = raw_cfg.get("experiment", {}).get("id", Path(cfg_path).stem)
 
                 if backend in ("modal", "kaggle"):
                     from harness.cloud_job_runner import CloudJobManager
+
                     manager = CloudJobManager(self.project_root)
                     job = manager.start_job(
                         backend=backend,
@@ -1284,8 +1677,12 @@ class AgentBridge:
                         auto_sync=True,
                         baseline_csv=params.get("baseline_csv"),
                     )
-                    session.compute_usage["experiments_used"] = int(session.compute_usage.get("experiments_used", 0)) + 1
-                    session.compute_usage["cloud_runs"] = int(session.compute_usage.get("cloud_runs", 0)) + 1
+                    session.compute_usage["experiments_used"] = (
+                        int(session.compute_usage.get("experiments_used", 0)) + 1
+                    )
+                    session.compute_usage["cloud_runs"] = (
+                        int(session.compute_usage.get("cloud_runs", 0)) + 1
+                    )
                     if exp_id not in session.experiments_run:
                         session.experiments_run.append(exp_id)
                     return ActionObservation(
@@ -1294,7 +1691,13 @@ class AgentBridge:
                         status="SUCCESS",
                         summary=f"Dispatched {backend} job `{job.job_id}` for experiment `{exp_id}`; result import waits for a terminal provider state.",
                         artifact_path=job.artifact_dir,
-                        data={"job_id": job.job_id, "backend": backend, "status": job.status, "provider_status": job.provider_status, "exp_id": exp_id},
+                        data={
+                            "job_id": job.job_id,
+                            "backend": backend,
+                            "status": job.status,
+                            "provider_status": job.provider_status,
+                            "exp_id": exp_id,
+                        },
                         elapsed_seconds=round(time.time() - t0, 3),
                     )
 
@@ -1314,11 +1717,18 @@ class AgentBridge:
                 if force:
                     cmd.append("--force")
 
-                passed, retcode, out_text, elapsed = self._run_subprocess_safe(cmd, timeout=min(1800.0,float(params.get("_deadline_seconds",1800))))
+                passed, retcode, out_text, elapsed = self._run_subprocess_safe(
+                    cmd,
+                    timeout=min(1800.0, float(params.get("_deadline_seconds", 1800))),
+                )
 
                 # Update compute usage
-                session.compute_usage["experiments_used"] = int(session.compute_usage.get("experiments_used", 0)) + 1
-                session.compute_usage["local_runs"] = int(session.compute_usage.get("local_runs", 0)) + 1
+                session.compute_usage["experiments_used"] = (
+                    int(session.compute_usage.get("experiments_used", 0)) + 1
+                )
+                session.compute_usage["local_runs"] = (
+                    int(session.compute_usage.get("local_runs", 0)) + 1
+                )
 
                 if exp_id not in session.experiments_run:
                     session.experiments_run.append(exp_id)
@@ -1326,14 +1736,22 @@ class AgentBridge:
                 max_rej = int(session.budget.get("max_consecutive_rejections") or 3)
                 if not passed:
                     session.consecutive_rejections += 1
-                    session.reassess_recommended = session.consecutive_rejections >= max_rej
+                    session.reassess_recommended = (
+                        session.consecutive_rejections >= max_rej
+                    )
                     return ActionObservation(
                         step_index=call.step_index,
                         action=act,
                         status="FAILED",
                         summary=f"Full validation ({backend}) failed for '{exp_id}'.",
-                        advisory="REASSESS_RECOMMENDED" if session.reassess_recommended else None,
-                        artifact_path=str((self.artifacts_dir / exp_id).relative_to(self.project_root)).replace("\\", "/"),
+                        advisory=(
+                            "REASSESS_RECOMMENDED"
+                            if session.reassess_recommended
+                            else None
+                        ),
+                        artifact_path=str(
+                            (self.artifacts_dir / exp_id).relative_to(self.project_root)
+                        ).replace("\\", "/"),
                         data={"returncode": retcode, "tail": out_text[-600:]},
                         elapsed_seconds=elapsed,
                     )
@@ -1341,7 +1759,11 @@ class AgentBridge:
                 # Reload TreeJournal and evaluate metrics
                 journal.sync_from_artifacts(self.artifacts_dir)
                 pool = self.comp_state.compute_candidate_pool(journal)
-                base_score = float(pool.get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
+                base_score = float(
+                    pool.get("baseline_score")
+                    or self.comp_state.spec.get("primary_metric_baseline")
+                    or 0.0
+                )
                 oof_path = self.artifacts_dir / exp_id / "oof_predictions.csv"
 
                 if oof_path.exists():
@@ -1351,7 +1773,11 @@ class AgentBridge:
                     comp_score = node.get_score() if node else 0.0
                     detail_scores = {"composite_score": comp_score}
 
-                delta = round((comp_score-base_score)*(1 if self.task_spec.direction=="maximize" else -1),4)
+                delta = round(
+                    (comp_score - base_score)
+                    * (1 if self.task_spec.direction == "maximize" else -1),
+                    4,
+                )
                 min_imp = self._get_spec_min_improvement(session)
                 if delta >= min_imp:
                     session.consecutive_rejections = 0
@@ -1363,12 +1789,18 @@ class AgentBridge:
                 bottlenecks = []
                 if diag_json.exists():
                     try:
-                        bottlenecks = json.loads(diag_json.read_text(encoding="utf-8")).get("critical_bottlenecks", [])
+                        bottlenecks = json.loads(
+                            diag_json.read_text(encoding="utf-8")
+                        ).get("critical_bottlenecks", [])
                     except Exception:
                         pass
 
                 validation_cfg = self.comp_state.spec.get("validation") or {}
-                data_cfg = self.comp_state.spec.get("data_config") or self.comp_state.spec.get("data") or {}
+                data_cfg = (
+                    self.comp_state.spec.get("data_config")
+                    or self.comp_state.spec.get("data")
+                    or {}
+                )
                 validation_strategy = (
                     validation_cfg.get("strategy")
                     or validation_cfg.get("scheme")
@@ -1394,44 +1826,81 @@ class AgentBridge:
                     composite_score=comp_score,
                     metric_delta=delta,
                     diagnostics_bottlenecks=bottlenecks,
-                    advisory="REASSESS_RECOMMENDED" if session.reassess_recommended else None,
-                    artifact_path=str(oof_path.relative_to(self.project_root)).replace("\\", "/"),
-                    data={"exp_id": exp_id, "backend": backend, "scores": detail_scores},
+                    advisory=(
+                        "REASSESS_RECOMMENDED" if session.reassess_recommended else None
+                    ),
+                    artifact_path=str(oof_path.relative_to(self.project_root)).replace(
+                        "\\", "/"
+                    ),
+                    data={
+                        "exp_id": exp_id,
+                        "backend": backend,
+                        "scores": detail_scores,
+                    },
                     elapsed_seconds=elapsed,
                 )
 
-            elif act in (TypedActionName.INSPECT_CLOUD_JOB.value, TypedActionName.WAIT_CLOUD_JOB.value):
+            elif act in (
+                TypedActionName.INSPECT_CLOUD_JOB.value,
+                TypedActionName.WAIT_CLOUD_JOB.value,
+            ):
                 from harness.cloud_job_runner import CloudJobManager
+
                 job_id = params.get("job_id")
                 if not job_id:
                     raise ValueError(f"Parameter `job_id` is required for `{act}`.")
                 manager = CloudJobManager(self.project_root)
-                wait_seconds = min(3600.0, max(0.0, float(params.get("timeout_seconds", 0))))
-                poll_seconds = min(30.0, max(0.25, float(params.get("poll_interval", 3))))
+                wait_seconds = min(
+                    3600.0, max(0.0, float(params.get("timeout_seconds", 0)))
+                )
+                poll_seconds = min(
+                    30.0, max(0.25, float(params.get("poll_interval", 3)))
+                )
                 deadline = time.monotonic() + wait_seconds
                 job = manager.get_job(str(job_id))
                 if not job:
-                    raise ValueError(f"Cloud job `{job_id}` was not found in this task workspace.")
-                while act == TypedActionName.WAIT_CLOUD_JOB.value and job.get("status") in {"PENDING", "RUNNING"} and time.monotonic() < deadline:
+                    raise ValueError(
+                        f"Cloud job `{job_id}` was not found in this task workspace."
+                    )
+                while (
+                    act == TypedActionName.WAIT_CLOUD_JOB.value
+                    and job.get("status") in {"PENDING", "RUNNING"}
+                    and time.monotonic() < deadline
+                ):
                     time.sleep(min(poll_seconds, max(0.0, deadline - time.monotonic())))
                     job = manager.get_job(str(job_id)) or job
                 artifact_data: Dict[str, Any] = {}
                 if job.get("status") == "COMPLETED":
-                    artifact_dir = self.project_root / str(job.get("artifact_dir") or "")
+                    artifact_dir = self.project_root / str(
+                        job.get("artifact_dir") or ""
+                    )
                     metrics_file = artifact_dir / "metrics.json"
                     if metrics_file.is_file():
                         try:
-                            artifact_data["metrics"] = json.loads(metrics_file.read_text(encoding="utf-8"))
+                            artifact_data["metrics"] = json.loads(
+                                metrics_file.read_text(encoding="utf-8")
+                            )
                         except json.JSONDecodeError:
-                            artifact_data["metrics_error"] = "metrics.json is not valid JSON"
-                    artifact_data["artifact_paths"] = [
-                        str(path.relative_to(self.project_root)).replace("\\", "/")
-                        for path in artifact_dir.iterdir() if path.is_file()
-                    ] if artifact_dir.is_dir() else []
+                            artifact_data["metrics_error"] = (
+                                "metrics.json is not valid JSON"
+                            )
+                    artifact_data["artifact_paths"] = (
+                        [
+                            str(path.relative_to(self.project_root)).replace("\\", "/")
+                            for path in artifact_dir.iterdir()
+                            if path.is_file()
+                        ]
+                        if artifact_dir.is_dir()
+                        else []
+                    )
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
-                    status="SUCCESS" if job.get("status") not in {"FAILED", "CANCELLED"} else "FAILED",
+                    status=(
+                        "SUCCESS"
+                        if job.get("status") not in {"FAILED", "CANCELLED"}
+                        else "FAILED"
+                    ),
                     summary=f"Cloud job `{job_id}` is {job.get('status')}; artifact identity verified={job.get('artifact_identity_verified', False)}.",
                     artifact_path=job.get("artifact_dir"),
                     data={"job": job, **artifact_data},
@@ -1446,17 +1915,34 @@ class AgentBridge:
                 name = params.get("name", f"{session.session_id}_router")
                 mode = params.get("mode", "specialist_router")
                 source_map = params.get("source_map")
-                if act==TypedActionName.PROMOTE_CANDIDATE.value:
-                    if not params.get("exp_id"): raise ValueError("Promotion requires exp_id")
-                    mode="single_model"; source_map={"source_exp":params["exp_id"]}
-                if not source_map: raise ValueError("Explicit source_map is required")
-                entry = self.comp_state.synthesize_candidate(name=name, mode=mode, source_map=source_map)
-                session.compute_usage["candidate_operations_used"]=int(session.compute_usage.get("candidate_operations_used",0))+1
+                if act == TypedActionName.PROMOTE_CANDIDATE.value:
+                    if not params.get("exp_id"):
+                        raise ValueError("Promotion requires exp_id")
+                    mode = "single_model"
+                    source_map = {"source_exp": params["exp_id"]}
+                if not source_map:
+                    raise ValueError("Explicit source_map is required")
+                entry = self.comp_state.synthesize_candidate(
+                    name=name, mode=mode, source_map=source_map
+                )
+                session.compute_usage["candidate_operations_used"] = (
+                    int(session.compute_usage.get("candidate_operations_used", 0)) + 1
+                )
 
                 oof_abs = self.project_root / entry["oof_path"]
                 synth_score, detail_scores = self._evaluate_oof_dataframe(oof_abs)
-                base_score = float(self.comp_state.compute_candidate_pool(journal).get("baseline_score") or self.comp_state.spec.get("primary_metric_baseline") or 0.0)
-                delta = round((synth_score-base_score)*(1 if self.task_spec.direction=="maximize" else -1),4)
+                base_score = float(
+                    self.comp_state.compute_candidate_pool(journal).get(
+                        "baseline_score"
+                    )
+                    or self.comp_state.spec.get("primary_metric_baseline")
+                    or 0.0
+                )
+                delta = round(
+                    (synth_score - base_score)
+                    * (1 if self.task_spec.direction == "maximize" else -1),
+                    4,
+                )
 
                 min_imp = self._get_spec_min_improvement(session)
                 max_rej = int(session.budget.get("max_consecutive_rejections") or 3)
@@ -1474,7 +1960,9 @@ class AgentBridge:
                     composite_score=synth_score,
                     metric_delta=delta,
                     fold_variance=None,
-                    advisory="REASSESS_RECOMMENDED" if session.reassess_recommended else None,
+                    advisory=(
+                        "REASSESS_RECOMMENDED" if session.reassess_recommended else None
+                    ),
                     artifact_path=entry["oof_path"],
                     data={**entry, "scores": detail_scores},
                     elapsed_seconds=round(time.time() - t0, 3),
@@ -1483,18 +1971,32 @@ class AgentBridge:
             elif act == TypedActionName.PREPARE_SUBMISSION.value:
                 pool = self.comp_state.compute_candidate_pool(journal)
                 best_cand = pool.get("overall_best") or {}
-                default_exp = best_cand.get("id") or self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
+                default_exp = (
+                    best_cand.get("id")
+                    or self.comp_state.state["gates"].get("baseline_exp_id")
+                    or "baseline"
+                )
                 exp_id = params.get("exp_id", default_exp)
                 cand_csv = params.get("candidate_csv")
-                if not cand_csv: raise ValueError("Explicit test candidate_csv is required")
+                if not cand_csv:
+                    raise ValueError("Explicit test candidate_csv is required")
                 from harness.artifacts import validate_test_prediction
-                validate_test_prediction(self.project_root/cand_csv,task_spec=self.task_spec,plugin=self.task_plugin)
-                capabilities=self.task_plugin.capabilities()
-                if not capabilities.get("submission_builder") or not capabilities.get("submission_validator"):
+
+                validate_test_prediction(
+                    self.project_root / cand_csv,
+                    task_spec=self.task_spec,
+                    plugin=self.task_plugin,
+                )
+                capabilities = self.task_plugin.capabilities()
+                if not capabilities.get("submission_builder") or not capabilities.get(
+                    "submission_validator"
+                ):
                     raise ValueError("Task plugin must implement submission hooks")
                 if self.project.plugin_id not in (None, "default"):
                     capabilities = self.task_plugin.capabilities()
-                    if not capabilities.get("submission_builder") or not capabilities.get("submission_validator"):
+                    if not capabilities.get(
+                        "submission_builder"
+                    ) or not capabilities.get("submission_validator"):
                         raise ValueError(
                             f"Task plugin '{self.project.plugin_id}' must implement both submission_builder and submission_validator."
                         )
@@ -1512,7 +2014,9 @@ class AgentBridge:
                         file_name=submission_spec.get("file_name", "submission.csv"),
                         notes=params.get("notes", ""),
                     )
-                    session.compute_usage["submissions_used"] = int(session.compute_usage.get("submissions_used", 0)) + 1
+                    session.compute_usage["submissions_used"] = (
+                        int(session.compute_usage.get("submissions_used", 0)) + 1
+                    )
                     return ActionObservation(
                         step_index=call.step_index,
                         action=act,
@@ -1533,7 +2037,9 @@ class AgentBridge:
                     if not cand_csv:
                         cand_csv = str(self.artifacts_dir / exp_id / "predictions.csv")
 
-                base_exp = self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
+                base_exp = (
+                    self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
+                )
                 base_csv = params.get("baseline_csv")
                 if not base_csv:
                     for base_opt in [
@@ -1544,8 +2050,12 @@ class AgentBridge:
                             base_csv = str(base_opt)
                             break
 
-                entry = sub_mgr.register_submission(exp_id=exp_id, candidate_csv=cand_csv, baseline_csv=base_csv)
-                session.compute_usage["submissions_used"] = int(session.compute_usage.get("submissions_used", 0)) + 1
+                entry = sub_mgr.register_submission(
+                    exp_id=exp_id, candidate_csv=cand_csv, baseline_csv=base_csv
+                )
+                session.compute_usage["submissions_used"] = (
+                    int(session.compute_usage.get("submissions_used", 0)) + 1
+                )
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
@@ -1559,16 +2069,24 @@ class AgentBridge:
             elif act == TypedActionName.RECORD_EXTERNAL_SCORE.value:
                 sub_id = params.get("sub_id")
                 if not sub_id:
-                    raise ValueError("Parameter 'sub_id' is required for 'record_external_score'.")
+                    raise ValueError(
+                        "Parameter 'sub_id' is required for 'record_external_score'."
+                    )
                 entry = sub_mgr.record_official_score(
                     sub_id=sub_id,
-                    primary_score=params.get("primary_score") or params.get("score"),
+                    primary_score=(
+                        params["primary_score"]
+                        if "primary_score" in params
+                        else params.get("score")
+                    ),
                     scores=params.get("scores") or params.get("custom_scores"),
                     split_type=params.get("split_type", "public"),
                     notes=params.get("notes", ""),
                 )
                 blockers = (
-                    ["CV vs LB Divergence detected (significant score delta between LB and Local CV)!"]
+                    [
+                        "CV vs LB Divergence detected (significant score delta between LB and Local CV)!"
+                    ]
                     if entry.divergence_warning
                     else []
                 )
@@ -1586,17 +2104,23 @@ class AgentBridge:
                 s1 = params.get("slot_1_id")
                 s2 = params.get("slot_2_id")
                 if not s1:
-                    candidates = self.comp_state.state["candidate_pool"].get("synthesized_candidates",[])
+                    candidates = self.comp_state.state["candidate_pool"].get(
+                        "synthesized_candidates", []
+                    )
                     if candidates:
                         s1 = candidates[0].get("id")
                         if len(candidates) > 1 and not s2:
                             s2 = candidates[1].get("id")
                     else:
-                        raise ValueError("Parameter 'slot_1_id' is required for 'freeze_candidate' when candidate pool is empty.")
+                        raise ValueError(
+                            "Parameter 'slot_1_id' is required for 'freeze_candidate' when candidate pool is empty."
+                        )
                 lock = self.comp_state.freeze_final_candidates(
                     slot_1_id=s1,
                     slot_2_id=s2,
-                    notes=params.get("notes", f"Frozen via AgentBridge session {session.session_id}"),
+                    notes=params.get(
+                        "notes", f"Frozen via AgentBridge session {session.session_id}"
+                    ),
                 )
                 return ActionObservation(
                     step_index=call.step_index,
@@ -1610,7 +2134,8 @@ class AgentBridge:
 
             elif act == TypedActionName.EMERGENCY_UNFREEZE.value:
                 reason = params.get("reason")
-                if not reason: raise ValueError("Unfreeze requires an explicit reason")
+                if not reason:
+                    raise ValueError("Unfreeze requires an explicit reason")
                 res = self.comp_state.emergency_unfreeze(reason=reason)
                 return ActionObservation(
                     step_index=call.step_index,

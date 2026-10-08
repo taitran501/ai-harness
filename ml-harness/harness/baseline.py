@@ -48,11 +48,12 @@ def validate_baseline_artifact(
     artifacts_dir: Path | str,
     exp_id: str,
     primary_metric: str,
+    task_spec=None,plugin=None,
 ) -> Dict[str, Any]:
     """Require a run artifact and finite primary metric; config defaults never qualify."""
     exp_dir = Path(artifacts_dir).resolve() / exp_id
     from harness.artifacts import validate_run
-    validate_run(exp_dir)
+    validate_run(exp_dir,task_spec=task_spec,plugin=plugin)
     metrics_path = exp_dir / "metrics.json"
     if not exp_dir.is_dir() or not metrics_path.is_file():
         raise ValueError(
@@ -62,6 +63,8 @@ def validate_baseline_artifact(
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Baseline metrics are unreadable at `{metrics_path}`: {exc}") from exc
+    from harness.evaluation import metric_name
+    if metric_name(metrics.get("primary_metric",""))!=metric_name(primary_metric): raise ValueError("Baseline scorer metric differs from the task")
     score, metric_key = extract_primary_metric(metrics, primary_metric, exp_id)
     if score is None:
         raise ValueError(

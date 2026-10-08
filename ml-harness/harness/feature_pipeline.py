@@ -146,12 +146,18 @@ class UniversalFeaturePipeline:
     def fit(self, text_series: pd.Series, df: Optional[pd.DataFrame] = None) -> UniversalFeaturePipeline:
         if self.sparse_featurizer:
             self.sparse_featurizer.fit(text_series)
+        if self.use_tabular_metadata:
+            self.tabular_extractor=TabularMetadataExtractor("__text")
+            self.tabular_extractor.fit(pd.DataFrame({"__text":text_series.reset_index(drop=True)}))
         return self
 
     def transform(self, text_series: pd.Series, df: Optional[pd.DataFrame] = None):
         components = []
         if self.sparse_featurizer:
             components.append(self.sparse_featurizer.transform(text_series))
+
+        if self.tabular_extractor is not None:
+            components.append(self.tabular_extractor.transform(pd.DataFrame({"__text":text_series.reset_index(drop=True)})))
 
         if len(components) == 1:
             return components[0]

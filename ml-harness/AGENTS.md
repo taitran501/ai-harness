@@ -61,8 +61,8 @@ The harness is task-agnostic. Competition-specific schemas and metrics are defin
   - `direction`: `maximize` or `minimize`.
   - `subtasks`: Optional array of subtasks with weights, metric formulas, and conditional filtering.
 - **Built-in Presets (`configs/tasks/`)**:
-  - `configs/tasks/kaggle_tabular_regression.yaml`
-  - `configs/tasks/kaggle_binary_classification.yaml`
+  - `configs/tasks/kaggle_house_prices.yaml`
+  - `configs/tasks/kaggle_titanic.yaml`
   - Competition-specific presets are distributed by their task plugins.
 
 ---
@@ -110,3 +110,8 @@ ml-harness-agent --project-root . act --action prepare_submission --user-approve
 | Full Validation | `ml-harness-run --project-root . --config configs/<config>.yaml` | Runs all configured folds |
 | Pre-Submission Audit | `ml-harness-agent --project-root . act --action prepare_submission --user-approved --params '{...}'` | Requires task plugin submission hooks and test-set predictions |
 | Run Test Suite | `python -m unittest discover -s tests -p "test_*.py"` | Runs full test suite |
+
+
+## Correctness contract
+
+Read `docs/CORRECTNESS_CONTRACT.md`. Completed full runs are immutable, including with `--force`. Debug/selected-fold probes never qualify as baseline evidence. Do not promote legacy artifacts, infer missing source IDs, or substitute OOF for test predictions. Always use the task seed and selected-variant full OOF aggregate. Calibration and threshold optimizers are utilities, not built-in estimator names. GPU/remote hard budgets fail closed until allocation and termination are verifiable.

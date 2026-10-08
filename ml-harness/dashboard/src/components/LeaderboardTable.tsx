@@ -17,10 +17,10 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'score' | 'timestamp' | 'params'>('score');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(taskInfo?.direction === 'minimize' ? 'asc' : 'desc');
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
-  const primaryMetricLabel = taskInfo?.primary_metric || 'Primary Metric (CV)';
+  const primaryMetricLabel = `${taskInfo?.primary_metric || 'Primary Metric (CV)'} (${taskInfo?.direction || 'maximize'})`;
 
   // Map experiment ID to latest official submission score if any
   const subScoreMap = useMemo(() => {
@@ -59,6 +59,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
         return matchesSearch;
       })
       .sort((a, b) => {
+        if (sortBy === 'score' && a.eligible !== b.eligible) return a.eligible ? -1 : 1;
         let valA = a.score;
         let valB = b.score;
         if (sortBy === 'timestamp') {
@@ -220,7 +221,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                         <AlertTriangle className="w-3.5 h-3.5" /> ERR
                       </span>
                     ) : (
-                      <span className="text-emerald-400 text-[11px]">✅ OK</span>
+                      <span className={exp.eligible ? "text-emerald-400 text-[11px]" : "text-amber-400 text-[11px]"}>{exp.eligible ? "Verified · eligible" : exp.status === "LEGACY_UNVERIFIED" ? "LEGACY_UNVERIFIED" : "Ineligible"}</span>
                     )}
                   </td>
                 </tr>

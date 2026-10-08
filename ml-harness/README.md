@@ -178,3 +178,8 @@ npm run build:package
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+
+## Correctness and evidence
+
+See [the schema v2 contract](docs/CORRECTNESS_CONTRACT.md) before running or promoting experiments. Full runs are immutable; probes have a separate namespace. Legacy artifacts remain viewable but are ineligible. Metrics preserve their original direction and probability requirements. Calibration/threshold utilities require custom integration. Hard runtime budgets currently support local wall-time only; remote/GPU hard limits are rejected until verified backend accounting is available.

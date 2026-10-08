@@ -52,7 +52,7 @@ class TestStrategyCardsAndSpawner(unittest.TestCase):
             self.assertEqual(response.status, 200)
             data = json.loads(response.read().decode("utf-8"))
             self.assertIn("strategies", data)
-            self.assertEqual(len(data["strategies"]), len(DEFAULT_STRATEGY_CARDS))
+            self.assertEqual(len(data["strategies"]), len([c for c in DEFAULT_STRATEGY_CARDS if c.get("model_name")!="threshold_optimizer"]))
 
     def test_get_next_experiment_id(self):
         res = get_next_experiment_id("feat", "video_title_ctx")

@@ -125,6 +125,7 @@ class StatisticalAuditGateTests(unittest.TestCase):
         cmd = [
             sys.executable,
             "tools/audit_gate.py",
+            "--id-column", "sample_id",
             "--candidate", str(cand_csv),
             "--baseline", str(base_csv),
             "--output-zip", str(self.p / "out.zip"),
@@ -159,6 +160,7 @@ class StatisticalAuditGateTests(unittest.TestCase):
         cmd = [
             sys.executable,
             "tools/audit_gate.py",
+            "--id-column", "sample_id",
             "--candidate", str(cand_csv),
             "--allow-initial",
             "--ensemble-components", str(c1_csv), str(c2_csv),
@@ -204,6 +206,7 @@ class TreeJournalAntiDegenerationTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+            verified=True,eligible=True,
     def test_locks_ens_when_only_one_model_family_exists(self):
         """Recommendation must disallow 'ens' if only 1 model family exists in the tree."""
         node1 = Node(
@@ -211,6 +214,7 @@ class TreeJournalAntiDegenerationTests(unittest.TestCase):
             parent_id=None,
             branch="baseline",
             atomic_hypothesis="TF-IDF baseline",
+            verified=True,eligible=True,
             metrics={"overall_composite": 0.65, "model": "tfidf"},
         )
         node2 = Node(
@@ -227,6 +231,7 @@ class TreeJournalAntiDegenerationTests(unittest.TestCase):
         rec = self.journal.recommend_next_branch()
         self.assertNotEqual(rec["recommended_branch"], "ens")
 
+            verified=True,eligible=True,
     def test_diagnostic_cues_influence_recommendation(self):
         """Diagnostic bottleneck on rare identity should prioritize 'loss' branch."""
         node = Node(

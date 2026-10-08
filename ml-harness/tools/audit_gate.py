@@ -65,8 +65,9 @@ def audit_prediction_integrity(
         spec=load_active_task_spec()
     key=id_col or spec.id_column
     errors=[]
+    if not any(c.startswith(("pred_","proba_")) for c in df) and not spec.subtasks: errors.append("Missing predictions")
     if key not in df: errors.append("Missing declared ID column")
-    elif df[key].isna().any() or df[key].duplicated().any(): errors.append("IDs must be non-null and unique")
+    elif df[key].isna().any() or df[key].duplicated().any(): errors.append(f"IDs {key} must be non-null and unique")
     if df.empty: errors.append("Prediction coverage is empty")
     for target,st in spec.subtasks.items():
         col=next((c for c in ("pred_"+target,"pred_"+(st.column or target),st.column or target) if c in df),None)
@@ -76,13 +77,13 @@ def audit_prediction_integrity(
         if st.task_type=="regression":
             values=pd.to_numeric(df[col],errors="coerce")
             if not np.isfinite(values).all(): errors.append("Non-finite prediction: "+target)
-        elif st.task_type=="multi_label":
+        elif st.task_type=="multilabel_classification":
             try:
                 values=np.asarray([json.loads(x) if isinstance(x,str) else x for x in df[col]])
-                if values.shape!=(len(df),len(st.classes)) or not np.isin(values,[0,1]).all(): errors.append("Invalid multilabel shape/domain")
+                if values.shape!=(len(df),len(st.labels or st.classes)) or not np.isin(values,[0,1]).all(): errors.append("Invalid multilabel shape/domain")
             except (ValueError,TypeError): errors.append("Invalid multilabel encoding")
         elif not df[col].astype(str).isin(list(map(str,st.classes))).all():
-            errors.append("Prediction outside declared classes: "+target)
+            errors.append("invalid values outside declared classes: "+target)
     return errors
 
 
@@ -216,6 +217,7 @@ def main() -> None:
         help="Minimum allowable disagreement percentage between ensemble components (default: 5.0%%)",
     )
 
+    parser.add_argument("--id-column",default=None)
     args = parser.parse_args()
 
     cand_path = Path(args.candidate)
@@ -233,7 +235,7 @@ def main() -> None:
     print(f"✔ Candidate Rows    : {len(cand_df):,}")
 
     # Step 1: Check physical integrity
-    integrity_errors = audit_prediction_integrity(cand_df)
+    integrity_errors = audit_prediction_integrity(cand_df,id_col=args.id_column)
     if integrity_errors:
         print(f"\n❌ [CRITICAL INTEGRITY FAILURE] Found {len(integrity_errors)} violations:", file=sys.stderr)
         for err in integrity_errors:
@@ -306,7 +308,7 @@ def main() -> None:
             sys.exit(1)
 
         # Check row diff
-        diff_count, diff_details = compute_diff_metrics(cand_df, base_df)
+        diff_count, diff_details = compute_diff_metrics(cand_df, base_df,id_col=args.id_column)
         diff_pct = round(diff_count / len(cand_df) * 100, 2)
         print(f"✔ Differing Samples : {diff_count} / {len(cand_df)} ({diff_pct}%)")
 

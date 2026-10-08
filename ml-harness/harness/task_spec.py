@@ -109,7 +109,7 @@ class SubtaskSpec:
         return cls(
             id=data["id"],
             name=data.get("name", data["id"]),
-            task_type=data.get("task_type", data.get("type", "binary_classification")),
+            task_type={"classification":"multiclass_classification","multi_label":"multilabel_classification"}.get(data.get("task_type",data.get("type")),data.get("task_type", data.get("type", "binary_classification"))),
             column=data.get("column"),
             column_prefix=data.get("column_prefix"),
             classes=data.get("classes", []),
@@ -294,10 +294,11 @@ class UniversalTaskSpec:
         return self.metadata.get("data_config") or self.metadata.get("data", {})
 
     def resolve_seed(self, runtime_seed=42):
-        return int(self.metadata.get("validation", {}).get("seed", self.data_config.get("seed", runtime_seed)))
+        return int(self.metadata.get("seed",self.metadata.get("validation", {}).get("seed", self.data_config.get("seed", runtime_seed))))
 
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> UniversalTaskSpec:
+        from harness.evaluation import metric_name
         task_cfg = cfg.get("task", cfg)
         inputs_list = []
         for inp in task_cfg.get("inputs", []):
@@ -312,6 +313,7 @@ class UniversalTaskSpec:
 
         subtasks_dict = {}
         st_configs = task_cfg.get("subtasks", task_cfg.get("metrics", []))
+        if isinstance(st_configs,dict): st_configs=[{"id":key,**value} for key,value in st_configs.items()]
         for st in st_configs:
             spec = SubtaskSpec.from_dict(st)
             subtasks_dict[spec.id] = spec
@@ -321,8 +323,8 @@ class UniversalTaskSpec:
 
         return cls(
             name=task_cfg.get("name", task_cfg.get("task_name", "universal_task")),
-            task_type=task_cfg.get("task_type", task_cfg.get("type", "classification")),
-            primary_metric=task_cfg.get("primary_metric", "macro_f1"),
+            task_type={"Tabular Regression":"regression","Tabular Binary Classification":"classification","Multi-Task Text Classification":"multi_task_classification","multi_label":"multilabel_classification"}.get(task_cfg.get("task_type",task_cfg.get("type")),task_cfg.get("task_type", task_cfg.get("type", "classification"))),
+            primary_metric=metric_name(task_cfg.get("primary_metric", "macro_f1")),
             direction=task_cfg.get("direction", "maximize"),
             inputs=inputs_list,
             subtasks=subtasks_dict,
@@ -460,6 +462,8 @@ class UniversalTaskSpec:
                 files = sorted(files)
                 if files:
                     return pd.concat([load_dataframe_file(f) for f in files], ignore_index=True)
+
+            raise FileNotFoundError(f"Declared {split} dataset path is missing or empty: {p}")
 
         # 2. Standard convention search
         extensions = [".csv", ".tsv", ".parquet", ".pq", ".feather", ".jsonl", ".json"]

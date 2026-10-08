@@ -106,6 +106,9 @@ class WorkspaceFixture(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        from tests.evidence_fixtures import seal_fixture
+        from harness.task_spec import load_active_task_spec
+        seal_fixture(baseline_dir,load_active_task_spec(self.project.task_config_path))
         validate_baseline_artifact(self.project.artifacts_dir, "exp000", "accuracy")
 
         for phase_id in PHASE_IDS[2:]:
@@ -256,7 +259,7 @@ class WorkspaceFixture(unittest.TestCase):
         self.assertEqual(response["visibility"], "private")
 
     def test_baseline_requires_finite_metric_from_matching_run(self):
-        with self.assertRaisesRegex(ValueError, "no completed run artifact"):
+        with self.assertRaisesRegex(ValueError, "LEGACY_UNVERIFIED"):
             validate_baseline_artifact(self.project.artifacts_dir, "exp000", "accuracy")
         exp_dir = self.project.artifacts_dir / "exp000"
         exp_dir.mkdir(parents=True)
@@ -269,10 +272,8 @@ class WorkspaceFixture(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        self.assertEqual(
-            validate_baseline_artifact(self.project.artifacts_dir, "exp000", "accuracy")["score"],
-            0.75,
-        )
+        with self.assertRaisesRegex(ValueError,"LEGACY_UNVERIFIED"):
+            validate_baseline_artifact(self.project.artifacts_dir,"exp000","accuracy")
 
     def test_generated_cloud_bundles_compile_and_exclude_data(self):
         config = self.root / "configs" / "exp001.yaml"
@@ -356,6 +357,9 @@ class WorkspaceFixture(unittest.TestCase):
             "files": {"metrics.json": hashlib.sha256(metrics_bytes).hexdigest()},
         }
         (artifact_dir / "artifact_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        from tests.evidence_fixtures import seal_fixture
+        from harness.task_spec import load_active_task_spec
+        metrics=seal_fixture(artifact_dir,load_active_task_spec(self.project.task_config_path),.84,job_id=job_id,task_id=self.project.manifest["task_id"],config_sha256=config_sha,run_id=job_id)
         log_file = self.project.artifacts_dir / "jobs" / f"{job_id}.log"
         log_file.write_text("", encoding="utf-8")
         job = CloudJob(

@@ -3,7 +3,7 @@ task:
   platform: kaggle
   task_name: House Prices Regression
   name: House Prices Regression
-  task_type: Tabular Regression
+  task_type: regression
   type: Tabular Regression
   modality: tabular
   primary_metric: RMSE

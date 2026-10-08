@@ -244,7 +244,7 @@ DEFAULT_STRATEGY_CARDS = [
 
 def list_available_tasks() -> List[Dict[str, Any]]:
     """List all available competition tasks from configs/tasks/ and mark the active one."""
-    tasks_dirs = [PROJECT_ROOT / "configs" / "tasks", HARNESS_DIR / "configs" / "tasks"]
+    tasks_dirs = [PROJECT_ROOT / "configs" / "tasks", HARNESS_DIR / "configs" / "tasks", HARNESS_DIR / "harness" / "defaults" / "tasks"]
     for td in tasks_dirs:
         td.mkdir(parents=True, exist_ok=True)
 
@@ -341,11 +341,8 @@ def load_task_config() -> Dict[str, Any]:
 
 def save_task_config(task_data: Dict[str, Any]) -> None:
     """Save updated task specification to configs/task.yaml."""
-    task_file = HARNESS_PROJECT.task_config_path
-    task_file.parent.mkdir(parents=True, exist_ok=True)
-    content = {"task": task_data}
-    with open(task_file, "w", encoding="utf-8") as f:
-        yaml.dump(content, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    _,obs=AgentBridge(PROJECT_ROOT).execute_action("update_task_contract",params={"task":task_data})
+    if obs.status!="SUCCESS": raise ValueError(obs.summary)
 
 
 TASK_PRESETS: List[Dict[str, Any]] = [
@@ -1089,24 +1086,19 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs),"session":asdict(sess)})
                     return
                 if action == "gate":
-                    for gk, gv in data.get("gates", {}).items():
-                        if gk in {"baseline_locked", "baseline_evidence", "freeze_locked", "finalized", "baseline_exp_id"}:
-                            self.send_json({"error": f"Gate `{gk}` can only be changed by its verified harness action."}, status=409)
-                            return
-                        comp.state["gates"][gk] = gv
-                    if "mode" in data:
-                        comp.state["mode"] = data["mode"]
-                    if "manual_phase_override" in data:
-                        comp.state["manual_phase_override"] = data["manual_phase_override"]
-                    if "toggle_pin_candidate" in data:
-                        cid = data["toggle_pin_candidate"]
-                        pinned = comp.state["candidate_pool"].get("pinned_candidates", [])
-                        if cid in pinned:
-                            pinned.remove(cid)
-                        else:
-                            pinned.append(cid)
-                        comp.state["candidate_pool"]["pinned_candidates"] = pinned
-                    comp.save()
+                    for key in data.get("gates",{}):
+                        if key not in {"spec_confirmed","data_risks_confirmed"}:
+                            self.send_json({"error":f"Gate {key} requires its verified action"},status=409); return
+                    bridge=AgentBridge(PROJECT_ROOT)
+                    for key,value in data.get("gates",{}).items():
+                        if not value: raise ValueError("Review evidence cannot be cleared through the legacy endpoint")
+                        _,obs=bridge.execute_action("confirm_task_spec" if key=="spec_confirmed" else "confirm_data_risks",user_approved=bool(data.get("user_approved",False)))
+                        if obs.status!="SUCCESS":
+                            self.send_json({"success":False,"observation":asdict(obs)},status=409); return
+                    settings={k:v for k,v in data.items() if k!="gates"}
+                    _,obs=bridge.execute_action("update_workspace_settings",params=settings)
+                    if obs.status!="SUCCESS": raise ValueError(obs.summary)
+                    comp=bridge.comp_state
                 elif action == "data-audit":
                     comp.run_data_readiness_audit(data.get("config"))
                 elif action == "agent-context":
@@ -1167,14 +1159,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     if key not in ("split_type", "primary_metric", "score", primary_metric)
                 }
 
-                mgr.record_official_score(
-                    sub_id=sub_id,
-                    primary_score=primary_score,
-                    split_type=split_type,
-                    notes=notes,
-                    custom_scores=custom_scores,
-                )
-                self.send_json({"success": True, "submission": asdict(mgr.submissions[sub_id])})
+                sess,obs=AgentBridge(PROJECT_ROOT).execute_action("record_external_score",params={"sub_id":sub_id,"primary_score":primary_score,"split_type":split_type,"notes":notes,"custom_scores":custom_scores},user_approved=bool(data.get("user_approved",False)),session_id=data.get("session_id"))
+                self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs),"session":asdict(sess)})
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/task_info":
@@ -1262,14 +1248,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
                 data = json.loads(body or "{}")
                 from harness.phase_workflow import PhaseWorkflow
-                record = PhaseWorkflow(PROJECT_ROOT, HARNESS_PROJECT.task_config_path).record(
-                    str(data.get("phase_id") or ""),
-                    str(data.get("response") or ""),
-                    sources=data.get("sources", []),
-                    artifacts=data.get("artifacts", []),
-                    metadata=data.get("metadata", {}),
-                )
-                self.send_json({"success": True, "record": record})
+                _,obs=AgentBridge(PROJECT_ROOT).execute_action("record_phase_output",params=data)
+                self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs)},status=200 if obs.status=="SUCCESS" else 400)
             except Exception as exc:
                 self.send_json({"error": str(exc)}, status=400)
         elif path == "/api/eda/run":
@@ -1277,8 +1257,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
                 data = json.loads(body or "{}")
                 from harness.eda import run_eda
-                report = run_eda(PROJECT_ROOT, data_path=data.get("data_path"))
-                self.send_json({"success": True, "report": report})
+                _,obs=AgentBridge(PROJECT_ROOT).execute_action("run_eda",params=data)
+                self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs)},status=200 if obs.status=="SUCCESS" else 400)
             except Exception as exc:
                 self.send_json({"error": str(exc)}, status=400)
         elif path == "/api/cloud/stop":
@@ -1317,62 +1297,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json({"error": "Field 'exp_id' is required."}, status=400)
                     return
 
-                candidate_csv = data.get("candidate_csv")
-                baseline_csv = data.get("baseline_csv")
-                notes = data.get("notes", "")
-                min_diff_pct = float(data.get("min_diff_pct", 2.0))
-                ensemble_components = data.get("ensemble_components")
-
-                mgr = SubmissionManager()
-                if HARNESS_PROJECT.plugin_id not in (None, "default"):
-                    if not candidate_csv:
-                        raise ValueError(
-                            "Provide test-set predictions. The dashboard will not package OOF validation predictions as a submission."
-                        )
-                    from harness.plugins import TaskPluginContext, load_task_plugin
-                    from harness.task_spec import load_active_task_spec
-
-                    task_spec = load_active_task_spec(HARNESS_PROJECT.task_config_path)
-                    plugin_context = TaskPluginContext(
-                        project_root=PROJECT_ROOT,
-                        task_config_path=HARNESS_PROJECT.task_config_path,
-                        task_spec=task_spec,
-                        plugin_id=HARNESS_PROJECT.plugin_id,
-                    )
-                    plugin = load_task_plugin(HARNESS_PROJECT.plugin_id, plugin_context)
-                    capabilities = plugin.capabilities()
-                    if not capabilities.get("submission_builder") or not capabilities.get("submission_validator"):
-                        raise ValueError(
-                            f"Task plugin '{HARNESS_PROJECT.plugin_id}' must implement submission_builder and submission_validator."
-                        )
-                    submission_spec = load_task_config().get("submission_spec", {})
-                    entry = mgr.register_plugin_submission(
-                        exp_id=exp_id,
-                        candidate_csv=candidate_csv,
-                        plugin=plugin,
-                        plugin_context=plugin_context,
-                        file_name=submission_spec.get("file_name", "submission.csv"),
-                        notes=notes,
-                    )
-                else:
-                    if not candidate_csv:
-                        default_cand = ARTIFACTS_DIR / exp_id / "oof_predictions.csv"
-                        if default_cand.exists():
-                            candidate_csv = str(default_cand)
-                        else:
-                            self.send_json({
-                                "error": f"Candidate predictions file not found at '{default_cand}'. Please provide valid candidate_csv path."
-                            }, status=400)
-                            return
-                    entry = mgr.register_submission(
-                        exp_id=exp_id,
-                        candidate_csv=candidate_csv,
-                        baseline_csv=baseline_csv,
-                        ensemble_components=ensemble_components,
-                        notes=notes,
-                        min_diff_pct=min_diff_pct,
-                    )
-                self.send_json({"success": True, "submission": asdict(entry)})
+                sess,obs=AgentBridge(PROJECT_ROOT).execute_action("prepare_submission",params=data,session_id=data.get("session_id"),user_approved=bool(data.get("user_approved",False)))
+                self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs),"session":asdict(sess),"error":obs.summary if obs.status!="SUCCESS" else None},status=200 if obs.status=="SUCCESS" else 400)
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/cloud/generate":
@@ -1493,7 +1419,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "parent_id": n.parent_id or "ROOT",
                 "approach_type": getattr(n, "approach_type", "ml"),
                 "model_family": getattr(n, "model_family", "linear"),
-                "score": round(n.get_score(), 4),
+                "score": round(n.get_score(), 4),"verified":n.verified,"eligible":n.eligible,"direction":n.direction,"primary_metric":n.primary_metric_name,
                 "param_count": n.param_count,
                 "param_size": getattr(n, "param_size", None),
                 "llm_spec": getattr(n, "llm_spec", None),
@@ -1785,6 +1711,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "submission_spec": task.get("submission_spec", {}),
             "artifacts_dir": artifact_path,
             "task_plugin": plugin_info,
+            "budget_capabilities":{"local":{"wall_deadline":True,"gpu_allocation":False},"modal":{"hard_budget":False},"kaggle":{"hard_budget":False}},
+            "runner_utilities":{"calibration":False,"threshold_optimization":False},
         })
 
     def handle_api_configs(self) -> None:
@@ -1807,7 +1735,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     return self.send_json({"strategies": raw_cards["strategies"]})
             except Exception:
                 pass
-        self.send_json({"strategies": DEFAULT_STRATEGY_CARDS})
+        self.send_json({"strategies": [c for c in DEFAULT_STRATEGY_CARDS if c.get("model_name")!="threshold_optimizer"],"utility_capabilities":{"calibration":"custom_integration","thresholds":"custom_integration"}})
 
     def handle_api_get_config(self, query: str) -> None:
         params = urllib.parse.parse_qs(query)
@@ -1876,7 +1804,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
+        _,obs=AgentBridge(PROJECT_ROOT).execute_action("write_experiment_config",params={"path":raw_path,"content":content})
+        if obs.status!="SUCCESS":
+            self.send_json({"error":obs.summary},status=400); return
 
         self.send_json({
             "success": True,
@@ -1986,7 +1916,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         yaml_content = yaml.dump(new_cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(yaml_content, encoding="utf-8")
+        _,obs=AgentBridge(PROJECT_ROOT).execute_action("write_experiment_config",params={"path":str(dest.relative_to(PROJECT_ROOT)),"content":yaml_content})
+        if obs.status!="SUCCESS":
+            self.send_json({"error":obs.summary},status=400); return
 
         self.send_json({
             "success": True,
@@ -2294,7 +2226,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             if best and (ARTIFACTS_DIR / best.id / "oof_predictions.csv").exists():
                 baseline_csv = str(ARTIFACTS_DIR / best.id / "oof_predictions.csv")
 
-        cmd = [sys.executable, str(PROJECT_ROOT / "tools" / "audit_gate.py"), "--candidate", candidate_csv]
+        cmd = [sys.executable, str(HARNESS_DIR / "tools" / "audit_gate.py"), "--candidate", candidate_csv]
         if baseline_csv and Path(baseline_csv).exists():
             cmd.extend(["--baseline", baseline_csv])
 

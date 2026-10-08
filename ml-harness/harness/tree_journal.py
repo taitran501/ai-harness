@@ -85,6 +85,7 @@ class TreeJournal:
         task_spec: Optional[Any] = None,
         journal_path: Optional[str | Path] = None,
         artifacts_dir: Optional[str | Path] = None,
+        task_plugin=None,
     ):
         from harness.project import HarnessProject
 
@@ -96,9 +97,22 @@ class TreeJournal:
             if artifacts_dir
             else (self.storage_path.parent if journal_path or storage_path else project.artifacts_dir)
         )
+        if task_spec is None:
+            from harness.task_spec import load_active_task_spec
+            from harness.plugins import TaskPluginContext,load_task_plugin
+            task_spec=load_active_task_spec(project.task_config_path)
+            task_plugin=load_task_plugin(project.plugin_id,TaskPluginContext(project.root,project.task_config_path,task_spec,project.plugin_id or "default"))
         self.task_spec = task_spec
+        self.task_plugin=task_plugin
         self.nodes: Dict[str, Node] = {}
         self.load()
+        from harness.artifacts import validate_run
+        for node in self.nodes.values():
+            if node.artifact_dir:
+                try: validate_run(node.artifact_dir,task_spec=self.task_spec,plugin=self.task_plugin)
+                except (ValueError,OSError,KeyError):
+                    node.verified=node.eligible=False
+                    node.status="LEGACY_UNVERIFIED"
         self._snapshot=[asdict(n) for n in self.nodes.values()]
         if auto_sync:
             self.sync_from_artifacts(self.artifacts_dir)
@@ -158,7 +172,7 @@ class TreeJournal:
             metrics = json.loads((directory/"metrics.json").read_text(encoding="utf-8"))
             cfg = yaml.safe_load((directory/"run_config.yaml").read_text(encoding="utf-8")) if (directory/"run_config.yaml").is_file() else {}
             try:
-                validate_run(directory, task_spec=self.task_spec)
+                validate_run(directory, task_spec=self.task_spec,plugin=self.task_plugin)
                 verified = True
             except (ValueError, KeyError, OSError):
                 verified = False
@@ -356,13 +370,7 @@ class TreeJournal:
             if max_params and n.param_count and n.param_count > max_params:
                 continue
 
-            raw_score = n.get_score()
-            direction = getattr(n, "direction", "maximize")
-            if direction == "minimize":
-                # Lower raw_score is better -> map to higher exploit [0, 1]
-                exploit = (max_s - raw_score) / range_s if len(valid_nodes) > 1 else (1.0 / (1.0 + max(0.0, raw_score)))
-            else:
-                exploit = raw_score
+            exploit = (n.get_utility()-min_s)/range_s if len(valid_nodes)>1 else 1.0
 
             visits = parent_visits.get(n.id, 0)
             explore = exploration_weight * math.sqrt(math.log(total_runs + 1) / (visits + 1))
@@ -371,6 +379,7 @@ class TreeJournal:
             scored_candidates.append((ucb_score, n))
 
         scored_candidates.sort(key=lambda x: x[0], reverse=True)
+        if not scored_candidates: return {"recommendation":"INITIAL_BASELINE","parent_id":None,"branch":"baseline"}
         top_ucb, top_node = scored_candidates[0]
 
         # Check diagnostic bottlenecks in top_node

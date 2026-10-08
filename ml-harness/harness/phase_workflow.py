@@ -429,7 +429,9 @@ class PhaseWorkflow:
             "evidence_revision": phase_state.get("current_evidence_revision"),
             "metadata": metadata or {},
         }
-        history = self.history()
-        history.append(record)
-        atomic_write_json(self.history_path, history, indent=2, ensure_ascii=False)
+        from harness.state_store import workspace_lock
+        with workspace_lock(self.history_path.parent):
+            history = self.history()
+            history.append(record)
+            atomic_write_json(self.history_path, history, indent=2, ensure_ascii=False)
         return record
