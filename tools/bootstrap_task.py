@@ -227,6 +227,19 @@ def analyze_dataset_schema(df: pd.DataFrame, context: Dict[str, Any]) -> Dict[st
     if not direction:
         direction = "minimize" if metric.lower() in ("rmse", "mae", "mse", "logloss", "loss") else "maximize"
 
+    # 7. Resolve Fold Count
+    num_folds = 5
+    if group_col and group_col in df.columns:
+        n_groups = df[group_col].nunique()
+        num_folds = min(5, n_groups)
+    elif task_type in ("binary_classification", "multiclass_classification"):
+        y_valid = df[target_col].dropna()
+        if len(y_valid.value_counts()) > 0:
+            min_class = int(y_valid.value_counts().min())
+            num_folds = min(5, min_class)
+    num_folds = min(num_folds, len(df))
+    num_folds = max(2, num_folds) if len(df) >= 2 else 1
+
     return {
         "id_column": id_col,
         "group_column": group_col,
@@ -236,6 +249,7 @@ def analyze_dataset_schema(df: pd.DataFrame, context: Dict[str, Any]) -> Dict[st
         "classes": classes,
         "primary_metric": metric,
         "direction": direction,
+        "num_folds": num_folds,
     }
 
 
@@ -276,7 +290,7 @@ def generate_task_yaml(
             ],
             "validation": {
                 "strategy": "kfold",
-                "num_folds": 5,
+                "num_folds": schema.get("num_folds", 5),
                 "split_file": "splits/fold_assignments.tsv",
             },
         }
@@ -344,7 +358,7 @@ def generate_baseline_config(
         },
         "data": {
             "train_path": train_rel_path,
-            "folds": [0, 1, 2, 3, 4],
+            "folds": list(range(schema.get("num_folds", 5))),
         },
         "model": {
             "name": "baseline",
@@ -458,7 +472,10 @@ def bootstrap_competition_task(
     try:
         rel_train = str(train_file.resolve().relative_to(root)).replace("\\", "/")
     except ValueError:
-        rel_train = str(train_file).replace("\\", "/")
+        try:
+            rel_train = f"dataset/{train_file.resolve().relative_to(data_dir.resolve()).as_posix()}"
+        except Exception:
+            rel_train = f"dataset/{train_file.name}"
 
     task_yaml_data = generate_task_yaml(
         task_name=task_name,
@@ -487,32 +504,32 @@ def bootstrap_competition_task(
         group_col=schema["group_column"],
         task_type=schema["task_type"],
         output_path=splits_path,
-        num_folds=5,
+        num_folds=schema.get("num_folds", 5),
     )
 
     # 7. Inject AI Agent Skill
-    skill_output = root / ".agents" / "skills" / "ml-harness" / "SKILL.md"
+    skill_output = root / ".agents" / "skills" / "ml-experiment-harness" / "SKILL.md"
     injected_skill = inject_skill_file(config_path=cfg_path, output_path=skill_output)
 
     try:
         splits_rel = str(splits_path.resolve().relative_to(root)).replace("\\", "/")
     except ValueError:
-        splits_rel = str(splits_path).replace("\\", "/")
+        splits_rel = f"splits/{splits_path.name}"
 
     try:
         cfg_rel = str(cfg_path.resolve().relative_to(root)).replace("\\", "/")
     except ValueError:
-        cfg_rel = str(cfg_path).replace("\\", "/")
+        cfg_rel = f"configs/{cfg_path.name}"
 
     try:
         baseline_rel = str(baseline_cfg_path.resolve().relative_to(root)).replace("\\", "/")
     except ValueError:
-        baseline_rel = str(baseline_cfg_path).replace("\\", "/")
+        baseline_rel = f"configs/{baseline_cfg_path.name}"
 
     try:
         skill_rel = str(injected_skill.resolve().relative_to(root)).replace("\\", "/")
     except ValueError:
-        skill_rel = str(injected_skill).replace("\\", "/")
+        skill_rel = f".agents/skills/ml-experiment-harness/{injected_skill.name}"
 
     report = {
         "status": "SUCCESS",

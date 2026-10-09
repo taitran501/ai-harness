@@ -20,7 +20,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(taskInfo?.direction === 'minimize' ? 'asc' : 'desc');
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
-  const primaryMetricLabel = `${taskInfo?.primary_metric || 'Primary Metric (CV)'} (${taskInfo?.direction || 'maximize'})`;
+  const primaryMetricLabel = `${taskInfo?.primary_metric || 'Primary Metric'} (${taskInfo?.direction || 'maximize'})`;
 
   // Map experiment ID to latest official submission score if any
   const subScoreMap = useMemo(() => {

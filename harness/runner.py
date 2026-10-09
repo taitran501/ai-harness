@@ -315,7 +315,11 @@ class UniversalRunner:
                     ):
                         raise ValueError("Declared fold count differs from split file")
                     result = [
-                        (f, df[df.fold != f].copy(), df[df.fold == f].copy())
+                        (
+                            int(f) if isinstance(f, (int, np.integer)) else f,
+                            df[df.fold != f].copy(),
+                            df[df.fold == f].copy(),
+                        )
                         for f in sorted(df.fold.unique())
                     ]
             elif strategy in {"holdout", "zero_shot_eval"}:
@@ -345,6 +349,10 @@ class UniversalRunner:
                 raise ValueError(f"Unsupported validation strategy {strategy}")
         if not result:
             raise ValueError("Validation returned no splits")
+        result = [
+            (int(f) if isinstance(f, (int, np.integer)) else f, train, dev)
+            for f, train, dev in result
+        ]
         if strategy == "kfold":
             held = [x for _, _, dev in result for x in dev[self.task_spec.id_column]]
             if len(held) != len(set(held)) or set(held) != set(
@@ -391,16 +399,19 @@ class UniversalRunner:
         if path:
             mod, name = path.rsplit(".", 1)
             return getattr(importlib.import_module(mod), name)
-        return lambda name, **params: GenericBaselineModel(
+        from harness.models import create_model
+
+        return lambda name, **params: create_model(
             self.task_spec, name, **params
         )
 
     def _record_predictions(self, dev, predictions, fold, variant):
+        fold_id = int(fold) if isinstance(fold, (int, np.integer)) else fold
         records = []
         for i in range(len(dev)):
             record = {
                 self.task_spec.id_column: dev[self.task_spec.id_column].iloc[i],
-                "fold": fold,
+                "fold": fold_id,
                 "input_variant": variant,
             }
             for key, value in predictions.items():
@@ -439,7 +450,11 @@ class UniversalRunner:
                 if partition not in df:
                     raise ValueError("Partition column is missing")
                 partitions = [
-                    (p, train[train[partition] == p], dev[dev[partition] == p])
+                    (
+                        int(p) if isinstance(p, (int, np.integer)) else p,
+                        train[train[partition] == p],
+                        dev[dev[partition] == p],
+                    )
                     for p in sorted(df[partition].dropna().unique())
                     if len(dev[dev[partition] == p])
                 ]
@@ -462,7 +477,7 @@ class UniversalRunner:
                         model = self._get_model_factory()(
                             config.get("name", "baseline"), **config.get("params", {})
                         )
-                    if isinstance(model, GenericBaselineModel):
+                    if hasattr(model, "seed"):
                         model.seed = self.seed
                     start = time.monotonic()
                     call_model(model, "fit", tr, variant)
@@ -488,11 +503,13 @@ class UniversalRunner:
                     )
                     pred = self.task_spec.apply_routing(pred, len(dv))
                     evaluation = self._evaluate(dv, pred)
+                    part_id = int(part) if isinstance(part, (int, np.integer)) else part
+                    fold_id = int(fold) if isinstance(fold, (int, np.integer)) else fold
                     detail = {
                         "experiment_id": self.exp_id,
                         "input_variant": variant,
-                        "dev_fold": fold,
-                        "partition": part,
+                        "dev_fold": fold_id,
+                        "partition": part_id,
                         "train_rows": len(tr),
                         "dev_rows": len(dv),
                         "fit_time_seconds": time.monotonic() - start,
@@ -501,12 +518,18 @@ class UniversalRunner:
                     details.append(detail)
                     rows.append(
                         {
-                            k: v
+                            k: (
+                                int(v)
+                                if isinstance(v, (int, np.integer))
+                                else float(v)
+                                if isinstance(v, (float, np.floating))
+                                else v
+                            )
                             for k, v in detail.items()
-                            if isinstance(v, (str, int, float))
+                            if isinstance(v, (str, int, float, np.integer, np.floating))
                         }
                     )
-                    records.extend(self._record_predictions(dv, pred, fold, variant))
+                    records.extend(self._record_predictions(dv, pred, fold_id, variant))
                     self.estimator_metadata.append(
                         getattr(
                             model, "estimator_metadata", {"class": type(model).__name__}
@@ -574,16 +597,17 @@ class UniversalRunner:
                     predictions[key].append(value)
             predictions = self.task_spec.apply_routing(predictions, len(dev))
             evaluation = self._evaluate(dev, predictions)
+            fold_id = int(fold) if isinstance(fold, (int, np.integer)) else fold
             details.append(
                 {
                     "experiment_id": self.exp_id,
                     "input_variant": "llm_prompt",
-                    "dev_fold": fold,
+                    "dev_fold": fold_id,
                     **evaluation,
                 }
             )
             records.extend(
-                self._record_predictions(dev, predictions, fold, "llm_prompt")
+                self._record_predictions(dev, predictions, fold_id, "llm_prompt")
             )
         return self._save_and_finalize(
             pd.concat(truths).drop_duplicates(self.task_spec.id_column),
@@ -625,10 +649,25 @@ class UniversalRunner:
                     predictions[col] = json.loads(selected[col].iloc[0])
             variants[variant] = self._evaluate(merged, predictions)
         aggregate = variants[self.selection_variant]
+        model_name = self.cfg.get("model", {}).get("name", "baseline")
+        model_family = self.cfg.get("model", {}).get("family")
+        if not model_family:
+            m_lower = str(model_name).lower()
+            if any(k in m_lower for k in ["lightgbm", "lgbm", "xgboost", "xgb", "catboost"]):
+                model_family = "gbdt"
+            elif any(k in m_lower for k in ["roberta", "deberta", "bert"]):
+                model_family = "transformer"
+            elif any(k in m_lower for k in ["llm", "llama", "qwen"]):
+                model_family = "llm"
+            else:
+                model_family = self.cfg.get("task", {}).get("model_family") or "linear"
+
         result = {
             "schema_version": 2,
             "experiment_id": self.exp_id,
             "selection_variant": self.selection_variant,
+            "model": model_name,
+            "model_family": model_family,
             **aggregate,
             "variants": variants,
             "fold_metrics": details,
@@ -639,7 +678,11 @@ class UniversalRunner:
             or [
                 {
                     "input_variant": d["input_variant"],
-                    "dev_fold": d["dev_fold"],
+                    "dev_fold": (
+                        int(d["dev_fold"])
+                        if isinstance(d["dev_fold"], (int, np.integer))
+                        else d["dev_fold"]
+                    ),
                     "primary_score": d["primary_score"],
                 }
                 for d in details

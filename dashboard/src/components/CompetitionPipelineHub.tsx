@@ -484,10 +484,10 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               </div>
             </div>
 
-            {/* Card 3: Validation Split (CV) */}
+            {/* Card 3: Validation Split */}
             <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-zinc-200">3. Validation Split (CV)</span>
+                <span className="text-xs font-semibold text-zinc-200">3. Validation Split</span>
                 <button
                   type="button"
                   onClick={() => onOpenTaskConfig('cv')}

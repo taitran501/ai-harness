@@ -9,7 +9,12 @@ from .competition_state import CompetitionStateMachine, CompetitionState
 from .agent_bridge import AgentBridge
 from .ensemble_guard import EnsembleGuard
 from .submission_manager import SubmissionManager
-from .io_utils import atomic_write_json, atomic_write_text
+from .io_utils import (
+    atomic_write_json,
+    atomic_write_text,
+    json_default_serializer,
+    sanitize_for_json,
+)
 
 __all__ = [
     "Node",
@@ -22,4 +27,6 @@ __all__ = [
     "SubmissionManager",
     "atomic_write_json",
     "atomic_write_text",
+    "json_default_serializer",
+    "sanitize_for_json",
 ]

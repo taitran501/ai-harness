@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
-from typing import Any
+from typing import Any, Callable, Optional
 
 
 def atomic_write_text(
@@ -42,15 +42,194 @@ def atomic_write_text(
         raise
 
 
+def json_default_serializer(obj: Any) -> Any:
+    """Fallback serializer handling NumPy types, Path objects, and common non-JSON types."""
+    import pathlib
+    if isinstance(obj, (pathlib.Path, pathlib.PurePath)):
+        return str(obj)
+
+    try:
+        import numpy as np
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+    except ImportError:
+        pass
+
+    if hasattr(obj, "item") and callable(obj.item):
+        try:
+            return obj.item()
+        except Exception:
+            pass
+
+    if hasattr(obj, "tolist") and callable(obj.tolist):
+        try:
+            return obj.tolist()
+        except Exception:
+            pass
+
+    import datetime
+    if isinstance(obj, (datetime.date, datetime.datetime)):
+        return obj.isoformat()
+
+    if isinstance(obj, (set, frozenset)):
+        return list(obj)
+
+    import dataclasses
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return dataclasses.asdict(obj)
+
+    if hasattr(obj, "to_dict") and callable(obj.to_dict):
+        try:
+            return obj.to_dict()
+        except Exception:
+            pass
+
+    import uuid
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.decode("utf-8", errors="replace")
+
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+def sanitize_for_json(obj: Any, seen: Optional[set[int]] = None) -> Any:
+    """Recursively convert NumPy scalars/arrays, Paths, and dict keys to JSON-compatible types."""
+    import pathlib
+
+    if seen is None:
+        seen = set()
+
+    obj_id = id(obj)
+    if isinstance(obj, (dict, list, tuple, set, frozenset)):
+        if obj_id in seen:
+            raise ValueError("Circular reference detected")
+        seen.add(obj_id)
+
+    try:
+        if isinstance(obj, (pathlib.Path, pathlib.PurePath)):
+            return str(obj)
+
+        try:
+            import numpy as np
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            if isinstance(obj, np.bool_):
+                return bool(obj)
+            if isinstance(obj, np.ndarray):
+                return [sanitize_for_json(x, seen) for x in obj.tolist()]
+        except ImportError:
+            pass
+
+        if hasattr(obj, "item") and callable(obj.item):
+            try:
+                return sanitize_for_json(obj.item(), seen)
+            except Exception:
+                pass
+
+        if hasattr(obj, "tolist") and callable(obj.tolist):
+            try:
+                return [sanitize_for_json(x, seen) for x in obj.tolist()]
+            except Exception:
+                pass
+
+        if isinstance(obj, dict):
+            clean_dict = {}
+            for k, v in obj.items():
+                if isinstance(k, (pathlib.Path, pathlib.PurePath)):
+                    clean_k = str(k)
+                elif hasattr(k, "item") and callable(k.item):
+                    try:
+                        clean_k = k.item()
+                    except Exception:
+                        clean_k = str(k)
+                elif not isinstance(k, (str, int, float, bool, type(None))):
+                    clean_k = str(k)
+                else:
+                    clean_k = k
+
+                if not isinstance(clean_k, (str, int, float, bool, type(None))):
+                    clean_k = str(clean_k)
+
+                clean_dict[clean_k] = sanitize_for_json(v, seen)
+            return clean_dict
+
+        if isinstance(obj, (list, tuple)):
+            return [sanitize_for_json(x, seen) for x in obj]
+
+        if isinstance(obj, (set, frozenset)):
+            return [sanitize_for_json(x, seen) for x in obj]
+
+        import datetime
+        if isinstance(obj, (datetime.date, datetime.datetime)):
+            return obj.isoformat()
+
+        import dataclasses
+        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+            return sanitize_for_json(dataclasses.asdict(obj), seen)
+
+        if hasattr(obj, "to_dict") and callable(obj.to_dict):
+            try:
+                return sanitize_for_json(obj.to_dict(), seen)
+            except Exception:
+                pass
+
+        import uuid
+        if isinstance(obj, uuid.UUID):
+            return str(obj)
+
+        if isinstance(obj, (bytes, bytearray)):
+            return obj.decode("utf-8", errors="replace")
+
+        return obj
+    finally:
+        if isinstance(obj, (dict, list, tuple, set, frozenset)):
+            seen.remove(obj_id)
+
+
 def atomic_write_json(
     path: Path | str,
     data: Any,
     indent: int = 2,
     ensure_ascii: bool = False,
     encoding: str = "utf-8",
+    default: Optional[Callable[[Any], Any]] = None,
 ) -> None:
-    """Atomically serialize data to a JSON file on disk."""
-    dumped = json.dumps(data, indent=indent, ensure_ascii=ensure_ascii)
+    """Atomically serialize data to a JSON file on disk with fallback serialization."""
+    def _fallback(o: Any) -> Any:
+        if default is not None:
+            try:
+                return default(o)
+            except Exception:
+                pass
+        return json_default_serializer(o)
+
+    try:
+        dumped = json.dumps(
+            data,
+            indent=indent,
+            ensure_ascii=ensure_ascii,
+            default=_fallback,
+        )
+    except TypeError:
+        # Handles non-primitive dict keys (e.g. np.int64 or Path keys) that bypass default serializer
+        clean_data = sanitize_for_json(data)
+        dumped = json.dumps(
+            clean_data,
+            indent=indent,
+            ensure_ascii=ensure_ascii,
+            default=_fallback,
+        )
+
     atomic_write_text(path, dumped, encoding=encoding)
 
 

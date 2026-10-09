@@ -1233,11 +1233,12 @@ class AgentBridge:
                 dataset_dir = params.get("dataset_dir", "dataset")
                 context_file = params.get("context_file", "docs/TASK.md")
                 output_config = params.get("output_config", "configs/task.yaml")
+                proj_root = params.get("project_root") or self.project_root
                 res = bootstrap_competition_task(
                     dataset_dir=dataset_dir,
                     context_file=context_file,
                     output_config=output_config,
-                    project_root=self.project_root,
+                    project_root=proj_root,
                 )
                 self._refresh_task_context()
                 self.comp_state.state["gates"]["spec_confirmed"] = False

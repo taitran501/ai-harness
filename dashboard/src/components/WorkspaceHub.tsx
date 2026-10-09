@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { api } from '../services/api';
+import { useLanguage } from '../constants/i18n';
 
 type ProviderStatus = {
   provider: 'kaggle' | 'modal';
@@ -17,6 +19,7 @@ type ProviderStatus = {
 const prettyStatus = (value?: string) => (value || 'UNKNOWN').replace(/_/g, ' ');
 
 export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({ onOpenEnvironmentModal }) => {
+  const { t } = useLanguage();
   const [phaseState, setPhaseState] = useState<any>(null);
   const [selectedPhase, setSelectedPhase] = useState<string>('');
   const [phasePrompt, setPhasePrompt] = useState('');
@@ -29,10 +32,18 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
   const [uploadChecks, setUploadChecks] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [notice, setNotice] = useState('');
+  const dismissedErrorRef = useRef<string | null>(null);
+  dismissedErrorRef.current = dismissedError;
 
-  const refresh = useCallback(async () => {
-    setError('');
+  const refresh = useCallback(async (isManual = false) => {
+    if (isManual) {
+      setError('');
+      setDismissedError(null);
+    }
     const results = await Promise.allSettled([
       api.getPhases(),
       api.getLatestEda(),
@@ -46,25 +57,49 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
         if (current && state.phases?.some((phase: any) => phase.id === current)) return current;
         return state.next_phase || state.phases?.find((phase: any) => phase.can_revisit)?.id || '';
       });
+      if (isManual) setError('');
     } else {
-      setError(phaseResult.reason?.message || 'Could not read the prompt pack. Run `ml-harness phase init` in this workspace.');
+      const msg = phaseResult.reason?.message || 'Could not read the prompt pack. Run `ml-harness phase init` in this workspace.';
+      if (isManual || dismissedErrorRef.current !== msg) {
+        setError(msg);
+      }
     }
     if (edaResult.status === 'fulfilled') setEda(edaResult.value?.report ?? edaResult.value);
     if (jobsResult.status === 'fulfilled') setJobs(jobsResult.value.jobs || []);
   }, []);
 
-  const refreshProviders = useCallback(async () => {
+  const refreshProviders = useCallback(async (isManual = false) => {
     try {
       setCloudState(await api.getCloudStatus());
+      if (isManual && !error) setError('');
     } catch (reason: any) {
-      setError(reason?.message || 'Could not inspect Kaggle and Modal account status.');
+      const msg = reason?.message || 'Could not inspect Kaggle and Modal account status.';
+      if (isManual || dismissedErrorRef.current !== msg) {
+        setError(msg);
+      }
     }
-  }, []);
+  }, [error]);
+
+  const handleManualRetry = async () => {
+    setIsRetrying(true);
+    try {
+      await Promise.allSettled([refresh(true), refreshProviders(true)]);
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
+  const handleDismissError = () => {
+    setDismissedError(error);
+    setError('');
+  };
 
   useEffect(() => {
     refresh();
     refreshProviders();
-    const timer = window.setInterval(refresh, 10000);
+    const timer = window.setInterval(() => {
+      refresh(false);
+    }, 10000);
     return () => window.clearInterval(timer);
   }, [refresh, refreshProviders]);
 
@@ -158,30 +193,71 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-lg font-bold text-white">Agent workspace</h2>
+            <h2 className="text-lg font-bold text-white">{t('wshub_title', 'Agent workspace')}</h2>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-400">
-              Prompts and phase history stay in this task workspace. Copy a phase prompt into your IDE agent,
-              then save its response and the sources or artifacts it actually used.
+              {t('wshub_desc', 'Prompts and phase history stay in this task workspace. Copy a phase prompt into your IDE agent, then save its response and the sources or artifacts it actually used.')}
             </p>
           </div>
-          <button onClick={async () => { await refresh(); await refreshProviders(); }} className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">
-            Refresh workspace state
+          <button onClick={handleManualRetry} disabled={isRetrying} className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 transition flex items-center gap-1.5">
+            <RefreshCw className={`w-3.5 h-3.5 ${isRetrying ? 'animate-spin' : ''}`} />
+            <span>{t('wshub_refresh_btn', 'Refresh workspace state')}</span>
           </button>
         </div>
         {phaseState && (
           <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-zinc-400">
-            <span className="rounded bg-zinc-950 px-2 py-1">Prompt pack: <code>{phaseState.pack}</code></span>
-            <span className="rounded bg-zinc-950 px-2 py-1">Next phase: <strong className="text-zinc-200">{phaseState.next_phase || 'initial phases complete'}</strong></span>
-            <span className="rounded bg-zinc-950 px-2 py-1">Evidence: <code>{String(phaseState.current_evidence_revision || '').slice(0, 12)}</code></span>
+            <span className="rounded bg-zinc-950 px-2 py-1">{t('wshub_prompt_pack', 'Prompt pack:')} <code>{phaseState.pack}</code></span>
+            <span className="rounded bg-zinc-950 px-2 py-1">{t('wshub_next_phase', 'Next phase:')} <strong className="text-zinc-200">{phaseState.next_phase || 'initial phases complete'}</strong></span>
+            <span className="rounded bg-zinc-950 px-2 py-1">{t('wshub_evidence', 'Evidence:')} <code>{String(phaseState.current_evidence_revision || '').slice(0, 12)}</code></span>
           </div>
         )}
-        {error && <p role="alert" className="mt-3 rounded border border-red-900 bg-red-950/40 p-3 text-xs text-red-300">{error}</p>}
+        {error && (
+          <div role="alert" className="mt-3 rounded-xl border border-red-900/70 bg-red-950/40 p-3.5 text-xs text-red-200 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span className="font-semibold text-red-100">
+                  {t('err_service_notice_title', 'Workspace Service Notice')}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleManualRetry}
+                  disabled={isRetrying}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-red-900/60 hover:bg-red-800 text-red-100 rounded-md text-[11px] font-semibold transition disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isRetrying ? 'animate-spin' : ''}`} />
+                  <span>{t('btn_retry', 'Retry')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowErrorDetails(!showErrorDetails)}
+                  className="px-2 py-1 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 rounded-md text-[11px] transition border border-zinc-800"
+                >
+                  {showErrorDetails ? t('btn_hide_details', 'Hide') : t('btn_details', 'Details')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDismissError}
+                  className="px-2 py-1 text-zinc-400 hover:text-zinc-200 transition text-[11px]"
+                >
+                  {t('btn_dismiss', 'Dismiss')}
+                </button>
+              </div>
+            </div>
+            {showErrorDetails && (
+              <div className="p-2.5 bg-black/50 rounded-lg font-mono text-[11px] text-red-300 whitespace-pre-wrap break-all border border-red-950">
+                {error}
+              </div>
+            )}
+          </div>
+        )}
         {notice && <p role="status" className="mt-3 rounded border border-emerald-900 bg-emerald-950/30 p-3 text-xs text-emerald-300">{notice}</p>}
       </section>
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(250px,0.8fr)_minmax(0,1.6fr)]">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
-          <h3 className="text-sm font-bold text-white">Eight competition phases</h3>
+          <h3 className="text-sm font-bold text-white">{t('wshub_eight_phases', 'Eight competition phases')}</h3>
           <div className="mt-3 space-y-2">
             {(phaseState?.phases || []).map((phase: any, index: number) => {
               const selectable = !phase.completed || phase.can_revisit;
@@ -221,7 +297,7 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
               <p className="mt-1 text-[11px] text-zinc-500">Edit prompt files in the workspace and version them with Git.</p>
             </div>
             <button disabled={!phasePrompt} onClick={copyPrompt} className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">
-              Copy prompt for IDE agent
+              {t('wshub_copy_prompt_btn', 'Copy prompt for IDE agent')}
             </button>
           </div>
           <textarea
@@ -233,20 +309,20 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
           />
           <div className="grid grid-cols-1 gap-3">
             <label className="text-xs text-zinc-400">
-              Agent response
-              <textarea value={phaseResponse} onChange={(event) => setPhaseResponse(event.target.value)} className="mt-1 h-40 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200 outline-none focus:border-indigo-600" placeholder="Paste the IDE agent's phase response here. The saved output is checked against the phase contract." />
+              {t('wshub_agent_response', 'Agent response')}
+              <textarea value={phaseResponse} onChange={(event) => setPhaseResponse(event.target.value)} className="mt-1 h-40 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200 outline-none focus:border-indigo-600" placeholder={t('wshub_agent_response_ph', "Paste the IDE agent's phase response here. The saved output is checked against the phase contract.")} />
             </label>
             <label className="text-xs text-zinc-400">
-              Sources actually inspected (JSON array)
+              {t('wshub_sources_inspected', 'Sources actually inspected (JSON array)')}
               <textarea value={sourceJson} onChange={(event) => setSourceJson(event.target.value)} className="mt-1 h-20 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] text-zinc-200 outline-none focus:border-indigo-600" placeholder={'[{"url":"https://...","title":"..."}]'} />
             </label>
             <label className="text-xs text-zinc-400">
-              Workspace artifact paths (one per line)
+              {t('wshub_artifact_paths', 'Workspace artifact paths (one per line)')}
               <textarea value={artifactText} onChange={(event) => setArtifactText(event.target.value)} className="mt-1 h-16 w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] text-zinc-200 outline-none focus:border-indigo-600" placeholder="artifacts/exp001/DIAGNOSTICS.md" />
             </label>
             <div className="flex justify-end">
               <button disabled={!selectedPhase || !phaseResponse.trim() || busy === 'phase' || Boolean(selectedPhaseData?.record_blocked_reason)} onClick={savePhaseResponse} className="rounded-md bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-40">
-                {busy === 'phase' ? 'Saving…' : 'Save phase output'}
+                {busy === 'phase' ? t('wshub_saving', 'Saving…') : t('wshub_save_output_btn', 'Save phase output')}
               </button>
             </div>
           </div>
@@ -257,11 +333,11 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-white">Exploratory data analysis</h3>
-              <p className="mt-1 text-xs text-zinc-400">Profiles declared training data locally. Reports omit raw rows and are saved under this task's artifact tree.</p>
+              <h3 className="text-sm font-bold text-white">{t('wshub_eda_title', 'Exploratory data analysis')}</h3>
+              <p className="mt-1 text-xs text-zinc-400">{t('wshub_eda_desc', "Profiles declared training data locally. Reports omit raw rows and are saved under this task's artifact tree.")}</p>
             </div>
             <button onClick={runEda} disabled={busy === 'eda'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">
-              {busy === 'eda' ? 'Running…' : 'Run EDA'}
+              {busy === 'eda' ? 'Running…' : t('wshub_run_eda_btn', 'Run EDA')}
             </button>
           </div>
           {eda?.paths && <p className="mt-3 break-all text-[10px] text-zinc-500">Latest report: {eda.paths.markdown || eda.paths.json}</p>}
@@ -288,10 +364,10 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-white">Kaggle and Modal accounts</h3>
-              <p className="mt-1 text-xs text-zinc-400">The harness reads official CLI profiles and credentials. Provider quotas and charges depend on the account.</p>
+              <h3 className="text-sm font-bold text-white">{t('wshub_accounts_title', 'Kaggle and Modal accounts')}</h3>
+              <p className="mt-1 text-xs text-zinc-400">{t('wshub_accounts_desc', 'The harness reads official CLI profiles and credentials. Provider quotas and charges depend on the account.')}</p>
             </div>
-            <button onClick={onOpenEnvironmentModal} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">Account setup</button>
+            <button onClick={onOpenEnvironmentModal} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800">{t('wshub_account_setup_btn', 'Account setup')}</button>
           </div>
           <div className="mt-4 space-y-3">
             {providers.map((provider) => {
@@ -328,10 +404,10 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
                     <div className="mt-2">
                       <label className="flex items-start gap-2 text-[10px] leading-relaxed text-zinc-400">
                         <input type="checkbox" checked={Boolean(uploadChecks[provider.provider])} onChange={(event) => setUploadChecks((current) => ({ ...current, [provider.provider]: event.target.checked }))} className="mt-0.5 accent-indigo-500" />
-                        I approve uploading these {provider.dataset?.file_count ?? 0} task data files to {provider.provider} for this fingerprint. Keep the upload private.
+                        {t('wshub_upload_consent', 'I approve uploading these {count} task data files to {provider} for this fingerprint. Keep the upload private.', { count: provider.dataset?.file_count ?? 0, provider: provider.provider })}
                       </label>
                       <button disabled={!uploadChecks[provider.provider] || busy === `consent-${provider.provider}`} onClick={() => grantConsent(provider.provider)} className="mt-2 rounded-md border border-zinc-700 px-3 py-1.5 text-[10px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">
-                        {busy === `consent-${provider.provider}` ? 'Saving…' : `Approve ${provider.provider} upload`}
+                        {busy === `consent-${provider.provider}` ? t('wshub_saving', 'Saving…') : t('wshub_approve_upload_btn', 'Approve {provider} upload', { provider: provider.provider })}
                       </button>
                     </div>
                   )}
@@ -346,14 +422,23 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-bold text-white">Execution jobs</h3>
-            <p className="mt-1 text-xs text-zinc-400">Shared job state from CLI and dashboard. Results remain in this workspace's artifact tree.</p>
+            <h3 className="text-sm font-bold text-white">{t('wshub_jobs_title', 'Execution jobs')}</h3>
+            <p className="mt-1 text-xs text-zinc-400">{t('wshub_jobs_desc', "Shared job state from CLI and dashboard. Results remain in this workspace's artifact tree.")}</p>
           </div>
-          <span className="text-[10px] text-zinc-500">refreshes every 10 seconds</span>
+          <span className="text-[10px] text-zinc-500">{t('wshub_refreshes_interval', 'refreshes every 10 seconds')}</span>
         </div>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[620px] text-left text-xs">
-            <thead className="text-[10px] uppercase text-zinc-500"><tr><th className="py-2 pr-3">Job</th><th className="py-2 pr-3">Provider</th><th className="py-2 pr-3">Experiment</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Metrics</th><th className="py-2">Artifacts</th></tr></thead>
+            <thead className="text-[10px] uppercase text-zinc-500">
+              <tr>
+                <th className="py-2 pr-3">{t('wshub_th_job', 'Job')}</th>
+                <th className="py-2 pr-3">{t('wshub_th_provider', 'Provider')}</th>
+                <th className="py-2 pr-3">{t('wshub_th_exp', 'Experiment')}</th>
+                <th className="py-2 pr-3">{t('wshub_th_status', 'Status')}</th>
+                <th className="py-2 pr-3">{t('wshub_th_metrics', 'Metrics')}</th>
+                <th className="py-2">{t('wshub_th_artifacts', 'Artifacts')}</th>
+              </tr>
+            </thead>
             <tbody>
               {jobs.slice(0, 12).map((job) => (
                 <tr key={job.job_id} className="border-t border-zinc-800 text-zinc-300">
@@ -367,7 +452,7 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
                   <td className="py-2 font-mono text-[10px]">{job.artifact_dir || '—'}{job.error_message && <span className="ml-2 text-red-300">{job.error_message}</span>}</td>
                 </tr>
               ))}
-              {!jobs.length && <tr><td colSpan={6} className="py-4 text-center text-zinc-500">No execution jobs recorded yet.</td></tr>}
+              {!jobs.length && <tr><td colSpan={6} className="py-4 text-center text-zinc-500">{t('wshub_no_jobs', 'No execution jobs recorded yet.')}</td></tr>}
             </tbody>
           </table>
         </div>

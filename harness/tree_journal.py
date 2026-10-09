@@ -177,7 +177,26 @@ class TreeJournal:
             except (ValueError, KeyError, OSError):
                 verified = False
             exp = cfg.get("experiment", {})
+            model_cfg = cfg.get("model", {})
+            task_cfg = cfg.get("task", {})
+            m_name = str(model_cfg.get("name", "") or metrics.get("model", "")).lower()
+            m_fam_raw = (
+                task_cfg.get("model_family")
+                or model_cfg.get("family")
+                or metrics.get("model_family")
+            )
+            if any(k in m_name for k in ["lightgbm", "lgbm", "xgboost", "xgb", "catboost"]):
+                m_fam = "gbdt"
+            elif any(k in m_name for k in ["roberta", "deberta", "bert"]):
+                m_fam = "transformer"
+            elif any(k in m_name for k in ["llm", "llama", "qwen"]):
+                m_fam = "llm"
+            elif m_fam_raw:
+                m_fam = m_fam_raw
+            else:
+                m_fam = "linear"
             node = Node(id=directory.name,parent_id=exp.get("parent_id"),branch=exp.get("branch","baseline"),
+                model_family=m_fam,
                 metrics=metrics if isinstance(metrics,dict) else {"legacy_folds":metrics},
                 primary_metric_name=metrics.get("primary_metric","unknown") if isinstance(metrics,dict) else "unknown",
                 direction=metrics.get("direction","maximize") if isinstance(metrics,dict) else "maximize",
@@ -272,24 +291,38 @@ class TreeJournal:
         for n in self.nodes.values():
             if n.is_buggy:
                 continue
-            if getattr(n, "model_family", None) and n.model_family not in ("other", "linear"):
-                families.add(n.model_family)
+            mf = str(getattr(n, "model_family", "") or "").lower()
+            model_name = str(n.metrics.get("model", "")).lower()
+            node_id = n.id.lower()
+
+            # 1. GBDT Family
+            if mf in ("tree", "gbdt") or any(
+                k in node_id or k in model_name
+                for k in ["lightgbm", "lgbm", "xgboost", "xgb", "catboost", "gbdt"]
+            ):
+                families.add("gbdt")
+            # 2. Transformer / Deep Learning Families
+            elif mf in ("transformer", "dl") or "xlmr" in node_id or "xlm-roberta" in model_name:
+                families.add("xlm_roberta")
+            elif "deberta" in node_id or "deberta" in model_name:
+                families.add("deberta")
+            elif mf in ("llm", "llm_peft") or "llm" in node_id or "llama" in model_name:
+                families.add("llm_generative")
+            # 3. Linear / Sparse TF-IDF Family
+            elif (
+                mf == "linear"
+                or "tfidf" in node_id
+                or "tfidf" in model_name
+                or "ridge" in model_name
+                or "logistic" in model_name
+                or "logreg" in model_name
+                or "baseline" in node_id
+            ):
+                families.add("sparse_tfidf")
+            elif mf and mf not in ("other", "linear"):
+                families.add(mf)
             else:
-                model_name = n.metrics.get("model", "")
-                if "tfidf" in n.id.lower() or "tfidf" in model_name.lower():
-                    families.add("sparse_tfidf")
-                elif "baseline" in n.id.lower() and ("linear" in model_name.lower() or "logreg" in model_name.lower() or "tfidf" in model_name.lower()):
-                    families.add("sparse_tfidf")
-                elif "xlmr" in n.id.lower() or "xlm-roberta" in model_name.lower():
-                    families.add("xlm_roberta")
-                elif "deberta" in n.id.lower() or "deberta" in model_name.lower():
-                    families.add("deberta")
-                elif "llm" in n.id.lower() or "llama" in model_name.lower():
-                    families.add("llm_generative")
-                elif getattr(n, "model_family", None):
-                    families.add(n.model_family)
-                else:
-                    families.add(f"custom_{n.id}")
+                families.add(f"custom_{n.id}")
         return len(families)
 
     def generate_compact_summary(self, max_nodes: int = 15) -> str:
