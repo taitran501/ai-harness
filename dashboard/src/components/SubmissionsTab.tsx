@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { SubmissionEntry, TaskInfo } from '../types/experiment';
 import { api } from '../services/api';
+import { useLanguage } from '../constants/i18n';
 
 interface SubmissionsTabProps {
   submissions: SubmissionEntry[];
@@ -28,6 +29,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
   onRefresh,
   onSelectExperiment,
 }) => {
+  const { t } = useLanguage();
   const [selectedSubForScore, setSelectedSubForScore] = useState<SubmissionEntry | null>(null);
   const [submittingScore, setSubmittingScore] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -207,21 +209,22 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
       {/* Compact Stats Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-zinc-900/50 border border-zinc-800/80 px-3.5 py-2 rounded-lg text-xs">
         <div className="flex items-center gap-4 text-zinc-400 font-mono text-[11px]">
-          <span>Registered: <strong className="text-zinc-100">{totalSubs}</strong></span>
-          <span>Scored: <strong className="text-zinc-100">{scoredSubs}</strong></span>
-          <span>Verified Packages: <strong className="text-zinc-100">{submissions.filter((s) => s.archive_path).length}</strong></span>
+          <span>{t('sub_stat_registered', 'Registered:')} <strong className="text-zinc-100">{totalSubs}</strong></span>
+          <span>{t('sub_stat_scored', 'Scored:')} <strong className="text-zinc-100">{scoredSubs}</strong></span>
+          <span>{t('sub_stat_verified_pkg', 'Verified Packages:')} <strong className="text-zinc-100">{submissions.filter((s) => s.archive_path).length}</strong></span>
         </div>
         {divergenceCount > 0 ? (
-          <div className="flex items-center gap-1.5 text-rose-400 text-xs font-medium">
+          <div className="flex items-center gap-1.5 text-rose-400 text-xs font-medium" title={t('sub_divergence_alert', 'Divergence Warning: CV improved while External score dropped. Investigate potential leakage or split distribution mismatch.')}>
             <AlertTriangle className="w-3.5 h-3.5" />
-            <span>{divergenceCount} Divergence Alert (LB drops below CV)</span>
+            <span>{t('sub_stat_divergence_alert', '{count} Divergence Alert (LB drops below CV)', { count: divergenceCount })}</span>
           </div>
         ) : (
           <div className="text-zinc-500 font-mono text-[11px]">
-            CV & LB aligned
+            {t('sub_stat_aligned', 'CV & LB aligned')}
           </div>
         )}
       </div>
+
 
       {/* Main Submissions Table */}
       <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-4 shadow-xl space-y-3">
@@ -230,11 +233,11 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
             <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
               <Award className="w-4 h-4 text-zinc-400" />
               <span>
-                {taskInfo?.platform ? `${taskInfo.platform.toUpperCase()} Submissions` : 'Submissions'}
+                {t('sub_title', 'Submissions & Audit Gate History')}
               </span>
             </h2>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Verified submission packages, cross-validation scores, and official leaderboard results.
+              {t('sub_desc', 'Deterministic audit gate tracking, public/private score reconciliation, and CV-LB divergence alerts.')}
             </p>
           </div>
 
@@ -243,14 +246,14 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
             className="flex items-center gap-1.5 bg-zinc-100 hover:bg-white active:scale-95 text-zinc-950 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition"
           >
             <PlusCircle className="w-3.5 h-3.5" />
-            <span>Build / Register Submission</span>
+            <span>{t('sub_btn_register', '+ Package New Submission')}</span>
           </button>
         </div>
 
         {submissions.length === 0 ? (
           <div className="p-8 text-center space-y-3">
             <FileArchive className="w-10 h-10 text-slate-600 mx-auto" />
-            <h3 className="text-sm font-semibold text-slate-300">No Submissions Registered Yet</h3>
+            <h3 className="text-sm font-semibold text-slate-300">{t('sub_no_submissions', 'No submissions recorded yet.')}</h3>
             <p className="text-xs text-slate-400 max-w-lg mx-auto leading-relaxed">
               {isCustomTaskPlugin
                 ? pluginCanSubmit
@@ -271,14 +274,14 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[10px]">
-                  <th className="py-3 px-3">Submission ID</th>
-                  <th className="py-3 px-3">Exp ID</th>
-                  <th className="py-3 px-3">Status</th>
-                  <th className="py-3 px-3 text-right">Local CV ({taskInfo?.primary_metric || 'Metric'})</th>
-                  <th className="py-3 px-3 text-right">Remote LB ({taskInfo?.primary_metric || 'Metric'})</th>
-                  <th className="py-3 px-3 text-right">Delta (Δ LB - CV)</th>
-                  <th className="py-3 px-3">Validation Receipt</th>
-                  <th className="py-3 px-3 text-right">Action</th>
+                  <th className="py-3 px-3">{t('sub_th_id', 'Submission ID')}</th>
+                  <th className="py-3 px-3">{t('sub_th_exp', 'Experiment')}</th>
+                  <th className="py-3 px-3">{t('sub_th_status', 'Audit Status')}</th>
+                  <th className="py-3 px-3 text-right">{t('sub_th_cv', 'CV Score')} ({taskInfo?.primary_metric || 'Metric'})</th>
+                  <th className="py-3 px-3 text-right">{t('sub_th_lb', 'External Score')} ({taskInfo?.primary_metric || 'Metric'})</th>
+                  <th className="py-3 px-3 text-right">{t('sub_th_divergence', 'CV-LB Gap')}</th>
+                  <th className="py-3 px-3">{t('sub_th_date', 'Timestamp')}</th>
+                  <th className="py-3 px-3 text-right">{t('sub_th_actions', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono">
@@ -297,7 +300,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                       <td className="py-3.5 px-3 font-semibold text-slate-200">
                         <div className="flex items-center gap-1.5">
                           {sub.divergence_warning && (
-                            <span title="Divergence Alert: LB drop > 0.05">
+                            <span title={t('sub_divergence_tooltip', 'Divergence Alert: LB drop > 0.05')}>
                               <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
                             </span>
                           )}
@@ -320,11 +323,11 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                       <td className="py-3.5 px-3">
                         {sub.status === 'SCORED' ? (
                           <span className="bg-indigo-900/60 text-indigo-300 border border-indigo-700/50 px-2 py-0.5 rounded text-[10px] font-semibold">
-                            SCORED ({sub.official_scores?.split_type || 'public'})
+                            {t('sub_status_scored', 'SCORED')} ({sub.official_scores?.split_type || 'public'})
                           </span>
                         ) : (
                           <span className="bg-emerald-900/60 text-emerald-300 border border-emerald-700/50 px-2 py-0.5 rounded text-[10px] font-semibold">
-                            LOCAL_VERIFIED
+                            {t('sub_status_local_verified', 'LOCAL_VERIFIED')}
                           </span>
                         )}
                       </td>
@@ -340,7 +343,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                           renderScoreSet(sub.official_scores)
                         ) : (
                           <span className="text-slate-500 font-sans italic text-[11px]">
-                            Pending Remote
+                            {t('sub_pending_remote', 'Pending Remote')}
                           </span>
                         )}
                       </td>
@@ -369,7 +372,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
 
                       {/* Receipt from the active submission validator */}
                       <td className="py-3.5 px-3 text-slate-400 font-sans text-[11px]">
-                        <span className="font-mono text-emerald-400">✓ Verified</span>
+                        <span className="font-mono text-emerald-400">{t('sub_status_verified', '✓ Verified')}</span>
                         {sub.notes && (
                           <div className="text-slate-500 text-[10px] truncate max-w-[180px]">
                             {sub.notes}
@@ -383,7 +386,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                           onClick={() => openScoreModal(sub)}
                           className="bg-indigo-600/80 hover:bg-indigo-600 active:scale-95 text-white px-2.5 py-1 rounded text-[11px] font-sans font-medium transition shadow-sm"
                         >
-                          {sub.status === 'SCORED' ? 'Update Score' : 'Record LB Score'}
+                          {t('sub_btn_record_score', 'Record Score')}
                         </button>
                       </td>
                     </tr>
@@ -401,7 +404,10 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                <h3 className="text-sm font-bold text-white">Record Remote / Leaderboard Score</h3>
+                <h3 className="text-sm font-bold text-white">{t('sub_modal_score_title', 'Record Remote / Leaderboard Score')}</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {t('sub_modal_score_desc', 'Enter verified evaluation score from competition leaderboard.')}
+                </p>
                 <p className="text-xs text-slate-400 font-mono mt-0.5">
                   {selectedSubForScore.id}
                 </p>
@@ -482,19 +488,19 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
               )}
 
               <div>
-                <label className="block text-slate-400 font-medium mb-1">Split Type</label>
+                <label className="block text-slate-400 font-medium mb-1">{t('sub_modal_split_type', 'Split Type')}</label>
                 <select
                   value={splitType}
                   onChange={(e) => setSplitType(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="public">Public Leaderboard</option>
-                  <option value="private">Private Test Leaderboard</option>
+                  <option value="public">{t('sub_modal_split_public', 'Public Leaderboard')}</option>
+                  <option value="private">{t('sub_modal_split_private', 'Private Test Leaderboard')}</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-slate-400 font-medium mb-1">Evaluation Notes / Run ID</label>
+                <label className="block text-slate-400 font-medium mb-1">{t('sub_modal_eval_notes', 'Evaluation Notes / Run ID')}</label>
                 <input
                   type="text"
                   placeholder={`e.g. ${taskInfo?.platform || 'competition'} submission ID`}
@@ -510,14 +516,15 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                   onClick={closeScoreModal}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
                 >
-                  Cancel
+                  {t('btn_cancel', 'Cancel')}
                 </button>
+
                 <button
                   type="submit"
                   disabled={submittingScore}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-medium rounded-lg transition shadow-lg shadow-indigo-600/30 disabled:opacity-50"
                 >
-                  {submittingScore ? 'Saving...' : 'Save Official Score'}
+                  {submittingScore ? t('status_saving', 'Saving...') : t('btn_save', 'Save')}
                 </button>
               </div>
             </form>
@@ -533,7 +540,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Award className="w-4 h-4 text-indigo-400" />
-                  <span>{isCustomTaskPlugin ? 'Build & Validate Submission' : 'Register Submission'}</span>
+                  <span>{isCustomTaskPlugin ? t('sub_modal_btn_build_validate', 'Build & Validate Submission') : t('sub_modal_reg_title', 'Package & Audit New Submission')}</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {isCustomTaskPlugin
@@ -571,7 +578,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
             <form onSubmit={handleRegisterSubmission} className="space-y-3.5 text-xs">
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Experiment ID <span className="text-rose-400">*</span>
+                  {t('sub_modal_reg_exp_label', 'Source Experiment ID:')} <span className="text-rose-400">*</span>
                 </label>
                 <input
                   type="text"
@@ -591,7 +598,7 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Candidate Predictions CSV Path
+                  {t('sub_modal_reg_csv_label', 'Test Set Predictions CSV:')}
                 </label>
                 <input
                   type="text"
@@ -602,14 +609,14 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                 />
                 <p className="text-[10px] text-slate-500 mt-0.5">
                   {isCustomTaskPlugin
-                    ? 'Use test-set predictions; validation OOF files are not accepted as submissions.'
-                    : <>Leave blank to auto-detect <code className="text-slate-400">{artifactDir}/{regExpId || '&lt;exp_id&gt;'}/oof_predictions.csv</code></>}
+                    ? t('sub_modal_test_preds_hint', 'Use test-set predictions; validation OOF files are not accepted as submissions.')
+                    : <>{t('sub_modal_autodetect_hint', 'Leave blank to auto-detect')} <code className="text-slate-400">{artifactDir}/{regExpId || '&lt;exp_id&gt;'}/oof_predictions.csv</code></>}
                 </p>
               </div>
 
               {!isCustomTaskPlugin && <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Parent Baseline CSV Path (for prediction delta check)
+                  {t('sub_modal_reg_baseline_label', 'Baseline CSV for Diff Check (optional):')}
                 </label>
                 <input
                   type="text"
@@ -619,14 +626,14 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                 />
                 <p className="text-[10px] text-slate-500 mt-0.5">
-                  Optional. If omitted, candidate is registered as the initial baseline package.
+                  {t('sub_modal_baseline_optional_hint', 'Optional. If omitted, candidate is registered as the initial baseline package.')}
                 </p>
               </div>}
 
               {!isCustomTaskPlugin && <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
-                    Min Prediction Delta (%)
+                    {t('sub_modal_reg_min_diff_label', 'Minimum Required Diff (%):')}
                   </label>
                   <input
                     type="number"
@@ -637,26 +644,26 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                   />
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    Uses the configured prediction-difference threshold.
+                    {t('sub_modal_diff_threshold_hint', 'Uses the configured prediction-difference threshold.')}
                   </p>
                 </div>
 
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
-                    Target Platform
+                    {t('sub_modal_target_platform', 'Target Platform')}
                   </label>
                   <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-300 font-mono">
                     {taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Not configured'}
                   </div>
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    From Task Config.
+                    {t('sub_modal_from_task_config', 'From Task Config.')}
                   </p>
                 </div>
               </div>}
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Submission Notes / Rationale
+                  {t('sub_modal_reg_notes_label', 'Submission Notes:')}
                 </label>
                 <input
                   type="text"
@@ -673,17 +680,18 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
                   onClick={() => setIsRegisterModalOpen(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
                 >
-                  Cancel
+                  {t('btn_cancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={registering || (isCustomTaskPlugin && !pluginCanSubmit)}
                   className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold rounded-lg transition shadow-lg shadow-indigo-600/30 disabled:opacity-50"
                 >
-                  {registering ? 'Building & Validating...' : isCustomTaskPlugin ? 'Build & Validate Submission' : 'Verify Audit & Register'}
+                  {registering ? t('sub_modal_btn_building', 'Building & Validating...') : isCustomTaskPlugin ? t('sub_modal_btn_build_validate', 'Build & Validate Submission') : t('sub_modal_btn_build', 'Run Audit & Build Package')}
                 </button>
               </div>
             </form>
+
           </div>
         </div>
       )}

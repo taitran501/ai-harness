@@ -15,6 +15,7 @@ import dagre from 'dagre';
 import { ArrowDown, ArrowRight, RefreshCw, GitBranch } from 'lucide-react';
 import { CustomExperimentNode } from './CustomExperimentNode';
 import { TreeGraphResponse, GraphNode, GraphEdge, UCBRecommendation } from '../types/experiment';
+import { useLanguage } from '../constants/i18n';
 
 interface TreeCanvasProps {
   graphData: TreeGraphResponse;
@@ -125,6 +126,7 @@ function getLayoutedElements(
 }
 
 const FlowInner: React.FC<TreeCanvasProps> = ({ graphData, onSelectNode, selectedNodeId, recommendation }) => {
+  const { t } = useLanguage();
   const [direction, setDirection] = useState<'TB' | 'LR'>('TB');
   const { fitView } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
@@ -217,7 +219,7 @@ const FlowInner: React.FC<TreeCanvasProps> = ({ graphData, onSelectNode, selecte
         <div className="flex items-center gap-1 pointer-events-auto bg-zinc-900/90 backdrop-blur-sm border border-zinc-800 p-0.5 rounded-lg text-xs">
           <button
             type="button"
-            title="Top-Down layout"
+            title={t('tree_tb_tooltip', 'Top-Down layout')}
             onClick={() => handleToggleDirection('TB')}
             className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition ${
               direction === 'TB'
@@ -226,11 +228,11 @@ const FlowInner: React.FC<TreeCanvasProps> = ({ graphData, onSelectNode, selecte
             }`}
           >
             <ArrowDown className="w-3 h-3" />
-            <span>Top-Down</span>
+            <span>{t('tree_tb', 'Top-Bottom')}</span>
           </button>
           <button
             type="button"
-            title="Left-Right layout"
+            title={t('tree_lr_tooltip', 'Left-Right layout')}
             onClick={() => handleToggleDirection('LR')}
             className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition ${
               direction === 'LR'
@@ -239,20 +241,21 @@ const FlowInner: React.FC<TreeCanvasProps> = ({ graphData, onSelectNode, selecte
             }`}
           >
             <ArrowRight className="w-3 h-3" />
-            <span>Left-Right</span>
+            <span>{t('tree_lr', 'Left-Right')}</span>
           </button>
         </div>
 
         <div className="pointer-events-auto">
           <button
             type="button"
-            title="Fit graph in view"
+            title={t('tree_fit_tooltip', 'Fit graph in view')}
             onClick={handleRecenter}
             className="flex items-center gap-1.5 bg-zinc-900/90 hover:bg-zinc-800 active:scale-95 backdrop-blur-sm border border-zinc-800 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-300 transition"
           >
             <RefreshCw className="w-3 h-3 text-zinc-400" />
-            <span>Recenter</span>
+            <span>{t('tree_recenter', 'Recenter')}</span>
           </button>
+
         </div>
       </div>
 
@@ -260,8 +263,8 @@ const FlowInner: React.FC<TreeCanvasProps> = ({ graphData, onSelectNode, selecte
       {filteredNodes.length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 pointer-events-none z-10 space-y-1.5">
           <GitBranch className="w-7 h-7 opacity-20 text-zinc-400" />
-          <p className="text-xs font-medium text-zinc-400">No experiment nodes in solution tree</p>
-          <p className="text-[11px] text-zinc-600">Run an experiment or click Sync to scan disk artifacts</p>
+          <p className="text-xs font-medium text-zinc-400">{t('tree_empty_title', 'No experiment nodes in solution tree')}</p>
+          <p className="text-[11px] text-zinc-600">{t('tree_empty_desc', 'Run an experiment or click Sync to scan disk artifacts')}</p>
         </div>
       )}
 

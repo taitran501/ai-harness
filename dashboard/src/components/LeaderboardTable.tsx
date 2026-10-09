@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Crown, Search, Filter, Cpu, Layers, AlertTriangle, ArrowUpDown, ChevronDown, ChevronUp } from 'lucide-react';
 import { ExperimentSummary, SubmissionEntry, TaskInfo } from '../types/experiment';
+import { useLanguage } from '../constants/i18n';
 
 interface LeaderboardTableProps {
   experiments: ExperimentSummary[];
@@ -15,6 +16,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
   taskInfo,
   onSelectNode,
 }) => {
+  const { t } = useLanguage();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'score' | 'timestamp' | 'params'>('score');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(taskInfo?.direction === 'minimize' ? 'asc' : 'desc');
@@ -90,14 +92,14 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
           <input
             type="text"
-            placeholder="Search experiments, branches, hypotheses..."
+            placeholder={t('lb_search_ph', 'Search experiments, branches, hypotheses...')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700 transition"
           />
         </div>
         <div className="text-xs text-zinc-500 font-mono">
-          {filtered.length} of {experiments.length} runs
+          {t('lb_runs_count', '{filtered} of {total} runs', { filtered: filtered.length, total: experiments.length })}
         </div>
       </div>
 
@@ -106,32 +108,32 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
         <table className="w-full text-left text-xs border-collapse">
           <thead>
             <tr className="border-b border-zinc-800 text-zinc-400 uppercase tracking-wider text-[10px]">
-              <th className="py-2.5 px-3">Experiment</th>
-              <th className="py-2.5 px-3">Branch</th>
-              <th className="py-2.5 px-3">Parent</th>
+              <th className="py-2.5 px-3" title={t('lb_th_rank', 'Rank')}>{t('lb_th_exp', 'Experiment')}</th>
+              <th className="py-2.5 px-3">{t('lb_th_approach', 'Branch')}</th>
+              <th className="py-2.5 px-3">{t('lb_th_parent', 'Parent')}</th>
               <th
                 onClick={() => toggleSort('score')}
                 className="py-2.5 px-3 text-right cursor-pointer hover:text-zinc-200 transition"
               >
                 <div className="flex items-center justify-end gap-1 font-semibold text-zinc-300">
-                  {primaryMetricLabel}
+                  {primaryMetricLabel || t('lb_th_cv', 'CV Score')}
                   <ArrowUpDown className="w-3 h-3" />
                 </div>
               </th>
               <th className="py-2.5 px-3 text-right text-zinc-400">
-                Remote LB
+                {t('lb_th_ext', 'Remote LB')}
               </th>
               <th
                 onClick={() => toggleSort('params')}
                 className="py-2.5 px-3 text-right cursor-pointer hover:text-zinc-200 transition"
               >
                 <div className="flex items-center justify-end gap-1">
-                  Params
+                  {t('lb_th_params', 'Params')}
                   <ArrowUpDown className="w-3 h-3" />
                 </div>
               </th>
-              <th className="py-2.5 px-3 min-w-[280px]">Hypothesis & Atomic Intervention</th>
-              <th className="py-2.5 px-3 text-center">Status</th>
+              <th className="py-2.5 px-3 min-w-[280px]">{t('lb_th_hypothesis_intervention', 'Hypothesis & Atomic Intervention')}</th>
+              <th className="py-2.5 px-3 text-center">{t('lb_th_status', 'Status')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800/60 font-mono">
@@ -144,6 +146,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                 <tr
                   key={exp.id}
                   onClick={() => onSelectNode(exp.id)}
+                  title={t('lb_view_in_tree', 'View in Solution Tree →')}
                   className="hover:bg-zinc-900/60 cursor-pointer transition group"
                 >
                   <td className="py-2.5 px-3 font-semibold text-zinc-100 flex items-center gap-1.5">
@@ -177,7 +180,9 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                       )}
                     </div>
                   </td>
-                  <td className="py-2.5 px-3 text-zinc-500">{exp.parent_id}</td>
+                  <td className="py-2.5 px-3 text-zinc-500">
+                    {exp.parent_id === 'ROOT' ? t('lb_root_baseline', 'Official Baseline Anchor') : exp.parent_id}
+                  </td>
                   <td
                     className={`py-2.5 px-3 text-right font-bold ${
                       exp.is_best ? 'text-amber-400 text-xs' : 'text-emerald-400'
@@ -208,7 +213,7 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                         <button
                           onClick={(e) => toggleExpand(exp.id, e)}
                           className="text-slate-400 hover:text-indigo-300 flex-shrink-0 p-0.5"
-                          title={isExpanded ? 'Collapse' : 'Expand full hypothesis'}
+                          title={isExpanded ? t('btn_collapse', 'Collapse') : t('btn_expand_hypothesis', 'Expand full hypothesis')}
                         >
                           {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
@@ -221,15 +226,29 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                         <AlertTriangle className="w-3.5 h-3.5" /> ERR
                       </span>
                     ) : (
-                      <span className={exp.eligible ? "text-emerald-400 text-[11px]" : "text-amber-400 text-[11px]"}>{exp.eligible ? "Verified · eligible" : exp.status === "LEGACY_UNVERIFIED" ? "LEGACY_UNVERIFIED" : "Ineligible"}</span>
+                      <span className={exp.eligible ? "text-emerald-400 text-[11px]" : "text-amber-400 text-[11px]"}>
+                        {exp.eligible
+                          ? t('lb_verified_eligible', 'Verified · eligible')
+                          : exp.status === "LEGACY_UNVERIFIED"
+                          ? t('lb_legacy_unverified', 'LEGACY_UNVERIFIED')
+                          : t('lb_ineligible', 'Ineligible')}
+                      </span>
                     )}
                   </td>
                 </tr>
               );
             })}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-zinc-500 font-sans text-xs">
+                  {t('lb_no_experiments', 'No experiments found matching search criteria.')}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
     </div>
   );
 };
+

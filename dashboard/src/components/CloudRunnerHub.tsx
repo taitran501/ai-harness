@@ -29,6 +29,7 @@ import {
 } from '../types/experiment';
 import { api } from '../services/api';
 import { CloudEnvironmentModal } from './CloudEnvironmentModal';
+import { useLanguage } from '../constants/i18n';
 
 interface CloudRunnerHubProps {
   taskInfo?: TaskInfo | null;
@@ -41,6 +42,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
   onRefreshSolutionTree,
   onOpenConfigModal,
 }) => {
+  const { t } = useLanguage();
   const isCustomTaskPlugin = Boolean(taskInfo?.task_plugin?.id && taskInfo.task_plugin.id !== 'default');
   const [platform, setPlatform] = useState<'modal' | 'kaggle'>('modal');
   const [configs, setConfigs] = useState<string[]>([]);
@@ -304,7 +306,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
       <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-3 shadow-xl flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Server className="w-4 h-4 text-indigo-400" />
-          <span className="text-xs font-semibold text-zinc-200">System Environment & Hardware:</span>
+          <span className="text-xs font-semibold text-zinc-200">{t('cloud_sys_env_hardware', 'System Environment & Hardware:')}</span>
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
             {/* Modal Pill */}
             <span
@@ -335,7 +337,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
           className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-lg border border-zinc-800 text-xs font-medium transition"
         >
           <Sliders className="w-3.5 h-3.5 text-zinc-400" />
-          <span>Account Settings</span>
+          <span>{t('cloud_account_settings', 'Account Settings')}</span>
         </button>
       </div>
 
@@ -344,10 +346,10 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
         <div>
           <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
             <Cloud className="w-4 h-4 text-zinc-400" />
-            <span>Cloud Runner Hub</span>
+            <span>{t('cloud_hub_title', 'Cloud GPU Runners & Clusters')}</span>
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Launch remote GPU experiments on Modal.com or Kaggle Kernels with live logs.
+            {t('cloud_hub_desc', 'Orchestrate training runs across Modal serverless GPU and Kaggle background kernels.')}
           </p>
           {isCustomTaskPlugin && (
             <p className="mt-2 p-2.5 bg-amber-950/30 border border-amber-800/60 rounded-lg text-xs text-amber-200">
@@ -367,7 +369,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
             }`}
           >
             <Cloud className="w-3.5 h-3.5 text-sky-400" />
-            <span>Modal.com</span>
+            <span>{t('cloud_tab_modal', 'Modal GPU (Serverless)')}</span>
           </button>
           <button
             onClick={() => setPlatform('kaggle')}
@@ -378,7 +380,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
             }`}
           >
             <Globe className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Kaggle Kernels</span>
+            <span>{t('cloud_tab_kaggle', 'Kaggle GPU (Kernels)')}</span>
           </button>
         </div>
       </div>
@@ -392,13 +394,13 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
               <span className="w-5 h-5 rounded-full bg-zinc-800 text-zinc-300 flex items-center justify-center text-xs font-mono font-bold">
                 1
               </span>
-              <span className="text-xs font-semibold text-zinc-200">Select Target Config</span>
+              <span className="text-xs font-semibold text-zinc-200">{t('cloud_target_exp_label', 'Target Experiment Config:')}</span>
             </div>
             <FileCode className="w-4 h-4 text-zinc-500" />
           </div>
 
           <div className="space-y-2">
-            <label className="block text-[11px] text-zinc-400">Target Config YAML:</label>
+            <label className="block text-[11px] text-zinc-400">{t('cloud_target_exp_label', 'Target Experiment Config:')}</label>
             <select
               value={selectedConfig}
               onChange={(e) => setSelectedConfig(e.target.value)}
@@ -422,7 +424,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                 onClick={() => onOpenConfigModal?.('create')}
                 className="flex items-center justify-center gap-1 px-3 py-1 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 rounded border border-indigo-500/30 text-xs font-medium transition"
               >
-                <span>+ New Target</span>
+                <span>{t('cloud_btn_new_target', '+ New Target')}</span>
               </button>
             </div>
           </div>
@@ -435,7 +437,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
               <span className="w-5 h-5 rounded-full bg-zinc-800 text-zinc-300 flex items-center justify-center text-xs font-mono font-bold">
                 2
               </span>
-              <span className="text-xs font-semibold text-zinc-200">Hardware & Audit Policy</span>
+              <span className="text-xs font-semibold text-zinc-200">{t('cloud_hardware_policy', 'Hardware & Audit Policy')}</span>
             </div>
             <Cpu className="w-4 h-4 text-zinc-500" />
           </div>
@@ -443,7 +445,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
           <div className="space-y-2.5">
             <div>
               <label className="block text-[11px] text-zinc-400 mb-1">
-                Cloud GPU Accelerator:
+                {t('cloud_gpu_type_label', 'GPU Hardware Type:')}
               </label>
               {platform === 'modal' ? (
                 <select
@@ -477,7 +479,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   onChange={(e) => setAutoAudit(e.target.checked)}
                   className="rounded bg-zinc-900 border-zinc-700 text-indigo-600 focus:ring-0"
                 />
-                <span>Auto-run Audit Gate (Min Diff &ge; 2%)</span>
+                <span>{t('cloud_auto_audit', 'Auto-run Audit Gate (Min Diff ≥ 2%)')}</span>
               </label>
               <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                 <input
@@ -486,7 +488,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   onChange={(e) => setAutoSync(e.target.checked)}
                   className="rounded bg-zinc-900 border-zinc-700 text-indigo-600 focus:ring-0"
                 />
-                <span>Auto-sync Solution Tree DAG on Pass</span>
+                <span>{t('cloud_auto_sync_dag', 'Auto-sync Solution Tree DAG on Pass')}</span>
               </label>
             </div>}
           </div>
@@ -499,7 +501,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
               <span className="w-5 h-5 rounded-full bg-zinc-800 text-zinc-300 flex items-center justify-center text-xs font-mono font-bold">
                 3
               </span>
-              <span className="text-xs font-semibold text-zinc-200">Execution</span>
+              <span className="text-xs font-semibold text-zinc-200">{t('cloud_execution_step', 'Execution')}</span>
             </div>
             <Terminal className="w-4 h-4 text-zinc-500" />
           </div>
@@ -512,7 +514,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
               className="w-full flex items-center justify-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-300 hover:text-white py-1 rounded-lg text-xs font-medium border border-zinc-800 transition"
             >
               <RefreshCw className={`w-3 h-3 text-zinc-400 ${inspecting ? 'animate-spin' : ''}`} />
-              <span>{inspecting ? 'Verifying Pre-Flight...' : 'Run Pre-Flight Check'}</span>
+              <span>{inspecting ? 'Verifying Pre-Flight...' : t('cloud_btn_preflight', 'Preflight Audit')}</span>
             </button>
 
             {preflightResult && (
@@ -527,12 +529,12 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   {preflightResult.passed ? (
                     <>
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Pre-flight Passed</span>
+                      <span>{t('cloud_preflight_passed', 'Pre-flight Passed')}</span>
                     </>
                   ) : (
                     <>
                       <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                      <span>Pre-flight Failed</span>
+                      <span>{t('cloud_preflight_failed', 'Pre-flight Failed')}</span>
                     </>
                   )}
                 </div>
@@ -566,7 +568,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                 <span>
                   {isLaunching
                     ? 'Launching Remote Job...'
-                    : 'Run'}
+                    : t('cloud_btn_launch', 'Launch Cloud Run')}
                 </span>
               </button>
             )}
@@ -583,7 +585,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
               <Terminal className="w-4 h-4 text-emerald-400" />
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs font-semibold text-zinc-100">
-                  {activeJob?.job_id || 'Execution Terminal'}
+                  {activeJob?.job_id || t('cloud_logs_title', 'Remote Cluster Live Logs')}
                 </span>
                 {activeJob?.status && (
                   <span
@@ -616,7 +618,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   className="flex items-center gap-1 px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800 text-xs rounded transition"
                 >
                   <Square className="w-3 h-3 fill-current" />
-                  <span>Stop</span>
+                  <span>{t('btn_stop', 'Stop')}</span>
                 </button>
               )}
 
@@ -626,7 +628,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   className="flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700 text-xs transition"
                 >
                   <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Re-Audit</span>
+                  <span>{t('btn_re_audit', 'Re-Audit')}</span>
                 </button>
               )}
 
@@ -636,7 +638,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                 className="flex items-center gap-1 px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700 text-xs transition"
               >
                 <FolderSync className={`w-3.5 h-3.5 text-zinc-400 ${syncingTree ? 'animate-spin' : ''}`} />
-                <span>{syncSuccessMsg || 'Sync DAG'}</span>
+                <span>{syncSuccessMsg || t('cloud_sync_dag', 'Sync DAG')}</span>
               </button>
             </div>
           </div>
@@ -651,7 +653,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
                   <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
                 )}
                 <div>
-                  <span className="font-semibold text-zinc-200">Audit Gate: </span>
+                  <span className="font-semibold text-zinc-200">{t('cloud_audit_gate_label', 'Audit Gate:')} </span>
                   <span
                     className={
                       auditReceipt.status === 'PASS'
@@ -675,7 +677,7 @@ export const CloudRunnerHub: React.FC<CloudRunnerHubProps> = ({
           {/* Terminal Console Output */}
           <div className="p-4 bg-zinc-950 text-zinc-300 font-mono text-[11px] leading-relaxed max-h-96 overflow-y-auto custom-scrollbar select-text">
             {jobLogs.length === 0 ? (
-              <p className="text-zinc-600 italic">Waiting for process logs...</p>
+              <p className="text-zinc-600 italic">{t('cloud_waiting_logs', 'Waiting for process logs...')}</p>
             ) : (
               jobLogs.map((line, idx) => (
                 <div key={idx} className="whitespace-pre-wrap hover:bg-zinc-900/40">

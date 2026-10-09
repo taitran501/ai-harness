@@ -488,9 +488,9 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               )}
 
               {/* Platform & Modality */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4" title={t('modal_task_platform_modality', 'Competition Platform / Problem Modality')}>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Competition Platform</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_platform_label', 'Competition Platform')}</label>
                   <select
                     value={platform}
                     onChange={(e) => setPlatform(e.target.value)}
@@ -505,7 +505,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Problem Modality</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_modality_label', 'Problem Modality')}</label>
                   <select
                     value={modality}
                     onChange={(e) => setModality(e.target.value)}
@@ -523,24 +523,24 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               {/* Task Name & Type */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Task / Competition Name</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_task_name_label', 'Task / Competition Name')}</label>
                   <input
                     type="text"
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Kaggle Competition, House Prices, Titanic"
+                    placeholder={t('taskcfg_task_name_ph', 'e.g. Kaggle Competition, House Prices, Titanic')}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Task Category / Type</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_task_type_label', 'Task Category / Type')}</label>
                   <input
                     type="text"
                     value={type}
                     onChange={(e) => setType(e.target.value)}
-                    placeholder="e.g. Multi-Task Text Classification, Tabular Regression"
+                    placeholder={t('taskcfg_task_type_ph', 'e.g. Multi-Task Text Classification, Tabular Regression')}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                   />
                 </div>
@@ -559,7 +559,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">
+                    <label className="block text-[11px] text-zinc-400 mb-1" title={t('taskcfg_primary_metric_label', 'Primary Metric')}>
                       {t('modal_task_pick_metric', 'Pick Standard ML Metric')}
                     </label>
                     <select
@@ -615,13 +615,13 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                           </option>
                         ))}
                       </optgroup>
-                      <option value="__custom__">Custom / Type Freely...</option>
+                      <option value="__custom__">{t('taskcfg_custom_metric_free', 'Custom / Type Freely...')}</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-[11px] text-zinc-400 mb-1">
-                      Active Metric Name
+                      {t('taskcfg_active_metric_name', 'Active Metric Name')}
                     </label>
                     <input
                       type="text"
@@ -638,19 +638,19 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Optimization Direction</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_direction_label', 'Optimization Direction')}</label>
                     <select
                       value={direction}
                       onChange={(e) => setDirection(e.target.value as 'maximize' | 'minimize')}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                     >
-                      <option value="maximize">Maximize (F1, AUC, Acc, R²)</option>
-                      <option value="minimize">Minimize (RMSE, Loss, Error)</option>
+                      <option value="maximize">{t('taskcfg_opt_max', 'Maximize (F1, AUC, Acc, R²)')}</option>
+                      <option value="minimize">{t('taskcfg_opt_min', 'Minimize (RMSE, Loss, Error)')}</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Baseline Score Floor</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_baseline_floor_label', 'Baseline Score Floor')}</label>
                     <input
                       type="number"
                       step="0.0001"
@@ -664,7 +664,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Target Goal Score</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_target_goal_label', 'Target Goal Score')}</label>
                     <input
                       type="number"
                       step="0.0001"
@@ -676,7 +676,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Languages (Comma separated)</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_languages_label', 'Languages (Comma separated)')}</label>
                     <input
                       type="text"
                       value={languages}
@@ -700,7 +700,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                     className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 px-2 py-0.5 rounded transition"
                   >
                     <Plus className="w-3 h-3" />
-                    <span>Add Subtask</span>
+                    <span>{t('taskcfg_btn_add_subtask', 'Add Subtask')}</span>
                   </button>
                 </div>
 
@@ -711,7 +711,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                         type="text"
                         value={m.name}
                         onChange={(e) => handleUpdateMetric(idx, { name: e.target.value })}
-                        placeholder="Subtask Name"
+                        placeholder={t('taskcfg_subtask_name_ph', 'Subtask Name')}
                         className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-200"
                       />
                       <input
@@ -740,7 +740,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                     {expandedMetricIndices[idx] && (
                       <div className="pt-2 border-t border-zinc-800 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
                         <div>
-                          <label className="block text-zinc-500 mb-0.5">Evaluation Metric</label>
+                          <label className="block text-zinc-500 mb-0.5">{t('taskcfg_eval_metric_label', 'Evaluation Metric')}</label>
                           <div className="space-y-1">
                             <select
                               value={ML_METRICS_CATALOG.some((c) => c.id === m.metric) ? m.metric : '__custom__'}
@@ -755,7 +755,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                               }}
                               className="w-full bg-zinc-900 border border-zinc-800 rounded px-1.5 py-0.5 text-[11px] text-zinc-200"
                             >
-                              <option value="__custom__">Custom / Type Below...</option>
+                              <option value="__custom__">{t('taskcfg_custom_metric_below', 'Custom / Type Below...')}</option>
                               {ML_METRICS_CATALOG.map((c) => (
                                 <option key={c.id} value={c.id}>
                                   {c.id} ({c.category})
@@ -772,13 +772,13 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                                   direction: getSuggestedDirection(val),
                                 });
                               }}
-                              placeholder="Metric Name"
-                              className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 text-zinc-300 font-mono text-[11px]"
+                              placeholder={t('taskcfg_metric_name_ph', 'Metric Name')}
+                              className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-0.5 text-zinc-300 font-mono text-[11px]"
                             />
                           </div>
                         </div>
                         <div>
-                          <label className="block text-zinc-500 mb-0.5">Baseline Score</label>
+                          <label className="block text-zinc-500 mb-0.5">{t('taskcfg_baseline_score_label', 'Baseline Score')}</label>
                           <input
                             type="number"
                             step="0.0001"
@@ -788,7 +788,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                           />
                         </div>
                         <div>
-                          <label className="block text-zinc-500 mb-0.5">Target Goal</label>
+                          <label className="block text-zinc-500 mb-0.5">{t('taskcfg_target_goal_label_sub', 'Target Goal')}</label>
                           <input
                             type="number"
                             step="0.0001"
@@ -798,7 +798,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                           />
                         </div>
                         <div>
-                          <label className="block text-zinc-500 mb-0.5">Weight (0-1.0)</label>
+                          <label className="block text-zinc-500 mb-0.5">{t('taskcfg_weight_label', 'Weight (0-1.0)')}</label>
                           <input
                             type="number"
                             step="0.01"
@@ -808,12 +808,12 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                           />
                         </div>
                         <div className="col-span-2 md:col-span-4">
-                          <label className="block text-zinc-500 mb-0.5">Description & Special Rules</label>
+                          <label className="block text-zinc-500 mb-0.5">{t('taskcfg_desc_rules_label', 'Description & Special Rules')}</label>
                           <input
                             type="text"
                             value={m.description ?? ''}
                             onChange={(e) => handleUpdateMetric(idx, { description: e.target.value })}
-                            placeholder="e.g. Evaluated strictly on hateful comments (oracle_hate)"
+                            placeholder={t('taskcfg_desc_rules_ph', 'e.g. Evaluated strictly on hateful comments (oracle_hate)')}
                             className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5 text-zinc-300"
                           />
                         </div>
@@ -829,10 +829,10 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
           {activeTab === 'data' && (
             <div className="space-y-4">
               <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
-                <div className="text-xs font-semibold text-zinc-200">Dataset Directories</div>
+                <div className="text-xs font-semibold text-zinc-200">{t('taskcfg_dataset_dirs_title', 'Dataset Directories')}</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Training Data Path</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_train_path_label', 'Training Data Path')}</label>
                     <input
                       type="text"
                       value={trainPath}
@@ -843,7 +843,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Test Data Path</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_test_path_label', 'Test Data Path')}</label>
                     <input
                       type="text"
                       value={testPath}
@@ -856,10 +856,10 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               </div>
 
               <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
-                <div className="text-xs font-semibold text-zinc-200">Column Schema</div>
+                <div className="text-xs font-semibold text-zinc-200">{t('taskcfg_column_schema_title', 'Column Schema')}</div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">ID Column Name</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_id_col_label', 'ID Column Name')}</label>
                     <input
                       type="text"
                       value={idColumn}
@@ -870,7 +870,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Input / Context Columns</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_context_cols_label', 'Input / Context Columns')}</label>
                     <input
                       type="text"
                       value={featureColumns}
@@ -881,7 +881,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Target Column(s)</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_target_col_label', 'Target Column(s)')}</label>
                     <input
                       type="text"
                       value={targetColumn}
@@ -894,10 +894,10 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               </div>
 
               <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
-                <div className="text-xs font-semibold text-zinc-200">Data Processing & Representation Strategy</div>
+                <div className="text-xs font-semibold text-zinc-200">{t('taskcfg_data_processing_title', 'Data Processing & Representation Strategy')}</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Feature / Context Strategy</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_feature_strategy_label', 'Feature / Context Strategy')}</label>
                     <select
                       value={dataStrategy}
                       onChange={(e) => setDataStrategy(e.target.value)}
@@ -912,7 +912,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Label Filtering & Imbalance Strategy</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_imbalance_strategy_label', 'Label Filtering & Imbalance Strategy')}</label>
                     <select
                       value={imbalanceStrategy}
                       onChange={(e) => setImbalanceStrategy(e.target.value)}
@@ -928,12 +928,12 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Missing Data Handling Policy</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_missing_data_label', 'Missing Data Handling Policy')}</label>
                   <input
                     type="text"
                     value={missingDataPolicy}
                     onChange={(e) => setMissingDataPolicy(e.target.value)}
-                    placeholder="e.g. fill_empty_context, drop_invalid_rows"
+                    placeholder={t('taskcfg_missing_data_ph', 'e.g. fill_empty_context, drop_invalid_rows')}
                     className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100"
                   />
                 </div>
@@ -948,7 +948,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 <div className="text-xs font-semibold text-zinc-200">{t('tab_validation_protocol', 'Validation Split Protocol')}</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Validation Split Scheme</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_split_strategy_label', 'Validation Split Strategy')}</label>
                     <select
                       value={splitStrategy}
                       onChange={(e) => setSplitStrategy(e.target.value)}
@@ -964,7 +964,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
 
                   <div>
                     <label className="block text-xs font-medium text-zinc-400 mb-1">
-                      Group / Entity Column (Anti-Leakage)
+                      {t('taskcfg_group_col_label', 'Group Identifier Column')}
                     </label>
                     <input
                       type="text"
@@ -978,7 +978,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Number of Folds (k)</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_n_folds_label', 'Number of Folds (K)')}</label>
                     <input
                       type="number"
                       min={2}
@@ -990,7 +990,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Fixed Random Seed</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_seed_label', 'Random Seed')}</label>
                     <input
                       type="number"
                       value={seed}
@@ -1000,7 +1000,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">Precomputed Fold File</label>
+                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_fold_file_label', 'Precomputed Fold File')}</label>
                     <input
                       type="text"
                       value={foldFilePath}
@@ -1018,7 +1018,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
           {activeTab === 'rules' && (
             <div className="space-y-4">
               <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
-                <div className="text-xs font-semibold text-zinc-200">Permitted Technologies & External Sources</div>
+                <div className="text-xs font-semibold text-zinc-200">{t('taskcfg_permitted_tech_title', 'Permitted Technologies & External Sources')}</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                   <label className="flex items-center gap-2 text-zinc-300">
                     <input
@@ -1027,7 +1027,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       onChange={(e) => setAllowLlm(e.target.checked)}
                       className="rounded bg-zinc-900 border-zinc-700"
                     />
-                    <span>Allow LLM / Generative Models & Prompting</span>
+                    <span>{t('taskcfg_allow_llm', 'Allow LLM / Generative Models & Prompting')}</span>
                   </label>
 
                   <label className="flex items-center gap-2 text-zinc-300">
@@ -1037,7 +1037,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       onChange={(e) => setAllowApi(e.target.checked)}
                       className="rounded bg-zinc-900 border-zinc-700"
                     />
-                    <span>Allow Proprietary Closed APIs (OpenAI / Anthropic)</span>
+                    <span>{t('taskcfg_allow_api', 'Allow Proprietary Closed APIs (OpenAI / Anthropic)')}</span>
                   </label>
 
                   <label className="flex items-center gap-2 text-zinc-300">
@@ -1047,7 +1047,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       onChange={(e) => setAllowExternalData(e.target.checked)}
                       className="rounded bg-zinc-900 border-zinc-700"
                     />
-                    <span>Allow External Datasets (Must register in grounding)</span>
+                    <span>{t('taskcfg_allow_ext_label', 'Allow External Data')}</span>
                   </label>
 
                   <label className="flex items-center gap-2 text-zinc-300">
@@ -1057,14 +1057,14 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       onChange={(e) => setAllowPretrainedModels(e.target.checked)}
                       className="rounded bg-zinc-900 border-zinc-700"
                     />
-                    <span>Allow Open Pretrained Weights (HuggingFace / timm)</span>
+                    <span>{t('taskcfg_allow_pretrained', 'Allow Open Pretrained Weights (HuggingFace / timm)')}</span>
                   </label>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Max Parameter Ceiling</label>
+                  <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_max_params_label', 'Max Parameter Limit')}</label>
                   <input
                     type="number"
                     value={maxParamsLimit}
@@ -1072,11 +1072,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                     placeholder="e.g. 150000000"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                   />
-                  <span className="text-[10px] text-zinc-500">Limits GPU memory footprint</span>
+                  <span className="text-[10px] text-zinc-500">{t('taskcfg_gpu_limit_hint', 'Limits GPU memory footprint')}</span>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Max GPU Runtime (Hours)</label>
+                  <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_max_gpu_hours_label', 'Max GPU Runtime (Hours)')}</label>
                   <input
                     type="number"
                     value={maxGpuHours}
@@ -1084,11 +1084,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                     placeholder="e.g. 9 or 12"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                   />
-                  <span className="text-[10px] text-zinc-500">Modal/Kaggle kernel cutoff</span>
+                  <span className="text-[10px] text-zinc-500">{t('taskcfg_gpu_hours_hint', 'Modal/Kaggle kernel cutoff')}</span>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Daily Submission Quota</label>
+                  <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_daily_quota_label', 'Daily Submission Quota')}</label>
                   <input
                     type="number"
                     value={dailySubmissionLimit}
@@ -1096,13 +1096,13 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                     placeholder="e.g. 5"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                   />
-                  <span className="text-[10px] text-zinc-500">Allowed submissions per day</span>
+                  <span className="text-[10px] text-zinc-500">{t('taskcfg_daily_quota_hint', 'Allowed submissions per day')}</span>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                 <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Competition Deadline (UTC)</label>
+                  <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_deadline_label', 'Competition Deadline (UTC)')}</label>
                   <input
                     type="text"
                     value={deadline}
@@ -1113,12 +1113,12 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Team & Collaboration Policy</label>
+                  <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_team_policy_label', 'Team & Collaboration Policy')}</label>
                   <input
                     type="text"
                     value={teamPolicy}
                     onChange={(e) => setTeamPolicy(e.target.value)}
-                    placeholder="e.g. Max 4 members, no private sharing"
+                    placeholder={t('taskcfg_team_policy_ph', 'e.g. Max 4 members, no private sharing')}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-100"
                   />
                 </div>
@@ -1131,7 +1131,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Official Submission File Name</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_sub_filename_label', 'Official Submission File Name')}</label>
                   <input
                     type="text"
                     value={submissionFileName}
@@ -1142,15 +1142,15 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Archive Packaging Format</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_archive_format_label', 'Archive Packaging Format')}</label>
                   <select
                     value={archiveFormat}
                     onChange={(e) => setArchiveFormat(e.target.value as 'zip' | 'csv' | 'tar.gz')}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700"
                   >
-                    <option value="zip">ZIP Compressed Archive (.zip)</option>
-                    <option value="csv">Raw Delimited CSV (.csv)</option>
-                    <option value="tar.gz">Tarball (.tar.gz)</option>
+                    <option value="zip">{t('taskcfg_fmt_zip', 'ZIP Compressed Archive (.zip)')}</option>
+                    <option value="csv">{t('taskcfg_fmt_csv', 'Raw Delimited CSV (.csv)')}</option>
+                    <option value="tar.gz">{t('taskcfg_fmt_tar', 'Tarball (.tar.gz)')}</option>
                   </select>
                 </div>
               </div>
@@ -1163,12 +1163,12 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               <div className="p-3.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
                 <div className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Audit Gate Parameters</span>
+                  <span>{t('taskcfg_audit_params_title', 'Audit Gate Parameters')}</span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Min Prediction Delta (% rows)</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_min_diff_label', 'Min Prediction Delta (% rows)')}</label>
                     <input
                       type="number"
                       step="0.1"
@@ -1177,11 +1177,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       placeholder="2.0"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">Min % changed vs baseline (default 2.0%)</span>
+                    <span className="text-[10px] text-zinc-500">{t('taskcfg_min_diff_hint', 'Min % changed vs baseline (default 2.0%)')}</span>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Max Ensemble Correlation (Kappa)</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_max_kappa_label', 'Max Ensemble Correlation (Kappa)')}</label>
                     <input
                       type="number"
                       step="0.01"
@@ -1190,11 +1190,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       placeholder="0.85"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">Blocks identical models (ceiling 0.85)</span>
+                    <span className="text-[10px] text-zinc-500">{t('taskcfg_max_kappa_hint', 'Blocks identical models (ceiling 0.85)')}</span>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Min Disagreement Rate (%)</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_min_disagreement_label', 'Min Disagreement Rate (%)')}</label>
                     <input
                       type="number"
                       step="0.1"
@@ -1203,7 +1203,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       placeholder="5.0"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">Min prediction diversity (floor 5.0%)</span>
+                    <span className="text-[10px] text-zinc-500">{t('taskcfg_min_disagreement_hint', 'Min prediction diversity (floor 5.0%)')}</span>
                   </div>
                 </div>
               </div>

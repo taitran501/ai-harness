@@ -8,6 +8,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { TaskInfo, SystemStatus, SubmissionEntry } from '../types/experiment';
+import { useLanguage } from '../constants/i18n';
 
 interface CompetitionReadinessModalProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
   submissions,
   onOpenTaskConfig,
 }) => {
+  const { t } = useLanguage();
   if (!isOpen) return null;
 
   const dataCfg = taskInfo?.data_config || {};
@@ -49,7 +51,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
   const pillars: PillarDisplayItem[] = [
     {
       id: 'task_objective',
-      title: '1. Task & Metric Objectives',
+      title: t('readiness_pillar_1', '1. Task & Metric Objectives'),
       status: taskInfo?.primary_metric ? 'passed' : 'warning',
       summary: taskInfo?.primary_metric
         ? `${taskInfo.task_name || 'Benchmark'} (${taskInfo.primary_metric}, ${taskInfo.direction || 'maximize'})`
@@ -63,7 +65,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
     },
     {
       id: 'data_splits',
-      title: '2. Dataset Schema & Preprocessing Strategy',
+      title: t('readiness_pillar_2', '2. Dataset Schema & Preprocessing Strategy'),
       status: dataCfg.train_path ? 'passed' : 'warning',
       summary: `Train: ${dataCfg.train_path || 'dataset/'} — Declared inputs and targets`,
       attributes: [
@@ -77,7 +79,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
     },
     {
       id: 'model_grounding',
-      title: '3. Model Strategy & Parameter Ceilings',
+      title: t('readiness_pillar_3', '3. Model Strategy & Parameter Ceilings'),
       status: rules.max_params_limit ? 'passed' : 'warning',
       summary: rules.max_params_limit
         ? `Parameter ceiling: ${(rules.max_params_limit / 1e6).toFixed(0)}M parameters`
@@ -90,7 +92,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
     },
     {
       id: 'experiment_lineage',
-      title: '4. Solution Tree & Lineage Tracking',
+      title: t('readiness_pillar_4', '4. Solution Tree & Lineage Tracking'),
       status: (status?.total_nodes || 0) > 0 ? 'passed' : 'pending',
       summary: `${status?.total_nodes || 0} runs tracked across ${status?.distinct_families || 0} model families`,
       attributes: [
@@ -101,7 +103,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
     },
     {
       id: 'validation_overfitting',
-      title: '5. Evaluation & Submission Checks',
+      title: t('readiness_pillar_5', '5. Grounding & Epistemic Assumptions'),
       status: isCustomTaskPlugin && !pluginCanSubmit ? 'warning' : 'pending',
       summary: isCustomTaskPlugin
         ? pluginCanSubmit
@@ -118,7 +120,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
     },
     {
       id: 'competition_rules',
-      title: '6. Competition Rules & Compute Quotas',
+      title: t('readiness_pillar_6', '6. Pre-Submission SWE Deterministic Gate'),
       status: rules.daily_submission_limit ? 'passed' : 'warning',
       summary: `Daily quota: ${rules.daily_submission_limit ?? 'Unlimited'} submissions per day`,
       attributes: [
@@ -130,7 +132,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
     },
     {
       id: 'final_submission',
-      title: '7. Submission Packaging',
+      title: t('readiness_pillar_7', '7. Cloud & Resource Budgeting'),
       status: submissions.length > 0 ? 'passed' : isCustomTaskPlugin && !pluginCanSubmit ? 'warning' : 'pending',
       summary: isCustomTaskPlugin && !pluginCanSubmit
         ? 'Packaging is blocked until the task plugin implements both submission hooks.'
@@ -148,7 +150,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
     },
     {
       id: 'system_description',
-      title: '8. Paper & System Description Readiness',
+      title: t('readiness_pillar_8', '8. Metric & Code Integrity Guardrails'),
       status: (status?.total_nodes || 0) > 0 ? 'passed' : 'pending',
       summary: 'EXPERIMENT_CARD.md and summary tables generated per run',
       attributes: [
@@ -170,14 +172,14 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
           <div>
             <div className="flex items-center gap-2.5">
               <h2 className="text-sm font-semibold text-zinc-100">
-                Competition Readiness Assessment
+                {t('readiness_title', 'Competition Readiness Assessment')}
               </h2>
               <span className="text-[11px] font-mono text-emerald-400">
                 ({passedCount} of {pillars.length} verified)
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Evaluating the 8 essential dimensions for competitive ML/DL benchmarks.
+              {t('readiness_desc', 'Evaluating the 8 essential dimensions for competitive ML/DL benchmarks.')}
             </p>
           </div>
           <button
@@ -236,8 +238,9 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
                       onOpenTaskConfig(pillar.tabKey);
                     }}
                     className="flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-2.5 py-1 rounded transition shrink-0"
+                    title={t('readiness_btn_fix', 'Configure in Settings →')}
                   >
-                    <span>Configure</span>
+                    <span>{t('readiness_btn_configure', 'Configure')}</span>
                     <ArrowRight className="w-3 h-3" />
                   </button>
                 )}
@@ -251,11 +254,11 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
           <div className="text-xs text-zinc-400">
             {warningCount > 0 ? (
               <span className="text-amber-400 font-medium">
-                {warningCount} areas need attention before official submission.
+                {t('readiness_pending_items', 'Action required on highlighted dimensions before baseline lock.')}
               </span>
             ) : (
               <span className="text-emerald-400 font-medium">
-                All competition dimensions are configured and audit-ready.
+                {t('readiness_all_passed', 'All competition dimensions are configured and audit-ready.')}
               </span>
             )}
           </div>
@@ -267,8 +270,9 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 border border-zinc-700 transition"
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>Open Task Setup Modal</span>
+            <span>{t('readiness_btn_open_setup', 'Open Task Setup Modal')}</span>
           </button>
+
         </div>
       </div>
     </div>

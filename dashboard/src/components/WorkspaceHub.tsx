@@ -206,7 +206,7 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
         {phaseState && (
           <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-zinc-400">
             <span className="rounded bg-zinc-950 px-2 py-1">{t('wshub_prompt_pack', 'Prompt pack:')} <code>{phaseState.pack}</code></span>
-            <span className="rounded bg-zinc-950 px-2 py-1">{t('wshub_next_phase', 'Next phase:')} <strong className="text-zinc-200">{phaseState.next_phase || 'initial phases complete'}</strong></span>
+            <span className="rounded bg-zinc-950 px-2 py-1">{t('wshub_next_phase', 'Next phase:')} <strong className="text-zinc-200">{phaseState.next_phase || t('wshub_initial_phases_complete', 'initial phases complete')}</strong></span>
             <span className="rounded bg-zinc-950 px-2 py-1">{t('wshub_evidence', 'Evidence:')} <code>{String(phaseState.current_evidence_revision || '').slice(0, 12)}</code></span>
           </div>
         )}
@@ -276,14 +276,14 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
                 >
                   <span><span className="mr-2 font-mono text-zinc-500">{index + 1}.</span>{phase.title}</span>
                   <span className="whitespace-nowrap text-[10px]">
-                    {phase.completed ? (phase.can_revisit ? 'new evidence' : `${phase.runs} saved`) : 'pending'}
+                    {phase.completed ? (phase.can_revisit ? t('wshub_new_evidence', 'new evidence') : t('wshub_runs_saved', '{runs} saved', { runs: phase.runs })) : t('wshub_pending', 'pending')}
                   </span>
                 </button>
               );
             })}
           </div>
           {selectedPhaseData?.latest_response_path && (
-            <p className="mt-3 break-all text-[10px] text-zinc-500">Latest output: {selectedPhaseData.latest_response_path}</p>
+            <p className="mt-3 break-all text-[10px] text-zinc-500">{t('wshub_latest_output', 'Latest output: {path}', { path: selectedPhaseData.latest_response_path })}</p>
           )}
           {selectedPhaseData?.record_blocked_reason && (
             <p className="mt-3 rounded border border-amber-900 bg-amber-950/30 p-2 text-[10px] leading-relaxed text-amber-300">{selectedPhaseData.record_blocked_reason}</p>
@@ -293,18 +293,18 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
         <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h3 className="text-sm font-bold text-white">{selectedPhaseData?.title || 'Phase prompt'}</h3>
-              <p className="mt-1 text-[11px] text-zinc-500">Edit prompt files in the workspace and version them with Git.</p>
+              <h3 className="text-sm font-bold text-white">{selectedPhaseData?.title || t('wshub_phase_prompt_fallback', 'Phase prompt')}</h3>
+              <p className="mt-1 text-[11px] text-zinc-500">{t('wshub_edit_prompt_hint', 'Edit prompt files in the workspace and version them with Git.')}</p>
             </div>
             <button disabled={!phasePrompt} onClick={copyPrompt} className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40">
               {t('wshub_copy_prompt_btn', 'Copy prompt for IDE agent')}
             </button>
           </div>
           <textarea
-            aria-label="Rendered phase prompt"
+            aria-label={t('wshub_rendered_prompt_aria', 'Rendered phase prompt')}
             value={phasePrompt}
             readOnly
-            placeholder="Select an available phase to render its prompt and current task context."
+            placeholder={t('wshub_select_phase_ph', 'Select an available phase to render its prompt and current task context.')}
             className="h-64 w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300 outline-none"
           />
           <div className="grid grid-cols-1 gap-3">
@@ -337,27 +337,27 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
               <p className="mt-1 text-xs text-zinc-400">{t('wshub_eda_desc', "Profiles declared training data locally. Reports omit raw rows and are saved under this task's artifact tree.")}</p>
             </div>
             <button onClick={runEda} disabled={busy === 'eda'} className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40">
-              {busy === 'eda' ? 'Running…' : t('wshub_run_eda_btn', 'Run EDA')}
+              {busy === 'eda' ? t('wshub_running_eda', 'Running…') : t('wshub_run_eda_btn', 'Run EDA')}
             </button>
           </div>
-          {eda?.paths && <p className="mt-3 break-all text-[10px] text-zinc-500">Latest report: {eda.paths.markdown || eda.paths.json}</p>}
+          {eda?.paths && <p className="mt-3 break-all text-[10px] text-zinc-500">{t('wshub_latest_eda_report', 'Latest report: {path}', { path: eda.paths.markdown || eda.paths.json })}</p>}
           <div className="mt-3 space-y-3">
             {(eda?.reports || []).map((report: any) => (
               <div key={report.source} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
                 <div className="flex flex-wrap justify-between gap-2 text-xs">
                   <span className="font-mono text-zinc-200">{report.source}</span>
-                  <span className="text-zinc-400">{report.row_count?.toLocaleString()} rows · {report.column_count} columns · {report.duplicate_row_count} duplicates</span>
+                  <span className="text-zinc-400">{t('wshub_eda_stats', '{rows} rows · {cols} columns · {dups} duplicates', { rows: report.row_count?.toLocaleString(), cols: report.column_count, dups: report.duplicate_row_count })}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {(report.columns || []).slice(0, 12).map((column: any) => (
                     <span key={column.name} className="rounded border border-zinc-800 px-2 py-1 text-[10px] text-zinc-400">
-                      {column.name}: {column.dtype}, {column.missing_count} missing
+                      {t('wshub_eda_missing', '{name}: {dtype}, {count} missing', { name: column.name, dtype: column.dtype, count: column.missing_count })}
                     </span>
                   ))}
                 </div>
               </div>
             ))}
-            {!eda?.reports?.length && <p className="text-xs text-zinc-500">No EDA report saved yet.</p>}
+            {!eda?.reports?.length && <p className="text-xs text-zinc-500">{t('wshub_no_eda_report', 'No EDA report saved yet.')}</p>}
           </div>
         </div>
 
@@ -374,17 +374,17 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
               const fingerprint = provider.dataset?.fingerprint || '';
               const consent = Boolean(provider.dataset?.upload_consent);
               const usage = provider.provider === 'kaggle' ? provider.quota : provider.billing;
-              const usageLabel = provider.provider === 'kaggle' ? 'Accelerator quota' : 'Current month billing summary';
+              const usageLabel = provider.provider === 'kaggle' ? t('wshub_quota_accel', 'Accelerator quota') : t('wshub_billing_summary', 'Current month billing summary');
               return (
                 <div key={provider.provider} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <strong className="text-xs capitalize text-zinc-100">{provider.provider}</strong>
                     <span className={`rounded px-2 py-1 text-[10px] ${provider.authenticated ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-300'}`}>
-                      {provider.authenticated ? `connected${provider.account ? ` · ${provider.account}` : ''}` : 'not connected'}
+                      {provider.authenticated ? `${t('status_connected', 'connected')}${provider.account ? ` · ${provider.account}` : ''}` : t('status_not_connected', 'not connected')}
                     </span>
                   </div>
-                  <p className="mt-2 text-[10px] text-zinc-500">CLI: {provider.cli_installed ? (provider.cli_version || 'installed') : 'not installed'} · {provider.dataset?.file_count ?? 0} data files · fingerprint <code>{fingerprint.slice(0, 12)}</code></p>
-                  <p className="mt-1 text-[10px] text-zinc-500">Current upload policy: private. Consent is tied to this task and dataset fingerprint.</p>
+                  <p className="mt-2 text-[10px] text-zinc-500">CLI: {provider.cli_installed ? (provider.cli_version || t('status_installed', 'installed')) : t('status_not_installed', 'not installed')} · {t('wshub_data_files', '{count} data files', { count: provider.dataset?.file_count ?? 0 })} · {t('wshub_fingerprint', 'fingerprint {fp}', { fp: fingerprint.slice(0, 12) })}</p>
+                  <p className="mt-1 text-[10px] text-zinc-500">{t('wshub_upload_policy_desc', 'Current upload policy: private. Consent is tied to this task and dataset fingerprint.')}</p>
                   <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/70 p-2">
                     <p className="text-[10px] font-semibold text-zinc-300">{usageLabel}</p>
                     {usage?.status === 'available' || usage?.status === 'available_text' ? (
@@ -394,12 +394,12 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
                         {usage.note && <p className="mt-1 text-[10px] text-amber-300">{usage.note}</p>}
                       </details>
                     ) : (
-                      <p className="mt-1 text-[10px] text-zinc-500">{usage?.reason || (usage?.status === 'not_exposed' ? 'No numeric quota is reported by this CLI.' : 'Unavailable; connect the official CLI account and refresh.')}</p>
+                      <p className="mt-1 text-[10px] text-zinc-500">{usage?.reason || (usage?.status === 'not_exposed' ? t('wshub_no_numeric_quota', 'No numeric quota is reported by this CLI.') : t('wshub_quota_unavailable', 'Unavailable; connect the official CLI account and refresh.'))}</p>
                     )}
                   </div>
                   {provider.warnings?.map((warning) => <p key={warning} className="mt-1 text-[10px] text-amber-300">{warning}</p>)}
                   {consent ? (
-                    <p className="mt-2 text-[10px] text-emerald-300">Upload approved for this fingerprint.</p>
+                    <p className="mt-2 text-[10px] text-emerald-300">{t('wshub_upload_approved', 'Upload approved for this fingerprint.')}</p>
                   ) : (
                     <div className="mt-2">
                       <label className="flex items-start gap-2 text-[10px] leading-relaxed text-zinc-400">
@@ -414,7 +414,7 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
                 </div>
               );
             })}
-            {!providers.length && <p className="text-xs text-zinc-500">Provider status is unavailable. Refresh after connecting an official CLI account.</p>}
+            {!providers.length && <p className="text-xs text-zinc-500">{t('wshub_provider_unavailable', 'Provider status is unavailable. Refresh after connecting an official CLI account.')}</p>}
           </div>
         </div>
       </section>

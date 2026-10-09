@@ -26,6 +26,7 @@ import {
 } from '../types/experiment';
 import { api } from '../services/api';
 import { PrimingCenter } from './PrimingCenter';
+import { useLanguage } from '../constants/i18n';
 
 interface CompetitionPipelineHubProps {
   taskInfo: TaskInfo | null;
@@ -48,6 +49,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
   onOpenEnvModal,
   onRefreshAll,
 }) => {
+  const { t } = useLanguage();
   const [activeStep, setActiveStep] = useState<1 | 2 | 3 | 4>(1);
 
   //Configs & target selection
@@ -337,25 +339,25 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           {[
             {
               step: 1 as const,
-              title: 'Step 1. Task & Data Setup',
+              title: t('pipe_step1_title', 'Step 1. Task & Data Setup'),
               desc: `${taskInfo?.platform?.toUpperCase() || 'Platform not set'} / ${dataCfg.split_strategy || 'Validation not set'}`,
             },
             {
               step: 2 as const,
-              title: 'Step 2. Agent Prompt & Propose',
-              desc: `Target: ${currentExpId}`,
+              title: t('pipe_step2_title', 'Step 2. Agent Prompt & Propose'),
+              desc: t('pipe_target_label', 'Target: {target}', { target: currentExpId }),
             },
             {
               step: 3 as const,
-              title: 'Step 3. Run & Retrieve Outputs',
-              desc: isCustomTaskPlugin ? 'Run locally through the installed task plugin' : 'Local CPU or Cloud GPU (Kaggle / Modal)',
+              title: t('pipe_step3_title', 'Step 3. Run & Retrieve Outputs'),
+              desc: isCustomTaskPlugin ? t('pipe_step3_desc_custom', 'Run locally through the installed task plugin') : t('pipe_step3_desc_general', 'Local CPU or Cloud GPU (Kaggle / Modal)'),
             },
             {
               step: 4 as const,
-              title: 'Step 4. Submission & Score',
+              title: t('pipe_step4_title', 'Step 4. Submission & Score'),
               desc: isCustomTaskPlugin && !pluginCanSubmit
-                ? 'Submission hooks are missing from the selected task plugin'
-                : `Build .${subSpec.archive_format || 'zip'} package, record score & continue`,
+                ? t('pipe_step4_desc_missing', 'Submission hooks are missing from the selected task plugin')
+                : t('pipe_step4_desc_ready', 'Build .{format} package, record score & continue', { format: subSpec.archive_format || 'zip' }),
             },
           ].map((item) => {
             const isActive = activeStep === item.step;
@@ -386,10 +388,10 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-4">
             <div>
               <h2 className="text-base font-semibold text-zinc-100">
-                Step 1. Competition Task, Data Schema & Validation Setup
+                {t('pipe_step1_heading', 'Step 1. Competition Task, Data Schema & Validation Setup')}
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Verify dataset paths, input/target columns, validation split, and submission format before generating the Agent prompt.
+                {t('pipe_step1_desc', 'Verify dataset paths, input/target columns, validation split, and submission format before generating the Agent prompt.')}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -399,14 +401,14 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 className="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 rounded-lg border border-zinc-700 text-xs font-medium transition"
               >
                 <Sliders className="w-4 h-4 text-indigo-400" />
-                <span>Edit Full Setup</span>
+                <span>{t('pipe_edit_full_setup', 'Edit Full Setup')}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveStep(2)}
                 className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition"
               >
-                <span>Next: Agent Prompt & Propose</span>
+                <span>{t('pipe_next_step2', 'Next: Agent Prompt & Propose')}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -417,30 +419,30 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             {/* Card 1: Task & Metric */}
             <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-zinc-200">1. Task & Evaluation Objective</span>
+                <span className="text-xs font-semibold text-zinc-200">{t('pipe_task_eval_obj', '1. Task & Evaluation Objective')}</span>
                 <button
                   type="button"
                   onClick={() => onOpenTaskConfig('task')}
                   className="text-xs text-indigo-400 hover:underline"
                 >
-                  Configure
+                  {t('pipe_btn_configure', 'Configure')}
                 </button>
               </div>
               <div className="space-y-1.5 text-xs font-mono">
                 <div>
-                  <span className="text-zinc-500">Task: </span>
+                  <span className="text-zinc-500">{t('pipe_field_task', 'Task:')} </span>
                   <span className="text-zinc-200">{taskInfo?.name || 'Competition Task'}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-500">Platform: </span>
+                  <span className="text-zinc-500">{t('pipe_field_platform', 'Platform:')} </span>
                   <span className="text-zinc-200 uppercase">{taskInfo?.platform || 'not configured'}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-500">Primary Metric: </span>
+                  <span className="text-zinc-500">{t('pipe_field_primary_metric', 'Primary Metric:')} </span>
                   <span className="text-emerald-400">{taskInfo?.primary_metric || 'Not configured'}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-500">Submission File: </span>
+                  <span className="text-zinc-500">{t('pipe_field_sub_file', 'Submission File:')} </span>
                   <span className="text-zinc-200">
                     {subSpec.file_name || 'submission.zip'} (.{subSpec.archive_format || 'zip'})
                   </span>
@@ -451,34 +453,34 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             {/* Card 2: Data Schema & Strategy */}
             <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-zinc-200">2. Data Schema & Strategy</span>
+                <span className="text-xs font-semibold text-zinc-200">{t('pipe_data_schema_strat', '2. Data Schema & Strategy')}</span>
                 <button
                   type="button"
                   onClick={() => onOpenTaskConfig('data')}
                   className="text-xs text-indigo-400 hover:underline"
                 >
-                  Configure
+                  {t('pipe_btn_configure', 'Configure')}
                 </button>
               </div>
               <div className="space-y-1.5 text-xs font-mono">
                 <div>
-                  <span className="text-zinc-500">Train / Test Path: </span>
+                  <span className="text-zinc-500">{t('pipe_field_train_test', 'Train / Test Path:')} </span>
                   <span className="text-zinc-200">
                     {dataCfg.train_path || 'dataset/'} , {dataCfg.test_path || 'dataset/test/'}
                   </span>
                 </div>
                 <div>
-                  <span className="text-zinc-500">ID Column: </span>
+                  <span className="text-zinc-500">{t('pipe_field_id_col', 'ID Column:')} </span>
                   <span className="text-zinc-200">{dataCfg.id_column || 'id'}</span>
                 </div>
                 <div className="truncate" title={dataCfg.target_column}>
-                  <span className="text-zinc-500">Target Columns: </span>
+                  <span className="text-zinc-500">{t('pipe_field_target_col', 'Target Columns:')} </span>
                   <span className="text-zinc-200">
                     {dataCfg.target_column || 'target'}
                   </span>
                 </div>
                 <div>
-                  <span className="text-zinc-500">Missing Policy: </span>
+                  <span className="text-zinc-500">{t('pipe_field_missing_policy', 'Missing Policy:')} </span>
                   <span className="text-zinc-200">{dataCfg.missing_data_policy || 'fill_empty_context'}</span>
                 </div>
               </div>
@@ -487,32 +489,32 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             {/* Card 3: Validation Split */}
             <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-zinc-200">3. Validation Split</span>
+                <span className="text-xs font-semibold text-zinc-200">{t('pipe_validation_split', '3. Validation Split')}</span>
                 <button
                   type="button"
                   onClick={() => onOpenTaskConfig('cv')}
                   className="text-xs text-indigo-400 hover:underline"
                 >
-                  Configure
+                  {t('pipe_btn_configure', 'Configure')}
                 </button>
               </div>
               <div className="space-y-1.5 text-xs font-mono">
                 <div>
-                  <span className="text-zinc-500">Split Method: </span>
+                  <span className="text-zinc-500">{t('pipe_field_split_method', 'Split Method:')} </span>
                   <span className="text-zinc-200">{dataCfg.split_strategy || 'Not declared'}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-500">Group Column: </span>
+                  <span className="text-zinc-500">{t('pipe_field_group_col', 'Group Column:')} </span>
                   <span className="text-amber-300">{dataCfg.group_column || 'Not declared'}</span>
                 </div>
                 <div>
-                  <span className="text-zinc-500">Folds / Seed: </span>
+                  <span className="text-zinc-500">{t('pipe_field_folds_seed', 'Folds / Seed:')} </span>
                   <span className="text-zinc-200">
                     {dataCfg.n_folds ?? 'Not declared'} folds (seed={dataCfg.seed ?? 'Not declared'})
                   </span>
                 </div>
                 <div>
-                  <span className="text-zinc-500">Fold File: </span>
+                  <span className="text-zinc-500">{t('pipe_field_fold_file', 'Fold File:')} </span>
                   <span className="text-zinc-200">{dataCfg.split_file || dataCfg.fold_file || 'Not declared'}</span>
                 </div>
               </div>
@@ -523,7 +525,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           <div className="p-4 bg-zinc-900/40 border border-zinc-800 rounded-xl flex flex-wrap items-center justify-between gap-3">
             <div className="flex-1 min-w-[260px]">
               <label className="block text-xs font-semibold text-zinc-300 mb-1">
-                Competition Submission Portal URL:
+                {t('pipe_portal_url_label', 'Competition Submission Portal URL:')}
               </label>
               <input
                 type="url"
@@ -538,7 +540,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               onClick={() => setActiveStep(2)}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-2"
             >
-              <span>Proceed to Step 2: Agent Prompt & Propose</span>
+              <span>{t('pipe_proceed_step2', 'Proceed to Step 2: Agent Prompt & Propose')}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -554,7 +556,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 shadow-xl flex flex-wrap items-center justify-between gap-4">
             <div className="flex-1 min-w-[260px] space-y-1">
               <div className="text-sm font-semibold text-zinc-100">
-                Active Proposed Experiment Config (`configs/*.yaml`)
+                {t('pipe_step2_active_config', 'Active Proposed Experiment Config (configs/*.yaml)')}
               </div>
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <select
@@ -573,14 +575,14 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   onClick={() => onOpenConfigModal(selectedConfig)}
                   className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 rounded-lg border border-zinc-800 text-xs font-medium transition"
                 >
-                  Inspect / Edit YAML
+                  {t('pipe_inspect_edit_yaml', 'Inspect / Edit YAML')}
                 </button>
                 <button
                   type="button"
                   onClick={() => onOpenConfigModal('create')}
                   className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 rounded-lg border border-indigo-500/40 text-xs font-semibold transition"
                 >
-                  + Propose New Config
+                  {t('pipe_propose_new_config', '+ Propose New Config')}
                 </button>
               </div>
             </div>
@@ -590,7 +592,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               onClick={() => setActiveStep(3)}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-2"
             >
-              <span>Next: Run Experiment (Step 3)</span>
+              <span>{t('pipe_next_step3', 'Next: Run Experiment (Step 3)')}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -608,12 +610,12 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           {/* Top Cloud Account Status Bar */}
           <div className="bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3 text-xs">
-              <span className="font-semibold text-zinc-300">Optional Cloud Accounts:</span>
+              <span className="font-semibold text-zinc-300">{t('pipe_cloud_accounts', 'Optional Cloud Accounts:')}</span>
               <span className="px-2.5 py-1 rounded border bg-zinc-900 border-zinc-800 text-zinc-300 font-mono">
-                Kaggle: <strong>{envStatus?.kaggle.username || 'Not logged in'}</strong>
+                Kaggle: <strong>{envStatus?.kaggle.username || t('pipe_not_logged_in', 'Not logged in')}</strong>
               </span>
               <span className="px-2.5 py-1 rounded border bg-zinc-900 border-zinc-800 text-zinc-300 font-mono">
-                Modal: <strong>{envStatus?.modal.active_profile || 'Not configured'}</strong>
+                Modal: <strong>{envStatus?.modal.active_profile || t('pipe_not_configured', 'Not configured')}</strong>
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -622,14 +624,14 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 onClick={onOpenEnvModal}
                 className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 rounded-lg border border-zinc-800 text-xs font-medium transition"
               >
-                Kaggle Login / Account Settings
+                {t('pipe_btn_account_settings', 'Kaggle Login / Account Settings')}
               </button>
               <button
                 type="button"
                 onClick={() => setActiveStep(4)}
                 className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5"
               >
-                <span>Next: Package & Submit (Step 4)</span>
+                <span>{t('pipe_next_step4', 'Next: Package & Submit (Step 4)')}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -639,15 +641,15 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             {/* Card 3.1: Push Dataset to Cloud (1-Click Sync) */}
             <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
               <div className="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2">
-                1. Sync Dataset & Splits to Cloud
+                {t('pipe_sync_data_cloud', '1. Sync Dataset & Splits to Cloud')}
               </div>
               {isCustomTaskPlugin && (
                 <p className="text-xs text-amber-200">
-                  Dataset upload is disabled until the selected task adapter is available in the remote runtime.
+                  {t('pipe_dataset_upload_disabled', 'Dataset upload is disabled until the selected task adapter is available in the remote runtime.')}
                 </p>
               )}
               <p className="text-xs text-zinc-400">
-                Push declared task data and splits to a private resource named from this task and its current data fingerprint. Every subsequent run mounts the matching resource.
+                {t('pipe_sync_data_desc', 'Push declared task data and splits to a private resource named from this task and its current data fingerprint. Every subsequent run mounts the matching resource.')}
               </p>
 
               <button
@@ -659,8 +661,8 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 <Upload className={`w-3.5 h-3.5 ${pushingDataset ? 'animate-bounce' : ''}`} />
                 <span>
                   {pushingDataset
-                    ? 'Pushing Dataset & Splits...'
-                    : `Push Dataset to ${execMode === 'modal' ? 'Modal Volume' : 'Kaggle Datasets'}`}
+                    ? t('pipe_btn_pushing_data', 'Pushing Dataset & Splits...')
+                    : t('pipe_btn_push_data', 'Push Dataset to {target}', { target: execMode === 'modal' ? 'Modal Volume' : 'Kaggle Datasets' })}
                 </span>
               </button>
 
@@ -674,7 +676,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             {/* Card 3.2: Choose Execution Mode & Run */}
             <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
               <div className="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2">
-                2. Execute Experiment ({currentExpId})
+                {t('pipe_exec_title', '2. Execute Experiment ({exp_id})', { exp_id: currentExpId })}
               </div>
 
               <div className="grid grid-cols-3 gap-1.5 bg-zinc-900 p-1 rounded-lg border border-zinc-800">
@@ -688,7 +690,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   }`}
                 >
                   <Cpu className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Local CPU</span>
+                  <span>{t('pipe_mode_local', 'Local CPU')}</span>
                 </button>
                 <button
                   type="button"
@@ -701,7 +703,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   }`}
                 >
                   <Globe className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Kaggle GPU</span>
+                  <span>{t('pipe_mode_kaggle', 'Kaggle GPU')}</span>
                 </button>
                 <button
                   type="button"
@@ -714,20 +716,20 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   }`}
                 >
                   <Cloud className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Modal GPU</span>
+                  <span>{t('pipe_mode_modal', 'Modal GPU')}</span>
                 </button>
               </div>
 
               {isCustomTaskPlugin && (
                 <p className="p-2.5 bg-amber-950/30 border border-amber-800/60 rounded-lg text-xs text-amber-200">
-                  Remote runs are disabled for task plugins until the adapter is installed in the remote runtime. Local runs use the selected adapter.
+                  {t('pipe_remote_disabled_note', 'Remote runs are disabled for task plugins until the adapter is installed in the remote runtime. Local runs use the selected adapter.')}
                 </p>
               )}
 
               {execMode === 'local' ? (
                 <div className="p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg space-y-2 text-xs text-zinc-300">
                   <div>
-                Runs the configured experiment through the selected task adapter on this machine.
+                    {t('pipe_local_desc', 'Runs the configured experiment through the selected task adapter on this machine.')}
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -736,12 +738,12 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                       onChange={(e) => setSmokeTestOnly(e.target.checked)}
                       className="rounded bg-zinc-950 border-zinc-700"
                     />
-                    <span>Quick Smoke Test (--debug --fold 0)</span>
+                    <span>{t('pipe_smoke_test_chk', 'Quick Smoke Test (--debug --fold 0)')}</span>
                   </label>
                 </div>
               ) : execMode === 'kaggle' ? (
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">Kaggle Cloud GPU:</label>
+                  <label className="block text-xs text-zinc-400 mb-1">{t('pipe_kaggle_gpu_label', 'Kaggle Cloud GPU:')}</label>
                   <select
                     value={kaggleGpu}
                     onChange={(e) => setKaggleGpu(e.target.value)}
@@ -753,7 +755,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 </div>
               ) : (
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">Modal Serverless GPU:</label>
+                  <label className="block text-xs text-zinc-400 mb-1">{t('pipe_modal_gpu_label', 'Modal Serverless GPU:')}</label>
                   <select
                     value={modalGpu}
                     onChange={(e) => setModalGpu(e.target.value)}
@@ -775,7 +777,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
                 >
                   <Square className="w-3.5 h-3.5 fill-current" />
-                  <span>{isStopping ? 'Stopping...' : 'Stop Job'}</span>
+                  <span>{isStopping ? t('pipe_btn_stopping', 'Stopping...') : t('pipe_btn_stop_job', 'Stop Job')}</span>
                 </button>
               ) : (
                 <button
@@ -785,7 +787,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>{isLaunching ? 'Starting...' : 'Run'}</span>
+                  <span>{isLaunching ? t('pipe_btn_starting', 'Starting...') : t('pipe_btn_run', 'Run')}</span>
                 </button>
               )}
             </div>
@@ -793,10 +795,10 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             {/* Card 3.3: Monitor Cloud Status & Pull Output to Local */}
             <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
               <div className="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2">
-                3. Monitor & Pull Output to Local
+                {t('pipe_monitor_pull_title', '3. Monitor & Pull Output to Local')}
               </div>
               <p className="text-xs text-zinc-400">
-                Check remote job progress and pull run outputs into <code>{artifactDir}/{currentExpId}/</code>.
+                {t('pipe_monitor_pull_desc', 'Check remote job progress and pull run outputs into {dir}/{exp_id}/.', { dir: artifactDir, exp_id: currentExpId })}
               </p>
 
               <div className="grid grid-cols-2 gap-2">
@@ -807,7 +809,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   className="py-2 px-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${checkingStatus ? 'animate-spin' : ''}`} />
-                  <span>Check Status</span>
+                  <span>{t('pipe_btn_check_status', 'Check Status')}</span>
                 </button>
 
                 <button
@@ -817,7 +819,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   className="py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>{pullingOutput ? 'Pulling...' : 'Pull Output'}</span>
+                  <span>{pullingOutput ? t('pipe_btn_pulling', 'Pulling...') : t('pipe_btn_pull_output', 'Pull Output')}</span>
                 </button>
               </div>
 
@@ -852,7 +854,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               <div className="px-4 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2 font-mono text-zinc-200">
                   <Terminal className="w-4 h-4 text-emerald-400" />
-                  <span>Execution Log Stream ({currentExpId})</span>
+                  <span>{t('pipe_log_stream_title', 'Execution Log Stream ({exp_id})', { exp_id: currentExpId })}</span>
                 </div>
                 <span className="font-mono text-zinc-400">{activeJob?.status || 'IDLE'}</span>
               </div>
@@ -878,20 +880,20 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-5 space-y-4 shadow-xl">
             <div className="border-b border-zinc-800 pb-3">
               <h2 className="text-base font-semibold text-zinc-100">
-                1. Build Submission for {taskInfo?.platform?.toUpperCase() || 'Configured Platform'}
+                {t('pipe_step4_heading', '1. Build Submission for {platform}', { platform: taskInfo?.platform?.toUpperCase() || 'Configured Platform' })}
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
                 {isCustomTaskPlugin
                   ? pluginCanSubmit
-                    ? 'Use Submissions Hub to provide test-set predictions; the task plugin builds and validates the official package.'
-                    : `Task plugin “${taskInfo?.task_plugin?.id}” does not expose both submission builder and validator hooks yet.`
-                  : <>Formats the configured predictions from <code>{artifactDir}/{currentExpId}/</code> using the declared task contract and runs the configured audit.</>}
+                    ? t('pipe_step4_plugin_can_submit', 'Use Submissions Hub to provide test-set predictions; the task plugin builds and validates the official package.')
+                    : t('pipe_step4_plugin_cannot_submit', 'Task plugin “{plugin}” does not expose both submission builder and validator hooks yet.', { plugin: taskInfo?.task_plugin?.id || '' })
+                  : t('pipe_step4_default_desc', 'Formats the configured predictions from {dir}/{exp_id}/ using the declared task contract and runs the configured audit.', { dir: artifactDir, exp_id: currentExpId })}
               </p>
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">Experiment to Package:</label>
+                <label className="block text-xs text-zinc-400 mb-1">{t('pipe_exp_to_package', 'Experiment to Package:')}</label>
                 <select
                   value={selectedConfig}
                   onChange={(e) => setSelectedConfig(e.target.value)}
@@ -914,10 +916,10 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                 <FileArchive className="w-4 h-4" />
                 <span>
                   {packagingSub
-                    ? 'Building & validating package...'
+                    ? t('pipe_btn_building_package', 'Building & validating package...')
                     : isCustomTaskPlugin
-                      ? 'Use Submissions Hub for plugin submissions'
-                      : `Build Submission (${subSpec.file_name || 'submission.zip'})`}
+                      ? t('pipe_btn_use_sub_hub', 'Use Submissions Hub for plugin submissions')
+                      : t('pipe_btn_build_sub', 'Build Submission ({filename})', { filename: subSpec.file_name || 'submission.zip' })}
                 </span>
               </button>
 
@@ -944,7 +946,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                     className="py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
                   >
                     <Download className="w-4 h-4 text-emerald-400" />
-                    <span>Download {activeSubObj?.archive_path?.split(/[\\/]/).pop() || 'submission.zip'}</span>
+                    <span>{t('pipe_btn_download_sub', 'Download {filename}', { filename: activeSubObj?.archive_path?.split(/[\\/]/).pop() || 'submission.zip' })}</span>
                   </a>
                 )}
 
@@ -955,7 +957,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
                   className="py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  <span>Open {taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Competition'} Portal</span>
+                  <span>{t('pipe_btn_open_portal', 'Open {platform} Portal', { platform: taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Competition' })}</span>
                 </a>
               </div>
             </div>
@@ -968,21 +970,21 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
           >
             <div className="border-b border-zinc-800 pb-3">
               <h2 className="text-base font-semibold text-zinc-100">
-                2. Record {taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Official'} LB Score & Loop to Next Proposal
+                {t('pipe_record_score_heading', '2. Record {platform} LB Score & Loop to Next Proposal', { platform: taskInfo?.platform ? taskInfo.platform.toUpperCase() : 'Official' })}
               </h2>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Enter the score returned by the evaluation platform and your observations. Saving updates <code>SUBMISSIONS.md</code> and immediately injects the feedback into Step 2 for the Agent's next proposal.
+                {t('pipe_record_score_desc', 'Enter the score returned by the evaluation platform and your observations. Saving updates SUBMISSIONS.md and immediately injects the feedback into Step 2 for the Agent next proposal.')}
               </p>
             </div>
 
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">Select Submission Package:</label>
+              <label className="block text-xs text-zinc-400 mb-1">{t('pipe_select_sub_package', 'Select Submission Package:')}</label>
               <select
                 value={activeSubmissionId}
                 onChange={(e) => setActiveSubmissionId(e.target.value)}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-mono text-zinc-200"
               >
-                {submissions.length === 0 && <option value="">No packaged submissions yet</option>}
+                {submissions.length === 0 && <option value="">{t('pipe_no_packaged_subs', 'No packaged submissions yet')}</option>}
                 {submissions.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.id} — {s.exp_id} ({s.created_at})
@@ -994,7 +996,7 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">
-                  {taskInfo?.primary_metric || 'Primary Metric'} Score
+                  {t('pipe_metric_score_label', '{metric} Score', { metric: taskInfo?.primary_metric || 'Primary Metric' })}
                 </label>
                 <input
                   type="number"
@@ -1024,13 +1026,13 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
 
             <div>
               <label className="block text-xs text-zinc-400 mb-1">
-                Diagnostic Note for Next Agent Proposal:
+                {t('pipe_diagnostic_note_label', 'Diagnostic Note for Next Agent Proposal:')}
               </label>
               <textarea
                 rows={3}
                 value={lbNotes}
                 onChange={(e) => setLbNotes(e.target.value)}
-                placeholder="e.g. Leaderboard reached 0.842 (+0.018 vs baseline). Slices with rare classes still low recall — propose focal loss or feature weighting next."
+                placeholder={t('pipe_diagnostic_note_ph', 'e.g. Leaderboard reached 0.842 (+0.018 vs baseline). Slices with rare classes still low recall — propose focal loss or feature weighting next.')}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500"
               />
             </div>
@@ -1049,8 +1051,8 @@ export const CompetitionPipelineHub: React.FC<CompetitionPipelineHubProps> = ({
               <RotateCcw className="w-4 h-4" />
               <span>
                 {savingScore
-                  ? 'Saving Score & Updating Prompt...'
-                  : 'Save Score & Loop to Step 2 (Propose Next)'}
+                  ? t('pipe_btn_saving_score', 'Saving Score & Updating Prompt...')
+                  : t('pipe_btn_save_score_loop', 'Save Score & Loop to Step 2 (Propose Next)')}
               </span>
             </button>
           </form>
