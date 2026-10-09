@@ -22,6 +22,7 @@ import {
 import { TaskInfo, TaskMetricDef, TaskPreset, DataConfig, CompetitionRules, SubmissionSpec } from '../types/experiment';
 import { api } from '../services/api';
 import { ML_METRICS_CATALOG, getMetricById, getSuggestedDirection } from '../constants/metrics';
+import { useLanguage } from '../constants/i18n';
 
 interface TaskConfigModalProps {
   isOpen: boolean;
@@ -77,6 +78,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   onSave,
   initialTab = 'task',
 }) => {
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'task' | 'data' | 'cv' | 'rules' | 'submission'>(initialTab);
   const [presets, setPresets] = useState<TaskPreset[]>([]);
 
@@ -105,7 +107,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [imbalanceStrategy, setImbalanceStrategy] = useState<string>('class_weighted');
   const [missingDataPolicy, setMissingDataPolicy] = useState<string>('fill_empty');
 
-  // Tab 3: Validation Protocol (CV)
+  // Tab 3: Validation Protocol
   const [splitStrategy, setSplitStrategy] = useState<string>('KFold');
   const [groupColumn, setGroupColumn] = useState<string>('');
   const [nFolds, setNFolds] = useState<number>(5);
@@ -304,7 +306,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       task_type: type.trim() || 'Supervised Learning',
       type: type.trim() || 'Supervised Learning',
       modality,
-      primary_metric: primaryMetric.trim() || 'Score (CV)',
+      primary_metric: primaryMetric.trim() || 'Score',
       direction,
       primary_metric_baseline: primaryBaseline ? parseFloat(primaryBaseline) : undefined,
       primary_metric_target: primaryTarget ? parseFloat(primaryTarget) : undefined,
@@ -368,11 +370,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <span>Competition & Benchmark Setup</span>
+                <span>{t('modal_task_title', 'Competition & Benchmark Setup')}</span>
                 {name && <span className="text-xs text-zinc-400 font-normal">({name})</span>}
               </h2>
               <p className="text-[11px] text-zinc-500">
-                Configure task objectives, cross-validation data splits, competition rules, and audit gates
+                {t('modal_task_desc', 'Configure task objectives, cross-validation data splits, competition rules, and audit gates')}
               </p>
             </div>
           </div>
@@ -396,7 +398,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             }`}
           >
             <Award className="w-3.5 h-3.5" />
-            <span>1. Objective & Metrics</span>
+            <span>{t('modal_tab_obj', '1. Objective & Metrics')}</span>
           </button>
 
           <button
@@ -409,7 +411,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             }`}
           >
             <Database className="w-3.5 h-3.5" />
-            <span>2. Data Schema & Strategy</span>
+            <span>{t('modal_tab_data', '2. Data Schema & Strategy')}</span>
           </button>
 
           <button
@@ -422,7 +424,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>3. Validation Split (CV)</span>
+            <span>{t('tab_validation_protocol', '3. Validation Split')}</span>
           </button>
 
           <button
@@ -435,7 +437,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             }`}
           >
             <Scale className="w-3.5 h-3.5" />
-            <span>4. Rules & Constraints</span>
+            <span>{t('modal_tab_rules', '4. Rules & Constraints')}</span>
           </button>
 
           <button
@@ -448,7 +450,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             }`}
           >
             <FileArchive className="w-3.5 h-3.5" />
-            <span>5. Submission & Audit</span>
+            <span>{t('modal_tab_sub', '5. Submission & Audit')}</span>
           </button>
         </div>
 
@@ -468,7 +470,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
                   <label className="block text-[11px] font-semibold text-zinc-300 mb-1.5 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Quick Competition Presets (1-Click Fill All Tabs)</span>
+                    <span>{t('modal_task_presets_label', 'Quick Competition Presets (1-Click Fill All Tabs)')}</span>
                   </label>
                   <div className="flex flex-wrap gap-1.5">
                     {presets.map((p) => (
@@ -548,7 +550,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               <div className="p-3.5 bg-zinc-950/70 border border-zinc-800/80 rounded-lg space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-semibold text-zinc-200">
-                    Primary Benchmark Metric & Target
+                    {t('modal_task_primary_metric_title', 'Primary Benchmark Metric & Target')}
                   </div>
                   <span className="text-[10px] text-zinc-500 font-mono">
                     Standard ML Catalog + Custom Support
@@ -558,7 +560,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-[11px] text-zinc-400 mb-1">
-                      Pick Standard ML Metric
+                      {t('modal_task_pick_metric', 'Pick Standard ML Metric')}
                     </label>
                     <select
                       value={ML_METRICS_CATALOG.some((m) => m.id === primaryMetric) ? primaryMetric : '__custom__'}
@@ -690,7 +692,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-zinc-200">
-                    Subtask Metrics & Evaluation Criteria ({metrics.length})
+                    {t('modal_task_subtasks_title', 'Subtasks & Auxiliary Metrics')} ({metrics.length})
                   </label>
                   <button
                     type="button"
@@ -939,11 +941,11 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: Validation Split (CV) */}
+          {/* TAB 3: Validation Split */}
           {activeTab === 'cv' && (
             <div className="space-y-4">
               <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-lg space-y-3">
-                <div className="text-xs font-semibold text-zinc-200">Cross-Validation Split Protocol</div>
+                <div className="text-xs font-semibold text-zinc-200">{t('tab_validation_protocol', 'Validation Split Protocol')}</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-zinc-400 mb-1">Validation Split Scheme</label>
@@ -1216,7 +1218,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               onClick={onClose}
               className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition"
             >
-              Cancel
+              {t('btn_cancel', 'Cancel')}
             </button>
 
             <button
@@ -1225,7 +1227,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow transition disabled:opacity-50"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>{saving ? 'Saving & Injecting Skill...' : 'Save & Sync Agent Skill'}</span>
+              <span>{saving ? t('status_saving', 'Saving...') : t('btn_save_task_config', 'Save & Sync Agent Skill')}</span>
             </button>
           </div>
         </form>

@@ -91,7 +91,9 @@ def load_task_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
 
 
 def generate_skill_content(
-    task: Dict[str, Any], artifact_path: str = ".ml-harness/artifacts/<task-id>"
+    task: Dict[str, Any],
+    artifact_path: str = ".ml-harness/artifacts/<task-id>",
+    skill_name: str = "ml-experiment-harness",
 ) -> str:
     """Generate Markdown content for SKILL.md dynamically tailored to the target task."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
@@ -111,7 +113,7 @@ def generate_skill_content(
 
     lines: List[str] = [
         "---",
-        "name: ml-experiment-harness",
+        f"name: {skill_name}",
         f"description: Manages ML experiments for {task_name} on {platform} via AIDE tree search, enforces SWE-agent deterministic audit gate, and mandates Epistemic Grounding & Assumption Registers.",
         "---",
         "",
@@ -317,11 +319,21 @@ def inject_skill_file(
         artifact_path = project.artifacts_dir.relative_to(project.root).as_posix()
     except ValueError:
         artifact_path = str(project.artifacts_dir)
-    content = generate_skill_content(cfg, artifact_path=artifact_path)
-
-    dest = output_path or (project.root / ".agents" / "skills" / "ml-harness" / "SKILL.md")
+    dest = output_path or (project.root / ".agents" / "skills" / "ml-experiment-harness" / "SKILL.md")
     dest.parent.mkdir(parents=True, exist_ok=True)
+    content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=dest.parent.name)
     dest.write_text(content, encoding="utf-8")
+    for twin_name in ("ml-experiment-harness", "ml-harness"):
+        if dest.parent.parent.name == "skills" and dest.parent.name != twin_name:
+            twin_dest = dest.parent.parent / twin_name / "SKILL.md"
+            twin_dest.parent.mkdir(parents=True, exist_ok=True)
+            twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=twin_name)
+            twin_dest.write_text(twin_content, encoding="utf-8")
+        elif output_path is None:
+            twin_dest = project.root / ".agents" / "skills" / twin_name / "SKILL.md"
+            twin_dest.parent.mkdir(parents=True, exist_ok=True)
+            twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=twin_name)
+            twin_dest.write_text(twin_content, encoding="utf-8")
     return dest
 
 

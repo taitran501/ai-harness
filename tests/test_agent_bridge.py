@@ -174,6 +174,7 @@ class TestAgentBridge(unittest.TestCase):
                     "dataset_dir": str(d_dir),
                     "context_file": str(doc_file),
                     "output_config": str(t_dir / "task.yaml"),
+                    "project_root": str(t_dir),
                 },
                 session_id=sess.session_id,
             )
