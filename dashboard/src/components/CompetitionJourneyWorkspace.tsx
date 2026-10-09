@@ -340,7 +340,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
   };
 
   const [agentGoal, setAgentGoal] = useState<string>(
-    agentCopilot.goal || (taskInfo?.primary_metric ? `Improve ${taskInfo.primary_metric}` : 'Improve primary validation metric')
+    agentCopilot.goal || (taskInfo?.primary_metric ? `Improve ${taskInfo.primary_metric}` : t('copilot_default_goal', 'Improve primary validation metric'))
   );
   const [maxExpBudget, setMaxExpBudget] = useState<number>(
     agentCopilot.budget?.max_experiments || 3
@@ -435,7 +435,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             <button
               onClick={() => setIsCopilotExpanded(!isCopilotExpanded)}
               className="px-2.5 py-1.5 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-medium flex items-center gap-1 transition border border-zinc-700/60"
-              title="Expand Copilot controls and step trace"
+              title={t('copilot_expand_tooltip', 'Expand Copilot controls and step trace')}
             >
               <Sliders className="w-3.5 h-3.5 text-zinc-400" />
               <span className="hidden sm:inline">{t('copilot_details', 'Details')}</span>
@@ -506,15 +506,15 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                     <Activity className="w-3.5 h-3.5 text-emerald-400" /> {t('copilot_parallel_tracks', 'Parallel Tracks')}
                   </span>
                   <span className="text-[10px] font-mono text-zinc-500">
-                    {agentCopilot.last_run_at ? `Run at ${new Date(agentCopilot.last_run_at).toLocaleTimeString()}` : 'Ready'}
+                    {agentCopilot.last_run_at ? t('copilot_last_run', 'Run at {time}', { time: new Date(agentCopilot.last_run_at).toLocaleTimeString() }) : t('copilot_ready_status', 'Ready')}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-1.5 text-[11px]">
                   {[
-                    { label: 'Experiments', state: activeTracks.experimentation || 'active', phase: 4 },
-                    { label: 'Candidates', state: activeTracks.candidate_management || 'active', phase: 5 },
-                    { label: evalProto.external_eval_label || 'External', state: activeTracks.external_evaluation || 'active', phase: 6 },
+                    { label: t('copilot_track_exp', 'Experiments'), state: activeTracks.experimentation || 'active', phase: 4 },
+                    { label: t('copilot_track_cand', 'Candidates'), state: activeTracks.candidate_management || 'active', phase: 5 },
+                    { label: evalProto.external_eval_label || t('copilot_track_external', 'External'), state: activeTracks.external_evaluation || 'active', phase: 6 },
                   ].map((tr, i) => (
                     <button
                       key={i}
@@ -604,7 +604,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                 <Trophy className="w-3.5 h-3.5" /> {isAwaitingBaseline ? t('best_score_label', 'Best Score') : t('kpi_best_validation_title', 'Best Validation Score')}
               </span>
               <span className="text-[10px] text-zinc-400 truncate max-w-[120px]">
-                {specSummary.primary_metric || 'Metric'}
+                {specSummary.primary_metric || t('kpi_metric_fallback', 'Metric')}
               </span>
             </div>
             {isAwaitingBaseline ? (
@@ -638,7 +638,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                   </span>
                 </div>
                 <div className="text-[11px] text-zinc-400 font-mono mt-0.5 truncate">
-                  Model: {currentBest.cv_best?.id || 'baseline'}
+                  {t('kpi_model_label', 'Model:')} {currentBest.cv_best?.id || 'baseline'}
                 </div>
               </div>
             )}
@@ -674,11 +674,11 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                 {typeof currentBest.public_lb_best?.score === 'number' && !isNaN(currentBest.public_lb_best.score) ? currentBest.public_lb_best.score.toFixed(4) : (currentBest.public_lb_best?.score ?? '—')}
               </span>
               <span className="text-[10px] text-zinc-400 uppercase">
-                {currentBest.public_lb_best?.label || 'Public LB'}
+                {currentBest.public_lb_best?.label || t('kpi_public_lb_fallback', 'Public LB')}
               </span>
             </div>
             <div className="text-[11px] text-zinc-400 font-mono mt-0.5 truncate">
-              {t('kpi_sub_id', 'Sub ID:')} {currentBest.public_lb_best?.sub_id || 'None scored'}
+              {t('kpi_sub_id', 'Sub ID:')} {currentBest.public_lb_best?.sub_id || t('kpi_none_scored', 'None scored')}
             </div>
           </div>
           <div className="mt-2 pt-2 border-t border-zinc-800/80 text-[11px] text-zinc-400 flex items-center justify-between">
@@ -701,7 +701,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                     : 'bg-amber-500/20 text-amber-300'
                 }`}
               >
-                {blockers.length} items
+                {t('kpi_items_count', '{count} items', { count: blockers.length })}
               </span>
             </div>
             {blockers.length === 0 ? (
@@ -719,7 +719,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                   >
                     <span className="text-zinc-200 truncate">{b.message}</span>
                     <span className="text-amber-300 font-semibold shrink-0 text-[10px]">
-                      {b.action_label || 'Fix'} →
+                      {b.action_label || t('kpi_fix_btn', 'Fix')} →
                     </span>
                   </button>
                 ))}
@@ -833,21 +833,21 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3">
               <div className="text-zinc-400 text-[11px]">{t('stage1_metric_card', 'Primary Evaluation Metric')}</div>
               <div className="text-base font-bold text-emerald-400 mt-0.5">
-                {specSummary.primary_metric || 'Primary metric'} ({specSummary.direction || 'maximize'})
+                {specSummary.primary_metric || 'Primary metric'} ({specSummary.direction === 'minimize' ? t('direction_minimize', 'minimize') : t('direction_maximize', 'maximize')})
               </div>
               <div className="text-zinc-500 mt-1 font-mono text-[11px]">
-                Baseline: {specSummary.baseline_goal ?? 'not set'} → Target: {specSummary.target_goal ?? 'not set'}
+                {t('stage1_baseline_target', 'Baseline: {baseline} → Target: {target}', { baseline: specSummary.baseline_goal ?? 'not set', target: specSummary.target_goal ?? 'not set' })}
               </div>
             </div>
             <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3">
               <div className="text-zinc-400 text-[11px]">{t('stage1_constraints_card', 'Declared Constraints')}</div>
               <div className="text-base font-bold text-indigo-400 mt-0.5">
                 {rulesObj.max_params_limit
-                  ? `≤ ${(Number(rulesObj.max_params_limit) / 1e6).toFixed(0)}M Params`
-                  : 'No Parameter Limit'}
+                  ? t('stage1_max_params', '≤ {params}M Params', { params: (Number(rulesObj.max_params_limit) / 1e6).toFixed(0) })
+                  : t('stage1_no_param_limit', 'No Parameter Limit')}
               </div>
               <div className="text-zinc-500 mt-1 text-[11px]">
-                External Data: {rulesObj.allow_external_data ? 'Allowed' : 'Forbidden'}
+                {t('stage1_external_data', 'External Data: {status}', { status: rulesObj.allow_external_data ? t('status_allowed', 'Allowed') : t('status_forbidden', 'Forbidden') })}
               </div>
             </div>
             <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3">
@@ -856,20 +856,20 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                 {evalProto.evaluation_mode || 'public_private_leaderboard'}
               </div>
               <div className="text-zinc-500 mt-1 text-[11px]">
-                Daily Quota: {evalProto.daily_quota ?? 5}/day • Max Final Slots: {maxFinalSlots}
+                {t('stage1_daily_quota_slots', 'Daily Quota: {quota}/day • Max Final Slots: {slots}', { quota: evalProto.daily_quota ?? 5, slots: maxFinalSlots })}
               </div>
             </div>
           </div>
 
           <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3.5">
             <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 mb-2">
-              Declared Subtasks & Target Conditioning ({subtasksList.length} subtasks)
+              {t('stage1_declared_subtasks', 'Declared Subtasks & Target Conditioning ({count} subtasks)', { count: subtasksList.length })}
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
               {subtasksList.map((st: any) => (
                 <div key={st.id} className="p-2.5 rounded bg-zinc-900 border border-zinc-800">
                   <div className="font-bold text-white">
-                    {st.name} (`{st.id}` • Weight {Math.round((st.weight ?? 1) * 100)}%)
+                    {st.name} (`{st.id}` • {t('stage1_subtask_weight', 'Weight {pct}%', { pct: Math.round((st.weight ?? 1) * 100) })})
                   </div>
                   <div className="text-zinc-400 text-[11px] mt-0.5">{st.description || st.task_type}</div>
                 </div>
@@ -948,7 +948,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             <div>
               <h2 className="text-base font-bold text-white">{t('stage2_title', '2. Data & Problem Understanding')}</h2>
               <p className="text-xs text-zinc-400">
-                Executes the `data_checks` declared in Competition Spec (`configs/task.yaml`).
+                {t('stage2_desc', 'Executes the data_checks declared in Competition Spec (configs/task.yaml).')}
               </p>
             </div>
             <span
@@ -980,13 +980,13 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
             <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3">
               <div className="text-zinc-400 text-[11px]">{t('stage2_spec_checks', 'Spec Checks')}</div>
               <div className="text-lg font-bold text-amber-400 mt-0.5 font-mono">
-                {dataReport.declared_checks_count ?? 4} checks
+                {t('stage2_checks_count', '{count} checks', { count: dataReport.declared_checks_count ?? 4 })}
               </div>
             </div>
             <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3">
               <div className="text-zinc-400 text-[11px]">{t('stage2_cross_fold_leakage', 'Cross-Fold Leakage')}</div>
               <div className="text-lg font-bold text-emerald-400 mt-0.5 font-mono">
-                {dataReport.leakage_audit?.cross_fold_leaked_groups ?? 0} leaked
+                {t('stage2_leaked_count', '{count} leaked', { count: dataReport.leakage_audit?.cross_fold_leaked_groups ?? 0 })}
               </div>
             </div>
           </div>
@@ -1028,7 +1028,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
               <span>
                 {gates.data_risks_confirmed
                   ? t('stage2_unlock_baseline_btn', 'Data readiness confirmed — Continue to Baseline')
-                  : 'Confirm data risks & unlock Baseline establishment'}
+                  : t('stage2_confirm_risks_btn', 'Confirm data risks & unlock Baseline establishment')}
               </span>
             </button>
           </div>
@@ -1119,21 +1119,21 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
             <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3">
-              <div className="text-zinc-400 text-[11px]">Baseline Model</div>
+              <div className="text-zinc-400 text-[11px]">{t('stage3_baseline_model', 'Baseline Model')}</div>
               <div className="font-mono font-bold text-white text-sm mt-0.5">
                 {currentBest.baseline?.id || 'baseline'}
               </div>
             </div>
             <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3">
-              <div className="text-zinc-400 text-[11px]">Score Anchor</div>
+              <div className="text-zinc-400 text-[11px]">{t('stage3_score_anchor', 'Score Anchor')}</div>
               <div className="font-mono font-bold text-emerald-400 text-sm mt-0.5">
                 {Number(currentBest.baseline?.score ?? baselineScore).toFixed(4)}
               </div>
             </div>
             <div className="bg-zinc-950/80 border border-zinc-800 rounded-lg p-3">
-              <div className="text-zinc-400 text-[11px]">Gate Status</div>
+              <div className="text-zinc-400 text-[11px]">{t('stage3_gate_status', 'Gate Status')}</div>
               <div className="font-bold text-zinc-200 text-sm mt-0.5">
-                {gates.baseline_locked ? '✓ Locked & Active' : 'Pending Lock'}
+                {gates.baseline_locked ? t('stage3_locked_active', '✓ Locked & Active') : t('stage3_pending_lock', 'Pending Lock')}
               </div>
             </div>
           </div>
@@ -1151,7 +1151,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                 {t('stage4_title', '4. Experimentation Track')}
               </h2>
               <p className="text-xs text-zinc-400">
-                Hypothesis → Train → Diagnose → Keep or Reject. Compare against baseline anchor.
+                {t('stage4_desc', 'Hypothesis → Train → Diagnose → Keep or Reject. Compare against baseline anchor.')}
               </p>
             </div>
             <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
@@ -1186,7 +1186,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
               {/* Filter Row */}
               <div className="flex items-center justify-between bg-zinc-900/60 border border-zinc-800 px-3 py-2 rounded-lg text-xs">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-zinc-400 text-[11px] uppercase font-bold mr-1">Filter:</span>
+                  <span className="text-zinc-400 text-[11px] uppercase font-bold mr-1">{t('stage4_filter_label', 'Filter:')}</span>
                   {(['ALL', 'KEEP', 'REJECT'] as const).map((mode) => (
                     <button
                       key={mode}
@@ -1202,7 +1202,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                   ))}
                 </div>
                 <span className="text-zinc-500 font-mono text-[11px]">
-                  {filteredCandidates.length} candidate runs
+                  {t('stage4_candidate_runs_count', '{count} candidate runs', { count: filteredCandidates.length })}
                 </span>
               </div>
 
@@ -1211,7 +1211,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                   <div className="bg-zinc-950/60 border border-zinc-800 rounded-xl p-8 text-center text-zinc-400">
                     <Layers className="w-8 h-8 mx-auto text-zinc-600 mb-2" />
                     <p className="text-sm font-medium">{t('stage4_empty', 'No candidate experiments matching this filter.')}</p>
-                    <p className="text-xs text-zinc-500 mt-1">Switch filter to ALL or run an experiment to see candidate cards.</p>
+                    <p className="text-xs text-zinc-500 mt-1">{t('stage4_empty_hint', 'Switch filter to ALL or run an experiment to see candidate cards.')}</p>
                   </div>
                 ) : (
                   filteredCandidates.map((exp: any) => (
@@ -1235,7 +1235,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                         >
                           {exp.id}
                         </div>
-                        <div className="text-[11px] text-zinc-400">Parent: {exp.parent_id || 'root'}</div>
+                        <div className="text-[11px] text-zinc-400">{t('stage4_parent_label', 'Parent: {id}', { id: exp.parent_id || 'root' })}</div>
                       </div>
                       <div className="lg:col-span-2 grid grid-cols-3 gap-2 text-xs">
                         <div className="bg-zinc-950 border border-zinc-800 rounded p-2">
@@ -1320,7 +1320,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
           <div className="lg:col-span-2 bg-zinc-900/90 border border-zinc-800 rounded-xl p-5 space-y-4">
             <h2 className="text-base font-bold text-white">{t('stage5_title', '5. Candidate Management Pool')}</h2>
             <p className="text-xs text-zinc-400">
-              Supports Single Model promotion, Diverse Ensemble Blending, Checkpoint Selection, and Subtask Routing.
+              {t('stage5_desc', 'Supports Single Model promotion, Diverse Ensemble Blending, Checkpoint Selection, and Subtask Routing.')}
             </p>
             {(candidatePool.synthesized_candidates || []).map((sc: any) => (
               <div
@@ -1338,16 +1338,16 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                   onClick={() => setSelectedPhase(6)}
                   className="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs"
                 >
-                  Evaluate in Stage 6 →
+                  {t('stage5_eval_stage6_btn', 'Evaluate in Stage 6 →')}
                 </button>
               </div>
             ))}
           </div>
 
           <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-5 space-y-3 text-xs">
-            <h3 className="text-sm font-bold text-white">Build / Promote Candidate</h3>
+            <h3 className="text-sm font-bold text-white">{t('stage5_build_cand_title', 'Build / Promote Candidate')}</h3>
             <div>
-              <label className="block text-zinc-400 mb-1">Candidate Name:</label>
+              <label className="block text-zinc-400 mb-1">{t('stage5_cand_name_label', 'Candidate Name:')}</label>
               <input
                 type="text"
                 value={synthName}
@@ -1356,7 +1356,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
               />
             </div>
             <div>
-              <label className="block text-zinc-400 mb-1">Candidate Strategy:</label>
+              <label className="block text-zinc-400 mb-1">{t('stage5_cand_strategy_label', 'Candidate Strategy:')}</label>
               <select
                 value={synthMode}
                 onChange={(e) => setSynthMode(e.target.value)}
@@ -1371,7 +1371,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
 
             {synthMode === 'single_model' || synthMode === 'checkpoint_selection' ? (
               <div>
-                <label className="block text-zinc-400 mb-1">Select Source Experiment:</label>
+                <label className="block text-zinc-400 mb-1">{t('stage5_source_exp_label', 'Select Source Experiment:')}</label>
                 <select
                   value={singleSourceExp}
                   onChange={(e) => setSingleSourceExp(e.target.value)}
@@ -1545,7 +1545,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                 }
                 className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow"
               >
-                <Lock className="w-4 h-4" /> {t('stage7_freeze_btn', 'Freeze Final Portfolio')} ({maxFinalSlots} slots)
+                <Lock className="w-4 h-4" /> {t('stage7_freeze_btn', 'Freeze Final Portfolio')} {t('stage7_slots_count', '({max} slots)', { max: maxFinalSlots })}
               </button>
             </div>
           </div>
@@ -1575,13 +1575,13 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
         <div className="space-y-5">
           <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-5 space-y-4">
             <h2 className="text-base font-bold text-white">
-              {t('stage8_title', '8. Competition Closure')} (`Local Validation ≠ External Score ≠ Final Score ≠ Rank`)
+              {t('stage8_title', '8. Competition Closure')} ({t('stage8_motto', 'Local Validation ≠ External Score ≠ Final Score ≠ Rank')})
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
               <input
                 type="number"
                 step="0.0001"
-                placeholder="Final Score (Slot 1)"
+                placeholder={t('stage8_score_slot1_ph', 'Final Score (Slot 1)')}
                 value={privScore1}
                 onChange={(e) => setPrivScore1(e.target.value)}
                 className="bg-zinc-950 border border-zinc-800 rounded p-2 text-white font-mono"
@@ -1589,14 +1589,14 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
               <input
                 type="number"
                 step="0.0001"
-                placeholder="Final Score (Slot 2)"
+                placeholder={t('stage8_score_slot2_ph', 'Final Score (Slot 2)')}
                 value={privScore2}
                 onChange={(e) => setPrivScore2(e.target.value)}
                 className="bg-zinc-950 border border-zinc-800 rounded p-2 text-white font-mono"
               />
               <input
                 type="number"
-                placeholder="Final Rank"
+                placeholder={t('stage8_rank_ph', 'Final Rank')}
                 value={finalRank}
                 onChange={(e) => setFinalRank(e.target.value)}
                 className="bg-zinc-950 border border-zinc-800 rounded p-2 text-white font-mono"
@@ -1612,7 +1612,7 @@ export const CompetitionJourneyWorkspace: React.FC<CompetitionJourneyWorkspacePr
                   });
                   await onRefreshAll();
                   if (res.state?.finalization) {
-                    setGeneratedReportMd(`Exported to ${taskInfo?.artifacts_dir || 'artifacts'}/FINAL_COMPETITION_REPORT.md`);
+                    setGeneratedReportMd(t('stage8_exported_notice', 'Exported to {path}/FINAL_COMPETITION_REPORT.md', { path: taskInfo?.artifacts_dir || 'artifacts' }));
                   }
                 }}
                 className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center justify-center gap-1.5 shadow"

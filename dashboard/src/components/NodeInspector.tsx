@@ -163,7 +163,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               {node.branch}
             </span>
             <span className="text-[10px] font-mono text-zinc-400">
-              Parent: <strong className="text-zinc-200">{node.parent_id || 'ROOT'}</strong>
+              {t('inspector_parent_label', 'Parent:')} <strong className="text-zinc-200">{node.parent_id || 'ROOT'}</strong>
             </span>
           </div>
 
@@ -329,7 +329,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
 
             {node.notes && (
               <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-1">
-                <h4 className="text-zinc-400 font-semibold text-xs">Experiment Notes</h4>
+                <h4 className="text-zinc-400 font-semibold text-xs">{t('inspector_notes_title', 'Experiment Notes')}</h4>
                 <p className="text-zinc-300 font-sans leading-relaxed">{node.notes}</p>
               </div>
             )}
@@ -348,10 +348,13 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                   </div>
                   <div className="space-y-1">
                     <h4 className="text-xs font-semibold text-zinc-200">
-                      Classical {node.approach_type.toUpperCase()} Experiment ({node.model_family})
+                      {t('inspector_classical_exp', 'Classical {approach} Experiment ({family})', {
+                        approach: node.approach_type.toUpperCase(),
+                        family: node.model_family,
+                      })}
                     </h4>
                     <p className="text-[11px] text-zinc-400 leading-relaxed font-sans">
-                      This run executed under a classical tabular/deep encoder architecture. You can fork this experiment into an LLM target to benchmark 7B or 14B instruction models against this baseline.
+                      {t('inspector_classical_desc', 'This run executed under a classical tabular/deep encoder architecture. You can fork this experiment into an LLM target to benchmark 7B or 14B instruction models against this baseline.')}
                     </p>
                   </div>
                 </div>
@@ -362,14 +365,14 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 font-bold rounded-lg transition"
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" />
-                    <span>Fork into 7B Unsloth LoRA Target</span>
+                    <span>{t('inspector_fork_7b', 'Fork into 7B Unsloth LoRA Target')}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => onOpenConfigModal?.('create', node.id)}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium rounded-lg border border-zinc-700 transition"
                   >
-                    <span>Fork into 14B DeepSeek-R1 CoT</span>
+                    <span>{t('inspector_fork_14b', 'Fork into 14B DeepSeek-R1 CoT')}</span>
                   </button>
                 </div>
               </div>
@@ -380,7 +383,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               <div className="flex items-center justify-between">
                 <h4 className="text-zinc-200 font-semibold text-xs flex items-center gap-2">
                   <Bot className="w-4 h-4 text-amber-400" />
-                  <span>Model Backbone & Scale</span>
+                  <span>{t('inspector_backbone_scale', 'Model Backbone & Scale')}</span>
                 </h4>
                 <span className="font-mono text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded">
                   {llmSpec?.param_size || node.param_size || (isLLM ? '7B' : 'N/A')}
@@ -389,28 +392,28 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
 
               <div className="grid grid-cols-2 gap-2.5 font-mono text-[11px]">
                 <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80">
-                  <div className="text-[10px] text-zinc-400">Model Identifier</div>
+                  <div className="text-[10px] text-zinc-400">{t('inspector_model_identifier', 'Model Identifier')}</div>
                   <div className="text-zinc-100 font-semibold truncate mt-0.5" title={llmSpec?.model_name || node.metrics?.model || node.id}>
                     {llmSpec?.model_name || node.metrics?.model || (isLLM ? 'Qwen2.5-7B-Instruct' : node.id)}
                   </div>
                 </div>
 
                 <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80">
-                  <div className="text-[10px] text-zinc-400">Quantization / Precision</div>
+                  <div className="text-[10px] text-zinc-400">{t('inspector_quant_precision', 'Quantization / Precision')}</div>
                   <div className="text-amber-300 font-semibold mt-0.5">
                     {llmSpec?.quantization || (isLLM ? '4-bit NormalFloat (NF4)' : 'bfloat16')}
                   </div>
                 </div>
 
                 <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80">
-                  <div className="text-[10px] text-zinc-400">Context Window</div>
+                  <div className="text-[10px] text-zinc-400">{t('inspector_context_window', 'Context Window')}</div>
                   <div className="text-indigo-300 font-semibold mt-0.5">
                     {llmSpec?.context_length ? `${llmSpec.context_length} tokens` : '8,192 tokens'}
                   </div>
                 </div>
 
                 <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80">
-                  <div className="text-[10px] text-zinc-400">Provider / Engine</div>
+                  <div className="text-[10px] text-zinc-400">{t('inspector_provider_engine', 'Provider / Engine')}</div>
                   <div className="text-emerald-400 font-semibold mt-0.5">
                     {llmSpec?.provider || (isLLM ? 'Unsloth Triton Kernel' : 'PyTorch Native')}
                   </div>
@@ -421,7 +424,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
             {/* PEFT / LoRA Hyperparameters */}
             <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-3">
               <h4 className="text-zinc-200 font-semibold text-xs flex items-center justify-between">
-                <span>PEFT & LoRA Adaptation</span>
+                <span>{t('inspector_peft_lora', 'PEFT & LoRA Adaptation')}</span>
                 <span className="text-[10px] font-mono text-indigo-400">
                   {llmSpec?.paradigm || 'unsloth_qlora'}
                 </span>
@@ -429,21 +432,21 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
 
               <div className="grid grid-cols-3 gap-2 text-center font-mono text-[11px]">
                 <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80">
-                  <div className="text-[10px] text-zinc-400">LoRA Rank (r)</div>
+                  <div className="text-[10px] text-zinc-400">{t('inspector_lora_rank', 'LoRA Rank (r)')}</div>
                   <div className="text-indigo-300 font-bold text-sm mt-0.5">
                     {llmSpec?.lora_r ?? 16}
                   </div>
                 </div>
 
                 <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80">
-                  <div className="text-[10px] text-zinc-400">Scaling (alpha)</div>
+                  <div className="text-[10px] text-zinc-400">{t('inspector_lora_alpha', 'Scaling (alpha)')}</div>
                   <div className="text-indigo-300 font-bold text-sm mt-0.5">
                     {llmSpec?.lora_alpha ?? 32}
                   </div>
                 </div>
 
                 <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80">
-                  <div className="text-[10px] text-zinc-400">Dropout</div>
+                  <div className="text-[10px] text-zinc-400">{t('inspector_lora_dropout', 'Dropout')}</div>
                   <div className="text-zinc-300 font-bold text-sm mt-0.5">
                     {llmSpec?.lora_dropout ?? 0.05}
                   </div>
@@ -451,7 +454,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               </div>
 
               <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80 space-y-1">
-                <span className="text-[10px] text-zinc-400 font-mono block">Target Projections:</span>
+                <span className="text-[10px] text-zinc-400 font-mono block">{t('inspector_target_projections', 'Target Projections:')}</span>
                 <code className="text-[11px] font-mono text-zinc-300 break-all leading-relaxed block">
                   {llmSpec?.target_modules || 'q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj'}
                 </code>
@@ -463,11 +466,11 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               <div className="flex items-center justify-between">
                 <h4 className="text-zinc-200 font-semibold text-xs flex items-center gap-1.5">
                   <FileText className="w-4 h-4 text-purple-400" />
-                  <span>Prompting & Reasoning Paradigm</span>
+                  <span>{t('inspector_prompting_paradigm', 'Prompting & Reasoning Paradigm')}</span>
                 </h4>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-950/60 border border-purple-800/60 text-purple-300">
-                    {llmSpec?.use_cot !== false ? 'CoT Reasoning Enabled' : 'Direct Classification'}
+                    {llmSpec?.use_cot !== false ? t('inspector_cot_enabled', 'CoT Reasoning Enabled') : t('inspector_direct_classification', 'Direct Classification')}
                   </span>
                   <button
                     type="button"
@@ -478,7 +481,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                       setTimeout(() => setCopiedLlmPrompt(false), 2000);
                     }}
                     className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition"
-                    title="Copy Prompt"
+                    title={t('btn_copy_prompt', 'Copy Prompt')}
                   >
                     {copiedLlmPrompt ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
@@ -486,7 +489,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               </div>
 
               <div className="space-y-2">
-                <div className="text-[10px] text-zinc-400">System Instruction:</div>
+                <div className="text-[10px] text-zinc-400">{t('inspector_system_instruction', 'System Instruction:')}</div>
                 <div className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80 font-mono text-[11px] text-zinc-300 leading-relaxed max-h-28 overflow-y-auto">
                   {llmSpec?.system_prompt ||
                     'You are an expert AI competition classifier. Predict target classes with calibrated confidence.'}
@@ -495,7 +498,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
 
               {llmSpec?.prompt_template && (
                 <div className="space-y-2">
-                  <div className="text-[10px] text-zinc-400">Prompt Template:</div>
+                  <div className="text-[10px] text-zinc-400">{t('inspector_prompt_template', 'Prompt Template:')}</div>
                   <pre className="p-2.5 bg-zinc-900 rounded-lg border border-zinc-800/80 font-mono text-[11px] text-indigo-300 leading-relaxed max-h-28 overflow-y-auto whitespace-pre-wrap">
                     {llmSpec.prompt_template}
                   </pre>
@@ -528,7 +531,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
               </pre>
             ) : (
               <div className="bg-zinc-950 p-6 rounded-xl border border-zinc-800 text-center text-zinc-400 font-sans">
-                No diagnostic failure slices recorded for this node.
+                {t('inspector_no_diagnostics', 'No diagnostic failure slices recorded for this node.')}
               </div>
             )}
           </div>
@@ -550,13 +553,13 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                 </div>
 
                 <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-2">
-                  <div className="text-zinc-400">Source Type</div>
+                  <div className="text-zinc-400">{t('inspector_source_type', 'Source Type')}</div>
                   <div className="font-mono text-zinc-100 font-bold">{grounding.source_type}</div>
-                  <div className="text-zinc-400 pt-2">Source / Model ID</div>
+                  <div className="text-zinc-400 pt-2">{t('inspector_source_id', 'Source / Model ID')}</div>
                   <div className="font-mono text-indigo-300 bg-zinc-900 p-2 rounded border border-zinc-800">
                     {grounding.source_id}
                   </div>
-                  <div className="text-zinc-400 pt-2">Retrieval Summary</div>
+                  <div className="text-zinc-400 pt-2">{t('inspector_retrieval_summary', 'Retrieval Summary')}</div>
                   <p className="text-zinc-300 leading-relaxed font-sans">{grounding.retrieval_summary}</p>
                 </div>
 
@@ -564,7 +567,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                   <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-2">
                     <h4 className="font-semibold text-zinc-200">{t('inspector_assumption_register', 'Assumption Register')}</h4>
                     <div className="text-zinc-400">
-                      Uncertainty Level: <strong className="text-amber-400 uppercase font-mono">{assumptions.uncertainty_level || 'N/A'}</strong>
+                      {t('inspector_uncertainty_level', 'Uncertainty Level:')} <strong className="text-amber-400 uppercase font-mono">{assumptions.uncertainty_level || 'N/A'}</strong>
                     </div>
                     {assumptions.assumptions && (
                       <ul className="list-disc pl-4 space-y-1 text-zinc-300 font-sans">
@@ -579,8 +582,8 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
             ) : (
               <div className="bg-zinc-950 p-6 rounded-xl border border-zinc-800 text-center space-y-2">
                 <AlertCircle className="w-8 h-8 text-zinc-500 mx-auto" />
-                <h4 className="text-zinc-300 font-semibold">Canonical Reference Baseline</h4>
-                <p className="text-zinc-400 font-sans">This node is the foundational root control baseline.</p>
+                <h4 className="text-zinc-300 font-semibold">{t('inspector_canonical_baseline', 'Canonical Reference Baseline')}</h4>
+                <p className="text-zinc-400 font-sans">{t('inspector_canonical_desc', 'This node is the foundational root control baseline.')}</p>
               </div>
             )}
           </div>
@@ -602,14 +605,14 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                   onClick={() => onOpenConfigModal?.(node.config?.path, node.id)}
                   className="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded transition"
                 >
-                  Edit in Target Editor
+                  {t('inspector_edit_target_btn', 'Edit in Target Editor')}
                 </button>
                 <button
                   type="button"
                   onClick={() => onOpenConfigModal?.('create', node.id)}
                   className="px-2.5 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-medium rounded border border-zinc-700 transition"
                 >
-                  + Fork Child Target
+                  {t('inspector_fork_child_btn', '+ Fork Child Target')}
                 </button>
               </div>
             </div>
@@ -621,16 +624,16 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
             ) : (
               <div className="bg-zinc-950 p-6 rounded-xl border border-zinc-800 text-center space-y-2">
                 <FileCode className="w-8 h-8 text-zinc-600 mx-auto" />
-                <h4 className="text-zinc-300 font-semibold">No Standalone YAML Config Stored</h4>
+                <h4 className="text-zinc-300 font-semibold">{t('inspector_no_yaml_stored', 'No Standalone YAML Config Stored')}</h4>
                 <p className="text-zinc-400 font-sans">
-                  This node ran under inherited baseline or artifact config. You can spawn a new target config extending this experiment.
+                  {t('inspector_inherited_config_desc', 'This node ran under inherited baseline or artifact config. You can spawn a new target config extending this experiment.')}
                 </p>
                 <button
                   type="button"
                   onClick={() => onOpenConfigModal?.('create', node.id)}
                   className="mt-2 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium transition"
                 >
-                  Spawn New Experiment Config from Node
+                  {t('inspector_spawn_config_btn', 'Spawn New Experiment Config from Node')}
                 </button>
               </div>
             )}

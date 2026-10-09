@@ -2,15 +2,18 @@ import React, { memo, useEffect } from 'react';
 import { Handle, Position, NodeProps, Node, useUpdateNodeInternals } from '@xyflow/react';
 import { AlertTriangle, Sparkles } from 'lucide-react';
 import { GraphNode } from '../types/experiment';
+import { useLanguage } from '../constants/i18n';
 
 export type ExperimentNodeType = Node<GraphNode & Record<string, any>, 'experimentNode'>;
 
 export const CustomExperimentNode = memo(({ id, data, selected }: NodeProps<ExperimentNodeType>) => {
+  const { t } = useLanguage();
   const updateNodeInternals = useUpdateNodeInternals();
   const isBest = Boolean(data?.is_best);
   const isBuggy = Boolean(data?.is_buggy || data?.status === 'BUGGY');
   const isLR = data?.layoutDirection === 'LR';
   const delta = data?.parent_delta;
+
 
   // Ensure React Flow updates handle positions whenever layout direction toggles
   useEffect(() => {
@@ -121,7 +124,7 @@ export const CustomExperimentNode = memo(({ id, data, selected }: NodeProps<Expe
                 : '0.0000'}
             </span>
           ) : (
-            <span className="text-[10px] font-mono text-slate-400 leading-none">root</span>
+            <span className="text-[10px] font-mono text-slate-400 leading-none">{t('node_root', 'root')}</span>
           )}
         </div>
       </div>
@@ -135,7 +138,7 @@ export const CustomExperimentNode = memo(({ id, data, selected }: NodeProps<Expe
           {data?.id || id}
         </span>
         {isBuggy && (
-          <span title="Flagged with issues/bugs" className="shrink-0 flex items-center">
+          <span title={t('node_buggy_title', 'Flagged with issues/bugs')} className="shrink-0 flex items-center">
             <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
           </span>
         )}
@@ -145,7 +148,7 @@ export const CustomExperimentNode = memo(({ id, data, selected }: NodeProps<Expe
       <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
         <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider leading-none flex items-center gap-1">
           {isBest && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block shadow-sm" />}
-          <span>{data?.metric_name || data?.primary_metric_name || 'Score'}</span>
+          <span>{data?.metric_name || data?.primary_metric_name || t('node_score_fallback', 'Score')}</span>
           {data?.param_size && (
             <span className="text-[9px] bg-slate-800/90 text-amber-300 border border-slate-700/60 px-1 py-0.2 rounded font-mono font-semibold">
               {data.param_size}
@@ -160,6 +163,7 @@ export const CustomExperimentNode = memo(({ id, data, selected }: NodeProps<Expe
           {hasScore ? data.score.toFixed(4) : '—'}
         </span>
       </div>
+
 
       {/* Source Handle (Outgoing) */}
       <Handle

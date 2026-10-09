@@ -173,7 +173,7 @@ const DashboardContent: React.FC = () => {
 
       {apiError && (
         <div className="px-4 sm:px-6 pt-3">
-          <div role="alert" className="bg-red-950/40 border border-red-800/60 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-red-200">
+          <div role="alert" title={t('connection_error', 'ML-Harness Connection Error')} className="bg-red-950/40 border border-red-800/60 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-red-200">
             <div className="flex items-center gap-2.5">
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
               <div>
@@ -471,7 +471,7 @@ const DashboardContent: React.FC = () => {
                   {agentSubView === 'workspace' ? t('view_agent_title', 'Autonomous Agent Workspace & Diagnostics') : t('view_priming_title', 'Copilot Priming Prompts & System Instructions')}
                 </span>
                 <span className="text-[11px] font-mono text-zinc-500 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">
-                  Layer 2 Agent Bridge
+                  {t('app_layer2_badge', 'Layer 2 Agent Bridge')}
                 </span>
               </div>
 

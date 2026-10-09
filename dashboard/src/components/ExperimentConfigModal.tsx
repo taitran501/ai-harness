@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { CloudPreflightResult, ExperimentSummary, StrategyCard, TaskInfo } from '../types/experiment';
+import { useLanguage } from '../constants/i18n';
 
 interface ExperimentConfigModalProps {
   initialConfigPath?: string;
@@ -179,6 +180,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
   onClose,
   onConfigSaved,
 }) => {
+  const { t } = useLanguage();
   const bestExp =
     experiments.find((e) => e.is_best) ||
     (experiments.length > 0
@@ -472,10 +474,10 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
         <div className="px-5 py-3.5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/70">
           <div>
             <h2 className="text-sm font-semibold text-zinc-100">
-              Strategy Catalog & Experiment Targets
+              {t('expcfg_title', 'Strategy Catalog & Experiment Targets')}
             </h2>
             <p className="text-[11px] text-zinc-500">
-              Scaffold verified research interventions or generate prompt directives for Antigravity and OpenAI Codex.
+              {t('expcfg_desc', 'Scaffold verified research interventions or generate prompt directives for Antigravity and OpenAI Codex.')}
             </p>
           </div>
           <button
@@ -497,7 +499,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   : 'border-transparent text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              Strategy Catalog & Directives
+              {t('expcfg_strategy_catalog', 'Strategy Catalog & Directives')}
             </button>
 
             <button
@@ -509,14 +511,14 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               }`}
             >
               <FileCode className="w-3.5 h-3.5" />
-              <span>Inspect & Edit YAML</span>
+              <span>{t('expcfg_tab_editor', 'Inspect & Edit YAML')}</span>
               {isDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
             </button>
           </div>
 
           {activeTab === 'editor' && (
             <div className="flex items-center gap-2 pb-2">
-              <label className="text-[11px] text-zinc-500">File:</label>
+              <label className="text-[11px] text-zinc-500">{t('expcfg_file_label', 'File:')}</label>
               <select
                 value={selectedConfig}
                 onChange={(e) => setSelectedConfig(e.target.value)}
@@ -540,7 +542,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               <span>{errorMessage}</span>
             </div>
             <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-red-200 text-xs">
-              Dismiss
+              {t('btn_dismiss', 'Dismiss')}
             </button>
           </div>
         )}
@@ -558,7 +560,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               }}
               className="flex items-center gap-1 px-2.5 py-1 text-xs bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 rounded border border-emerald-700 transition"
             >
-              <span>View & Inspect YAML</span>
+              <span>{t('expcfg_btn_view_yaml', 'View & Inspect YAML')}</span>
               <ArrowRight className="w-3 h-3" />
             </button>
           </div>
@@ -567,9 +569,10 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
         {saveSuccess && (
           <div className="mx-5 mt-3 p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-lg text-xs text-emerald-300 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            <span>Target configuration saved to disk.</span>
+            <span>{t('expcfg_saved_notice', 'Target configuration saved to disk.')}</span>
           </div>
         )}
+
 
         {/* TAB 1: Strategy Catalog & Agent Spawner */}
         {activeTab === 'strategies' && (
@@ -581,7 +584,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   <GitBranch className="w-4 h-4 text-emerald-400" />
                 </div>
                 <div>
-                  <span className="text-xs font-semibold text-zinc-200">Parent Baseline Model</span>
+                  <span className="text-xs font-semibold text-zinc-200">{t('expcfg_parent_label', 'Parent Baseline Model')}</span>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <select
                       value={selectedParentId}
@@ -597,7 +600,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       ))}
                     </select>
                     <span className="text-[11px] text-zinc-500">
-                      Candidate runs benchmark directly against this parent baseline.
+                      {t('expcfg_parent_hint', 'Candidate runs benchmark directly against this parent baseline.')}
                     </span>
                   </div>
                 </div>
@@ -605,7 +608,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 
               {/* IDE Selector */}
               <div className="flex items-center gap-2 self-end md:self-auto bg-zinc-900/90 p-1 rounded-lg border border-zinc-800">
-                <span className="text-[11px] text-zinc-400 px-2 font-medium">Prompt IDE:</span>
+                <span className="text-[11px] text-zinc-400 px-2 font-medium">{t('expcfg_prompt_ide', 'Prompt IDE:')}</span>
                 <button
                   type="button"
                   onClick={() => setSelectedIde('antigravity')}
@@ -635,10 +638,10 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
             <div className="space-y-3">
               <div>
                 <h3 className="text-xs font-semibold text-zinc-200">
-                  AI Agent Target Directives
+                  {t('expcfg_agent_directives_title', 'AI Agent Target Directives')}
                 </h3>
                 <p className="text-[11px] text-zinc-400">
-                  Generate structured prompt directives pre-injected with failure diagnostics for autonomous coding agents.
+                  {t('expcfg_agent_directives_desc', 'Generate structured prompt directives pre-injected with failure diagnostics for autonomous coding agents.')}
                 </p>
               </div>
 
@@ -646,10 +649,10 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                 <div className="p-4 bg-zinc-950/60 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3">
                   <div className="space-y-1.5">
                     <span className="text-xs font-semibold text-zinc-200">
-                      Iterate & Fix Diagnosed Bottlenecks
+                      {t('expcfg_iterate_title', 'Iterate & Fix Diagnosed Bottlenecks')}
                     </span>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">
-                      Agent analyzes failure modes and diagnostic logs of <code className="text-zinc-300 font-mono">{selectedParentId}</code> to apply a single controlled intervention.
+                      {t('expcfg_iterate_desc', 'Agent analyzes failure modes and diagnostic logs of {parent} to apply a single controlled intervention.', { parent: selectedParentId })}
                     </p>
                   </div>
 
@@ -662,12 +665,12 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {previewPromptContent?.title.includes('Iterate') ? (
                         <>
                           <EyeOff className="w-3 h-3" />
-                          <span>Hide Preview</span>
+                          <span>{t('btn_hide_preview', 'Hide Preview')}</span>
                         </>
                       ) : (
                         <>
                           <Eye className="w-3 h-3" />
-                          <span>Preview Directive</span>
+                          <span>{t('btn_preview_directive', 'Preview Directive')}</span>
                         </>
                       )}
                     </button>
@@ -680,12 +683,12 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {copiedPromptId === 'iterate' ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-300">Directive Copied</span>
+                          <span className="text-emerald-300">{t('btn_directive_copied', 'Directive Copied')}</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5 text-zinc-400" />
-                          <span>Copy Directive</span>
+                          <span>{t('btn_copy_directive', 'Copy Directive')}</span>
                         </>
                       )}
                     </button>
@@ -695,10 +698,10 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                 <div className="p-4 bg-zinc-950/60 hover:bg-zinc-950 border border-zinc-800 hover:border-zinc-700 rounded-xl transition flex flex-col justify-between space-y-3">
                   <div className="space-y-1.5">
                     <span className="text-xs font-semibold text-zinc-200">
-                      Explore Novel Architecture & Paradigm
+                      {t('expcfg_explore_title', 'Explore Novel Architecture & Paradigm')}
                     </span>
                     <p className="text-[11px] text-zinc-400 leading-relaxed">
-                      Agent explores a distinct model family (Multilingual Transformer or Multi-Task Learning) guided by tree search with epistemic grounding.
+                      {t('expcfg_explore_desc', 'Agent explores a distinct model family (Multilingual Transformer or Multi-Task Learning) guided by tree search with epistemic grounding.')}
                     </p>
                   </div>
 
@@ -711,12 +714,12 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {previewPromptContent?.title.includes('Explore') ? (
                         <>
                           <EyeOff className="w-3 h-3" />
-                          <span>Hide Preview</span>
+                          <span>{t('btn_hide_preview', 'Hide Preview')}</span>
                         </>
                       ) : (
                         <>
                           <Eye className="w-3 h-3" />
-                          <span>Preview Directive</span>
+                          <span>{t('btn_preview_directive', 'Preview Directive')}</span>
                         </>
                       )}
                     </button>
@@ -729,18 +732,19 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       {copiedPromptId === 'explore' ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-300">Directive Copied</span>
+                          <span className="text-emerald-300">{t('btn_directive_copied', 'Directive Copied')}</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5 text-zinc-400" />
-                          <span>Copy Directive</span>
+                          <span>{t('btn_copy_directive', 'Copy Directive')}</span>
                         </>
                       )}
                     </button>
                   </div>
                 </div>
               </div>
+
 
               {previewPromptContent && (
                 <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 space-y-2">
@@ -753,7 +757,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       onClick={() => setPreviewPromptContent(null)}
                       className="text-zinc-500 hover:text-zinc-300 text-xs"
                     >
-                      Close Preview
+                      {t('btn_close_preview', 'Close Preview')}
                     </button>
                   </div>
                   <pre className="text-[11px] font-mono bg-zinc-900 p-3 rounded-lg border border-zinc-800 text-zinc-300 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed">
@@ -768,10 +772,10 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
                 <div>
                   <h3 className="text-xs font-semibold text-zinc-200">
-                    Research Strategy Catalog
+                    {t('expcfg_strategy_catalog', 'Research Strategy Catalog')}
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    Scientific interventions conforming to repository standards. Scaffold a target config or copy prompt directive.
+                    {t('expcfg_strategy_desc', 'Scientific interventions conforming to repository standards. Scaffold a target config or copy prompt directive.')}
                   </p>
                 </div>
 
@@ -838,15 +842,35 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                       >
                         <div className="space-y-2">
                           <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
-                            <span>Branch: {card.branch}</span>
-                            <span>{card.model_family}: {card.model_name}</span>
+                            <span>{t('expcfg_branch_label', 'AIDE Branch:')} {card.branch}</span>
+                            <span>{t('expcfg_model_family', 'Model Family:')} {card.model_family}: {card.model_name}</span>
                           </div>
+                          {card.approach_type && (
+                            <div className="text-[10px] font-mono text-zinc-500">
+                              <span>{t('expcfg_approach_type', 'Approach Type:')} {card.approach_type.toUpperCase()}</span>
+                            </div>
+                          )}
 
                           <h4 className="text-xs font-bold text-zinc-100">{card.title}</h4>
 
                           <p className="text-[11px] text-zinc-400 leading-relaxed">
+                            <span className="font-semibold text-zinc-300">{t('expcfg_problem_label', 'Problem Addressed:')} </span>
                             {card.rationale || card.problem_addressed}
                           </p>
+
+                          {card.hypothesis && (
+                            <p className="text-[11px] text-zinc-400 leading-relaxed">
+                              <span className="font-semibold text-zinc-300">{t('expcfg_hypothesis_label', 'Atomic Scientific Hypothesis:')} </span>
+                              {card.hypothesis}
+                            </p>
+                          )}
+
+                          {card.intervention && (
+                            <p className="text-[11px] text-zinc-400 leading-relaxed">
+                              <span className="font-semibold text-zinc-300">{t('expcfg_intervention_label', 'Scientific Intervention:')} </span>
+                              {card.intervention}
+                            </p>
+                          )}
 
                           {card.target_tasks && (
                             <div className="text-[11px] text-zinc-500 font-mono">
@@ -864,12 +888,12 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                             {isCopied ? (
                               <>
                                 <Check className="w-3 h-3 text-emerald-400" />
-                                <span className="text-emerald-300">Copied</span>
+                                <span className="text-emerald-300">{t('btn_copied', 'Copied!')}</span>
                               </>
                             ) : (
                               <>
                                 <Copy className="w-3 h-3 text-zinc-400" />
-                                <span>Copy Prompt</span>
+                                <span>{t('btn_copy_prompt', 'Copy Prompt')}</span>
                               </>
                             )}
                           </button>
@@ -880,7 +904,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                             onClick={() => handleSpawnStrategy(card)}
                             className="px-3 py-1.5 text-xs bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded-md transition disabled:opacity-50"
                           >
-                            {isGenerating ? 'Creating Config...' : 'Create Config'}
+                            {isGenerating ? t('expcfg_creating_config', 'Creating Config...') : t('expcfg_create_config', 'Create Config')}
                           </button>
                         </div>
                       </div>
@@ -896,13 +920,13 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
           <div className="flex-1 overflow-hidden flex flex-col p-5 space-y-3">
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
-                <span className="text-zinc-400">Config:</span>
+                <span className="text-zinc-400">{t('expcfg_config_label', 'Config:')}</span>
                 <span className="font-mono text-zinc-200 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800">
                   {selectedConfig}
                 </span>
                 {isDirty && (
                   <span className="text-[10px] text-amber-400 bg-amber-950/50 border border-amber-800 px-1.5 py-0.5 rounded font-medium">
-                    Unsaved Changes
+                    {t('expcfg_unsaved_changes', 'Unsaved Changes')}
                   </span>
                 )}
               </div>
@@ -914,7 +938,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   className="flex items-center gap-1 px-2.5 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded border border-zinc-700 transition"
                 >
                   {copiedYaml ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedYaml ? 'Copied' : 'Copy YAML'}</span>
+                  <span>{copiedYaml ? t('btn_copied', 'Copied!') : t('expcfg_copy_yaml', 'Copy YAML')}</span>
                 </button>
 
                 {isDirty && (
@@ -924,7 +948,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                     className="flex items-center gap-1 px-2.5 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 rounded border border-zinc-700 transition"
                   >
                     <RotateCcw className="w-3 h-3" />
-                    <span>Revert</span>
+                    <span>{t('btn_revert', 'Revert')}</span>
                   </button>
                 )}
 
@@ -935,7 +959,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   className="flex items-center gap-1 px-2.5 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded border border-zinc-700 transition disabled:opacity-50"
                 >
                   <ShieldCheck className="w-3 h-3 text-indigo-400" />
-                  <span>{runningPreflight ? 'Checking...' : 'Preflight Test'}</span>
+                  <span>{runningPreflight ? t('status_checking', 'Checking...') : t('expcfg_btn_preflight', 'Preflight Test')}</span>
                 </button>
 
                 <button
@@ -945,7 +969,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                   className="flex items-center gap-1 px-3 py-1 text-xs bg-zinc-100 hover:bg-white text-zinc-900 font-semibold rounded transition disabled:opacity-40"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>{saving ? 'Saving...' : 'Save Config'}</span>
+                  <span>{saving ? t('status_saving', 'Saving...') : t('expcfg_btn_save_config', 'Save Config')}</span>
                 </button>
               </div>
             </div>
@@ -953,18 +977,19 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
             <div className="flex-1 min-h-[340px] flex flex-col relative bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden">
               {loadingConfig ? (
                 <div className="flex-1 flex items-center justify-center text-xs text-zinc-500">
-                  Loading configuration...
+                  {t('expcfg_loading_config', 'Loading configuration...')}
                 </div>
               ) : (
                 <textarea
                   value={yamlContent}
                   onChange={(e) => setYamlContent(e.target.value)}
-                  placeholder="# YAML Experiment Configuration..."
+                  placeholder={t('expcfg_yaml_ph', '# YAML Experiment Configuration...')}
                   spellCheck={false}
                   className="w-full flex-1 p-4 bg-transparent text-zinc-200 font-mono text-xs leading-relaxed resize-none focus:outline-none selection:bg-zinc-700"
                 />
               )}
             </div>
+
 
             {preflightResult && (
               <div
@@ -983,12 +1008,12 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
                     )}
                     <span>
                       {preflightResult.passed
-                        ? 'Pre-Flight Audit Passed — Valid Experiment Schema'
-                        : 'Pre-Flight Validation Errors Detected'}
+                        ? t('expcfg_preflight_passed', 'Pre-Flight Audit Passed — Valid Experiment Schema')
+                        : t('expcfg_preflight_failed', 'Pre-Flight Validation Errors Detected')}
                     </span>
                   </div>
                   <span className="font-mono text-[10px] bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
-                    {preflightResult.errors.length} issues
+                    {t('expcfg_issues_count', '{count} issues', { count: preflightResult.errors.length })}
                   </span>
                 </div>
                 {preflightResult.errors.length > 0 && (

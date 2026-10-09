@@ -17,6 +17,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useLanguage } from '../constants/i18n';
 import {
   TaskInfo,
   LLMProviderInfo,
@@ -220,6 +221,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
   taskInfo,
   onRefreshSolutionTree,
 }) => {
+  const { t } = useLanguage();
   const [studioMode, setStudioMode] = useState<'prompting' | 'unsloth' | 'hf_hub'>('prompting');
 
   // Providers & keys state
@@ -690,9 +692,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
       {/* Top Header / Mode Switcher */}
       <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
         <div>
-          <h1 className="text-base font-bold text-zinc-100">LLM & Unsloth Fine-Tuning Studio</h1>
+          <h1 className="text-base font-bold text-zinc-100">{t('llm_studio_title', 'LLM & Unsloth Fine-Tuning Studio')}</h1>
           <p className="text-xs text-zinc-400">
-            Real-time model discovery from Hugging Face Hub, Unsloth checkpoints, and inference provider APIs.
+            {t('llm_studio_desc', 'Real-time model discovery from Hugging Face Hub, Unsloth checkpoints, and inference provider APIs.')}
           </p>
         </div>
 
@@ -706,7 +708,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Prompt Playground
+            {t('llm_tab_playground', 'Prompt Playground')}
           </button>
 
           <button
@@ -717,7 +719,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Unsloth LoRA Studio
+            {t('llm_tab_unsloth', 'Unsloth LoRA Studio')}
           </button>
 
           <button
@@ -728,7 +730,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Hugging Face Hub
+            {t('llm_tab_hf_hub', 'Hugging Face Hub')}
           </button>
         </div>
       </div>
@@ -744,7 +746,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
                   <div className="flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-purple-400" />
-                    <span className="text-sm font-semibold text-zinc-200">Model & API Provider</span>
+                    <span className="text-sm font-semibold text-zinc-200">{t('llm_model_provider_card', 'Model & API Provider')}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer">
@@ -754,7 +756,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                         onChange={(e) => setIsCustomModel(e.target.checked)}
                         className="w-3 h-3 accent-purple-500 rounded"
                       />
-                      <span>Custom ID</span>
+                      <span>{t('llm_custom_id', 'Custom ID')}</span>
                     </label>
                     <button
                       onClick={() => loadProviderModels(selectedProviderId)}
@@ -762,7 +764,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingProviderModels ? 'animate-spin' : ''}`} />
-                      <span>Fetch Live</span>
+                      <span>{t('llm_fetch_live', 'Fetch Live')}</span>
                     </button>
                   </div>
                 </div>
@@ -770,7 +772,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Provider Selection */}
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400">Inference Provider</label>
+                    <label className="text-xs font-medium text-zinc-400">{t('llm_inference_provider', 'Inference Provider')}</label>
                     <select
                       value={selectedProviderId}
                       onChange={(e) => handleSelectProvider(e.target.value)}
@@ -787,9 +789,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   {/* Model Selection */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium text-zinc-400">Model Name</label>
+                      <label className="text-xs font-medium text-zinc-400">{t('llm_model_name', 'Model Name')}</label>
                       {providerModels.length > 0 && providerModels[0].is_live && (
-                        <span className="text-[10px] text-emerald-400 font-mono">Live from API</span>
+                        <span className="text-[10px] text-emerald-400 font-mono">{t('llm_live_api', 'Live from API')}</span>
                       )}
                     </div>
 
@@ -827,8 +829,8 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     )}
                     <span className="text-zinc-300">
                       {currentProvider?.has_key
-                        ? `${currentProvider.env_key_name || 'Provider'} is verified`
-                        : `Missing ${currentProvider?.env_key_name || 'API Key'}`}
+                        ? t('llm_provider_verified', '{key} is verified', { key: currentProvider.env_key_name || 'Provider' })
+                        : t('llm_missing_key', 'Missing {key}', { key: currentProvider?.env_key_name || 'API Key' })}
                     </span>
                   </div>
 
@@ -838,7 +840,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-[11px] font-medium transition flex items-center gap-1.5"
                     >
                       <Key className="w-3 h-3 text-amber-400" />
-                      <span>{currentProvider.has_key ? 'Update Key' : 'Configure Key'}</span>
+                      <span>{currentProvider.has_key ? t('llm_btn_update_key', 'Update Key') : t('llm_btn_configure_key', 'Configure Key')}</span>
                     </button>
                   )}
                 </div>
@@ -847,7 +849,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 <div className="grid grid-cols-2 gap-4 pt-1">
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs text-zinc-400">
-                      <span>Temperature</span>
+                      <span>{t('llm_temp_label', 'Temperature')}</span>
                       <span className="font-mono text-zinc-200">{temperature.toFixed(2)}</span>
                     </div>
                     <input
@@ -863,7 +865,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
 
                   <div className="space-y-1">
                     <div className="flex justify-between text-xs text-zinc-400">
-                      <span>Max Tokens</span>
+                      <span>{t('llm_max_tokens_label', 'Max Tokens')}</span>
                       <span className="font-mono text-zinc-200">{maxTokens}</span>
                     </div>
                     <input
@@ -884,7 +886,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
                   <div className="flex items-center gap-2">
                     <Code2 className="w-4 h-4 text-purple-400" />
-                    <span className="text-sm font-semibold text-zinc-200">Prompt Engineering Canvas</span>
+                    <span className="text-sm font-semibold text-zinc-200">{t('llm_system_prompt_label', 'System Instructions')}</span>
                   </div>
 
                   <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-zinc-300">
@@ -894,19 +896,19 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       onChange={(e) => setUseCot(e.target.checked)}
                       className="w-3.5 h-3.5 accent-purple-500 rounded cursor-pointer"
                     />
-                    <span>Chain-of-Thought (CoT)</span>
+                    <span>{t('llm_cot_label', 'Chain-of-Thought Reasoning')}</span>
                   </label>
                 </div>
 
                 {/* System Prompt */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-zinc-400">System Instruction</label>
+                  <label className="text-xs font-medium text-zinc-400">{t('llm_system_prompt_label', 'System Instructions')}</label>
                   <textarea
                     rows={2}
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 font-mono focus:outline-none focus:border-purple-500 resize-y"
-                    placeholder="Enter system instruction..."
+                    placeholder={t('llm_system_prompt_ph', 'Enter system instruction...')}
                   />
                 </div>
 
@@ -914,9 +916,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 <div className="space-y-2">
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium text-zinc-400">User Prompt Template</label>
+                      <label className="text-xs font-medium text-zinc-400">{t('llm_user_template_label', 'Task Prompt Template')}</label>
                       <span className="text-[10px] text-zinc-500">
-                        Click tag to toggle in/out or drag tag into editor
+                        {t('llm_available_tags', 'Click column tag to toggle insertion:')}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -957,7 +959,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={handlePromptDrop}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 font-mono focus:outline-none focus:border-purple-500 resize-y leading-relaxed"
-                    placeholder="Enter template or drag {column_name} tags here..."
+                    placeholder={t('llm_user_template_ph', 'Enter template or drag {column_name} tags here...')}
                   />
                 </div>
 
@@ -969,7 +971,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   >
                     <span className="flex items-center gap-2">
                       <Layers className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Few-Shot Demonstrations ({fewShots.length})</span>
+                      <span>{t('llm_few_shot_label', 'Few-Shot In-Context Examples')} ({fewShots.length})</span>
                     </span>
                     <span className="text-[11px] text-zinc-500">{showFewShots ? 'Collapse' : 'Expand'}</span>
                   </button>
@@ -993,7 +995,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                               updated[idx].input = e.target.value;
                               setFewShots(updated);
                             }}
-                            placeholder="Input text..."
+                            placeholder={t('llm_few_shot_input_ph', 'Input text...')}
                             className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono"
                           />
                           <div className="grid grid-cols-2 gap-2">
@@ -1005,7 +1007,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                                 updated[idx].output = e.target.value;
                                 setFewShots(updated);
                               }}
-                              placeholder="Expected output label..."
+                              placeholder={t('llm_few_shot_output_ph', 'Expected output label...')}
                               className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono"
                             />
                             <input
@@ -1016,7 +1018,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                                 updated[idx].explanation = e.target.value;
                                 setFewShots(updated);
                               }}
-                              placeholder="Reasoning explanation (optional)..."
+                              placeholder={t('llm_few_shot_reasoning_ph', 'Reasoning explanation (optional)...')}
                               className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono"
                             />
                           </div>
@@ -1028,7 +1030,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                         className="w-full py-1.5 border border-dashed border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900 rounded-xl text-xs text-zinc-400 hover:text-zinc-200 flex items-center justify-center gap-1.5 transition"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>Add Few-Shot Exemplar</span>
+                        <span>{t('llm_add_example', 'Add Example')}</span>
                       </button>
                     </div>
                   )}
@@ -1041,7 +1043,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
               {/* Execution Output Card */}
               <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 space-y-4">
                 <div className="flex items-center justify-between border-b border-zinc-800 pb-3 gap-3">
-                  <span className="text-sm font-semibold text-zinc-200">Execution Output</span>
+                  <span className="text-sm font-semibold text-zinc-200">{t('llm_infer_result_title', 'Test Inference Output')}</span>
                   <div className="flex items-center gap-2">
                     {testResult && (
                       <span className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs font-mono rounded">
@@ -1060,12 +1062,12 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       {testingPrompt ? (
                         <>
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Running...</span>
+                          <span>{t('llm_btn_testing', 'Generating LLM Output...')}</span>
                         </>
                       ) : (
                         <>
                           <Play className="w-3.5 h-3.5" />
-                          <span>Run Test</span>
+                          <span>{t('llm_btn_test_infer', 'Run Test Inference')}</span>
                         </>
                       )}
                     </button>
@@ -1082,7 +1084,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 {testResult ? (
                   <div className="space-y-3">
                     <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl flex items-center justify-between">
-                      <span className="text-xs text-zinc-400 font-medium">Extracted Prediction:</span>
+                      <span className="text-xs text-zinc-400 font-medium">{t('llm_parsed_label', 'Parsed Target Output')}:</span>
                       <span className="px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-mono font-bold text-xs rounded-lg">
                         {testResult.extracted.parsed_label || 'UNKNOWN'}
                       </span>
@@ -1091,7 +1093,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     {testResult.extracted.reasoning && (
                       <div className="p-3 bg-zinc-950/70 border border-zinc-800 rounded-xl space-y-1">
                         <span className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider">
-                          CoT Reasoning:
+                          {t('llm_cot_label', 'Chain-of-Thought Reasoning')}:
                         </span>
                         <p className="text-xs text-zinc-300 font-mono leading-relaxed">
                           {testResult.extracted.reasoning}
@@ -1101,7 +1103,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
 
                     <div className="p-3 bg-zinc-950/70 border border-zinc-800 rounded-xl space-y-1">
                       <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">
-                        Raw Text Response:
+                        {t('llm_raw_response', 'Raw Model Response')}:
                       </span>
                       <pre className="text-[11px] text-zinc-300 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed">
                         {testResult.raw_text}
@@ -1114,7 +1116,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                         disabled={registeringExp}
                         className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold transition"
                       >
-                        {registeringExp ? 'Registering...' : 'Register as LLM Experiment in Tree'}
+                        {registeringExp ? 'Registering...' : t('llm_btn_register_exp', 'Register as Experiment Run')}
                       </button>
                       {registeredExpMsg && (
                         <p className="text-[11px] text-center pt-2 text-emerald-400 font-medium">
@@ -1141,7 +1143,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-zinc-800">
                 <div>
                   <h2 className="text-sm font-bold text-zinc-100">
-                    Unsloth High-Performance LoRA & QLoRA
+                    {t('llm_unsloth_config_title', 'Unsloth High-Performance LoRA & QLoRA')}
                   </h2>
                   <p className="text-xs text-zinc-400 mt-0.5">
                     Select a base model checkpoint below using live parameter and quantization filters, then generate a reproducible training script.
@@ -1177,7 +1179,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-xs font-semibold text-zinc-300">
-                    Selected Base Model ID
+                    {t('llm_base_model_label', 'Selected Base Model ID')}
                   </label>
                   <div className="flex items-center gap-3">
                     {unslothLastFetched && (
@@ -1191,7 +1193,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 transition"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingUnslothModels ? 'animate-spin' : ''}`} />
-                      <span>Sync Live Hub</span>
+                      <span>{t('llm_btn_sync_hub', 'Sync Live Hub')}</span>
                     </button>
                   </div>
                 </div>
@@ -1212,7 +1214,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                       type="text"
                       value={unslothSearch}
                       onChange={(e) => setUnslothSearch(e.target.value)}
-                      placeholder="Filter model name..."
+                      placeholder={t('llm_filter_model_ph', 'Filter model name...')}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-zinc-200 font-mono focus:outline-none focus:border-amber-500"
                     />
                   </div>
@@ -1222,7 +1224,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     onChange={(e) => setUnslothFamily(e.target.value)}
                     className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
                   >
-                    <option value="all">All Families</option>
+                    <option value="all">{t('llm_all_families', 'All Families')}</option>
                     <option value="Qwen">Qwen</option>
                     <option value="Llama">Llama</option>
                     <option value="DeepSeek">DeepSeek</option>
@@ -1236,12 +1238,12 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     onChange={(e) => setUnslothParamRange(e.target.value)}
                     className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
                   >
-                    <option value="all">All Parameter Sizes</option>
-                    <option value="<3B">Under 3B</option>
-                    <option value="3B-8B">3B to 8B</option>
-                    <option value="8B-14B">8B to 14B</option>
-                    <option value="14B-32B">14B to 32B</option>
-                    <option value=">32B">Over 32B</option>
+                    <option value="all">{t('llm_all_param_sizes', 'All Parameter Sizes')}</option>
+                    <option value="<3B">{t('llm_param_under_3b', 'Under 3B')}</option>
+                    <option value="3B-8B">{t('llm_param_3b_8b', '3B to 8B')}</option>
+                    <option value="8B-14B">{t('llm_param_8b_14b', '8B to 14B')}</option>
+                    <option value="14B-32B">{t('llm_param_14b_32b', '14B to 32B')}</option>
+                    <option value=">32B">{t('llm_param_over_32b', 'Over 32B')}</option>
                   </select>
 
                   <select
@@ -1249,7 +1251,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     onChange={(e) => setUnslothQuantization(e.target.value)}
                     className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
                   >
-                    <option value="all">All Quantizations</option>
+                    <option value="all">{t('llm_all_quantizations', 'All Quantizations')}</option>
                     <option value="4-bit">4-bit (BNB / AWQ)</option>
                     <option value="8-bit">8-bit</option>
                     <option value="FP16/BF16">FP16 / BF16</option>
@@ -1261,27 +1263,27 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     onChange={(e) => setUnslothSort(e.target.value)}
                     className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
                   >
-                    <option value="downloads">Sort: Downloads</option>
-                    <option value="lastModified">Sort: Recently Updated</option>
-                    <option value="likes">Sort: Likes</option>
+                    <option value="downloads">{t('llm_sort_downloads', 'Sort: Downloads')}</option>
+                    <option value="lastModified">{t('llm_sort_recent', 'Sort: Recently Updated')}</option>
+                    <option value="likes">{t('llm_sort_likes', 'Sort: Likes')}</option>
                   </select>
                 </div>
 
                 {/* Vertical Model List (divide-y) */}
                 <div className="border border-zinc-800 rounded-xl bg-zinc-950/60 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2 bg-zinc-900/80 border-b border-zinc-800 text-[11px] font-semibold text-zinc-400">
-                    <span>Model Repository ({unslothModels.length} matching checkpoints)</span>
-                    <span>Parameters / Quantization / Downloads</span>
+                    <span>{t('llm_models_count', 'Model Repository ({count} matching checkpoints)', { count: unslothModels.length })}</span>
+                    <span>{t('llm_th_params_quant_dl', 'Parameters / Quantization / Downloads')}</span>
                   </div>
 
                   {loadingUnslothModels ? (
                     <div className="py-10 text-center text-xs text-zinc-400 flex items-center justify-center gap-2">
                       <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
-                      <span>Querying live Unsloth checkpoints from Hugging Face Hub...</span>
+                      <span>{t('llm_querying_unsloth', 'Querying live Unsloth checkpoints from Hugging Face Hub...')}</span>
                     </div>
                   ) : unslothModels.length === 0 ? (
                     <div className="py-8 text-center text-xs text-zinc-500">
-                      No Unsloth models match the active filters.
+                      {t('llm_no_unsloth_match', 'No Unsloth models match the active filters.')}
                     </div>
                   ) : (
                     <div className="divide-y divide-zinc-800/80 max-h-72 overflow-y-auto">
@@ -1310,10 +1312,10 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
 
                             <div className="flex items-center gap-4 text-xs font-mono shrink-0">
                               <span className="text-zinc-400">
-                                {m.downloads.toLocaleString()} downloads
+                                {t('llm_downloads_count', '{count} downloads', { count: m.downloads.toLocaleString() })}
                               </span>
                               <span className="text-zinc-500">
-                                {m.likes.toLocaleString()} likes
+                                {t('llm_likes_count', '{count} likes', { count: m.likes.toLocaleString() })}
                               </span>
                               <button
                                 type="button"
@@ -1341,7 +1343,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
               {/* Dataset Columns Configuration */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-zinc-400">Dataset Text Column</label>
+                  <label className="text-xs font-medium text-zinc-400">{t('llm_dataset_text_col', 'Dataset Text Column')}</label>
                   <input
                     type="text"
                     value={peftTextCol}
@@ -1352,7 +1354,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-zinc-400">Dataset Target Column</label>
+                  <label className="text-xs font-medium text-zinc-400">{t('llm_dataset_target_col', 'Dataset Target Column')}</label>
                   <input
                     type="text"
                     value={peftTargetCol}
@@ -1364,9 +1366,9 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
               </div>
 
               {/* Hyperparameters Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 bg-zinc-950/70 border border-zinc-800/80 rounded-xl text-xs font-mono">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-4 bg-zinc-950/70 border border-zinc-800/80 rounded-xl text-xs font-mono">
                 <div>
-                  <label className="text-[10px] text-zinc-500">LoRA Rank (r)</label>
+                  <label className="text-[10px] text-zinc-500">{t('llm_lora_rank', 'LoRA Rank (r)')}</label>
                   <select
                     value={peftLoraR}
                     onChange={(e) => setPeftLoraR(parseInt(e.target.value))}
@@ -1380,7 +1382,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-zinc-500">LoRA Alpha</label>
+                  <label className="text-[10px] text-zinc-500">{t('llm_lora_alpha', 'LoRA Alpha')}</label>
                   <select
                     value={peftLoraAlpha}
                     onChange={(e) => setPeftLoraAlpha(parseInt(e.target.value))}
@@ -1393,7 +1395,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-zinc-500">Max Seq Length</label>
+                  <label className="text-[10px] text-zinc-500">{t('llm_max_seq_len', 'Max Seq Length')}</label>
                   <select
                     value={peftMaxSeqLength}
                     onChange={(e) => setPeftMaxSeqLength(parseInt(e.target.value))}
@@ -1406,7 +1408,18 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-zinc-500">Epochs</label>
+                  <label className="text-[10px] text-zinc-500">{t('llm_lr_label', 'Learning Rate')}</label>
+                  <input
+                    type="number"
+                    step="0.00001"
+                    value={peftLR}
+                    onChange={(e) => setPeftLR(parseFloat(e.target.value) || 0.0002)}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded p-1.5 text-zinc-200 mt-1"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-zinc-500">{t('llm_epochs_label', 'Training Epochs')}</label>
                   <input
                     type="number"
                     min="1"
@@ -1418,7 +1431,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-zinc-500">Batch Size</label>
+                  <label className="text-[10px] text-zinc-500">{t('llm_batch_size_label', 'Batch Size per Device')}</label>
                   <input
                     type="number"
                     min="1"
@@ -1443,7 +1456,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 >
                   {generatingPeft
                     ? 'Generating...'
-                    : `Generate ${fineTuningFramework === 'unsloth' ? 'Unsloth' : 'PEFT'} Script`}
+                    : t('llm_btn_gen_script', 'Generate Fine-Tuning Python Script')}
                 </button>
 
                 <button
@@ -1451,7 +1464,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   disabled={generatingPeft}
                   className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-medium transition"
                 >
-                  Save Script to scripts/llm/
+                  {t('llm_btn_save_script', 'Save to Experiment Dir')}
                 </button>
               </div>
 
@@ -1467,9 +1480,10 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     <button
                       onClick={() => copyToClipboard(peftResult.script_code)}
                       className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-mono flex items-center gap-1.5 transition"
+                      title={t('btn_copy', 'Copy')}
                     >
                       {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedScript ? 'Copied' : 'Copy Code'}</span>
+                      <span>{copiedScript ? t('btn_copied', 'Copied!') : t('llm_btn_copy_script', 'Copy Script')}</span>
                     </button>
                   </div>
 
@@ -1489,10 +1503,10 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-zinc-800">
                 <div>
                   <h2 className="text-sm font-bold text-zinc-100">
-                    Hugging Face Hub Live Model Browser
+                    {t('llm_hf_browser_title', 'Hugging Face Hub Live Model Browser')}
                   </h2>
                   <p className="text-xs text-zinc-400 mt-0.5">
-                    Real-time query against the Hugging Face Hub API with family, parameter size, and quantization filters.
+                    {t('llm_hf_browser_desc', 'Real-time query against the Hugging Face Hub API with family, parameter size, and quantization filters.')}
                   </p>
                 </div>
 
@@ -1508,7 +1522,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${loadingHfModels ? 'animate-spin' : ''}`} />
-                    <span>Sync Live Hub</span>
+                    <span>{t('llm_btn_sync_hub', 'Sync Live Hub')}</span>
                   </button>
                 </div>
               </div>
@@ -1521,7 +1535,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                     type="text"
                     value={hfSearchQuery}
                     onChange={(e) => setHfSearchQuery(e.target.value)}
-                    placeholder="Search Hugging Face Hub..."
+                    placeholder={t('llm_search_hf_ph', 'Search Hugging Face Hub...')}
                     className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-zinc-200 font-mono focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -1531,7 +1545,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   onChange={(e) => setHfFamily(e.target.value)}
                   className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
                 >
-                  <option value="all">All Families</option>
+                  <option value="all">{t('llm_all_families', 'All Families')}</option>
                   <option value="Qwen">Qwen</option>
                   <option value="Llama">Llama</option>
                   <option value="DeepSeek">DeepSeek</option>
@@ -1547,12 +1561,12 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   onChange={(e) => setHfParamRange(e.target.value)}
                   className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
                 >
-                  <option value="all">All Parameter Sizes</option>
-                  <option value="<3B">Under 3B</option>
-                  <option value="3B-8B">3B to 8B</option>
-                  <option value="8B-14B">8B to 14B</option>
-                  <option value="14B-32B">14B to 32B</option>
-                  <option value=">32B">Over 32B</option>
+                  <option value="all">{t('llm_all_param_sizes', 'All Parameter Sizes')}</option>
+                  <option value="<3B">{t('llm_param_under_3b', 'Under 3B')}</option>
+                  <option value="3B-8B">{t('llm_param_3b_8b', '3B to 8B')}</option>
+                  <option value="8B-14B">{t('llm_param_8b_14b', '8B to 14B')}</option>
+                  <option value="14B-32B">{t('llm_param_14b_32b', '14B to 32B')}</option>
+                  <option value=">32B">{t('llm_param_over_32b', 'Over 32B')}</option>
                 </select>
 
                 <select
@@ -1560,7 +1574,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   onChange={(e) => setHfQuantization(e.target.value)}
                   className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
                 >
-                  <option value="all">All Quantizations</option>
+                  <option value="all">{t('llm_all_quantizations', 'All Quantizations')}</option>
                   <option value="4-bit">4-bit (BNB / AWQ / GPTQ)</option>
                   <option value="8-bit">8-bit</option>
                   <option value="FP16/BF16">FP16 / BF16</option>
@@ -1572,28 +1586,28 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   onChange={(e) => setHfSortFilter(e.target.value)}
                   className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
                 >
-                  <option value="downloads">Sort: Downloads</option>
-                  <option value="lastModified">Sort: Recently Updated</option>
-                  <option value="likes">Sort: Likes</option>
-                  <option value="trendingScore">Sort: Trending</option>
+                  <option value="downloads">{t('llm_sort_downloads', 'Sort: Downloads')}</option>
+                  <option value="lastModified">{t('llm_sort_recent', 'Sort: Recently Updated')}</option>
+                  <option value="likes">{t('llm_sort_likes', 'Sort: Likes')}</option>
+                  <option value="trendingScore">{t('llm_sort_trending', 'Sort: Trending')}</option>
                 </select>
               </div>
 
               {/* Vertical List Results */}
               <div className="border border-zinc-800 rounded-xl bg-zinc-950/60 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-2 bg-zinc-900/80 border-b border-zinc-800 text-[11px] font-semibold text-zinc-400">
-                  <span>Model Repository ({hfModels.length} results)</span>
-                  <span>Metrics & Actions</span>
+                  <span>{t('llm_hf_results_count', 'Model Repository ({count} results)', { count: hfModels.length })}</span>
+                  <span>{t('llm_th_metrics_actions', 'Metrics & Actions')}</span>
                 </div>
 
                 {loadingHfModels ? (
                   <div className="py-12 text-center text-xs text-zinc-400 flex items-center justify-center gap-2">
                     <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
-                    <span>Querying live models from Hugging Face Hub API...</span>
+                    <span>{t('llm_querying_hf', 'Querying live models from Hugging Face Hub API...')}</span>
                   </div>
                 ) : hfModels.length === 0 ? (
                   <div className="py-10 text-center text-xs text-zinc-500">
-                    No models found matching your filter criteria.
+                    {t('llm_no_hf_match', 'No models found matching your filter criteria.')}
                   </div>
                 ) : (
                   <div className="divide-y divide-zinc-800/80 max-h-[520px] overflow-y-auto">
@@ -1612,7 +1626,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                               target="_blank"
                               rel="noreferrer"
                               className="text-zinc-500 hover:text-blue-400 transition shrink-0"
-                              title="Open on Hugging Face Hub"
+                              title={t('llm_open_hf_tooltip', 'Open on Hugging Face Hub')}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
                             </a>
@@ -1640,7 +1654,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                             }}
                             className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-amber-300 rounded text-[11px] font-medium transition"
                           >
-                            Use in LoRA
+                            {t('llm_btn_use_in_lora', 'Use in LoRA')}
                           </button>
                           <button
                             onClick={() => {
@@ -1650,7 +1664,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                             }}
                             className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-purple-300 rounded text-[11px] font-medium transition"
                           >
-                            Use in Prompt
+                            {t('llm_btn_use_in_prompt', 'Use in Prompt')}
                           </button>
                         </div>
                       </div>
@@ -1670,18 +1684,18 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2">
                 <Key className="w-4 h-4 text-purple-400" />
-                <h3 className="text-sm font-bold text-zinc-100">Set {keyToConfigure}</h3>
+                <h3 className="text-sm font-bold text-zinc-100">{t('llm_set_api_key_title', 'Set {key}', { key: keyToConfigure })}</h3>
               </div>
               <button
                 onClick={() => setShowKeyModal(false)}
                 className="text-zinc-500 hover:text-zinc-300 text-sm"
               >
-                Close
+                {t('btn_close', 'Close')}
               </button>
             </div>
 
             <p className="text-xs text-zinc-400">
-              This API key will be saved to your local <code className="text-purple-300">.env</code> file and activated in the running process.
+              {t('llm_api_key_notice', 'This API key will be saved to your local .env file and activated in the running process.')}
             </p>
 
             <form onSubmit={handleSaveApiKey} className="space-y-4">
@@ -1689,7 +1703,7 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                 type="password"
                 value={apiKeyInput}
                 onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder={`Paste your ${keyToConfigure} here...`}
+                placeholder={t('llm_paste_api_key_ph', 'Paste your {key} here...', { key: keyToConfigure })}
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-purple-500"
               />
 
@@ -1706,14 +1720,14 @@ export const LLMStudio: React.FC<LLMStudioProps> = ({
                   onClick={() => setShowKeyModal(false)}
                   className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs"
                 >
-                  Cancel
+                  {t('btn_cancel', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={savingKey || !apiKeyInput.trim()}
                   className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold"
                 >
-                  {savingKey ? 'Saving...' : 'Save Key'}
+                  {savingKey ? t('status_saving', 'Saving...') : t('llm_btn_save_key', 'Save Key')}
                 </button>
               </div>
             </form>

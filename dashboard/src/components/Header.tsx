@@ -215,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenTaskConfig}
             className="flex items-center gap-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1 rounded-lg border border-zinc-800 text-xs font-medium transition"
-            title={t('header_setup_tooltip', 'Configure task platform, metrics, and subtasks')}
+            title={`${t('task_settings', 'Task Settings')} — ${t('header_setup_tooltip', 'Configure task platform, metrics, and subtasks')}`}
           >
             <Sliders className="w-3.5 h-3.5 text-zinc-400" />
             <span className="hidden xl:inline">{t('header_setup', 'Setup')}</span>
@@ -237,7 +237,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenConfigModal}
             className="flex items-center gap-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1 rounded-lg border border-zinc-800 text-xs font-medium transition"
-            title={t('header_strategy_tooltip', 'Open Strategy Catalog and configure experiment targets')}
+            title={`${t('new_experiment', 'New Experiment')} — ${t('header_strategy_tooltip', 'Open Strategy Catalog and configure experiment targets')}`}
           >
             <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
             <span className="hidden xl:inline">{t('header_strategy', 'Strategy')}</span>
@@ -248,7 +248,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={handleSync}
           disabled={syncing}
           className="flex items-center gap-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1 rounded-lg border border-zinc-800 text-xs font-medium transition"
-          title={t('header_sync_tooltip', 'Scan experiment artifacts for new runs')}
+          title={`${t('refresh', 'Refresh')} — ${t('header_sync_tooltip', 'Scan experiment artifacts for new runs')}`}
         >
           <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-indigo-400' : 'text-zinc-400'}`} />
           <span className="hidden sm:inline">{syncMessage || t('header_sync', 'Sync')}</span>

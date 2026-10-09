@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { TaskInfo } from '../types/experiment';
 import { api } from '../services/api';
+import { useLanguage } from '../constants/i18n';
 
 interface PrimingCenterProps {
   initialPrompt?: string;
@@ -17,6 +18,7 @@ interface PrimingCenterProps {
 }
 
 export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = '', taskInfo }) => {
+  const { t } = useLanguage();
   const [selectedIde, setSelectedIde] = useState<'antigravity' | 'codex'>('antigravity');
   const [selectedIntent, setSelectedIntent] = useState<'attach' | 'iterate'>('iterate');
   const [promptText, setPromptText] = useState<string>(initialPrompt);
@@ -60,10 +62,10 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/80 pb-3">
         <div>
           <h2 className="text-sm font-semibold text-zinc-100 tracking-tight">
-            Agent Prompts Hub
+            {t('prime_title', 'Agent Prompts Hub')}
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Copy tailored system priming prompts for Antigravity or OpenAI Codex CLI sessions.
+            {t('prime_desc', 'Copy tailored system priming prompts for Antigravity or OpenAI Codex CLI sessions.')}
           </p>
         </div>
 
@@ -78,14 +80,14 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
           }`}
         >
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-          <span>{copied ? 'Copied to Clipboard!' : 'Copy Prompt'}</span>
+          <span>{copied ? t('prime_copied_btn', 'Copied to Clipboard!') : t('prime_copy_btn', 'Copy Prompt')}</span>
         </button>
       </div>
 
       {/* Level 1: Target IDE Selector (Antigravity vs Codex) */}
       <div className="space-y-1.5">
         <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
-          1. Select Coding Environment
+          {t('prime_select_ide', '1. Select Coding Environment')}
         </label>
         <div className="grid grid-cols-2 gap-2.5">
           <button
@@ -141,7 +143,7 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
       {/* Level 2: Intent Selector (Attach / Setup vs New Chat / Iterate) */}
       <div className="space-y-1.5">
         <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
-          2. Select Session Intent
+          {t('prime_select_intent', '2. Select Session Intent')}
         </label>
         <div className="grid grid-cols-2 gap-2.5">
           <button
@@ -157,13 +159,13 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
             </div>
             <div>
               <div className="flex items-center gap-1.5 font-medium text-xs text-zinc-200">
-                <span>Attach & Setup Pipeline</span>
+                <span>{t('prime_intent_attach', 'Attach & Setup Pipeline')}</span>
                 <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-sky-950/60 text-sky-300 border border-sky-800/50">
-                  Initial
+                  {t('prime_badge_initial', 'Initial')}
                 </span>
               </div>
               <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
-                First-time onboarding: Reads task specs, checks data leakage rules, and establishes exp001 baseline.
+                {t('prime_intent_attach_desc', 'First-time onboarding: Reads task specs, checks data leakage rules, and establishes exp001 baseline.')}
               </p>
             </div>
           </button>
@@ -181,13 +183,13 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
             </div>
             <div>
               <div className="flex items-center gap-1.5 font-medium text-xs text-zinc-200">
-                <span>Continue Iteration (New Chat)</span>
+                <span>{t('prime_intent_iterate', 'Continue Iteration (New Chat)')}</span>
                 <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50">
-                  Active
+                  {t('prime_badge_active', 'Active')}
                 </span>
               </div>
               <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
-                Ongoing development: Injects reigning champion, diagnosed failure slices, UCB branch, and Idea Graveyard.
+                {t('prime_intent_iterate_desc', 'Ongoing development: Injects reigning champion, diagnosed failure slices, UCB branch, and Idea Graveyard.')}
               </p>
             </div>
           </button>
@@ -199,15 +201,14 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
         <div className="flex items-center gap-4 min-w-0">
           <Info className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
           <span>
-            Task: <strong className="text-zinc-200 font-mono">{taskInfo?.task_name || 'Active Task'}</strong>
+            {t('prime_task_label', 'Task:')} <strong className="text-zinc-200 font-mono">{taskInfo?.task_name || 'Active Task'}</strong>
           </span>
           <span>
-            Target: <strong className="text-zinc-200 font-mono">{taskInfo?.primary_metric || 'Score'}</strong>
+            {t('prime_target_label', 'Target:')} <strong className="text-zinc-200 font-mono">{taskInfo?.primary_metric || 'Score'}</strong>
           </span>
         </div>
         <div className="flex items-center gap-4 font-mono text-[11px] shrink-0 text-zinc-500">
-          <span>{charCount.toLocaleString()} chars</span>
-          <span>~{tokenEst.toLocaleString()} tokens</span>
+          <span>{t('prime_est_tokens', 'Prompt Length: {chars} chars (~{tokens} tokens)', { chars: charCount.toLocaleString(), tokens: tokenEst.toLocaleString() })}</span>
         </div>
       </div>
 
@@ -215,8 +216,9 @@ export const PrimingCenter: React.FC<PrimingCenterProps> = ({ initialPrompt = ''
       <div className="relative">
         {loading ? (
           <div className="w-full h-[460px] bg-zinc-900/80 border border-zinc-800 rounded-lg flex items-center justify-center text-zinc-500 text-xs font-mono">
-            Generating agent prompt...
+            {t('prime_generating_prompt', 'Generating agent prompt...')}
           </div>
+
         ) : (
           <textarea
             readOnly

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { EnvironmentStatus } from '../types/experiment';
 import { api } from '../services/api';
+import { useLanguage } from '../constants/i18n';
 
 interface CloudEnvironmentModalProps {
   isOpen: boolean;
@@ -29,6 +30,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
   onClose,
   onStatusChanged,
 }) => {
+  const { t } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -317,10 +319,10 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <span>Cloud & LLM Environment</span>
+                <span>{t('env_modal_title', 'Cloud Environment & Account Governance')}</span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Live status and credentials for Modal.com, Kaggle, and LLM API providers.
+                {t('env_modal_desc', 'Inspect API keys, profiles, and quota limits for Kaggle, Modal, and LLM inference providers.')}
               </p>
             </div>
           </div>
@@ -329,7 +331,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
               onClick={fetchStatus}
               disabled={loading}
               className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 transition"
-              title="Refresh environment status"
+              title={t('env_refresh_tooltip', 'Refresh environment status')}
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -363,7 +365,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2.5">
               <div className="flex items-center gap-2">
                 <Cloud className="w-4 h-4 text-sky-400" />
-                <span className="font-semibold text-zinc-100">Modal.com Serverless GPU</span>
+                <span className="font-semibold text-zinc-100">{t('env_modal_account', 'Modal Account')}</span>
                 {envStatus?.modal.installed ? (
                   <span className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">
                     CLI Available
@@ -386,10 +388,10 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   type="button"
                   onClick={handleLaunchModalAuth}
                   className="flex items-center gap-1.5 px-2.5 py-1 bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 border border-sky-800/40 rounded-lg text-xs font-medium transition"
-                  title="Open Modal token creation page in browser"
+                  title={t('env_modal_auth_tooltip', 'Open Modal token creation page in browser')}
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Authorize</span>
+                  <span>{t('env_btn_authorize', 'Authorize')}</span>
                 </button>
                 <button
                   type="button"
@@ -397,7 +399,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 font-mono px-2 py-1 bg-zinc-900 hover:bg-zinc-800 rounded-lg border border-zinc-800 transition"
                 >
                   <Key className="w-3 h-3" />
-                  <span>{showModalTokenForm ? 'Close' : 'Paste Token'}</span>
+                  <span>{showModalTokenForm ? t('btn_close', 'Close') : t('env_btn_paste_token', 'Paste Token')}</span>
                 </button>
               </div>
             </div>
@@ -411,7 +413,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-zinc-400 font-mono">Token ID / Command</label>
+                    <label className="text-[10px] text-zinc-400 font-mono">{t('env_token_id_label', 'Token ID / Command')}</label>
                     <input
                       type="text"
                       value={modalTokenId}
@@ -421,7 +423,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-400 font-mono">Token Secret (optional if pasted in left box)</label>
+                    <label className="text-[10px] text-zinc-400 font-mono">{t('env_token_secret_label', 'Token Secret (optional if pasted in left box)')}</label>
                     <input
                       type="password"
                       value={modalTokenSecret}
@@ -436,7 +438,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   disabled={savingModalToken || !modalTokenId.trim()}
                   className="px-3 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-semibold"
                 >
-                  {savingModalToken ? 'Saving Token...' : 'Save & Authenticate'}
+                  {savingModalToken ? t('env_saving_token', 'Saving Token...') : t('env_save_auth', 'Save & Authenticate')}
                 </button>
               </form>
             )}
@@ -444,7 +446,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             {/* Profile List & Switcher */}
             <div>
               <div className="text-[11px] text-zinc-400 mb-2">
-                <span>Configured Accounts:</span>
+                <span>{t('env_configured_accounts', 'Configured Accounts:')}</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {envStatus?.modal.profiles && envStatus.modal.profiles.length > 0 ? (
@@ -493,7 +495,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2.5">
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-cyan-400" />
-                <span className="font-semibold text-zinc-100">Kaggle CLI & Kernels</span>
+                <span className="font-semibold text-zinc-100">{t('env_kaggle_account', 'Kaggle Account')}</span>
                 {envStatus?.kaggle.authenticated ? (
                   <span className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">
                     Authenticated: {envStatus.kaggle.username}
@@ -512,15 +514,15 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   onClick={handleLaunchKaggleAuth}
                   disabled={savingKaggle}
                   className="flex items-center gap-1.5 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition"
-                  title="Execute kaggle login auth --force to authenticate automatically"
+                  title={t('env_kaggle_login_tooltip', 'Execute kaggle login auth --force to authenticate automatically')}
                 >
-                  <span>{savingKaggle ? 'Logging in...' : 'Kaggle Login'}</span>
+                  <span>{savingKaggle ? t('env_logging_in', 'Logging in...') : t('env_kaggle_login', 'Kaggle Login')}</span>
                 </button>
               </div>
             </div>
 
             <div className="flex items-center justify-between text-xs text-zinc-400 font-mono">
-              <span>Config Directory:</span>
+              <span>{t('env_config_dir', 'Config Directory:')}</span>
               <span className="text-zinc-300">{envStatus?.kaggle.config_dir || '~/.kaggle'}</span>
             </div>
           </div>
@@ -529,7 +531,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
           <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-zinc-200">LLM API Providers</span>
+                <span className="font-semibold text-zinc-200">{t('env_llm_keys', 'Inference API Keys')}</span>
               </div>
               <div className="flex items-center gap-2">
                 {envStatus?.llm?.providers && (
@@ -537,10 +539,10 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                     type="button"
                     onClick={handleVerifyAllConfigured}
                     className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 rounded text-xs font-mono transition flex items-center gap-1.5"
-                    title="Test all configured provider keys"
+                    title={t('env_verify_all_tooltip', 'Test all configured provider keys')}
                   >
                     <RefreshCw className="w-3 h-3 text-cyan-400" />
-                    <span>Test All</span>
+                    <span>{t('env_btn_verify_all', 'Verify All Accounts')}</span>
                   </button>
                 )}
                 <button
@@ -551,7 +553,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                   className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-purple-300 rounded text-xs font-medium transition flex items-center gap-1.5"
                 >
                   <Key className="w-3 h-3 text-purple-400" />
-                  <span>{showLLMKeyForm ? 'Cancel' : 'Set API Key'}</span>
+                  <span>{showLLMKeyForm ? t('btn_cancel', 'Cancel') : t('env_set_api_key', 'Set API Key')}</span>
                 </button>
               </div>
             </div>
@@ -560,7 +562,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
               <form onSubmit={handleSaveLLMKey} className="p-3 bg-zinc-950/80 border border-zinc-800 rounded-lg space-y-2">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-zinc-400 font-mono">Provider Key</label>
+                    <label className="text-[10px] text-zinc-400 font-mono">{t('env_provider_key_label', 'Provider Key')}</label>
                     <select
                       value={selectedLLMKeyName}
                       onChange={(e) => {
@@ -578,7 +580,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-400 font-mono">Key Secret</label>
+                    <label className="text-[10px] text-zinc-400 font-mono">{t('env_key_secret_label', 'Key Secret')}</label>
                     <input
                       type="password"
                       value={llmKeyValue}
@@ -586,7 +588,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                         setLLMKeyValue(e.target.value);
                         setInputKeyTestResult(null);
                       }}
-                      placeholder="Paste API secret..."
+                      placeholder={t('env_paste_api_secret_ph', 'Paste API secret...')}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-200 font-mono"
                     />
                   </div>
@@ -621,7 +623,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                       <span className="text-xs text-emerald-400 font-medium">{llmKeySuccessMsg}</span>
                     )}
                     {!inputKeyTestResult && !llmKeySuccessMsg && (
-                      <span className="text-[10px] text-zinc-500">Key will be saved to .env</span>
+                      <span className="text-[10px] text-zinc-500">{t('env_key_save_env_notice', 'Key will be saved to .env')}</span>
                     )}
                   </div>
 
@@ -633,14 +635,14 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                       className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded text-xs font-medium transition flex items-center gap-1.5 disabled:opacity-50"
                     >
                       <RefreshCw className={`w-3 h-3 ${testingInputKey ? 'animate-spin text-purple-400' : 'text-zinc-400'}`} />
-                      <span>{testingInputKey ? 'Testing...' : 'Test Key'}</span>
+                      <span>{testingInputKey ? t('status_checking', 'Checking...') : t('env_test_provider', 'Test Key')}</span>
                     </button>
                     <button
                       type="submit"
                       disabled={savingLLMKey || !llmKeyValue.trim()}
                       className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold disabled:opacity-50"
                     >
-                      {savingLLMKey ? 'Saving...' : 'Save API Key'}
+                      {savingLLMKey ? t('status_saving', 'Saving...') : t('env_btn_save_creds', 'Save API Key')}
                     </button>
                   </div>
                 </div>
@@ -698,7 +700,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                             ) : isConfigured ? (
                               <span className="text-zinc-300">{pInfo.masked_key || 'Configured'}</span>
                             ) : (
-                              <span className="text-zinc-500">No Key</span>
+                              <span className="text-zinc-500">{t('env_no_key', 'No Key')}</span>
                             )}
                           </span>
 
@@ -708,7 +710,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                               disabled={isVerifying}
                               onClick={() => handleVerifyProvider(pName)}
                               className="px-1.5 py-0.5 bg-zinc-900 hover:bg-zinc-800 text-[10px] text-zinc-300 hover:text-white rounded border border-zinc-800 transition shrink-0"
-                              title="Test this provider API key live"
+                              title={t('env_test_provider_tooltip', 'Test this provider API key live')}
                             >
                               {isVerifying ? '...' : 'Check'}
                             </button>
@@ -718,7 +720,7 @@ export const CloudEnvironmentModal: React.FC<CloudEnvironmentModalProps> = ({
                     );
                   })
               ) : (
-                <div className="col-span-3 text-xs text-zinc-500 italic">No LLM provider status loaded.</div>
+                <div className="col-span-3 text-xs text-zinc-500 italic">{t('env_no_llm_status', 'No LLM provider status loaded.')}</div>
               )}
             </div>
           </div>
