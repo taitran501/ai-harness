@@ -398,9 +398,12 @@ export const ML_METRICS_CATALOG: MetricDefinition[] = [
 ];
 
 export function getMetricById(id: string): MetricDefinition | undefined {
+  if (!id) return undefined;
   const cleanId = id.trim().toLowerCase();
-  return ML_METRICS_CATALOG.find(
-    (m) => m.id.toLowerCase() === cleanId || m.name.toLowerCase().startsWith(cleanId)
+  if (!cleanId) return undefined;
+  return (
+    ML_METRICS_CATALOG.find((m) => m.id.toLowerCase() === cleanId) ||
+    ML_METRICS_CATALOG.find((m) => m.name.toLowerCase().startsWith(cleanId))
   );
 }
 
