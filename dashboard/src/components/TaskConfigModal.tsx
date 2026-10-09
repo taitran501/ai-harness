@@ -18,6 +18,7 @@ import {
   Scale,
   FileArchive,
   ShieldCheck,
+  RotateCcw,
 } from 'lucide-react';
 import { TaskInfo, TaskMetricDef, TaskPreset, DataConfig, CompetitionRules, SubmissionSpec } from '../types/experiment';
 import { api } from '../services/api';
@@ -70,6 +71,189 @@ const SPLIT_STRATEGIES = [
   { id: 'KFold', name: 'Standard KFold (Random Split)' },
   { id: 'TimeSeriesSplit', name: 'TimeSeriesSplit (Temporal Forward Split)' },
 ];
+
+export type AuditRegime = 'classification' | 'regression' | 'ranking' | 'generative_nlp';
+
+export function resolveAuditRegime(
+  modality: string,
+  taskType: string,
+  primaryMetric: string
+): AuditRegime {
+  const t = (taskType || '').toLowerCase();
+  const m = (primaryMetric || '').toLowerCase();
+  const mod = (modality || '').toLowerCase();
+  const metricObj = getMetricById(primaryMetric || '');
+  const cat = (metricObj?.category || '').toLowerCase();
+
+  // 1. Regression detection
+  if (
+    cat === 'regression' ||
+    t.includes('regress') ||
+    ['rmse', 'mae', 'mse', 'r2', 'rmsle', 'medae', 'mape'].some((k) => m.includes(k))
+  ) {
+    return 'regression';
+  }
+
+  // 2. Ranking detection
+  if (
+    cat === 'ranking' ||
+    t.includes('rank') ||
+    t.includes('recsys') ||
+    ['ndcg', 'map', 'mrr', 'hitrate', 'kendall'].some((k) => m.includes(k))
+  ) {
+    return 'ranking';
+  }
+
+  // 3. Generative NLP detection
+  if (
+    (mod === 'text' || t.includes('llm') || t.includes('generat') || t.includes('causal-lm') || t.includes('language-model')) &&
+    (cat === 'nlp' || ['bleu', 'rouge', 'perplexity', 'exactmatch', 'chrf', 'meteor', 'bertscore'].some((k) => m.includes(k)))
+  ) {
+    return 'generative_nlp';
+  }
+
+  if (
+    t.includes('generat') ||
+    t.includes('generation') ||
+    t.includes('llm') ||
+    t.includes('causal-lm') ||
+    t.includes('language-model') ||
+    t.includes('summariz') ||
+    t.includes('translat')
+  ) {
+    return 'generative_nlp';
+  }
+
+  // 4. Default: Classification
+  return 'classification';
+}
+
+const REGIME_DISPLAY_NAMES: Record<AuditRegime, string> = {
+  classification: 'Classification',
+  regression: 'Continuous Regression',
+  ranking: 'Ranking & Recommendation',
+  generative_nlp: 'NLP / Generative LLM',
+};
+
+export const getRegimeDefaults = (regime: AuditRegime) => {
+  switch (regime) {
+    case 'regression':
+      return { minDiff: '2.0', maxKappa: '0.90', minDisagreement: '5.0' };
+    case 'ranking':
+      return { minDiff: '2.0', maxKappa: '0.85', minDisagreement: '5.0' };
+    case 'generative_nlp':
+      return { minDiff: '2.0', maxKappa: '0.92', minDisagreement: '5.0' };
+    case 'classification':
+    default:
+      return { minDiff: '2.0', maxKappa: '0.85', minDisagreement: '5.0' };
+  }
+};
+
+const CONTEXT_COL_SUGGESTIONS: Record<string, string[]> = {
+  text: ['text', 'prompt', 'context', 'question', 'title', 'premise, hypothesis'],
+  tabular: ['all_features', 'numerical_features', 'categorical_features', 'feature_cols'],
+  vision: ['image_path', 'image_id', 'filepath', 'bbox', 'mask_path'],
+  audio: ['audio_path', 'waveform_path', 'sampling_rate', 'transcript'],
+  'time-series': ['timestamp', 'series_id', 'value', 'lag_1', 'group_id'],
+  multimodal: ['text, image_path', 'features, context'],
+};
+
+const getContextColPlaceholder = (mod: string, t: (k: string, fallback?: string) => string): string => {
+  switch (mod) {
+    case 'text':
+      return t('taskcfg_context_cols_ph_text', 'e.g. text, prompt, context, title');
+    case 'tabular':
+      return t('taskcfg_context_cols_ph_tabular', 'e.g. feat_1, feat_2, ..., numerical & categorical features');
+    case 'vision':
+      return t('taskcfg_context_cols_ph_vision', 'e.g. image_path, image_id, label');
+    case 'time-series':
+      return t('taskcfg_context_cols_ph_timeseries', 'e.g. timestamp, entity_id, value, lag_features');
+    case 'multimodal':
+      return t('taskcfg_context_cols_ph_multimodal', 'e.g. text, image_path, tabular_features');
+    case 'audio':
+      return t('taskcfg_context_cols_ph_audio', 'e.g. audio_path, sample_rate, transcript');
+    default:
+      return t('taskcfg_context_cols_ph_text', 'e.g. text, prompt, context, title');
+  }
+};
+
+interface MissingDataPreset {
+  id: string;
+  labelKey: string;
+  defaultLabel: string;
+}
+
+const MISSING_DATA_PRESETS: Record<string, MissingDataPreset[]> = {
+  tabular: [
+    { id: 'impute_median_mode', labelKey: 'taskcfg_missing_opt_median_mode', defaultLabel: 'Median (Numerical) / Mode (Categorical) Imputation' },
+    { id: 'indicator_imputation', labelKey: 'taskcfg_missing_opt_indicator', defaultLabel: 'Mean Imputation + Missingness Indicator' },
+    { id: 'drop_invalid_rows', labelKey: 'taskcfg_missing_opt_drop_rows', defaultLabel: 'Drop Incomplete / Corrupted Rows' },
+    { id: 'constant_sentinel', labelKey: 'taskcfg_missing_opt_constant', defaultLabel: 'Constant Sentinel Value (-999, "missing")' },
+  ],
+  text: [
+    { id: 'fill_empty_context', labelKey: 'taskcfg_missing_opt_fill_empty', defaultLabel: 'Fill Empty Text String / Default Context' },
+    { id: 'truncate_and_pad', labelKey: 'taskcfg_missing_opt_truncate_pad', defaultLabel: 'Truncate Long Context / Pad Short Sequences' },
+    { id: 'mark_unknown_token', labelKey: 'taskcfg_missing_opt_mark_unk', defaultLabel: 'Replace with [UNK] / Placeholder Token' },
+    { id: 'drop_invalid_rows', labelKey: 'taskcfg_missing_opt_drop_rows', defaultLabel: 'Drop Incomplete / Corrupted Rows' },
+  ],
+  vision: [
+    { id: 'drop_missing_files', labelKey: 'taskcfg_missing_opt_drop_missing_files', defaultLabel: 'Drop Missing Media References' },
+    { id: 'substitute_blank_canvas', labelKey: 'taskcfg_missing_opt_blank_canvas', defaultLabel: 'Substitute Neutral Blank Canvas' },
+    { id: 'drop_invalid_rows', labelKey: 'taskcfg_missing_opt_drop_rows', defaultLabel: 'Drop Incomplete / Corrupted Rows' },
+  ],
+  audio: [
+    { id: 'drop_missing_files', labelKey: 'taskcfg_missing_opt_drop_missing_files', defaultLabel: 'Drop Missing Media References' },
+    { id: 'fill_silence_constant', labelKey: 'taskcfg_missing_opt_constant', defaultLabel: 'Constant Sentinel Value (-999, "missing")' },
+    { id: 'drop_invalid_rows', labelKey: 'taskcfg_missing_opt_drop_rows', defaultLabel: 'Drop Incomplete / Corrupted Rows' },
+  ],
+  'time-series': [
+    { id: 'forward_backward_fill', labelKey: 'taskcfg_missing_opt_forward_fill', defaultLabel: 'Forward / Backward Fill Imputation' },
+    { id: 'impute_median_mode', labelKey: 'taskcfg_missing_opt_median_mode', defaultLabel: 'Median (Numerical) / Mode (Categorical) Imputation' },
+    { id: 'drop_invalid_rows', labelKey: 'taskcfg_missing_opt_drop_rows', defaultLabel: 'Drop Incomplete / Corrupted Rows' },
+  ],
+  multimodal: [
+    { id: 'fill_empty_context', labelKey: 'taskcfg_missing_opt_fill_empty', defaultLabel: 'Fill Empty Text String / Default Context' },
+    { id: 'drop_missing_files', labelKey: 'taskcfg_missing_opt_drop_missing_files', defaultLabel: 'Drop Missing Media References' },
+    { id: 'drop_invalid_rows', labelKey: 'taskcfg_missing_opt_drop_rows', defaultLabel: 'Drop Incomplete / Corrupted Rows' },
+  ],
+};
+
+interface ParamPreset {
+  id: string;
+  value: string;
+  labelKey: string;
+  defaultLabel: string;
+}
+
+const PARAM_PRESETS: ParamPreset[] = [
+  { id: '100m', value: '100000000', labelKey: 'taskcfg_params_preset_100m', defaultLabel: '100M (Edge/Base)' },
+  { id: '350m', value: '350000000', labelKey: 'taskcfg_params_preset_350m', defaultLabel: '350M (DeBERTa-large)' },
+  { id: '1b', value: '1000000000', labelKey: 'taskcfg_params_preset_1b', defaultLabel: '1B (Small LLM / Vision)' },
+  { id: '7b', value: '7000000000', labelKey: 'taskcfg_params_preset_7b', defaultLabel: '7B (LoRA/vLLM)' },
+  { id: '14b', value: '14000000000', labelKey: 'taskcfg_params_preset_14b', defaultLabel: '14B (Reasoning / CoT)' },
+  { id: '70b', value: '70000000000', labelKey: 'taskcfg_params_preset_70b', defaultLabel: '70B (Cluster LLM)' },
+  { id: 'unlimited', value: '', labelKey: 'taskcfg_params_preset_unlimited', defaultLabel: 'Unlimited (No Ceiling)' },
+];
+
+const formatParamScale = (val: string, unlimitedLabel: string): string => {
+  if (!val || val.trim() === '' || val === '0') {
+    return unlimitedLabel;
+  }
+  const num = Number(val);
+  if (isNaN(num)) return val;
+  if (num >= 1e9) {
+    const b = (num / 1e9).toFixed(1);
+    return `${b}B parameters`;
+  }
+  if (num >= 1e6) {
+    const m = (num / 1e6).toFixed(0);
+    return `${m}M parameters`;
+  }
+  if (num >= 1e3) {
+    return `${(num / 1e3).toFixed(0)}K parameters`;
+  }
+  return `${num} parameters`;
+};
 
 export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   isOpen,
@@ -136,6 +320,43 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Active audit regime resolved adaptively from modality, task type, and metric
+  const regime: AuditRegime = resolveAuditRegime(modality, type, primaryMetric);
+
+  const getLocalizedRegimeName = (r: AuditRegime): string => {
+    switch (r) {
+      case 'classification':
+        return t('regime_classification', REGIME_DISPLAY_NAMES.classification);
+      case 'regression':
+        return t('regime_regression', REGIME_DISPLAY_NAMES.regression);
+      case 'ranking':
+        return t('regime_ranking', REGIME_DISPLAY_NAMES.ranking);
+      case 'generative_nlp':
+        return t('regime_generative_nlp', REGIME_DISPLAY_NAMES.generative_nlp);
+      default:
+        return REGIME_DISPLAY_NAMES[r] || r;
+    }
+  };
+
+  const handleResetRegimeDefaults = (targetRegime?: AuditRegime) => {
+    const r = targetRegime || regime;
+    const defaults = getRegimeDefaults(r);
+    setMinDiffPct(defaults.minDiff);
+    setMaxKappa(defaults.maxKappa);
+    setMinDisagreement(defaults.minDisagreement);
+  };
+
+  const handleAddContextColChip = (chip: string) => {
+    if (!featureColumns.trim()) {
+      setFeatureColumns(chip);
+    } else {
+      const parts = featureColumns.split(',').map((p) => p.trim());
+      if (!parts.includes(chip)) {
+        setFeatureColumns(`${featureColumns.trim()}, ${chip}`);
+      }
+    }
+  };
+
   // Fetch presets
   useEffect(() => {
     api
@@ -171,6 +392,7 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       setNFolds(d.n_folds || 5);
       setSeed(d.seed || 42);
       setIdColumn(d.id_column || 'id');
+      setFeatureColumns((d as any).feature_columns || 'text, context');
       setTargetColumn(d.target_column || 'target');
       setMissingDataPolicy(d.missing_data_policy || 'drop_invalid_rows');
 
@@ -228,6 +450,9 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       setSeed(preset.data_config.seed || 42);
       setIdColumn(preset.data_config.id_column || 'id');
       setTargetColumn(preset.data_config.target_column || 'target');
+      if ((preset.data_config as any)?.feature_columns) {
+        setFeatureColumns((preset.data_config as any).feature_columns);
+      }
     }
 
     if (preset.competition_rules) {
@@ -244,7 +469,10 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       setSubmissionFileName(preset.submission_spec.file_name || 'submission.csv');
       setArchiveFormat(preset.submission_spec.archive_format || 'csv');
       setMinDiffPct(preset.submission_spec.min_diff_pct !== undefined ? String(preset.submission_spec.min_diff_pct) : '2.0');
-      setMaxKappa(preset.submission_spec.max_kappa !== undefined ? String(preset.submission_spec.max_kappa) : '0.85');
+      const targetRegime = resolveAuditRegime(preset.modality || 'text', preset.type, preset.primary_metric || 'Score');
+      const defaults = getRegimeDefaults(targetRegime);
+      setMaxKappa(preset.submission_spec.max_kappa !== undefined ? String(preset.submission_spec.max_kappa) : defaults.maxKappa);
+      setMinDisagreement(preset.submission_spec.min_disagreement !== undefined ? String(preset.submission_spec.min_disagreement) : defaults.minDisagreement);
     }
   };
 
@@ -299,6 +527,12 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
+    const parseSafeFloat = (v: string, def?: number): number | undefined => {
+      if (!v || v.trim() === '') return def;
+      const parsed = parseFloat(v);
+      return isNaN(parsed) ? def : parsed;
+    };
+
     const updatedTask: TaskInfo = {
       platform,
       task_name: name.trim(),
@@ -308,8 +542,8 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
       modality,
       primary_metric: primaryMetric.trim() || 'Score',
       direction,
-      primary_metric_baseline: primaryBaseline ? parseFloat(primaryBaseline) : undefined,
-      primary_metric_target: primaryTarget ? parseFloat(primaryTarget) : undefined,
+      primary_metric_baseline: parseSafeFloat(primaryBaseline),
+      primary_metric_target: parseSafeFloat(primaryTarget),
       metrics,
       languages: langList,
       description: description.trim(),
@@ -322,16 +556,17 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
         n_folds: Number(nFolds) || 5,
         seed: Number(seed) || 42,
         id_column: idColumn.trim() || 'id',
+        feature_columns: featureColumns.trim(),
         target_column: targetColumn.trim() || 'target',
         missing_data_policy: missingDataPolicy.trim(),
-      },
+      } as DataConfig & { feature_columns?: string },
       competition_rules: {
         allow_llm: allowLlm,
         allow_api: allowApi,
         allow_external_data: allowExternalData,
         allow_pretrained_models: allowPretrainedModels,
         max_params_limit: maxParamsLimit ? parseInt(maxParamsLimit, 10) : undefined,
-        max_gpu_hours: maxGpuHours ? parseFloat(maxGpuHours) : undefined,
+        max_gpu_hours: parseSafeFloat(maxGpuHours),
         daily_submission_limit: dailySubmissionLimit ? parseInt(dailySubmissionLimit, 10) : 5,
         deadline: deadline.trim() || undefined,
         team_policy: teamPolicy.trim() || undefined,
@@ -341,14 +576,15 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
         file_name: submissionFileName.trim(),
         archive_format: archiveFormat,
         ...(isCustomTaskPlugin ? {} : {
-          min_diff_pct: minDiffPct ? parseFloat(minDiffPct) : 2.0,
-          max_kappa: maxKappa ? parseFloat(maxKappa) : 0.85,
-          min_disagreement: minDisagreement ? parseFloat(minDisagreement) : 5.0,
+          min_diff_pct: parseSafeFloat(minDiffPct, 2.0) ?? 2.0,
+          max_kappa: parseSafeFloat(maxKappa, 0.85) ?? 0.85,
+          min_disagreement: parseSafeFloat(minDisagreement, 5.0) ?? 5.0,
         }),
       },
     };
 
     try {
+      await api.updateTaskInfo(updatedTask);
       await onSave(updatedTask);
       onClose();
     } catch (err: any) {
@@ -870,14 +1106,30 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_context_cols_label', 'Input / Context Columns')}</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-medium text-zinc-400">{t('taskcfg_context_cols_label', 'Input / Context Columns')}</label>
+                      <span className="text-[10px] text-zinc-500">{t('taskcfg_context_cols_hint', 'Contextual input columns for feature extraction or prompt engineering')}</span>
+                    </div>
                     <input
                       type="text"
                       value={featureColumns}
                       onChange={(e) => setFeatureColumns(e.target.value)}
-                      placeholder="e.g. text, context, title"
+                      placeholder={getContextColPlaceholder(modality, t)}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-xs font-mono text-zinc-100"
                     />
+                    <div className="flex items-center flex-wrap gap-1 mt-1.5">
+                      <span className="text-[10px] text-zinc-500 mr-1">{t('taskcfg_context_preset_label', 'Suggested Columns:')}</span>
+                      {(CONTEXT_COL_SUGGESTIONS[modality] || CONTEXT_COL_SUGGESTIONS.text).map((chip) => (
+                        <button
+                          key={chip}
+                          type="button"
+                          onClick={() => handleAddContextColChip(chip)}
+                          className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 rounded border border-zinc-800 hover:border-zinc-700 transition"
+                        >
+                          +{chip}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div>
@@ -928,14 +1180,36 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">{t('taskcfg_missing_data_label', 'Missing Data Handling Policy')}</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-zinc-400">{t('taskcfg_missing_data_label', 'Missing Data Handling Policy')}</label>
+                    <span className="text-[10px] text-zinc-500">{t('taskcfg_missing_data_hint', 'Contextual resolution strategy for null or missing values')}</span>
+                  </div>
                   <input
                     type="text"
                     value={missingDataPolicy}
                     onChange={(e) => setMissingDataPolicy(e.target.value)}
                     placeholder={t('taskcfg_missing_data_ph', 'e.g. fill_empty_context, drop_invalid_rows')}
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1.5 text-xs text-zinc-100 mb-2"
                   />
+                  <div className="flex items-center flex-wrap gap-1.5">
+                    {(MISSING_DATA_PRESETS[modality] || MISSING_DATA_PRESETS.tabular).map((preset) => {
+                      const isSelected = missingDataPolicy === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setMissingDataPolicy(preset.id)}
+                          className={`px-2 py-1 text-[11px] rounded border transition ${
+                            isSelected
+                              ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700 font-medium'
+                              : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-800'
+                          }`}
+                        >
+                          {t(preset.labelKey, preset.defaultLabel)}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1064,7 +1338,12 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_max_params_label', 'Max Parameter Limit')}</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] text-zinc-400">{t('taskcfg_max_params_label', 'Max Parameter Limit')}</label>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-800">
+                      {formatParamScale(maxParamsLimit, t('taskcfg_max_params_unlimited', 'Unlimited parameters'))}
+                    </span>
+                  </div>
                   <input
                     type="number"
                     value={maxParamsLimit}
@@ -1072,7 +1351,27 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                     placeholder="e.g. 150000000"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                   />
-                  <span className="text-[10px] text-zinc-500">{t('taskcfg_gpu_limit_hint', 'Limits GPU memory footprint')}</span>
+                  <div className="flex items-center flex-wrap gap-1 mt-1.5">
+                    <span className="text-[10px] text-zinc-500 mr-1">{t('taskcfg_params_preset_label', 'Architectural Parameter Presets:')}</span>
+                    {PARAM_PRESETS.map((preset) => {
+                      const isSelected = preset.value === '' ? (!maxParamsLimit || maxParamsLimit === '0') : maxParamsLimit === preset.value;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setMaxParamsLimit(preset.value)}
+                          className={`px-1.5 py-0.5 text-[10px] rounded border transition ${
+                            isSelected
+                              ? 'bg-indigo-950/80 text-indigo-300 border-indigo-700 font-medium'
+                              : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border-zinc-800'
+                          }`}
+                        >
+                          {t(preset.labelKey, preset.defaultLabel)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="text-[10px] text-zinc-500 block mt-1">{t('taskcfg_gpu_limit_hint', 'Limits GPU memory footprint')}</span>
                 </div>
 
                 <div>
@@ -1161,14 +1460,53 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                 </div>
               ) : (
               <div className="p-3.5 bg-zinc-950 rounded-lg border border-zinc-800 space-y-3">
-                <div className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>{t('taskcfg_audit_params_title', 'Audit Gate Parameters')}</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-800/80 pb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="text-xs font-semibold text-zinc-200">
+                        {regime === 'regression' && t('taskcfg_audit_title_regression', 'Audit Gate Parameters (Continuous Regression)')}
+                        {regime === 'ranking' && t('taskcfg_audit_title_ranking', 'Audit Gate Parameters (Ranking & Recommendation)')}
+                        {regime === 'generative_nlp' && t('taskcfg_audit_title_generative', 'Audit Gate Parameters (NLP / Generative LLM)')}
+                        {regime === 'classification' && t('taskcfg_audit_title_classification', 'Audit Gate Parameters (Classification)')}
+                      </div>
+                      <div className="text-[11px] text-zinc-400">
+                        {regime === 'regression' && t('taskcfg_audit_desc_regression', 'Enforces continuous prediction variance, collinearity rejection, and relative epsilon tolerance.')}
+                        {regime === 'ranking' && t('taskcfg_audit_desc_ranking', 'Audits permutation concordances, rank inversion rates, and listwise order deltas.')}
+                        {regime === 'generative_nlp' && t('taskcfg_audit_desc_generative', 'Audits embedding cosine diversity, lexical edit distance, and output hash integrity.')}
+                        {regime === 'classification' && t('taskcfg_audit_desc_classification', 'Enforces discrete label diversity and chance-adjusted inter-model agreement.')}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 shadow-sm"
+                      title={t('taskcfg_audit_adaptive_tooltip', 'Audit Gate metrics and thresholds automatically adapt to the selected Problem Modality and Task Category.')}
+                    >
+                      {t('taskcfg_audit_regime_badge', `Active Audit Regime: ${getLocalizedRegimeName(regime)}`, { regime: getLocalizedRegimeName(regime) })}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => handleResetRegimeDefaults(regime)}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-zinc-300 bg-zinc-900 hover:bg-zinc-800 hover:text-white rounded border border-zinc-800 hover:border-zinc-700 transition"
+                      title={t('taskcfg_audit_reset_defaults', 'Reset to Regime Defaults')}
+                    >
+                      <RotateCcw className="w-3 h-3 text-zinc-400" />
+                      <span>{t('taskcfg_audit_reset_defaults', 'Reset to Regime Defaults')}</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_min_diff_label', 'Min Prediction Delta (% rows)')}</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">
+                      {regime === 'regression' && t('audit_label_min_diff_regression', 'Min Meaningful Effect Delta (% rows)')}
+                      {regime === 'ranking' && t('audit_label_min_diff_ranking', 'Min Top-K Rank Delta (% rows)')}
+                      {regime === 'generative_nlp' && t('audit_label_min_diff_nlp', 'Generation Checksum & Output Delta (% rows)')}
+                      {regime === 'classification' && t('audit_label_min_diff_classification', 'Min Class Delta (% rows)')}
+                    </label>
                     <input
                       type="number"
                       step="0.1"
@@ -1177,24 +1515,44 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       placeholder="2.0"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">{t('taskcfg_min_diff_hint', 'Min % changed vs baseline (default 2.0%)')}</span>
+                    <span className="text-[10px] text-zinc-500 block mt-1">
+                      {regime === 'regression' && t('audit_hint_min_diff_regression', 'Min % rows where |y_cand - y_base| exceeds relative epsilon tolerance (|Δy|/σy ≥ ε)')}
+                      {regime === 'ranking' && t('audit_hint_min_diff_ranking', 'Min % queries with reordered rankings vs baseline')}
+                      {regime === 'generative_nlp' && t('audit_hint_min_diff_nlp', 'Rejects identical prompt replays and verifies generation checksum divergence (≥ 2.0%)')}
+                      {regime === 'classification' && t('audit_hint_min_diff_classification', 'Minimum % changed prediction classes vs parent baseline (MMES floor 2.0%)')}
+                    </span>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_max_kappa_label', 'Max Ensemble Correlation (Kappa)')}</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">
+                      {regime === 'regression' && t('audit_label_max_corr_regression', 'Max Ensemble Pearson/Spearman Corr (r ≤ 0.90)')}
+                      {regime === 'ranking' && t('audit_label_max_corr_ranking', 'Max Rank Correlation (Kendall’s Tau ≤ 0.85)')}
+                      {regime === 'generative_nlp' && t('audit_label_max_corr_nlp', 'Max Semantic Embedding Similarity (cos θ ≤ 0.92)')}
+                      {regime === 'classification' && t('audit_label_max_corr_classification', 'Max Ensemble Correlation (Cohen’s Kappa)')}
+                    </label>
                     <input
                       type="number"
                       step="0.01"
                       value={maxKappa}
                       onChange={(e) => setMaxKappa(e.target.value)}
-                      placeholder="0.85"
+                      placeholder={regime === 'regression' ? '0.90' : regime === 'generative_nlp' ? '0.92' : '0.85'}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">{t('taskcfg_max_kappa_hint', 'Blocks identical models (ceiling 0.85)')}</span>
+                    <span className="text-[10px] text-zinc-500 block mt-1">
+                      {regime === 'regression' && t('audit_hint_max_corr_regression', 'Ceiling r ≤ 0.90 ensures continuous prediction vectors are genuinely diverse')}
+                      {regime === 'ranking' && t('audit_hint_max_corr_ranking', 'Ceiling Kendall’s Tau ≤ 0.85 ensures diverse ranking orders across models')}
+                      {regime === 'generative_nlp' && t('audit_hint_max_corr_nlp', 'Ceiling cos θ ≤ 0.92 prevents blending prompts with redundant output distributions')}
+                      {regime === 'classification' && t('audit_hint_max_corr_classification', 'Ceiling 0.85 blocks pseudo-ensembles of near-identical classifiers')}
+                    </span>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">{t('taskcfg_min_disagreement_label', 'Min Disagreement Rate (%)')}</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">
+                      {regime === 'regression' && t('audit_label_disagree_regression', 'Relative Epsilon Tolerance & Value Disagreement')}
+                      {regime === 'ranking' && t('audit_label_disagree_ranking', 'Min Rank Inversion Rate (%)')}
+                      {regime === 'generative_nlp' && t('audit_label_disagree_nlp', 'Min Token / Embedding Diversity Rate (%)')}
+                      {regime === 'classification' && t('audit_label_disagree_classification', 'Min Class Disagreement Rate (%)')}
+                    </label>
                     <input
                       type="number"
                       step="0.1"
@@ -1203,7 +1561,31 @@ export const TaskConfigModal: React.FC<TaskConfigModalProps> = ({
                       placeholder="5.0"
                       className="w-full bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs font-mono text-zinc-100"
                     />
-                    <span className="text-[10px] text-zinc-500">{t('taskcfg_min_disagreement_hint', 'Min prediction diversity (floor 5.0%)')}</span>
+                    <span className="text-[10px] text-zinc-500 block mt-1">
+                      {regime === 'regression' && t('audit_hint_disagree_regression', 'Min % samples where |y1 - y2| exceeds relative error threshold ε (relative to σy)')}
+                      {regime === 'ranking' && t('audit_hint_disagree_ranking', 'Floor 5.0% pairwise rank inversions guarantees complementary ranking lists')}
+                      {regime === 'generative_nlp' && t('audit_hint_disagree_nlp', 'Floor 5.0% semantic divergence enforces distinct reasoning paths or generation phrasing')}
+                      {regime === 'classification' && t('audit_hint_disagree_classification', 'Floor 5.0% enforces orthogonal decision boundaries between ensemble members')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Mathematical Epistemic Grounding Formula Callout */}
+                <div className="mt-2 pt-2 border-t border-zinc-800/60 flex items-center justify-between text-[10px] font-mono text-zinc-500">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-zinc-400 font-semibold">{t('taskcfg_audit_adaptive_badge', 'Modality-Adaptive Gate')}:</span>
+                    {regime === 'classification' && (
+                      <span>Σ 𝕀(ŷ_cand ≠ ŷ_base) / N ≥ {minDiffPct || '2.0'}% • Kappa ≤ {maxKappa || '0.85'} • Disagreement ≥ {minDisagreement || '5.0'}%</span>
+                    )}
+                    {regime === 'regression' && (
+                      <span>|Δy| / σy ≥ ε ({minDiffPct || '2.0'}% rows) • Pearson/Spearman r ≤ {maxKappa || '0.90'} • |Δ| &gt; ε ({minDisagreement || '5.0'}%)</span>
+                    )}
+                    {regime === 'ranking' && (
+                      <span>Top-K Inversion Rate ≥ {minDiffPct || '2.0'}% • Kendall’s Tau ≤ {maxKappa || '0.85'} • Disagreement ≥ {minDisagreement || '5.0'}%</span>
+                    )}
+                    {regime === 'generative_nlp' && (
+                      <span>Output Checksum &amp; Token Delta ≥ {minDiffPct || '2.0'}% • Cosine Sim ≤ {maxKappa || '0.92'} • Diversity ≥ {minDisagreement || '5.0'}%</span>
+                    )}
                   </div>
                 </div>
               </div>
