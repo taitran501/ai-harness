@@ -518,8 +518,8 @@ if exp_dir.exists():
     manifest = json.loads((exp_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
     manifest.update({{
         "schema_version": 2,
-        "job_id": {json.dumps(job_id)},
-        "task_id": {json.dumps(str(task_id))},
+        "job_id": {repr(job_id)},
+        "task_id": {repr(str(task_id))},
         "exp_id": "{exp_id}",
         "config_sha256": "{config_sha256}",
         "core_version": (runtime.get("core") or {{}}).get("version"),
