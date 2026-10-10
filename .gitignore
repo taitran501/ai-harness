@@ -39,8 +39,10 @@ artifacts/base/
 # Local task state does not belong to the installable runtime distribution
 /.agents/
 /artifacts/
+/.ai-harness/
 /.ml-harness/
 /build/
+/ai_harness.egg-info/
 /ml_harness.egg-info/
 /task_plugins/*/build/
 /task_plugins/*.egg-info/

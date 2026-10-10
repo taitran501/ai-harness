@@ -1,7 +1,7 @@
-# Universal Base Runtime Configuration for ML-Harness
+# Universal Base Runtime Configuration for AI-Harness
 paths:
   data_dir: "dataset"
-  leaderboard_path: ".ml-harness/EXPERIMENTS.md"
+  leaderboard_path: ".ai-harness/EXPERIMENTS.md"
 
 runtime:
   seed: 42

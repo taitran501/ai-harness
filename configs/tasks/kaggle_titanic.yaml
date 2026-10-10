@@ -1,5 +1,5 @@
 # NOTE: This task specification is provided for schema reference only.
-# ML-Harness is strictly verified and working well ONLY on NLP/Text tasks.
+# AI-Harness is strictly verified and working well ONLY on NLP/Text tasks.
 # Tabular modeling is experimental work-in-progress (WIP) and has NOT been validated in competitive settings.
 task:
   id: kaggle_titanic
