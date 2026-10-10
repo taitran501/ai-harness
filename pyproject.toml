@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ml-harness"
+name = "ai-harness"
 version = "0.2.0"
 description = "Installable experiment and agent harness for competition task plugins"
 readme = "README.md"
@@ -21,6 +21,12 @@ dependencies = [
 cloud = ["modal>=1.5.0", "kaggle>=1.6.0"]
 
 [project.scripts]
+ai-harness = "harness.cli:main"
+ai-harness-agent = "tools.agent_bridge_cli:main"
+ai-harness-dashboard = "tools.dashboard_cli:main"
+ai-harness-run = "harness.runner:main"
+ai-harness-audit = "tools.audit_gate:main"
+ai-harness-bootstrap = "tools.bootstrap_task:main"
 ml-harness = "harness.cli:main"
 ml-harness-agent = "tools.agent_bridge_cli:main"
 ml-harness-dashboard = "tools.dashboard_cli:main"
