@@ -19,6 +19,7 @@ Canonical context file for AI coding assistants (Antigravity, OpenAI Codex, Clau
 - **[docs/CORRECTNESS_CONTRACT.md](docs/CORRECTNESS_CONTRACT.md)** — Schema v2 rules, immutable runs, and verification gates.
 - **[docs/TASK_SPEC_TEMPLATE.md](docs/TASK_SPEC_TEMPLATE.md)** — Declarative `configs/task.yaml` specification schema.
 - **[docs/plugin_architecture.md](docs/plugin_architecture.md)** — Pluggable task adapters, registration, and discovery.
+- **[docs/kaggle_execution.md](docs/kaggle_execution.md)** — Kaggle CLI setup, data mounts, dependency policy, polling, and verified artifact import.
 - **[docs/prompts/README.md](docs/prompts/README.md)** — Prompt library across onboarding, iteration, and ensembling phases.
 
 ---

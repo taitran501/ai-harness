@@ -1,4 +1,7 @@
 import hashlib
+import ast
+import base64
+import io
 import json
 import tempfile
 import unittest
@@ -311,8 +314,12 @@ class WorkspaceFixture(unittest.TestCase):
                 job_id="job_fixture",
                 runtime_manifest=runtime,
             )
-            compile((package / "run_kaggle.py").read_text(encoding="utf-8"), "run_kaggle.py", "exec")
-            with zipfile.ZipFile(package / "code_bundle.zip") as archive:
+            source = (package / "run_kaggle.py").read_text(encoding="utf-8")
+            compile(source, "run_kaggle.py", "exec")
+            bundle = next(node.args[0].value for node in ast.walk(ast.parse(source))
+                          if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                          and node.func.attr == "b64decode")
+            with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle))) as archive:
                 names = archive.namelist()
                 self.assertFalse(any(name.startswith("dataset/") or name.startswith("splits/") for name in names))
 

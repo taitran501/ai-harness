@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -253,18 +254,12 @@ def run_via_kaggle(
     project = context["project"]
     exp_id = context["exp_id"]
     managed_job_id = job_id
-    job_id = job_id or f"kaggle_{exp_id}"
+    job_id = job_id or f"kaggle_{exp_id}_{uuid.uuid4().hex[:10]}"
     if managed_job_id:
         update_worker_state(
             project.root, managed_job_id, status="RUNNING", provider_status="PREPARING",
             exp_id=exp_id, config_sha256=context["config_sha256"],
         )
-
-    try:
-        import kaggle
-    except ImportError:
-        print("❌ Kaggle API not installed. Run `pip install kaggle`.", file=sys.stderr)
-        raise RuntimeError("Kaggle CLI is not installed. Install the `cloud` extra and authenticate with the official Kaggle CLI.")
 
     # Upload task data only after the task/provider/fingerprint consent check.
     dataset_slug = context["external_kaggle_dataset"]
@@ -285,6 +280,7 @@ def run_via_kaggle(
         )
         if not uploaded.get("success"):
             raise RuntimeError(f"Kaggle private dataset upload failed: {uploaded.get('error') or uploaded.get('logs')}")
+        KaggleKernelManager.wait_for_dataset(dataset_slug)
 
     # 2. Package exact core/adapter runtime and task code without credentials or dataset bytes.
     stage_dir = Path(tempfile.mkdtemp(prefix=f"mlh-kaggle-{job_id}-"))
@@ -309,8 +305,8 @@ def run_via_kaggle(
     if ret.returncode != 0:
         raise RuntimeError(f"Kaggle push failed with code {ret.returncode}")
 
-    task_slug = KaggleKernelManager._get_task_slug(exp_id)
-    kernel_slug = f"{KaggleKernelManager.get_authenticated_username()}/{task_slug}"
+    # Use the ID actually submitted; title normalization and job suffixes may change it.
+    kernel_slug = json.loads((stage_dir / "kernel-metadata.json").read_text(encoding="utf-8"))["id"]
     print(f"Polling Kaggle kernel until a terminal state: {kernel_slug}")
 
     def persist_kaggle_status(state: Dict[str, Any]) -> None:
@@ -339,6 +335,7 @@ def run_via_kaggle(
         exp_id, kernel_slug,
         artifact_dir=project.artifacts_dir / exp_id,
         expected_identity=expected_identity,
+        project_root=project.root,
     )
     if not pulled.get("success"):
         raise RuntimeError(f"Kaggle output import failed: {pulled.get('raw_output') or pulled.get('identity_mismatches')}")

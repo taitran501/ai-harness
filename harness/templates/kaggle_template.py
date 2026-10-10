@@ -2,14 +2,17 @@
 
 Enables complete headless execution via Kaggle API:
 1. `push_dataset_to_kaggle`: Packages `dataset/` + `splits/` into a private Kaggle Dataset once (`kaggle datasets create` / `version`).
-2. `setup_kernel_package`: Generates `kernel-metadata.json` with attached `dataset_sources` and packs lightweight code (`train.py`, `src/`, `configs/`).
+2. `setup_kernel_package`: Generates metadata and a Python script with an embedded code/config bundle.
 3. `get_kernel_status`: Polls `kaggle kernels status <slug>` to monitor running/completed state.
-4. `pull_kernel_output`: Runs `kaggle kernels output <slug>` and migrates lightweight prediction/metric files (`oof_predictions.csv`, `test_predictions.csv`, `metrics.json`, `run.log`, `EXPERIMENT_CARD.md`) directly into `artifacts/<exp_id>/`.
+4. `pull_kernel_output`: Downloads and verifies one sealed run in the attached workspace.
 """
 
 from __future__ import annotations
 
 import json
+import base64
+import copy
+import io
 import hashlib
 import os
 import re
@@ -18,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -31,14 +35,17 @@ class KaggleKernelManager:
         env_user = os.environ.get("KAGGLE_USERNAME")
         if env_user:
             return env_user
-        kaggle_json = Path.home() / ".kaggle" / "kaggle.json"
-        if kaggle_json.exists():
-            try:
-                data = json.loads(kaggle_json.read_text(encoding="utf-8"))
-                if data.get("username"):
-                    return data["username"]
-            except Exception:
-                pass
+        config_dirs = [Path.home() / ".kaggle", Path.home() / ".config" / "kaggle"]
+        if os.environ.get("KAGGLE_CONFIG_DIR"):
+            config_dirs.insert(0, Path(os.environ["KAGGLE_CONFIG_DIR"]).expanduser())
+        for directory in config_dirs:
+            for filename in ("kaggle.json", "credentials.json"):
+                try:
+                    data = json.loads((directory / filename).read_text(encoding="utf-8"))
+                    if data.get("username"):
+                        return data["username"]
+                except (OSError, ValueError):
+                    pass
         try:
             res = subprocess.run(
                 ["kaggle", "config", "view"],
@@ -56,25 +63,28 @@ class KaggleKernelManager:
         return ""
 
     @classmethod
-    def _get_task_slug(cls, exp_id: Optional[str] = None) -> str:
-        """Derive a URL/API-safe slug from active TaskSpec and exp_id, ensuring title <= 50 chars."""
+    def _get_task_slug(cls, task_config_path=None) -> str:
+        """Derive a URL/API-safe slug from active TaskSpec."""
         try:
-            import re
             from harness.task_spec import load_active_task_spec
 
-            spec = load_active_task_spec()
+            spec = load_active_task_spec(task_config_path)
             slug = re.sub(r"[^a-zA-Z0-9]+", "-", spec.name.lower()).strip("-")
-            if exp_id:
-                exp_slug = re.sub(r"[^a-zA-Z0-9]+", "-", exp_id.lower()).strip("-")
-                max_task_len = max(5, 45 - len(exp_slug) - 1)
-                task_part = slug[:max_task_len].rstrip("-")
-                return f"{task_part}-{exp_slug}" if task_part else exp_slug
-            # Default static task slug <= 20 chars
-            if len(slug) > 20:
-                slug = slug[:20].rstrip("-")
+            # Leave space for the experiment; _bounded_slug limits the final ID/title.
+            if len(slug) > 25:
+                slug = slug[:25].rstrip("-")
             return slug or "competition"
         except Exception:
             return "competition"
+
+    @staticmethod
+    def _bounded_slug(value: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+        if len(slug) < 5:
+            slug = "run-" + (slug or "harness")
+        if len(slug) > 50:
+            slug = slug[:39].rstrip("-") + "-" + hashlib.sha256(value.encode()).hexdigest()[:10]
+        return slug
 
     @classmethod
     def push_dataset_to_kaggle(
@@ -177,6 +187,7 @@ class KaggleKernelManager:
                     str(stage_dir),
                     "--dir-mode",
                     "zip",
+                    "--keep-tabular",
                 ]
                 logs.append(f"$ {' '.join(create_cmd)}")
                 proc = subprocess.run(
@@ -186,8 +197,8 @@ class KaggleKernelManager:
                 logs.append(out.strip())
 
                 if (
-                    proc.returncode != 0
-                    or "already exists" in out.lower()
+                    "already exists" in out.lower()
+                    or "already in use" in out.lower()
                     or "409" in out.lower()
                 ):
                     ver_cmd = [
@@ -200,6 +211,7 @@ class KaggleKernelManager:
                         "Sync task data and validation splits",
                         "--dir-mode",
                         "zip",
+                        "--keep-tabular",
                     ]
                     logs.append(f"$ {' '.join(ver_cmd)}")
                     proc_v = subprocess.run(
@@ -207,9 +219,10 @@ class KaggleKernelManager:
                     )
                     out_v = (proc_v.stdout or "") + "\n" + (proc_v.stderr or "")
                     logs.append(out_v.strip())
-                    success = proc_v.returncode == 0
+                    success = proc_v.returncode == 0 and "creation error:" not in out_v.lower()
                 else:
-                    success = True
+                    # Some CLI releases print provider errors but still exit zero.
+                    success = proc.returncode == 0 and "creation error:" not in out.lower()
         except Exception as exc:
             return {
                 "success": False,
@@ -225,6 +238,25 @@ class KaggleKernelManager:
             "logs": "\n".join(logs),
         }
 
+    @staticmethod
+    def wait_for_dataset(dataset_slug, *, poll_interval=10.0, timeout_seconds=600.0):
+        """Dataset upload is asynchronous; dispatch only after processing is ready."""
+        deadline = time.monotonic() + timeout_seconds
+        last = "UNKNOWN"
+        while time.monotonic() < deadline:
+            proc = subprocess.run(["kaggle", "datasets", "status", dataset_slug],
+                                  capture_output=True, text=True, timeout=30)
+            output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+            if proc.returncode != 0:
+                raise RuntimeError(f"Kaggle dataset status failed: {output}")
+            last = (proc.stdout or "").strip().strip('"').rsplit(".", 1)[-1].upper()
+            if last == "READY":
+                return
+            if last in {"ERROR", "FAILED", "FAILURE"}:
+                raise RuntimeError(f"Kaggle dataset processing failed: {output}")
+            time.sleep(max(0.0, poll_interval))
+        raise TimeoutError(f"Kaggle dataset did not become ready before timeout (last status: {last})")
+
     @classmethod
     def generate_kernel_metadata(
         cls,
@@ -237,7 +269,10 @@ class KaggleKernelManager:
         """Generate kernel-metadata.json configuration dictionary."""
         username = cls.get_authenticated_username()
         owner = username or "ml-harness-user"
-        full_kernel_id = kernel_slug if "/" in kernel_slug else f"{owner}/{kernel_slug}"
+        if "/" in kernel_slug:
+            owner, kernel_slug = kernel_slug.split("/", 1)
+        kernel_slug = cls._bounded_slug(kernel_slug)
+        full_kernel_id = f"{owner}/{kernel_slug}"
         return {
             "id": full_kernel_id,
             "title": full_kernel_id.split("/")[-1].replace("-", " ").title(),
@@ -286,7 +321,11 @@ class KaggleKernelManager:
         stage.mkdir(parents=True, exist_ok=True)
 
         username = cls.get_authenticated_username()
-        slug = cls._get_task_slug(exp_id)
+        t_slug = cls._get_task_slug(project.task_config_path)
+        slug = f"{t_slug}-{exp_id.replace('_', '-')}"
+        if job_id:
+            # Polling 'latest' must refer to this dispatch, not an older run of the same experiment.
+            slug += "-" + hashlib.sha256(job_id.encode()).hexdigest()[:10]
         resolved_dataset = dataset_slug
         if not resolved_dataset or resolved_dataset == "antigravity/dataset":
             from harness.cloud_policy import private_upload_resource_names
@@ -310,7 +349,7 @@ class KaggleKernelManager:
         # Bundle only code/config; dataset contents use the separately consented provider dataset.
         import tempfile
 
-        runtime = runtime_manifest or {
+        runtime = copy.deepcopy(runtime_manifest) if runtime_manifest else {
             "schema_version": 2,
             "core": {
                 "distribution": "ml-harness",
@@ -389,7 +428,6 @@ class KaggleKernelManager:
             (bundle_base / "ml-harness-runtime.json").write_text(
                 json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8"
             )
-            import io, base64, zipfile
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for file_path in bundle_base.rglob("*"):
@@ -397,155 +435,53 @@ class KaggleKernelManager:
                         zf.write(file_path, file_path.relative_to(bundle_base))
             bundle_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-        dataset_folder_name = resolved_dataset.split("/")[-1]
-
         task_id = (
             task_id or project.manifest.get("task_id") or project.plugin_id or "task"
         )
         artifact_dir = project.artifacts_dir.relative_to(root).as_posix()
-        runner_content = f"""import hashlib
+        runner_content = f"""import base64
+import io
 import json
+import os
+from pathlib import Path
+import runpy
 import subprocess
 import sys
-import os
-import shutil
+import tempfile
 import zipfile
-import base64
-import io
-from pathlib import Path
 
-print("[Kaggle Kernel] Starting execution for: {exp_id}")
-
-# 1. Extract embedded code bundle
-bundle_bytes = base64.b64decode('{bundle_b64}')
-with zipfile.ZipFile(io.BytesIO(bundle_bytes), 'r') as zf:
-    zf.extractall('.')
-
-# 2. Restore only the task data paths included in the separately consented dataset.
-input_root = None
-for candidate in [Path("/kaggle/input/{dataset_folder_name}"), *Path("/kaggle/input").rglob("{dataset_folder_name}")]:
-    if candidate.exists() and candidate.is_dir():
-        input_root = candidate
-        break
-
-if input_root is None:
-    # Fallback to any directory containing mlh-data-bundle.json or dataset/train.csv
-    for manifest_candidate in Path("/kaggle/input").rglob("mlh-data-bundle.json"):
-        input_root = manifest_candidate.parent
-        break
-
-if input_root is None:
-    for data_candidate in Path("/kaggle/input").rglob("train.csv"):
-        input_root = data_candidate.parent.parent if data_candidate.parent.name == "dataset" else data_candidate.parent
-        break
-
-if input_root is None:
-    input_root = Path("/kaggle/input/{dataset_folder_name}")
-
-print(f"[Kaggle Kernel] Using input_root: {{input_root}} (exists: {{input_root.exists()}})")
-
-# Unpack any staged zips (e.g. dataset.zip or splits.zip if uploaded as zip)
-for zip_file in input_root.glob("*.zip"):
-    with zipfile.ZipFile(zip_file, "r") as zf:
-        zf.extractall(".")
-
-data_manifest_path = input_root / "mlh-data-bundle.json"
-if data_manifest_path.is_file():
-    data_manifest = json.loads(data_manifest_path.read_text(encoding="utf-8"))
-    for relative in data_manifest.get("paths", []):
-        source = input_root / relative
-        target = Path(relative)
-        if not source.exists() and not target.exists():
-            print(f"[Warning] Manifest path not found: {{source}}")
-            continue
-        if source.exists() and not target.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if source.is_dir():
-                shutil.copytree(source, target)
-            else:
-                shutil.copy2(source, target)
-
-# Fallback copy if dataset or splits folder are in input_root
-if (input_root / "dataset").exists() and not Path("dataset").exists():
-    shutil.copytree(input_root / "dataset", "dataset", dirs_exist_ok=True)
-if (input_root / "splits").exists() and not Path("splits").exists():
-    shutil.copytree(input_root / "splits", "splits", dirs_exist_ok=True)
-
-# 3. Check and install missing dependencies
-runtime = json.loads(Path("ml-harness-runtime.json").read_text(encoding="utf-8"))
-requirements = ["numpy>=1.24.0", "pandas>=2.0.0", "scikit-learn>=1.3.0", "pyyaml>=6.0", "scipy>=1.11.0"] + runtime.get("requirements", [])
-missing = []
-for req in requirements:
-    pkg = req.split(">=")[0].split("==")[0].split("<")[0].strip()
+print({('[Kaggle Kernel] Starting execution for: ' + exp_id)!r}, flush=True)
+output_root = Path.cwd().resolve()
+# Kaggle saves /kaggle/working recursively. Keep code, data and the original
+# run outside that directory, then publish exactly one sealed artifact set.
+with tempfile.TemporaryDirectory(prefix="mlh-kaggle-work-") as temporary:
+    workspace = Path(temporary)
+    with zipfile.ZipFile(io.BytesIO(base64.b64decode({bundle_b64!r}))) as archive:
+        archive.extractall(workspace)
+    os.chdir(workspace)
+    sys.path.insert(0, str(workspace))
     try:
-        __import__(pkg.replace("-", "_"))
-    except ImportError:
-        missing.append(req)
-
-if missing:
-    try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", *missing], check=True, timeout=120)
-    except Exception as exc:
-        print(f"[Warning] Failed to pip install missing packages ({{missing}}): {{exc}}", file=sys.stderr)
-
-install = (runtime.get("plugin") or {{}}).get("install") or {{}}
-if install.get("type") == "wheel":
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", install["path"]], check=True)
-elif install.get("type") == "index":
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", install["requirement"]], check=True)
-
-# 4. Run training
-cmd = [sys.executable, "-u", "-m", "harness.runner", "--project-root", ".", "--task-config", "{task_config_rel}", "--config", "{config_rel}"]
-print(f"Executing: {{' '.join(cmd)}}")
-ret = subprocess.run(cmd)
-
-if ret.returncode != 0:
-    print(f"Execution failed with returncode {{ret.returncode}}", file=sys.stderr)
-    sys.exit(ret.returncode)
-
-# 5. Copy lightweight output artifacts to /kaggle/working root so `kaggle kernels output` downloads them cleanly
-exp_dir = Path("{artifact_dir}") / "{exp_id}"
-essential_files = [
-    "metrics.json",
-    "summary.csv",
-    "summary.md",
-    "predictions.csv",
-    "oof_predictions.csv",
-        "evaluation_truth.csv",
-    "test_predictions.csv",
-    "submission.csv",
-    "DIAGNOSTICS.md",
-    "diagnostics.json",
-    "run.log",
-    "EXPERIMENT_CARD.md",
-    "run_config.yaml",
-]
-if exp_dir.exists():
-    metrics = json.loads((exp_dir / "metrics.json").read_text(encoding="utf-8")) if (exp_dir / "metrics.json").is_file() else None
-    records = metrics if isinstance(metrics, list) else [metrics]
-    if not any(isinstance(row, dict) and row.get("experiment_id", row.get("exp_id")) == "{exp_id}" for row in records):
-        raise RuntimeError("Run metrics are missing the expected experiment identity.")
-    manifest = json.loads((exp_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
-    manifest.update({{
-        "schema_version": 2,
-        "job_id": {repr(job_id)},
-        "task_id": {repr(str(task_id))},
-        "exp_id": "{exp_id}",
-        "config_sha256": "{config_sha256}",
-        "core_version": (runtime.get("core") or {{}}).get("version"),
-        "plugin_id": (runtime.get("plugin") or {{}}).get("id"),
-        "files": {{}},
-    }})
-    for fname in essential_files:
-        src_file = exp_dir / fname
-        if src_file.exists():
-            shutil.copy2(src_file, Path(".") / fname)
-            manifest["files"][fname] = hashlib.sha256(src_file.read_bytes()).hexdigest()
-    Path("artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-else:
-    raise RuntimeError(f"Expected experiment artifact directory was not created: {{exp_dir}}")
-
-print("Training completed. Lightweight output artifacts copied to working root.")
+        # Loading by path avoids importing harness.__init__ before dependencies exist.
+        helpers = runpy.run_path(str(workspace / "harness" / "kaggle_runtime.py"))
+        runtime = json.loads(Path("ml-harness-runtime.json").read_text(encoding="utf-8"))
+        helpers["ensure_dependencies"](runtime, enable_internet={enable_internet!r})
+        input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
+        print(f"[Kaggle Kernel] Using input_root: {{input_root}}", flush=True)
+        helpers["restore_dataset"](input_root, workspace)
+        cmd = [sys.executable, "-u", "-m", "harness.runner", "--project-root", ".",
+               "--task-config", {task_config_rel!r}, "--config", {config_rel!r}]
+        print(f"Executing: {{' '.join(cmd)}}", flush=True)
+        subprocess.run(cmd, check=True)
+        helpers["export_run"](Path({artifact_dir!r}) / {exp_id!r}, output_root, {{
+            "job_id": {job_id!r}, "task_id": {str(task_id)!r}, "exp_id": {exp_id!r},
+            "config_sha256": {config_sha256!r},
+            "core_version": (runtime.get("core") or {{}}).get("version"),
+            "plugin_id": (runtime.get("plugin") or {{}}).get("id"),
+        }})
+    finally:
+        os.chdir(output_root)
+        sys.path.remove(str(workspace))
+print("Training completed. Sealed output artifacts copied to working root.", flush=True)
 """
         (stage / "run_kaggle.py").write_text(runner_content, encoding="utf-8")
         return stage
@@ -556,8 +492,8 @@ print("Training completed. Lightweight output artifacts copied to working root."
     ) -> Dict[str, Any]:
         """Check status of a Kaggle kernel via `kaggle kernels status <slug>`."""
         username = cls.get_authenticated_username()
-        t_slug = cls._get_task_slug(exp_id)
-        slug = kernel_slug or f"{username}/{t_slug}"
+        t_slug = cls._get_task_slug()
+        slug = kernel_slug or f"{username}/{t_slug}-{exp_id.replace('_', '-')}"
         if "/" not in slug:
             slug = f"{username}/{slug}"
 
@@ -570,17 +506,21 @@ print("Training completed. Lightweight output artifacts copied to working root."
             )
             output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
             status_state = "UNKNOWN"
-            lower_out = output.lower()
-            tokens = set(re.findall(r"[a-z]+", lower_out))
-            if tokens.intersection({"failed", "failure", "error", "invalid"}):
+            # Kernel names and failure messages can contain 'error', 'running', etc.
+            # Parse only the provider's status field, not every word in stdout/stderr.
+            match = re.search(r'has status\s+["\x27]([^"\x27]+)["\x27]', proc.stdout or "", re.I)
+            state = match.group(1).rsplit(".", 1)[-1].upper() if match else (proc.stdout or "").strip().upper()
+            if proc.returncode != 0:
+                status_state = "ERROR"
+            elif state in {"FAILED", "FAILURE", "ERROR", "INVALID"}:
                 status_state = "FAILED"
-            elif tokens.intersection({"cancelled", "canceled", "cancel"}):
+            elif state in {"CANCELLED", "CANCELED", "CANCEL"}:
                 status_state = "CANCELLED"
-            elif "queued" in tokens:
+            elif state == "QUEUED":
                 status_state = "QUEUED"
-            elif "running" in tokens:
+            elif state == "RUNNING":
                 status_state = "RUNNING"
-            elif tokens.intersection({"complete", "completed", "success", "succeeded"}):
+            elif state in {"COMPLETE", "COMPLETED", "SUCCESS", "SUCCEEDED"}:
                 status_state = "COMPLETED"
 
             return {
@@ -627,6 +567,17 @@ print("Training completed. Lightweight output artifacts copied to working root."
         return {**last, "success": False, "status": "TIMEOUT", "timed_out": True}
 
     @classmethod
+    def _download_output_api(cls, slug, download_dir):
+        """Use the public API's pagination and HTTP checks for root-level run output."""
+        from kaggle.api.kaggle_api_extended import KaggleApi
+
+        api = KaggleApi()
+        api.authenticate()
+        # Root exports have no experiment ID in their filenames. Filter by layout,
+        # not by ID, and avoid old nested source/data copies and duplicate manifests.
+        api.kernels_output(slug, path=str(download_dir), file_pattern=r"^[^/\\]+$", quiet=True)
+
+    @classmethod
     def pull_kernel_output(
         cls,
         exp_id: str,
@@ -634,17 +585,18 @@ print("Training completed. Lightweight output artifacts copied to working root."
         *,
         artifact_dir: Optional[Path | str] = None,
         expected_identity: Optional[Dict[str, Any]] = None,
+        project_root: Optional[Path | str] = None,
     ) -> Dict[str, Any]:
         """Download outputs only after artifact identity matches the submitted task and run."""
         username = cls.get_authenticated_username()
-        t_slug = cls._get_task_slug(exp_id)
-        slug = kernel_slug or f"{username}/{t_slug}"
+        t_slug = cls._get_task_slug()
+        slug = kernel_slug or f"{username}/{t_slug}-{exp_id.replace('_', '-')}"
         if "/" not in slug:
             slug = f"{username}/{slug}"
 
         from harness.project import HarnessProject
 
-        project = HarnessProject.discover()
+        project = HarnessProject.discover(project_root)
         target_artifacts_dir = (
             Path(artifact_dir).expanduser()
             if artifact_dir
@@ -676,46 +628,27 @@ print("Training completed. Lightweight output artifacts copied to working root."
                 prefix=f"mlh-kaggle-{exp_id}-"
             ) as temp_dir:
                 download_dir = Path(temp_dir)
-                output = ""
-                # Use KaggleApi directly to download session output files quickly without CLI hanging
                 try:
-                    from kaggle.api.kaggle_api_extended import KaggleApi
-                    import requests
-
-                    api = KaggleApi()
-                    api.authenticate()
-                    owner, k_name = slug.split("/")
-                    with api.build_kaggle_client() as kg_client:
-                        from kagglesdk.kernels.services.kernels_api_service import (
-                            ApiListKernelSessionOutputRequest,
-                        )
-
-                        req = ApiListKernelSessionOutputRequest()
-                        req.user_name = owner
-                        req.kernel_slug = k_name
-                        res = kg_client.kernels.kernels_api_client.list_kernel_session_output(
-                            req
-                        )
-                        for f_info in res.files or []:
-                            fname = f_info.file_name
-                            # Only download experiment output files and avoid dataset or source tree dumps
-                            if exp_id in fname:
-                                out_file = download_dir / fname
-                                out_file.parent.mkdir(parents=True, exist_ok=True)
-                                r_down = requests.get(f_info.url, timeout=60)
-                                out_file.write_bytes(r_down.content)
+                    cls._download_output_api(slug, download_dir)
                     output = "Downloaded via KaggleApi"
-                except Exception as dl_err:
-                    output = f"Direct API download failed ({dl_err}), falling back to CLI"
+                except (Exception, SystemExit) as api_error:
+                    # The CLI may be installed in pipx/uv while its SDK is absent here.
+                    # Discard any partial API files before the independent CLI retry.
+                    shutil.rmtree(download_dir)
+                    download_dir.mkdir()
                     proc = subprocess.run(
                         ["kaggle", "kernels", "output", slug, "-p", str(download_dir)],
-                        capture_output=True,
-                        text=True,
-                        timeout=300,
+                        capture_output=True, text=True, timeout=300,
                     )
-                    output += "\n" + ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
-
-                manifest_path = next(download_dir.rglob("artifact_manifest.json"), None)
+                    output = f"Direct API download failed ({api_error}), falling back to CLI\n"
+                    output += ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+                    if proc.returncode != 0:
+                        return {"success": False, "kernel_slug": slug, "exp_id": exp_id, "raw_output": output}
+                manifests = list(download_dir.rglob("artifact_manifest.json"))
+                if len(manifests) != 1:
+                    return {"success": False, "kernel_slug": slug, "exp_id": exp_id,
+                            "raw_output": "Remote import requires exactly one manifest v2"}
+                manifest_path = manifests[0]
                 manifest = None
                 if manifest_path:
                     try:
@@ -746,9 +679,10 @@ print("Training completed. Lightweight output artifacts copied to working root."
                     for file_name, expected_hash in (
                         manifest.get("files") or {}
                     ).items():
-                        file_path = next(download_dir.rglob(file_name), None)
+                        file_path = manifest_path.parent / file_name
                         if (
-                            not file_path
+                            Path(file_name).name != file_name
+                            or not file_path.is_file()
                             or hashlib.sha256(file_path.read_bytes()).hexdigest()
                             != expected_hash
                         ):
@@ -759,7 +693,6 @@ print("Training completed. Lightweight output artifacts copied to working root."
                                 "invalid_artifact": file_name,
                                 "raw_output": "Downloaded Kaggle artifact failed its SHA-256 identity check.",
                             }
-                target_artifacts_dir.mkdir(parents=True, exist_ok=True)
                 migrated = cls.migrate_downloaded_artifacts(
                     download_dir, target_artifacts_dir
                 )
@@ -772,9 +705,7 @@ print("Training completed. Lightweight output artifacts copied to working root."
                         )
                     except Exception:
                         pass
-                success = (
-                    len(migrated) > 0 or proc.returncode == 0
-                ) and metrics_data is not None
+                success = bool(migrated) and metrics_data is not None
                 if not success:
                     shutil.rmtree(target_artifacts_dir, ignore_errors=True)
                 return {
