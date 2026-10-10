@@ -674,13 +674,42 @@ print("Training completed. Lightweight output artifacts copied to working root."
                 prefix=f"mlh-kaggle-{exp_id}-"
             ) as temp_dir:
                 download_dir = Path(temp_dir)
-                proc = subprocess.run(
-                    ["kaggle", "kernels", "output", slug, "-p", str(download_dir)],
-                    capture_output=True,
-                    text=True,
-                    timeout=180,
-                )
-                output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+                output = ""
+                # Use KaggleApi directly to download session output files quickly without CLI hanging
+                try:
+                    from kaggle.api.kaggle_api_extended import KaggleApi
+                    import requests
+
+                    api = KaggleApi()
+                    api.authenticate()
+                    owner, k_name = slug.split("/")
+                    with api.build_kaggle_client() as kg_client:
+                        from kagglesdk.kernels.services.kernels_api_service import (
+                            ApiListKernelSessionOutputRequest,
+                        )
+
+                        req = ApiListKernelSessionOutputRequest()
+                        req.user_name = owner
+                        req.kernel_slug = k_name
+                        res = kg_client.kernels.kernels_api_client.list_kernel_session_output(
+                            req
+                        )
+                        for f_info in res.files or []:
+                            out_file = download_dir / f_info.file_name
+                            out_file.parent.mkdir(parents=True, exist_ok=True)
+                            r_down = requests.get(f_info.url, timeout=60)
+                            out_file.write_bytes(r_down.content)
+                    output = "Downloaded via KaggleApi"
+                except Exception as dl_err:
+                    output = f"Direct API download failed ({dl_err}), falling back to CLI"
+                    proc = subprocess.run(
+                        ["kaggle", "kernels", "output", slug, "-p", str(download_dir)],
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+                    output += "\n" + ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+
                 manifest_path = next(download_dir.rglob("artifact_manifest.json"), None)
                 manifest = None
                 if manifest_path:
