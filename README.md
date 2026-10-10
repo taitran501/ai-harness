@@ -12,7 +12,29 @@ ai-harness provides experiment tracking, validation orchestration, and agent int
 
 The core runtime is task-agnostic. Task-specific data loading, model architectures, and competition metrics are loaded via standalone task adapters.
 
-> **Scope Notice**: ai-harness is validated and benchmarked for **Natural Language Processing (NLP / Text)** tasks (e.g., text sequence classification, transformer fine-tuning, prompt evaluation). Other modalities (Tabular, Vision, Audio, Multimodal) are experimental roadmap items and are not yet validated in competition settings.
+> **Scope Notice**: Competition-level validation currently covers **NLP / Text** tasks. **Tabular already has implemented and locally tested execution paths**: native categorical handling, scikit-learn pipelines, LightGBM, and XGBoost, including regression/classification integration tests. Tabular competition-level generalization is still unverified; Vision, Audio, and Multimodal remain experimental roadmap work. Local engineering tests and competition results are separate evidence.
+
+### Agent research continuity
+
+The harness preserves proposals, decisions, execution observations, and restart
+checkpoints across sessions. Read `ai-harness-agent context`, search older work with
+`search_research_memory`, and use `review_hypothesis` before implementation. Exact
+declared configuration repeats require a `revisit_reason`; related approaches get
+an advisory comparison. Plateau triggers reassessment against the comparable
+incumbent and verified diagnostics, without automatically freezing the task.
+See [the research continuity protocol](docs/research_continuity.md) and
+[runtime extensions](docs/runtime_extensions.md).
+
+On Windows PowerShell, put action parameters in a UTF-8 JSON file to avoid shell
+quoting ambiguity:
+
+```powershell
+ai-harness-agent --project-root . act --action record_research_checkpoint --param-file checkpoint.json
+ai-harness-run --project-root . --config configs/exp012_loss_weighted.yaml --debug --fold 0 --unbuffered
+```
+
+Fold progress is always flushed to stdout and `run.log`. `--unbuffered` additionally
+flushes redirected Python stdout/stderr; managed Python subprocesses use `-u`.
 
 ## Quick start
 
