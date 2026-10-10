@@ -54,6 +54,9 @@ class TypedActionName(str, Enum):
     REVIEW_HYPOTHESIS = "review_hypothesis"
     RECORD_RESEARCH_DECISION = "record_research_decision"
     RECORD_RESEARCH_CHECKPOINT = "record_research_checkpoint"
+    RECORD_RESEARCH_INSIGHT = "record_research_insight"
+    PLAN_RESEARCH_PROBE = "plan_research_probe"
+    TRACE_RESEARCH_INSIGHT = "trace_research_insight"
     WRITE_EXPERIMENT_CONFIG = "write_experiment_config"
     UPDATE_WORKSPACE_SETTINGS = "update_workspace_settings"
     BOOTSTRAP_TASK = "bootstrap_task"
@@ -86,6 +89,9 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.REVIEW_HYPOTHESIS.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_RESEARCH_DECISION.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_RESEARCH_CHECKPOINT.value: ApprovalTier.AUTO.value,
+    TypedActionName.RECORD_RESEARCH_INSIGHT.value: ApprovalTier.AUTO.value,
+    TypedActionName.PLAN_RESEARCH_PROBE.value: ApprovalTier.AUTO.value,
+    TypedActionName.TRACE_RESEARCH_INSIGHT.value: ApprovalTier.AUTO.value,
     TypedActionName.BOOTSTRAP_TASK.value: ApprovalTier.AUTO.value,
     TypedActionName.CONFIRM_TASK_SPEC.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.INSPECT_DATA_READINESS.value: ApprovalTier.AUTO.value,
@@ -784,7 +790,9 @@ class AgentBridge:
         lines.extend(["", "## Research continuity (survives sessions and compaction)",
                       json.dumps({key: memory[key] for key in (
                           "entry_count", "verified_run_count", "latest_checkpoint", "recent_decisions",
-                          "recent_results", "consecutive_non_improvements", "reassess_recommended")},
+                          "recent_results", "consecutive_non_improvements", "reassess_recommended",
+                          "insight_count", "open_insight_count", "research_frontier",
+                          "unreviewed_result_count", "unreviewed_results", "progress_path", "progress_warning")},
                           ensure_ascii=False),
                       *[f"- {step}" for step in memory["resume_protocol"]]])
 
@@ -792,7 +800,7 @@ class AgentBridge:
             [
                 "",
                 "## 🛠️ Typed Bridge Actions (`ml-harness-agent act --action <name> ...`)",
-                "- **AUTO (Research continuity)**: `search_research_memory`, `review_hypothesis`, `record_research_decision`, `record_research_checkpoint`",
+                "- **AUTO (Research continuity)**: `search_research_memory`, `review_hypothesis`, `record_research_insight`, `plan_research_probe`, `trace_research_insight`, `record_research_decision`, `record_research_checkpoint`",
                 "- **AUTO**: `inspect_data_readiness`, `run_eda`, `record_phase_output`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
                 "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (dispatches a tracked local/Kaggle/Modal job), `synthesize_candidate`, `build_ensemble`",
                 "- **AUTO (Job lifecycle)**: `inspect_cloud_job`, `wait_cloud_job`",
@@ -825,6 +833,9 @@ class AgentBridge:
             TypedActionName.REVIEW_HYPOTHESIS.value,
             TypedActionName.RECORD_RESEARCH_DECISION.value,
             TypedActionName.RECORD_RESEARCH_CHECKPOINT.value,
+            TypedActionName.RECORD_RESEARCH_INSIGHT.value,
+            TypedActionName.PLAN_RESEARCH_PROBE.value,
+            TypedActionName.TRACE_RESEARCH_INSIGHT.value,
         ):
             return (
                 "STOP_POLICY_TRIGGERED",
@@ -1116,8 +1127,19 @@ class AgentBridge:
                     obs.elapsed_seconds,
                 )
         if action in {"run_smoke_test", "run_probe", "run_full_validation"}:
+            execution_exp_id = obs.data.get("exp_id")
+            execution_insight_id = None
+            if params.get("config_path"):
+                try:
+                    config_file = (self.project_root / params["config_path"]).resolve()
+                    config_file.relative_to(self.project_root)
+                    execution_cfg = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+                    execution_exp_id = execution_exp_id or execution_cfg.get("experiment", {}).get("id", config_file.stem)
+                    execution_insight_id = (execution_cfg.get("research") or {}).get("insight_id")
+                except (OSError, ValueError, TypeError, yaml.YAMLError):
+                    pass
             self._research_memory().record_execution(action, obs.status, obs.summary,
-                obs.data.get("exp_id"), session.session_id)
+                execution_exp_id, session.session_id, insight_id=execution_insight_id)
         if action in {"create_experiment", "write_experiment_config", "run_full_validation",
                       "inspect_cloud_job", "wait_cloud_job", "inspect_diagnostics"}:
             continuity = self._research_memory().context(
@@ -1179,10 +1201,22 @@ class AgentBridge:
 
         try:
             if act in {"search_research_memory", "review_hypothesis", "record_research_decision",
-                       "record_research_checkpoint"}:
+                       "record_research_checkpoint", "record_research_insight", "plan_research_probe",
+                       "trace_research_insight"}:
                 memory = self._research_memory()
                 if act == "search_research_memory":
                     result = {"matches": memory.search(params.get("query", ""), params.get("limit", 8))}
+                elif act == "record_research_insight":
+                    result = memory.record_insight(title=params["title"], observation=params["observation"],
+                        mechanism=params["mechanism"], next_action=params["next_action"],
+                        evidence=params.get("evidence"), parent_insight_id=params.get("parent_insight_id"),
+                        session_id=session.session_id)
+                elif act == "plan_research_probe":
+                    result = memory.plan_probe(**{key: params[key] for key in (
+                        "insight_id", "control", "intervention", "expected_observation", "alternative_explanation",
+                        "decision_rule", "budget", "stop_rule")}, session_id=session.session_id)
+                elif act == "trace_research_insight":
+                    result = memory.trace(params["insight_id"], params.get("offset", 0), params.get("limit", 20))
                 elif act == "review_hypothesis":
                     cfg = params.get("config")
                     if cfg is None:
@@ -1193,10 +1227,13 @@ class AgentBridge:
                 elif act == "record_research_decision":
                     result = memory.record_decision(outcome=params["outcome"], conclusion=params["conclusion"],
                         evidence=params.get("evidence", []), next_action=params.get("next_action", ""),
+                        insight_id=params.get("insight_id"), lesson=params.get("lesson", ""),
+                        revisit_when=params.get("revisit_when", ""),
                         session_id=session.session_id)
                 else:
                     result = memory.checkpoint(summary=params["summary"], next_action=params["next_action"],
-                        open_questions=params.get("open_questions", []), session_id=session.session_id)
+                        open_questions=params.get("open_questions", []), session_id=session.session_id,
+                        insight_ids=params.get("insight_ids"))
                 return ActionObservation(call.step_index, act, "SUCCESS", "Research memory action completed",
                                          data=result, elapsed_seconds=round(time.time() - t0, 3))
             if act == "update_workspace_settings":
@@ -1250,6 +1287,8 @@ class AgentBridge:
                 )
                 exp = cfg.get("experiment", {}).get("id", path.stem)
                 cfg.setdefault("experiment", {})["id"] = exp
+                if params.get("insight_id"):
+                    cfg.setdefault("research", {})["insight_id"] = params["insight_id"]
                 if (self.artifacts_dir / exp / "artifact_manifest.json").is_file():
                     raise ValueError(
                         "Use a new experiment ID to change a run configuration"
@@ -1259,7 +1298,7 @@ class AgentBridge:
                 with workspace_lock(self.artifacts_dir):
                     review = self._review_research_config(cfg, params)
                     if review["revisit_reason"]:
-                        cfg["research"] = {"revisit_reason": review["revisit_reason"]}
+                        cfg.setdefault("research", {})["revisit_reason"] = review["revisit_reason"]
                     atomic_write_text(path, yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
                     self._research_memory().propose(cfg, review["revisit_reason"], session.session_id)
                 return ActionObservation(
@@ -1747,6 +1786,8 @@ class AgentBridge:
                 from harness.state_store import workspace_lock
                 from harness.io_utils import atomic_write_text
 
+                if params.get("insight_id"):
+                    cfg_payload.setdefault("research", {})["insight_id"] = params["insight_id"]
                 cfg_path.resolve().relative_to(configs_dir.resolve())
                 if cfg_path.exists() or (self.artifacts_dir / exp_id / "artifact_manifest.json").exists():
                     raise ValueError("Experiment ID already exists; choose a new ID")
@@ -1755,7 +1796,7 @@ class AgentBridge:
                         raise ValueError("Experiment ID already exists; choose a new ID")
                     review = self._review_research_config(cfg_payload, params)
                     if review["revisit_reason"]:
-                        cfg_payload["research"] = {"revisit_reason": review["revisit_reason"]}
+                        cfg_payload.setdefault("research", {})["revisit_reason"] = review["revisit_reason"]
                     atomic_write_text(cfg_path, yaml.safe_dump(cfg_payload, sort_keys=False, allow_unicode=True))
                     self._research_memory().propose(cfg_payload, review["revisit_reason"], session.session_id)
                 rel_cfg = str(cfg_path.relative_to(self.project_root)).replace(

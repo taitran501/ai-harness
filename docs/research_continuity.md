@@ -2,6 +2,8 @@
 
 The external assistant owns scientific reasoning. The harness retains evidence,
 decisions, and restart instructions so that a fresh session can continue the work.
+For insight IDs, bounded probe plans, linked experiment history, lessons and resume
+triage, see [the research trace protocol](research_trace.md).
 `AgentRuntime.start_run()` only starts an active session. It does not invent an
 experiment, synthesize a portfolio, or propose freezing it.
 
@@ -33,14 +35,19 @@ Use `ai-harness-agent --project-root .` (the `ml-harness-agent` alias also works
    error slice, model, or previous decision.
 3. Call `act --action review_hypothesis` with an inline `config` object or a
    workspace-relative `config_path`. Read exact matches and related approaches.
-4. State the control, one intervention, why it differs from past attempts, a cheap
-   verification probe, and the promotion/stop criterion. Implement through
+4. Record `record_research_insight` and save its ID. Use `plan_research_probe` to
+   state the control, one intervention, alternative explanation, expected result,
+   budget, and decision/stop rules. Link `research.insight_id` in the config (or
+   pass `insight_id` to the bridge action). Implement through
    `create_experiment` or `write_experiment_config`, then run smoke/full validation.
 5. Call `record_research_decision` with `outcome` (`supported`, `rejected`,
    `inconclusive`, `deferred`), `conclusion`, optional verified experiment IDs in
-   `evidence`, and `next_action`.
+   `evidence`, and `next_action`. Linked decisions also require `insight_id` and
+   `lesson`; rejected/deferred directions require a `revisit_when` condition.
 6. Call `record_research_checkpoint` with `summary`, `next_action`, and
-   `open_questions`. Save enough context to resume without reconstructing the chat.
+   `open_questions` and active `insight_ids`. Use `trace_research_insight` to recover
+   the thread; link a derived insight via `parent_insight_id`. Save enough context
+   to resume without reconstructing the chat.
 
 Example action payloads for `--params`:
 

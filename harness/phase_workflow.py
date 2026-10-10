@@ -142,6 +142,7 @@ class PhaseWorkflow:
         digest = hashlib.sha256()
         paths: List[Path] = [
             self.project.artifacts_dir / "journal.json",
+            self.project.artifacts_dir / "research_memory.json",
             self.project.artifacts_dir / "competition_state.json",
             self.project.artifacts_dir / "submissions" / "registry.json",
             self.project.artifacts_dir / "submissions" / "submissions.json",
