@@ -115,14 +115,20 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         self.assertEqual(t_id, "ak-1234567890abcdef")
         self.assertEqual(t_sec, "as-abcdef1234567890")
 
-        # 2. Launch auth returns valid URL structure
-        m_res = EnvironmentDetector.launch_modal_auth()
-        self.assertTrue(m_res["success"])
-        self.assertIn("modal.com/settings/tokens", m_res["auth_url"])
-
-        k_res = EnvironmentDetector.launch_kaggle_auth()
-        self.assertTrue(k_res["success"])
-        self.assertIn("kaggle.com/settings", k_res["auth_url"])
+        # Auth tests must never open browser tabs or start a real OAuth process.
+        process = Mock()
+        process.communicate.return_value = ("fixture login", "")
+        with patch("webbrowser.open", return_value=True) as browser, patch(
+            "harness.environment_detector.subprocess.Popen", return_value=process
+        ) as launch:
+            m_res = EnvironmentDetector.launch_modal_auth()
+            self.assertTrue(m_res["success"])
+            self.assertIn("modal.com/settings/tokens", m_res["auth_url"])
+            k_res = EnvironmentDetector.launch_kaggle_auth()
+            self.assertTrue(k_res["success"])
+            self.assertIn("kaggle.com/settings", k_res["auth_url"])
+            self.assertEqual(browser.call_count, 2)
+            self.assertEqual(launch.call_args.args[0], ["kaggle", "auth", "login"])
 
 
 if __name__ == "__main__":

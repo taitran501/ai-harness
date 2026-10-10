@@ -351,6 +351,7 @@ class CloudJobManager:
                 job.remote_id,
                 artifact_dir=self.artifacts_dir / job.exp_id,
                 expected_identity=expected_identity,
+                project_root=self.project.root,
             )
             if not result.get("success"):
                 raise RuntimeError(
