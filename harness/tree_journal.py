@@ -22,6 +22,7 @@ class Node:
 
     id: str
     parent_id: Optional[str] = None
+    parent_ids: List[str] = field(default_factory=list)
     branch: str = "baseline"  # baseline, feat, model, loss, mtl, ens
     approach_type: str = "ml"  # "ml" (classical tabular/n-gram), "dl" (deep learning/transformers), "hybrid"
     model_family: str = "linear"  # linear, tree, transformer, cnn, rnn, ensemble, other
@@ -42,6 +43,13 @@ class Node:
     timestamp: float = field(default_factory=time.time)
     notes: str = ""
     diagnostics_summary: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Harmonize parent_id and parent_ids for multi-parent DAG lineage."""
+        if self.parent_id and not self.parent_ids:
+            self.parent_ids = [self.parent_id]
+        elif self.parent_ids and not self.parent_id:
+            self.parent_id = self.parent_ids[0]
 
     def get_score(self, key: Optional[str] = None) -> float:
         """Extract a scalar comparison score from metrics dict in a task-agnostic manner."""
@@ -127,14 +135,17 @@ class TreeJournal:
         metrics: Optional[Dict[str, Any]] = None,
         model_family: str = "linear",
         approach_type: str = "ml",
+        parent_ids: Optional[List[str]] = None,
     ) -> Node:
         """Helper to programmatically create, register, and save a node."""
         m = metrics or {}
         if "overall_composite" not in m:
             m["overall_composite"] = score
+        p_ids = parent_ids or ([parent_id] if parent_id else [])
         node = Node(
             id=node_id,
-            parent_id=parent_id,
+            parent_id=parent_id or (p_ids[0] if p_ids else None),
+            parent_ids=p_ids,
             branch=branch,
             approach_type=approach_type,
             model_family=model_family,
@@ -228,7 +239,10 @@ class TreeJournal:
         return self.nodes.get(node_id)
 
     def get_children(self, parent_id: str) -> List[Node]:
-        return [n for n in self.nodes.values() if n.parent_id == parent_id]
+        return [
+            n for n in self.nodes.values()
+            if n.parent_id == parent_id or parent_id in getattr(n, "parent_ids", [])
+        ]
 
     def get_graph_data(self) -> Dict[str, Any]:
         """Generate structured DAG nodes and directed edges with delta scores for frontend visualizers."""
@@ -239,20 +253,25 @@ class TreeJournal:
 
         for n in self.nodes.values():
             delta = None
-            if n.parent_id and n.parent_id in self.nodes:
-                parent_node = self.nodes[n.parent_id]
-                delta = round(n.get_utility() - parent_node.get_utility(), 4)
-                edges_list.append({
-                    "from": n.parent_id,
-                    "to": n.id,
-                    "delta": delta,
-                    "improved": delta > 0,
-                })
+            parents = n.parent_ids if getattr(n, "parent_ids", None) else ([n.parent_id] if n.parent_id else [])
+            for p_id in parents:
+                if p_id in self.nodes:
+                    parent_node = self.nodes[p_id]
+                    edge_delta = round(n.get_utility() - parent_node.get_utility(), 4)
+                    if delta is None:
+                        delta = edge_delta
+                    edges_list.append({
+                        "from": p_id,
+                        "to": n.id,
+                        "delta": edge_delta,
+                        "improved": edge_delta > 0,
+                    })
 
             nodes_list.append({
                 "id": n.id,
                 "label": n.id,
                 "parent_id": n.parent_id,
+                "parent_ids": getattr(n, "parent_ids", []),
                 "branch": n.branch,
                 "approach_type": getattr(n, "approach_type", "ml"),
                 "model_family": getattr(n, "model_family", "linear"),
@@ -371,7 +390,11 @@ class TreeJournal:
         )
 
         for n in sorted_nodes[:max_nodes]:
-            parent = n.parent_id or "ROOT"
+            parent = (
+                ",".join(n.parent_ids)
+                if len(getattr(n, "parent_ids", [])) > 1
+                else (n.parent_id or "ROOT")
+            )
             score_str = f"{n.get_score():.4f}" if not n.is_buggy else "ERR"
             params_str = f"{n.param_count / 1e6:.1f}M" if n.param_count else "-"
             hypo_snippet = (
@@ -405,7 +428,7 @@ class TreeJournal:
                 "recommendation": "INITIAL_BASELINE",
                 "parent_id": None,
                 "branch": "baseline",
-                "guideline": "Establish strong initial baseline with TF-IDF or default backbone.",
+                "guideline": "Establish strong initial baseline with default model backbone.",
             }
 
         # Count visits per parent
@@ -475,7 +498,7 @@ class TreeJournal:
         # Enforce Ensemble Guard: Disallow 'ens' if fewer than 2 distinct model families
         if recommended_branch == "ens" and num_families < 2:
             recommended_branch = "model"
-            diagnostic_cue += f" (Note: 'ens' locked because only {num_families} model family exists. Explore a new architecture backbone like XLM-R before ensembling)."
+            diagnostic_cue += f" (Note: 'ens' locked because only {num_families} model family exists. Explore a diverse orthogonal architecture family before ensembling)."
 
         return {
             "recommendation": f"Branch from {top_node.id} on {recommended_branch}",

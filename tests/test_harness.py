@@ -88,6 +88,35 @@ class TreeJournalTests(unittest.TestCase):
         rec = self.journal.recommend_next_branch(max_params=150_000_000)
         self.assertEqual(rec["parent_id"], "exp_light")
 
+    def test_multi_parent_dag_lineage(self):
+        """Verify that multi-parent nodes (e.g. ensembles/merges) correctly track DAG edges and children."""
+        n1 = Node(verified=True, eligible=True, id="m1", branch="baseline", metrics={"overall_composite": 0.80})
+        n2 = Node(verified=True, eligible=True, id="m2", branch="model", metrics={"overall_composite": 0.82})
+        ens = Node(
+            verified=True,
+            eligible=True,
+            id="ens_blend",
+            parent_ids=["m1", "m2"],
+            branch="ens",
+            metrics={"overall_composite": 0.85},
+        )
+        self.journal.append(n1)
+        self.journal.append(n2)
+        self.journal.append(ens)
+
+        # Children query for m1 and m2 must both include ens_blend
+        ch_m1 = self.journal.get_children("m1")
+        ch_m2 = self.journal.get_children("m2")
+        self.assertTrue(any(c.id == "ens_blend" for c in ch_m1))
+        self.assertTrue(any(c.id == "ens_blend" for c in ch_m2))
+
+        # Graph data should contain edges from both m1 and m2
+        g = self.journal.get_graph_data()
+        edges = g["edges"]
+        edge_pairs = [(e["from"], e["to"]) for e in edges]
+        self.assertIn(("m1", "ens_blend"), edge_pairs)
+        self.assertIn(("m2", "ens_blend"), edge_pairs)
+
 
 class ValidatorTests(unittest.TestCase):
     def test_assert_parameter_limit_exceeded(self):
