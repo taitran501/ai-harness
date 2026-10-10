@@ -29,7 +29,7 @@ def main() -> None:
     run_p.add_argument("--goal", required=True, help="Scientific / competition goal for this AgentRun")
     run_p.add_argument("--max-experiments", type=int, default=3, help="Maximum experiments budget (default: 3)")
     run_p.add_argument("--max-wall-seconds", type=float, default=1800.0, help="Maximum wall-clock time in seconds")
-    run_p.add_argument("--auto-approve", action="store_true", help="Auto-approve USER_APPROVAL tier actions")
+    run_p.add_argument("--auto-approve", action="store_true", help="Deprecated compatibility flag; starting a session never freezes candidates")
 
     # 2. list
     subparsers.add_parser("list", help="List recent AgentRuns and their statuses")

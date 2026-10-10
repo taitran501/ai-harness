@@ -45,7 +45,9 @@ def _parse_json_arg(raw: str | None) -> Dict[str, Any]:
         return {}
     try:
         parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else {}
+        if not isinstance(parsed, dict):
+            raise ValueError("Action parameters must be a JSON object")
+        return parsed
     except Exception as e:
         print(f"Error parsing --params JSON: {e}", file=sys.stderr)
         sys.exit(1)
@@ -80,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-consecutive-rejections",
         type=int,
         default=3,
-        help="Max non-improving full runs before circuit breaker pauses (default: 3)",
+        help="Comparable non-improving full runs before reassessment advisory (default: 3; no automatic freeze)",
     )
 
     # 3. act
@@ -89,7 +91,10 @@ def main(argv: list[str] | None = None) -> int:
     act_p.add_argument("--session-id", default=None, help="Target session ID (uses active session if omitted)")
     act_p.add_argument("--goal", default=None, help="Optional goal if creating a new session")
     act_p.add_argument("--rationale", default="", help="Why Antigravity selected this action")
-    act_p.add_argument("--params", default="{}", help="JSON object of action parameters")
+    parameters = act_p.add_mutually_exclusive_group()
+    parameters.add_argument("--params", default=None, help="JSON object of action parameters")
+    parameters.add_argument("--param-file", "--params-file", dest="param_file", default=None,
+                            help="UTF-8 JSON object file, absolute or relative to project root (PowerShell friendly)")
     act_p.add_argument(
         "--backend",
         choices=["local", "modal", "kaggle"],
@@ -139,7 +144,16 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(asdict(sess), indent=2, ensure_ascii=False))
 
     elif args.command == "act":
-        params = _parse_json_arg(args.params)
+        raw = args.params
+        if args.param_file:
+            path = Path(args.param_file)
+            if not path.is_absolute():
+                path = project.root / path
+            try:
+                raw = path.read_text(encoding="utf-8-sig")
+            except OSError as error:
+                parser.error(f"Cannot read --param-file: {error}")
+        params = _parse_json_arg(raw)
         if args.backend:
             params["backend"] = args.backend
 

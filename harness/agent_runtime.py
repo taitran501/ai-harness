@@ -179,7 +179,11 @@ class AgentRuntime:
         max_wall_seconds: float = 1800.0,
         auto_approve_all: bool = False,
     ) -> AgentRun:
-        """Initialize a BridgeSession and execute initial readiness/synthesis actions via AgentBridge."""
+        """Start a session; scientific planning and freeze decisions belong to the caller.
+
+        auto_approve_all is retained for compatibility and does not grant authority
+        to synthesize or freeze candidates merely because a session was started.
+        """
         sess = self.bridge.start_session(
             goal=goal,
             budget={
@@ -187,55 +191,6 @@ class AgentRuntime:
                 "max_wall_seconds": max_wall_seconds,
             },
         )
-        gates = self.comp_state.state.get("gates", {})
-
-        if not gates.get("data_risks_confirmed"):
-            sess, _ = self.bridge.execute_action(
-                TypedActionName.INSPECT_DATA_READINESS.value,
-                rationale="Verify dataset readiness and group splits.",
-                session_id=sess.session_id,
-            )
-
-        if not gates.get("baseline_locked"):
-            sess, _ = self.bridge.execute_action(
-                TypedActionName.ESTABLISH_BASELINE_ANCHOR.value,
-                rationale="Establish official baseline anchor.",
-                session_id=sess.session_id,
-            )
-
-        default_base = self.bridge.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
-        sess, _ = self.bridge.execute_action(
-            TypedActionName.INSPECT_DIAGNOSTICS.value,
-            params={"exp_id": default_base},
-            rationale=f"Extract failure modes for goal: {goal}",
-            session_id=sess.session_id,
-        )
-
-        sess, _ = self.bridge.execute_action(
-            TypedActionName.CREATE_EXPERIMENT.value,
-            params={"parent_id": default_base, "branch": "feat", "descriptor": "feature_pipeline"},
-            rationale=f"Draft GroundingGate-verified config for goal: {goal}.",
-            session_id=sess.session_id,
-        )
-
-        sess, _ = self.bridge.execute_action(
-            TypedActionName.SYNTHESIZE_CANDIDATE.value,
-            params={
-                "name": f"{sess.session_id}_router",
-                "mode": "specialist_router",
-            },
-            rationale="Synthesize specialist candidate portfolio.",
-            session_id=sess.session_id,
-        )
-
-        sess, _ = self.bridge.execute_action(
-            TypedActionName.FREEZE_CANDIDATE.value,
-            params={},
-            rationale="Propose freezing candidate portfolio (gated by USER_APPROVAL).",
-            session_id=sess.session_id,
-            user_approved=auto_approve_all,
-        )
-
         return self._session_to_agent_run(sess)
 
     def approve_pending_action(self, run_id: str) -> AgentRun:

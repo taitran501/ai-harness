@@ -614,7 +614,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     if not diagnostics_notes:
         diagnostics_notes.append(f"- **Performance Frontier**: Target metric `{primary_metric}` stands at `{best_score}`. Focus on generalization on validation splits.")
 
-    graveyard_items = ["- No rejected approaches are recorded in the current experiment history."]
+    graveyard_items = ["- Search research memory below for decisions and evidence; legacy notes are not a permanent ban."]
 
     rec_parent = rec.get("parent_id") or best_id
     rec_branch = rec.get("branch") or "feat"
@@ -750,7 +750,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "### Diagnosed Failure Modes",
             *diagnostics_notes,
             "",
-            "### The Idea Graveyard (Permanently Forbidden Interventions)",
+            "### The Idea Graveyard (Legacy notes; review evidence before revisiting)",
             *graveyard_items,
             "",
             "## 4. EXECUTION LOOP (PLAN -> CODE -> VERIFY)",
@@ -783,7 +783,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "## 3. Diagnosed Empirical Bottlenecks (Target Problems)",
             *diagnostics_notes,
             "",
-            "## 4. The Idea Graveyard (Permanently Forbidden Interventions)",
+            "## 4. The Idea Graveyard (Legacy notes; review evidence before revisiting)",
             *graveyard_items,
             "",
             "## 5. Hard Operational Protocols (Physical Circuit Breakers)",
@@ -798,7 +798,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "3. **Intervention & Grounding Source**: Specify your atomic intervention and its empirical citation.",
             "4. **Explicit Assumptions**: State 1-2 testable assumptions and your uncertainty rating (`low` | `medium` | `high`).",
             "",
-            "*Wait for user confirmation after completing this acknowledgment before executing training commands.*",
+            "*Continue authorized experiments within the session budget. Request approval only for governed sensitive actions or missing authority.*",
         ]
 
     try:
@@ -809,6 +809,15 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     except Exception as comp_err:
         print(f"⚠️ Warning: Failed to render competition state context: {comp_err}")
 
+    from harness.research_memory import ResearchMemory
+    from harness.task_spec import load_active_task_spec
+    from harness.plugins import TaskPluginContext, load_task_plugin
+
+    project = HarnessProject.discover(PROJECT_ROOT)
+    spec = load_active_task_spec(project.task_config_path)
+    plugin = load_task_plugin(project.plugin_id, TaskPluginContext(
+        project.root, project.task_config_path, spec, project.plugin_id or "default"))
+    prompt_lines.extend(["", ResearchMemory(project.root, project.artifacts_dir, spec, plugin).render()])
     prompt_text = "\n".join(prompt_lines)
     return {
         "template_id": template_id,

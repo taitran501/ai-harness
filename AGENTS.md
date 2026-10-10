@@ -5,9 +5,9 @@ Canonical context file for AI coding assistants (Antigravity, OpenAI Codex, Clau
 > **Read this file like a table of contents.** Detail lives in `docs/` and task skills. This file stays lean (~100 lines) per OpenAI's [harness-engineering](https://openai.com/index/harness-engineering/) practice to maximize task context economy.
 
 > [!IMPORTANT]
-> **Verification Scope: Strictly NLP / Text Only**
-> AI-Harness is currently **strictly verified and working well ONLY on NLP / Text** tasks (sequence classification, transformer fine-tuning, prompt evaluation).
-> Support for other modalities (**Tabular, Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)** and NOT verified in competitive conditions.
+> **Implementation and Verification Scope**
+> Competition-level verification currently covers **NLP / Text** tasks (sequence classification, transformer fine-tuning, prompt evaluation).
+> **Tabular has implemented and locally tested paths** for categorical handling, scikit-learn pipelines, LightGBM, and XGBoost; its performance remains unverified in competitive conditions. **Vision, Audio, Multimodal** remain experimental WIP / Roadmap.
 
 ---
 
@@ -15,6 +15,7 @@ Canonical context file for AI coding assistants (Antigravity, OpenAI Codex, Clau
 
 - **[docs/architecture.md](docs/architecture.md)** — 3-layer architecture, decoupling, and empirical evolution roadmap.
 - **[docs/agent_workflow.md](docs/agent_workflow.md)** — Full 8-phase workflow, detailed CLI guides, and agent conventions.
+- **[docs/research_continuity.md](docs/research_continuity.md)** — Durable research memory, novelty review, restart checkpoints, and stagnation reassessment.
 - **[docs/CORRECTNESS_CONTRACT.md](docs/CORRECTNESS_CONTRACT.md)** — Schema v2 rules, immutable runs, and verification gates.
 - **[docs/TASK_SPEC_TEMPLATE.md](docs/TASK_SPEC_TEMPLATE.md)** — Declarative `configs/task.yaml` specification schema.
 - **[docs/plugin_architecture.md](docs/plugin_architecture.md)** — Pluggable task adapters, registration, and discovery.
@@ -34,6 +35,7 @@ Assistant / Engineer (Layer 1)  ──>  Agent Bridge (Layer 2)  ──>  Harnes
 3. **Atomic Interventions**: Modify one hypothesis variable at a time so performance deltas are cleanly attributable.
 4. **Fast Probes Before Full Runs**: Always verify with a single-fold smoke test (`--debug --fold 0`) before committing full multi-fold compute.
 5. **Immutable Evidence**: Full runs under `.ai-harness/artifacts/<task-id>/<exp_id>` are strictly immutable. Never mutate completed evidence folders.
+6. **Research Continuity**: After restart/compaction, read `context` and the latest checkpoint. Before brainstorming/implementation, use `search_research_memory` and `review_hypothesis`. Record decisions and a checkpoint after each iteration. An intentional repeated configuration requires `revisit_reason`; related approaches need a mechanism comparison. Plateau calls for diagnostics and a bounded discriminating probe, never automatic freeze.
 
 ---
 

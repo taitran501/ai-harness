@@ -172,7 +172,7 @@ class TreeJournal:
             metrics = json.loads((directory/"metrics.json").read_text(encoding="utf-8"))
             cfg = yaml.safe_load((directory/"run_config.yaml").read_text(encoding="utf-8")) if (directory/"run_config.yaml").is_file() else {}
             try:
-                validate_run(directory, task_spec=self.task_spec,plugin=self.task_plugin)
+                manifest = validate_run(directory, task_spec=self.task_spec,plugin=self.task_plugin)
                 verified = True
             except (ValueError, KeyError, OSError):
                 verified = False
@@ -195,13 +195,19 @@ class TreeJournal:
                 m_fam = m_fam_raw
             else:
                 m_fam = "linear"
+            diagnostics = {}
+            if verified and "diagnostics.json" in manifest["files"]:
+                diagnostics = json.loads((directory / "diagnostics.json").read_text(encoding="utf-8"))
             node = Node(id=directory.name,parent_id=exp.get("parent_id"),branch=exp.get("branch","baseline"),
                 model_family=m_fam,
                 metrics=metrics if isinstance(metrics,dict) else {"legacy_folds":metrics},
                 primary_metric_name=metrics.get("primary_metric","unknown") if isinstance(metrics,dict) else "unknown",
                 direction=metrics.get("direction","maximize") if isinstance(metrics,dict) else "maximize",
                 verified=verified,eligible=verified,status="COMPLETED" if verified else "LEGACY_UNVERIFIED",
-                artifact_dir=str(directory),atomic_hypothesis=exp.get("hypothesis",""))
+                artifact_dir=str(directory),atomic_hypothesis=exp.get("hypothesis",""),
+                intervention=exp.get("intervention", ""), diagnostics_summary=diagnostics,
+                timestamp=(directory / "artifact_manifest.json").stat().st_mtime
+                    if (directory / "artifact_manifest.json").exists() else directory.stat().st_mtime)
             self.nodes[node.id]=node; count+=1
         if count: self.save()
         return count

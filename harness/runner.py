@@ -431,12 +431,46 @@ class UniversalRunner:
         path = self.cfg.get("model", {}).get("factory")
         if path:
             mod, name = path.rsplit(".", 1)
-            return getattr(importlib.import_module(mod), name)
+            factory = getattr(importlib.import_module(mod), name)
+            signature = inspect.signature(factory)
+            declared = self.cfg.get("model", {}).get("factory_context")
+            if declared not in {None, "none", "task_spec", "plugin_context"}:
+                raise ValueError("factory_context must be none, task_spec, or plugin_context")
+            context_key = declared if declared != "none" else None
+            if declared is None:
+                context_key = next((key for key in ("task_spec", "plugin_context")
+                                    if key in signature.parameters), None)
+            if context_key is None:
+                return factory  # legacy factory(name, **params)
+
+            value = self.task_spec if context_key == "task_spec" else self.plugin_context
+            parameter = signature.parameters.get(context_key)
+            first = next(iter(signature.parameters), None)
+            positional = (parameter is None or
+                          (first == context_key and parameter.kind in
+                           (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)))
+
+            def with_context(model_name, **params):
+                if context_key in params:
+                    raise ValueError(f"Model params cannot override injected {context_key}")
+                args = (value, model_name) if positional else (model_name,)
+                kwargs = params if positional else {**params, context_key: value}
+                signature.bind(*args, **kwargs)
+                # Do not catch TypeError from inside the factory or retry it.
+                return factory(*args, **kwargs)
+
+            return with_context
         from harness.models import create_model
 
         return lambda name, **params: create_model(
             self.task_spec, name, **params
         )
+
+    def _progress(self, message):
+        line = f"[ai-harness:{self.exp_id}] {message}"
+        print(line, flush=True)
+        with (self.exp_dir / "run.log").open("a", encoding="utf-8") as log:
+            log.write(line + "\n")
 
     def _record_predictions(self, dev, predictions, fold, variant):
         fold_id = int(fold) if isinstance(fold, (int, np.integer)) else fold
@@ -500,6 +534,7 @@ class UniversalRunner:
         details, rows, records, truths = [], [], [], []
         fold_test_preds = []
         for fold, train, dev in self._resolve_validation_splits(df, val_strategy):
+            self._progress(f"Fold {fold} started: train={len(train)}, dev={len(dev)}")
             partitions = [("all", train, dev)]
             partition = self.cfg.get("data", {}).get("partition_column")
             if partition:
@@ -601,6 +636,8 @@ class UniversalRunner:
                         **evaluation,
                     }
                     details.append(detail)
+                    self._progress(f"Fold {fold}, partition={part}, input={variant} completed: "
+                                   f"{self.task_spec.primary_metric}={evaluation['primary_score']:.6f}")
                     rows.append(
                         {
                             k: (
@@ -659,7 +696,23 @@ class UniversalRunner:
             "strategy", self.task_spec.validation.strategy
         )
         targets = {s.column or key for key, s in self.task_spec.subtasks.items()}
+        targets.update((s.column_prefix or "") + label for s in self.task_spec.subtasks.values()
+                       if s.task_type == "multilabel_classification" for label in s.labels)
+        targets.update(c for s in self.task_spec.subtasks.values() if s.column_prefix
+                       for c in df.columns if c.startswith(s.column_prefix))
+        inputs = {column for variant in self.task_spec.inputs_dict.values()
+                  for column in variant.source_columns}
+        if inputs & targets:
+            raise ValueError("Declared LLM inputs overlap ground-truth target columns")
+        from string import Formatter
+
+        template_fields = {field for template in (config.get("prompt_template", "{text}"),
+                           config.get("system_prompt", "")) for _, field, _, _ in Formatter().parse(template)
+                           if field}
+        if template_fields & targets:
+            raise ValueError("LLM prompt references ground-truth labels")
         for fold, train, dev in self._resolve_validation_splits(df, strategy):
+            self._progress(f"LLM fold {fold} started: dev={len(dev)}")
             limit = self.cfg.get("validation", {}).get("sample_limit")
             if getattr(self.args, "debug", False):
                 limit = getattr(self.args, "probe_samples", None) or 50
@@ -668,7 +721,7 @@ class UniversalRunner:
             truths.append(dev)
             predictions = {key: [] for key in self.task_spec.subtasks}
             for _, row in dev.iterrows():
-                features = {k: v for k, v in row.to_dict().items() if k not in targets}
+                features = {k: row[k] for k in inputs if k in row and k not in targets}
                 system, user = LLMEngine.format_prompt(
                     config.get("prompt_template", "{text}"),
                     features,
@@ -708,6 +761,7 @@ class UniversalRunner:
                     predictions[key].append(value)
             predictions = self.task_spec.apply_routing(predictions, len(dev))
             evaluation = self._evaluate(dev, predictions)
+            self._progress(f"LLM fold {fold} completed: {self.task_spec.primary_metric}={evaluation['primary_score']:.6f}")
             fold_id = int(fold) if isinstance(fold, (int, np.integer)) else fold
             details.append(
                 {
@@ -928,6 +982,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Universal Competition Experiment Runner"
     )
+    parser.add_argument("--unbuffered", action="store_true",
+                        help="Flush redirected stdout/stderr immediately; fold progress always flushes")
     parser.add_argument(
         "--project-root", type=str, default=None, help="Competition workspace root"
     )
@@ -976,6 +1032,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Do not write the project leaderboard",
     )
     args = parser.parse_args(argv)
+    if args.unbuffered:
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(line_buffering=True, write_through=True)
 
     project = HarnessProject.discover(args.project_root, args.task_config)
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)

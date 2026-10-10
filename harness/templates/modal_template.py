@@ -240,7 +240,7 @@ def run_training_remote(config_path: str, exp_id: str):
     print(f"[Modal Remote] Starting GPU training for experiment: {{exp_id}} on {gpu}")
     print(f"[Modal Remote] Config: {{config_path}}")
 
-    cmd = ["python", "-m", "harness.runner", "--project-root", ".", "--task-config", {task_config_rel!r}, "--config", config_path]
+    cmd = ["python", "-u", "-m", "harness.runner", "--project-root", ".", "--task-config", {task_config_rel!r}, "--config", config_path]
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -250,7 +250,7 @@ def run_training_remote(config_path: str, exp_id: str):
     )
 
     for line in iter(process.stdout.readline, ""):
-        print(line, end="")
+        print(line, end="", flush=True)
 
     process.stdout.close()
     ret = process.wait()
