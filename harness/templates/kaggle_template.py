@@ -420,13 +420,25 @@ with zipfile.ZipFile(io.BytesIO(bundle_bytes), 'r') as zf:
     zf.extractall('.')
 
 # 2. Restore only the task data paths included in the separately consented dataset.
-input_root = Path("/kaggle/input/{dataset_folder_name}")
-if not input_root.exists() or not any(input_root.iterdir()):
-    # Find dataset folder in /kaggle/input
-    for candidate in sorted(Path("/kaggle/input").glob("*")):
-        if candidate.is_dir() and ((candidate / "dataset").exists() or (candidate / "mlh-data-bundle.json").exists() or any(candidate.glob("*.csv")) or any(candidate.glob("*.zip"))):
-            input_root = candidate
-            break
+input_root = None
+for candidate in [Path("/kaggle/input/{dataset_folder_name}"), *Path("/kaggle/input").rglob("{dataset_folder_name}")]:
+    if candidate.exists() and candidate.is_dir():
+        input_root = candidate
+        break
+
+if input_root is None:
+    # Fallback to any directory containing mlh-data-bundle.json or dataset/train.csv
+    for manifest_candidate in Path("/kaggle/input").rglob("mlh-data-bundle.json"):
+        input_root = manifest_candidate.parent
+        break
+
+if input_root is None:
+    for data_candidate in Path("/kaggle/input").rglob("train.csv"):
+        input_root = data_candidate.parent.parent if data_candidate.parent.name == "dataset" else data_candidate.parent
+        break
+
+if input_root is None:
+    input_root = Path("/kaggle/input/{dataset_folder_name}")
 
 print(f"[Kaggle Kernel] Using input_root: {{input_root}} (exists: {{input_root.exists()}})")
 
