@@ -127,15 +127,47 @@ class SubmissionManager:
     def register_submission(
         self,
         exp_id: str,
-        candidate_csv: str,
+        candidate_csv: Optional[str] = None,
         baseline_csv: Optional[str] = None,
         ensemble_components: Optional[List[str]] = None,
         notes: str = "",
         min_diff_pct: float = 2.0,
     ) -> SubmissionEntry:
-        """Generic tasks require explicit task-plugin submission hooks."""
-        raise ValueError(
-            "Submission requires task-plugin submission hooks and verified test evidence"
+        from harness.project import HarnessProject
+        from harness.task_spec import load_active_task_spec
+        from harness.plugins import TaskPluginContext, load_task_plugin
+
+        project = HarnessProject.discover(self.project_root, self.task_config_path)
+        spec = load_active_task_spec(project.task_config_path)
+        context = TaskPluginContext(
+            project.root,
+            project.task_config_path,
+            spec,
+            project.plugin_id or "default",
+        )
+        plugin = load_task_plugin(project.plugin_id, context)
+        caps = plugin.capabilities()
+        if not caps.get("submission_builder") or not caps.get("submission_validator"):
+            raise ValueError(
+                "Submission requires task-plugin submission hooks and verified test evidence"
+            )
+        if not candidate_csv:
+            default_cand = self.artifacts_dir / exp_id / "test_predictions.csv"
+            if default_cand.is_file():
+                candidate_csv = str(default_cand)
+            else:
+                raise ValueError(
+                    f"Candidate CSV not specified and {default_cand} does not exist"
+                )
+        sub_spec = getattr(spec, "submission_spec", None) or spec.metadata.get("submission_spec", {})
+        file_name = sub_spec.get("file_name", "submission.csv") if isinstance(sub_spec, dict) else "submission.csv"
+        return self.register_plugin_submission(
+            exp_id=exp_id,
+            candidate_csv=candidate_csv,
+            plugin=plugin,
+            plugin_context=context,
+            file_name=file_name,
+            notes=notes,
         )
 
     def register_plugin_submission(

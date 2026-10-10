@@ -225,6 +225,52 @@ class TestGBDTModelsAndTreeSearch(unittest.TestCase):
         # Still 2 distinct families because LightGBM and XGBoost both belong to GBDT
         self.assertEqual(journal.count_distinct_model_families(), 2)
 
+        # Node 4: Vision model
+        node4 = Node(
+            id="exp003_convnext",
+            branch="model",
+            model_family="vision",
+            metrics={"overall_composite": 0.81, "model": "convnext_small"},
+            verified=True,
+            eligible=True,
+        )
+        journal.append(node4)
+        self.assertEqual(journal.count_distinct_model_families(), 3)
+
+        # Node 5: Audio model
+        node5 = Node(
+            id="exp004_whisper",
+            branch="model",
+            model_family="audio",
+            metrics={"overall_composite": 0.83, "model": "whisper-small"},
+            verified=True,
+            eligible=True,
+        )
+        journal.append(node5)
+        self.assertEqual(journal.count_distinct_model_families(), 4)
+
+    @unittest.skipUnless(HAS_LIGHTGBM, "LightGBM not installed")
+    def test_lightgbm_custom_feature_transformer_passthrough(self):
+        """Verify LightGBM runs with transform='passthrough' on agent-preprocessed features."""
+        df_cat = self.df.copy()
+        df_cat["feature_cat"] = df_cat["feature_cat"].astype("category")
+        model = create_model(self.task_spec, "lightgbm", n_estimators=10, transform="passthrough")
+        model.fit(df_cat, variant="features")
+        pred = model.predict(df_cat, variant="features")
+        self.assertIn("target", pred)
+        self.assertEqual(len(pred["target"]), len(self.df))
+
+    @unittest.skipUnless(HAS_XGBOOST, "XGBoost not installed")
+    def test_xgboost_custom_feature_transformer_passthrough(self):
+        """Verify XGBoost runs with feature_transformer='passthrough' on agent-preprocessed features."""
+        df_cat = self.df.copy()
+        df_cat["feature_cat"] = df_cat["feature_cat"].astype("category")
+        model = create_model(self.task_spec, "xgboost", n_estimators=10, feature_transformer="passthrough")
+        model.fit(df_cat, variant="features")
+        pred = model.predict(df_cat, variant="features")
+        self.assertIn("target", pred)
+        self.assertEqual(len(pred["target"]), len(self.df))
+
     def test_tree_journal_sync_from_artifacts_gbdt(self):
         """Verify TreeJournal.sync_from_artifacts correctly infers 'gbdt' for LightGBM/XGBoost runs."""
         art_dir = self.tmp_dir / "artifacts"

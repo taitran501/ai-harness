@@ -301,25 +301,44 @@ class TreeJournal:
                 for k in ["lightgbm", "lgbm", "xgboost", "xgb", "catboost", "gbdt"]
             ):
                 families.add("gbdt")
-            # 2. Transformer / Deep Learning Families
-            elif mf in ("transformer", "dl") or "xlmr" in node_id or "xlm-roberta" in model_name:
+            # 2. Vision Family
+            elif any(
+                k in node_id or k in model_name
+                for k in ["convnext", "swin", "vit", "resnet", "efficientnet", "vision", "timm"]
+            ):
+                families.add("vision")
+            # 3. Audio Family
+            elif any(
+                k in node_id or k in model_name
+                for k in ["whisper", "wav2vec", "ast", "audio"]
+            ):
+                families.add("audio")
+            # 4. Transformer / Deep Learning / LLM Families
+            elif "xlmr" in node_id or "xlm-roberta" in model_name:
                 families.add("xlm_roberta")
             elif "deberta" in node_id or "deberta" in model_name:
                 families.add("deberta")
+            elif "roberta" in node_id or "roberta" in model_name:
+                families.add("roberta")
+            elif "bert" in node_id or "bert" in model_name:
+                families.add("bert")
+            elif mf in ("transformer",):
+                families.add("transformer")
+            elif mf in ("dl", "deep_learning"):
+                families.add("deep_learning")
             elif mf in ("llm", "llm_peft") or "llm" in node_id or "llama" in model_name:
                 families.add("llm_generative")
-            # 3. Linear / Sparse TF-IDF Family
+            # 3. Linear / Baseline / TF-IDF Family
             elif (
                 mf == "linear"
-                or "tfidf" in node_id
-                or "tfidf" in model_name
-                or "ridge" in model_name
-                or "logistic" in model_name
-                or "logreg" in model_name
-                or "baseline" in node_id
+                or any(k in model_name for k in ["ridge", "logistic", "logreg"])
             ):
-                families.add("sparse_tfidf")
-            elif mf and mf not in ("other", "linear"):
+                families.add("linear")
+            elif "tfidf" in node_id or "tfidf" in model_name:
+                families.add("tfidf")
+            elif "baseline" in node_id:
+                families.add("baseline")
+            elif mf and mf not in ("other",):
                 families.add(mf)
             else:
                 families.add(f"custom_{n.id}")

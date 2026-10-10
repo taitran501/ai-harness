@@ -29,6 +29,21 @@ def metric_name(value: str) -> str:
         "acc": "accuracy",
         "rootmeansquarederror": "rmse",
         "meanabsoluteerror": "mae",
+        "qwk": "qwk",
+        "quadraticweightedkappa": "qwk",
+        "cohenkappa": "qwk",
+        "cohenkappascore": "qwk",
+        "kappa": "qwk",
+        "ndcg": "ndcg",
+        "ndcgscore": "ndcg",
+        "normalizeddiscountedcumulativegain": "ndcg",
+        "spearman": "spearman",
+        "spearmanr": "spearman",
+        "spearmanrho": "spearman",
+        "spearmancorrelation": "spearman",
+        "spearmanrankcorrelation": "spearman",
+        "mape": "mape",
+        "meanabsolutepercentageerror": "mape",
     }
     return aliases.get(name, value)
 
@@ -175,15 +190,48 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
             y = truth[column].to_numpy()[mask]
         p = np.asarray(label)[mask]
         name = metric_name(st.primary_metric)
-        if st.task_type == "regression":
+        if st.task_type in {"regression", "ranking"}:
             y, p = np.asarray(y, float), np.asarray(p, float)
             if not np.isfinite(y).all() or not np.isfinite(p).all():
                 raise ValueError("Regression values must be finite")
             available = {
                 "rmse": float(np.sqrt(metrics.mean_squared_error(y, p))),
                 "mae": float(metrics.mean_absolute_error(y, p)),
-                "r2": float(metrics.r2_score(y, p)),
+                "r2": float(metrics.r2_score(y, p)) if len(y) > 1 else 0.0,
             }
+            try:
+                available["mape"] = float(metrics.mean_absolute_percentage_error(y, p))
+            except Exception:
+                available["mape"] = 0.0
+            try:
+                import scipy.stats as stats
+
+                s_res = stats.spearmanr(y, p)
+                s_val = getattr(s_res, "statistic", s_res[0])
+                available["spearman"] = 0.0 if np.isnan(s_val) else float(s_val)
+            except Exception:
+                available["spearman"] = 0.0
+            try:
+                y_nonneg = y - np.min(y) if len(y) and np.min(y) < 0 else y
+                if len(y) > 1:
+                    available["ndcg"] = float(
+                        metrics.ndcg_score(y_nonneg[None, :], p[None, :])
+                    )
+                else:
+                    available["ndcg"] = 0.0
+            except Exception:
+                available["ndcg"] = 0.0
+            try:
+                val = float(
+                    metrics.cohen_kappa_score(
+                        np.rint(y).astype(int),
+                        np.rint(p).astype(int),
+                        weights="quadratic",
+                    )
+                )
+                available["qwk"] = 0.0 if np.isnan(val) else val
+            except Exception:
+                available["qwk"] = 0.0
         elif st.task_type in {
             "binary_classification",
             "multiclass_classification",
@@ -217,6 +265,22 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                     )
                 ),
             }
+            if st.task_type != "multilabel_classification":
+                try:
+                    val = float(
+                        metrics.cohen_kappa_score(
+                            y, p, labels=classes, weights="quadratic"
+                        )
+                    )
+                    available["qwk"] = 0.0 if np.isnan(val) else val
+                except Exception:
+                    available["qwk"] = 0.0
+            else:
+                try:
+                    val = float(metrics.ndcg_score(y, p))
+                    available["ndcg"] = 0.0 if np.isnan(val) else val
+                except Exception:
+                    available["ndcg"] = 0.0
             if name in {"roc_auc", "logloss"}:
                 raw = next(
                     (
@@ -242,35 +306,61 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                 if not np.isfinite(prob).all() or (prob < 0).any() or (prob > 1).any():
                     raise ValueError("Invalid probabilities")
                 order = [str(c) for c in order]
-                if len(set(order)) != len(order) or set(order) != set(classes):
+                expected_classes = (
+                    [str(c) for c in (st.labels or [])]
+                    if st.task_type == "multilabel_classification"
+                    else classes
+                )
+                if len(set(order)) != len(order) or (
+                    expected_classes is not None
+                    and len(expected_classes) > 0
+                    and set(order) != set(expected_classes)
+                ):
                     raise ValueError(
                         "Probability class order must match declared classes"
                     )
-                if (
-                    prob.ndim != 2
-                    or prob.shape[1] != len(order)
-                    or not np.allclose(prob.sum(axis=1), 1)
+                if prob.ndim != 2 or prob.shape[1] != len(order):
+                    raise ValueError(
+                        "Probability matrix must have one column per class"
+                    )
+                if st.task_type == "multiclass_classification" and not np.allclose(
+                    prob.sum(axis=1), 1
                 ):
                     raise ValueError(
                         "Probability matrix must have one column per class and sum to one"
                     )
-                sorted_order = sorted(order)
-                reordered = prob[:, [order.index(c) for c in sorted_order]]
-                available[name] = float(
-                    metrics.log_loss(y, reordered, labels=sorted_order)
-                    if name == "logloss"
-                    else (
-                        metrics.roc_auc_score(y == order[1], prob[:, 1])
-                        if len(order) == 2
-                        else metrics.roc_auc_score(
-                            y,
-                            reordered,
-                            labels=sorted_order,
-                            multi_class="ovr",
-                            average="macro",
+                if st.task_type == "multilabel_classification":
+                    target_order = [str(c) for c in (st.labels or order)]
+                    reordered = prob[:, [order.index(c) for c in target_order]]
+                    if name == "logloss":
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings("ignore", category=UserWarning)
+                            available[name] = float(metrics.log_loss(y, reordered))
+                    else:
+                        try:
+                            val = float(metrics.roc_auc_score(y, reordered, average="macro"))
+                            available[name] = 0.5 if np.isnan(val) else val
+                        except Exception:
+                            available[name] = 0.5
+                else:
+                    sorted_order = sorted(order)
+                    reordered = prob[:, [order.index(c) for c in sorted_order]]
+                    available[name] = float(
+                        metrics.log_loss(y, reordered, labels=sorted_order)
+                        if name == "logloss"
+                        else (
+                            metrics.roc_auc_score(y == order[1], prob[:, 1])
+                            if len(order) == 2
+                            else metrics.roc_auc_score(
+                                y,
+                                reordered,
+                                labels=sorted_order,
+                                multi_class="ovr",
+                                average="macro",
+                            )
                         )
                     )
-                )
         else:
             raise ValueError(f"Unsupported task type {st.task_type}")
         if name not in available:
@@ -326,7 +416,7 @@ def validate_prediction_contract(spec, truth, predictions):
         if values is None or len(values) != len(truth):
             raise ValueError("Missing prediction coverage: " + key)
         array = np.asarray(values)
-        if st.task_type == "regression":
+        if st.task_type in ("regression", "ranking"):
             if (
                 array.shape != (len(truth),)
                 or not np.isfinite(array.astype(float)).all()

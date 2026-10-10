@@ -507,7 +507,16 @@ def bootstrap_competition_task(
         num_folds=schema.get("num_folds", 5),
     )
 
-    # 7. Inject AI Agent Skill
+    # 7. Automatically Attach Project (.ml-harness/project.yaml)
+    from harness.project import attach_project
+    attach_project(
+        project_root=root,
+        task_config=cfg_path,
+        plugin_id=context.get("plugin") or context.get("plugin_id") or "default",
+        force=True,
+    )
+
+    # 8. Inject AI Agent Skill
     skill_output = root / ".agents" / "skills" / "ml-experiment-harness" / "SKILL.md"
     injected_skill = inject_skill_file(config_path=cfg_path, output_path=skill_output)
 
@@ -548,6 +557,7 @@ def bootstrap_competition_task(
         "config_file": cfg_rel,
         "baseline_config": baseline_rel,
         "skill_file": skill_rel,
+        "project_file": ".ml-harness/project.yaml",
     }
     return report
 

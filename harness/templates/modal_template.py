@@ -135,7 +135,15 @@ def generate_modal_script(
         volume_name = private_upload_resource_names(project)["modal_volume_name"]
     app_name = f"mlh-{t_slug}-{exp_id}-{(job_id or 'job').replace('_', '-')}"
     cache_name = f"mlh-{t_slug}-hf-cache"
-    runtime_requirements = ["numpy>=1.24.0", "pandas>=2.0.0", "scikit-learn>=1.3.0", "pyyaml>=6.0", "scipy>=1.11.0"]
+    runtime_requirements = [
+        "numpy>=1.24.0",
+        "pandas>=2.0.0",
+        "scikit-learn>=1.3.0",
+        "pyyaml>=6.0",
+        "scipy>=1.11.0",
+        "lightgbm>=4.0.0",
+        "xgboost>=2.0.0",
+    ]
     runtime_requirements.extend(runtime_manifest.get("requirements", []))
     plugin_install = (runtime_manifest.get("plugin") or {}).get("install") or {}
     if plugin_install.get("type") == "index":

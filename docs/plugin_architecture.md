@@ -1,5 +1,9 @@
 # Task plugins and local agent integration
 
+> [!IMPORTANT]
+> **Verification Scope: Strictly NLP / Text Only**
+> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks. Task plugins such as `stereoqueereval` represent the verified domain of ML-Harness. Non-NLP modalities are experimental WIP on the roadmap.
+
 ML-Harness is installed as a Python distribution. Competition adapters are separate distributions discovered through the `ml_harness.task_plugins` entry-point group. The harness does not inspect a workspace's `src` package or guess a competition from its directory name.
 
 ## Install and attach
