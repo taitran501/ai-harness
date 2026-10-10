@@ -20,7 +20,7 @@ import yaml
 from harness.artifacts import validate_run
 from harness.cloud_policy import UploadConsentStore, dataset_fingerprint
 from harness.data_bundle import stage_declared_data
-from harness.kaggle_runtime import ensure_dependencies, restore_dataset, export_run
+from harness.kaggle_runtime import ensure_dependencies, restore_dataset, export_run, find_dataset_mount
 from harness.project import HarnessProject, attach_project
 from harness.templates.kaggle_template import KaggleKernelManager
 from harness.task_spec import load_active_task_spec
@@ -108,7 +108,8 @@ class KaggleRuntimeTests(unittest.TestCase):
         def download(command, **kwargs):
             shutil.copytree(output, Path(command[-1]), dirs_exist_ok=True)
             return Mock(returncode=0, stdout="downloaded", stderr="")
-        with patch("harness.templates.kaggle_template.subprocess.run", side_effect=download):
+        with patch.object(KaggleKernelManager, "_download_output_api", side_effect=ImportError("CLI-only fixture")), patch(
+            "harness.templates.kaggle_template.subprocess.run", side_effect=download):
             result = KaggleKernelManager.pull_kernel_output(
                 self.exp_id, "fixture-user/kernel", project_root=self.root,
                 expected_identity=identity)
@@ -138,12 +139,12 @@ class KaggleRuntimeTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle))) as archive:
             self.assertIn("harness/runner.py", archive.namelist())
             self.assertFalse(any(name.startswith("dataset/") for name in archive.namelist()))
-        mount = self.root / "mounted-input"
+        mount = self.root / "mounted-input" / "datasets" / "fixture-user" / "fixture-data"
         stage_declared_data(self.project, mount)
         shutil.make_archive(str(mount / "dataset"), "zip", root_dir=mount / "dataset")
         shutil.rmtree(mount / "dataset")
         # Substitute the provider mount only; execute the generated program and actual runner.
-        source = source.replace(repr("/kaggle/input/fixture-data"), repr(str(mount)))
+        source = source.replace('Path("/kaggle/input")', f'Path({str(self.root / "mounted-input")!r})')
         script = self.root / "execute.py"
         script.write_text(source, encoding="utf-8")
         output = self.root / "kaggle-working"
@@ -241,12 +242,49 @@ class KaggleRuntimeTests(unittest.TestCase):
             shutil.rmtree(package)
 
     def test_failed_output_download_never_imports_partial_files(self):
-        with patch("harness.templates.kaggle_template.subprocess.run",
+        with patch.object(KaggleKernelManager, "_download_output_api", side_effect=ImportError("CLI-only fixture")), patch("harness.templates.kaggle_template.subprocess.run",
                    return_value=Mock(returncode=1, stdout="", stderr="download interrupted")):
             result = KaggleKernelManager.pull_kernel_output(self.exp_id, "fixture-user/kernel", project_root=self.root)
         self.assertFalse(result["success"])
         self.assertIn("download interrupted", result["raw_output"])
         self.assertFalse((self.project.artifacts_dir / self.exp_id).exists())
+
+    def test_mount_resolution_matches_selected_owner_and_rejects_unrelated_data(self):
+        base = self.root / "input"
+        selected = base / "datasets" / "fixture-user" / "fixture-data"
+        selected.mkdir(parents=True)
+        other = base / "datasets" / "other-user" / "fixture-data"
+        other.mkdir(parents=True)
+        self.assertEqual(find_dataset_mount(base, "fixture-user/fixture-data"), selected)
+        with self.assertRaisesRegex(RuntimeError, "missing"):
+            find_dataset_mount(base, "fixture-user/absent")
+        with self.assertRaisesRegex(RuntimeError, "missing"):
+            find_dataset_mount(base, "absent-owner/fixture-data")
+        with self.assertRaisesRegex(RuntimeError, "Ambiguous"):
+            find_dataset_mount(base, "fixture-data")
+
+    def test_api_download_imports_flat_output_without_a_cli_process(self):
+        output = self.root / "api-output" / self.exp_id
+        output.mkdir(parents=True)
+        identity = {"job_id": "fixture-job", "exp_id": self.exp_id}
+        seal_fixture(output, load_active_task_spec(self.project.task_config_path), **identity)
+        api = Mock()
+        def api_download(slug, *, path, file_pattern, quiet):
+            self.assertEqual(slug, "fixture-user/kernel")
+            self.assertEqual(file_pattern, r"^[^/\\]+$")
+            shutil.copytree(output, Path(path), dirs_exist_ok=True)
+        api.kernels_output.side_effect = api_download
+        module = Mock(KaggleApi=Mock(return_value=api))
+        with patch.dict(sys.modules, {"kaggle": Mock(), "kaggle.api": Mock(),
+                                     "kaggle.api.kaggle_api_extended": module}), patch(
+            "harness.templates.kaggle_template.subprocess.run") as cli, patch.object(
+            KaggleKernelManager, "get_authenticated_username", return_value="fixture-user"):
+            result = KaggleKernelManager.pull_kernel_output(self.exp_id, "fixture-user/kernel",
+                project_root=self.root, expected_identity=identity)
+        self.assertTrue(result["success"], result)
+        cli.assert_not_called()
+        api.authenticate.assert_called_once()
+        validate_run(self.project.artifacts_dir / self.exp_id)
 
 
 if __name__ == "__main__":

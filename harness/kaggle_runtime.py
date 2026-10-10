@@ -74,6 +74,26 @@ def _relative(value):
     return Path(*path.parts)
 
 
+def find_dataset_mount(input_base, dataset_slug):
+    """Locate the selected dataset across flat and nested Kaggle input layouts."""
+    base = Path(input_base)
+    folder = dataset_slug.rsplit("/", 1)[-1]
+    direct = base / folder
+    if direct.is_dir():
+        return direct
+    owner = dataset_slug.split("/", 1)[0] if "/" in dataset_slug else None
+    candidates = [path for path in base.rglob(folder) if path.is_dir()]
+    if owner:
+        owned = [path for path in candidates if path.parent.name == owner]
+        if owned or any(path.parent.parent.name == "datasets" for path in candidates):
+            candidates = owned
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise RuntimeError(f"Ambiguous selected Kaggle dataset mount: {dataset_slug}")
+    raise RuntimeError(f"The selected Kaggle dataset mount is missing: {dataset_slug}")
+
+
 def restore_dataset(input_root, workspace):
     """Restore declared paths, including directories uploaded with --dir-mode zip."""
     input_root, workspace = Path(input_root), Path(workspace)

@@ -435,8 +435,6 @@ class KaggleKernelManager:
                         zf.write(file_path, file_path.relative_to(bundle_base))
             bundle_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-        dataset_folder_name = resolved_dataset.split("/")[-1]
-
         task_id = (
             task_id or project.manifest.get("task_id") or project.plugin_id or "task"
         )
@@ -467,7 +465,9 @@ with tempfile.TemporaryDirectory(prefix="mlh-kaggle-work-") as temporary:
         helpers = runpy.run_path(str(workspace / "harness" / "kaggle_runtime.py"))
         runtime = json.loads(Path("ml-harness-runtime.json").read_text(encoding="utf-8"))
         helpers["ensure_dependencies"](runtime, enable_internet={enable_internet!r})
-        helpers["restore_dataset"](Path({('/kaggle/input/' + dataset_folder_name)!r}), workspace)
+        input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
+        print(f"[Kaggle Kernel] Using input_root: {{input_root}}", flush=True)
+        helpers["restore_dataset"](input_root, workspace)
         cmd = [sys.executable, "-u", "-m", "harness.runner", "--project-root", ".",
                "--task-config", {task_config_rel!r}, "--config", {config_rel!r}]
         print(f"Executing: {{' '.join(cmd)}}", flush=True)
@@ -567,6 +567,17 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
         return {**last, "success": False, "status": "TIMEOUT", "timed_out": True}
 
     @classmethod
+    def _download_output_api(cls, slug, download_dir):
+        """Use the public API's pagination and HTTP checks for root-level run output."""
+        from kaggle.api.kaggle_api_extended import KaggleApi
+
+        api = KaggleApi()
+        api.authenticate()
+        # Root exports have no experiment ID in their filenames. Filter by layout,
+        # not by ID, and avoid old nested source/data copies and duplicate manifests.
+        api.kernels_output(slug, path=str(download_dir), file_pattern=r"^[^/\\]+$", quiet=True)
+
+    @classmethod
     def pull_kernel_output(
         cls,
         exp_id: str,
@@ -617,15 +628,22 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                 prefix=f"mlh-kaggle-{exp_id}-"
             ) as temp_dir:
                 download_dir = Path(temp_dir)
-                proc = subprocess.run(
-                    ["kaggle", "kernels", "output", slug, "-p", str(download_dir)],
-                    capture_output=True,
-                    text=True,
-                    timeout=180,
-                )
-                output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
-                if proc.returncode != 0:
-                    return {"success": False, "kernel_slug": slug, "exp_id": exp_id, "raw_output": output}
+                try:
+                    cls._download_output_api(slug, download_dir)
+                    output = "Downloaded via KaggleApi"
+                except (Exception, SystemExit) as api_error:
+                    # The CLI may be installed in pipx/uv while its SDK is absent here.
+                    # Discard any partial API files before the independent CLI retry.
+                    shutil.rmtree(download_dir)
+                    download_dir.mkdir()
+                    proc = subprocess.run(
+                        ["kaggle", "kernels", "output", slug, "-p", str(download_dir)],
+                        capture_output=True, text=True, timeout=300,
+                    )
+                    output = f"Direct API download failed ({api_error}), falling back to CLI\n"
+                    output += ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+                    if proc.returncode != 0:
+                        return {"success": False, "kernel_slug": slug, "exp_id": exp_id, "raw_output": output}
                 manifests = list(download_dir.rglob("artifact_manifest.json"))
                 if len(manifests) != 1:
                     return {"success": False, "kernel_slug": slug, "exp_id": exp_id,
@@ -687,9 +705,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                         )
                     except Exception:
                         pass
-                success = (
-                    len(migrated) > 0 or proc.returncode == 0
-                ) and metrics_data is not None
+                success = bool(migrated) and metrics_data is not None
                 if not success:
                     shutil.rmtree(target_artifacts_dir, ignore_errors=True)
                 return {

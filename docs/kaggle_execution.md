@@ -79,7 +79,9 @@ Sources: [dataset commands](https://github.com/Kaggle/kaggle-cli/blob/main/docs/
    the current generator enables GPU.
 3. Code and training execute in a temporary workspace outside the saved output
    directory. The selected mount is `/kaggle/input/<dataset-slug>`; a missing
-   mount fails explicitly instead of selecting another dataset.
+   mount fails explicitly instead of selecting another dataset. Nested paths
+   such as `/kaggle/input/datasets/<owner>/<dataset-slug>` are also resolved by
+   the selected slug/owner; ambiguous mounts fail.
 4. `mlh-data-bundle.json` lists workspace-relative files. Restoration accepts
    expanded directories or `<directory>.zip` uploads. Only listed files enter
    the run workspace. ZIPs store paths relative to the uploaded directory.
@@ -117,6 +119,13 @@ queued/running states and parses the quoted status field, so words such as
 Without a version suffix, status/output refer to the latest run: use the
 submitted ID recorded in the job. Current CLI documentation also describes
 explicit `owner/kernel/version` references, pagination and output filtering.
+
+Output recovery first uses the public `KaggleApi.kernels_output` method, which
+handles pagination and HTTP errors. Its filter selects root-level filenames,
+including `metrics.json` and `artifact_manifest.json`; filtering by experiment
+ID would exclude those files. If the SDK is absent or fails, partial files are
+discarded and the CLI retries with a bounded subprocess timeout. Unit tests mock
+both paths, so API authentication cannot run while testing imports.
 
 Import requires exactly one manifest v2, matching job/task/experiment/config
 identity, completed full validation, required evidence files and valid hashes.
