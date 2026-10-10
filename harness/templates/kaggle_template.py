@@ -695,10 +695,13 @@ print("Training completed. Lightweight output artifacts copied to working root."
                             req
                         )
                         for f_info in res.files or []:
-                            out_file = download_dir / f_info.file_name
-                            out_file.parent.mkdir(parents=True, exist_ok=True)
-                            r_down = requests.get(f_info.url, timeout=60)
-                            out_file.write_bytes(r_down.content)
+                            fname = f_info.file_name
+                            # Only download experiment output files and avoid dataset or source tree dumps
+                            if exp_id in fname:
+                                out_file = download_dir / fname
+                                out_file.parent.mkdir(parents=True, exist_ok=True)
+                                r_down = requests.get(f_info.url, timeout=60)
+                                out_file.write_bytes(r_down.content)
                     output = "Downloaded via KaggleApi"
                 except Exception as dl_err:
                     output = f"Direct API download failed ({dl_err}), falling back to CLI"
