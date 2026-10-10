@@ -12,6 +12,11 @@ A modular experimentation harness and dashboard for competitive machine learning
 
 **ML-Harness** is a Python framework designed to streamline running, tracking, and evaluating machine learning experiments. It works for standard data science workflows whether you run models locally, dispatch heavy training jobs to cloud GPUs (Modal or Kaggle), or collaborate with AI coding assistants (such as Antigravity or Codex).
 
+> [!IMPORTANT]
+> **Current Verification Scope: NLP / Text ONLY**
+> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (empirically benchmarked and validated on real-world tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and LLM prompt evaluation).
+> Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice.
+
 The harness is **task-agnostic**. Its core runtime provides experiment tracking, validation orchestration, agent sessions, and generic guardrails. Competition-specific data loading, model factories, metrics, and official submission contracts live in separately installed task adapters.
 
 ## Install into a competition workspace
@@ -41,11 +46,11 @@ See [Plugin architecture and lifecycle](docs/plugin_architecture.md) for the ent
 
 ## Features
 
-### 1. Broad Modeling Support
-- **Classical ML & Gradient Boosting**: Native support for `scikit-learn`, `LightGBM`, `XGBoost`, and `CatBoost` with tabular preprocessing pipelines.
-- **Deep Learning Transformers**: Fine-tuning pretrained text encoders (`DeBERTa`, `RoBERTa`, `ModernBERT`, etc.) via Hugging Face with customizable heads, learning rate schedules, and mixed precision.
-- **PEFT / QLoRA**: Script generation and execution for 4-bit quantized LoRA fine-tuning using `Unsloth` and Hugging Face PEFT for consumer-grade GPU memory footprints.
-- **LLM Prompting & Reasoning**: Support for zero-shot, few-shot, and Chain-of-Thought (CoT) prompting with structured JSON output parsing across OpenAI, Gemini, and DeepSeek backends.
+### 1. Modeling Paradigms
+- **Deep Learning Transformers (Verified Core - NLP)**: Fine-tuning pretrained text encoders (`DeBERTa`, `RoBERTa`, `ModernBERT`, etc.) via Hugging Face with customizable heads, learning rate schedules, and mixed precision.
+- **PEFT / QLoRA (Verified Core - NLP)**: Script generation and execution for 4-bit quantized LoRA fine-tuning using `Unsloth` and Hugging Face PEFT for consumer-grade GPU memory footprints.
+- **LLM Prompting & Reasoning (Verified Core - NLP)**: Support for zero-shot, few-shot, and Chain-of-Thought (CoT) prompting with structured JSON output parsing across OpenAI, Gemini, and DeepSeek backends.
+- **Classical ML & Gradient Boosting (Experimental / WIP — Tabular)**: Basic scaffolding for `scikit-learn`, `LightGBM`, `XGBoost`, and `CatBoost` tabular pipelines. *(Note: Tabular modeling is experimental WIP and has NOT been validated in competitive practice).*
 
 ### 2. Flexible Validation Protocols
 - **Holdout Validation**: Fast validation against a designated evaluation dataset (`dev_split_name`).
@@ -80,6 +85,30 @@ A local web UI built with React, Vite, and Tailwind CSS provides:
 
 ---
 
+## Scope, Modality Bias & Multimodal Roadmap
+
+### Current Verification Scope: NLP Only
+> [!IMPORTANT]
+> **Production & Competition Readiness**: ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** problems (empirically validated on real-world benchmarks such as `stereoqueereval`, text classification, transformer fine-tuning, and LLM prompt evaluation).
+>
+> **All other modalities (Tabular, Computer Vision, Audio, Multimodal) are experimental works-in-progress (WIP / Roadmap)**. They have **NOT** been rigorously benchmarked or verified in competitive environments and are **NOT** currently considered ready or working well in practice. Do not claim or assume production-readiness for non-NLP tasks.
+
+### Modality Breakdown
+- **Verified Core (NLP / Text)**: Text sequence classification, cross-lingual transfer, ranking, and instruction-tuning / prompt evaluation. Fully tested, benchmarked, and operational.
+- **Experimental WIP (Tabular)**: Basic scaffolding for GBDT (`LightGBM`, `XGBoost`, `CatBoost`) and tabular feature pipelines exists, but is experimental and has **not** been verified in real competitions.
+- **Future Roadmap (Vision, Audio, Multimodal)**:
+  1. **Computer Vision**: Convolutional and Vision Transformer backbones (`timm`, ConvNeXt, Swin, ViT), data augmentation, and spatial metrics (planned roadmap).
+  2. **Audio Processing**: Speech and audio encoders (`Whisper`, `Wav2Vec2`, AST) with spectrographic pipelines (planned roadmap).
+  3. **Multimodal Fusion**: Vision-language models (CLIP, SigLIP, Qwen2-VL) and joint representations (planned roadmap).
+
+### Transparency on Historical "LLM / NLP Foundation"
+ML-Harness was purpose-built and empirically validated for NLP/Text benchmarks. While early scaffolding reflected this text-centric foundation (e.g. defaults around TF-IDF vectorization, XLM-RoBERTa / DeBERTa transformers, and LLM prompting/PEFT):
+- **Verified Foundation**: NLP/Text is the **sole verified and working core** of ML-Harness.
+- **Non-Prescriptive Runtime**: In accordance with the AIDE / Agentic ML paradigm, the AI coding assistant (Antigravity / Codex) is the creative scientist that designs and edits model code (`model.factory`), feature transformations, and hyperparameters. ML-Harness operates strictly as a neutral execution runtime and audit gate—it **does not impose hardcoded preprocessing pipelines** (such as forced `StandardScaler` or restrictive `OneHotEncoder` caps) and does not force text-centric backbones onto non-text tasks.
+- **Experimental Scaffolding Only**: Any non-NLP pipelines (Tabular, Vision, Audio, Multimodal) are experimental works-in-progress (WIP) on the development roadmap and must never be assumed to be battle-tested or production-ready.
+
+---
+
 ## Package layout
 
 ```text
@@ -87,7 +116,7 @@ ml-harness/
 ├── harness/                    # Task-neutral runtime, runner, and plugin API
 ├── tools/                      # Agent Bridge, dashboard, audit, and bootstrap CLIs
 ├── dashboard/                  # Dashboard source; packaged static assets are in tools/web/
-├── configs/tasks/              # Generic example task presets
+├── configs/tasks/              # Schema reference task presets (Tabular is experimental WIP)
 └── task_plugins/               # Separately installable competition adapters
     └── stereoqueereval/        # Optional adapter for the SemEval task
 ```

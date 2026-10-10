@@ -2,6 +2,11 @@
 
 This document outlines the workflow, conventions, and CLI commands for AI coding assistants (such as Antigravity, OpenAI Codex, or Claude Code) working within ML-Harness.
 
+> [!IMPORTANT]
+> **Verification Scope: Strictly NLP / Text Only**
+> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
+> Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice. Never claim or assume that non-NLP modalities are production-ready or battle-tested.
+
 ---
 
 ## 1. System Structure
@@ -30,7 +35,7 @@ Harness Runtime (Layer 3 - harness/)
      - *Resource-managed*: `establish_baseline_anchor`, `run_full_validation`, `promote_candidate`, `build_ensemble`.
      - *User approval required*: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`.
 3. **Layer 3 — Execution Harness**:
-   - **Runner (`harness/runner.py`)**: Executes models across supported paradigms (Classical ML, Transformers, QLoRA, Reasoning LLMs) and validation schemes (holdout, k-fold, debug probe).
+   - **Runner (`harness/runner.py`)**: Executes models across supported paradigms (Verified Core: Transformers, QLoRA, Reasoning LLMs; Experimental WIP: Classical ML / Tabular) and validation schemes (holdout, k-fold, debug probe).
    - **Solution Tree (`harness/tree_journal.py`)**: Tracks experiment lineage, scores, and parent-child relations.
    - **Guardrails**: Validates data splits (`harness/validator.py`), checks ensemble diversity (`harness/ensemble_guard.py`), and verifies submissions (`tools/audit_gate.py`).
 
@@ -47,6 +52,13 @@ Harness Runtime (Layer 3 - harness/)
    - Run a single fold or debug probe (`--debug --fold 0`) first to verify code syntax and loss convergence before committing full multi-fold or cloud GPU resources.
 4. **Reproducibility**:
    - Use the seed declared by the task config. Never overwrite completed experiment artifacts under the attached project's configured artifact directory.
+5. **Non-Prescriptive Runtime & Agent Autonomy**:
+   - In the AIDE / Agentic ML paradigm, the agent (Antigravity / Codex) is the primary scientific reasoning engine responsible for writing and modifying model code (`model.factory`), feature engineering, and hyperparameters.
+   - The harness is an execution and audit layer, **not a prescriptive modeling framework**. It must never hardcode feature preprocessing (e.g. forcing `StandardScaler` or restrictive one-hot encoding onto tree models) or constrain model selections. Experiments must freely configure architectures, pipelines, and loss objectives.
+6. **Verification Scope: Strictly NLP/Text Only (Non-NLP Modalities are WIP)**:
+   - **Empirical Reality**: ML-Harness is currently **strictly verified and working well ONLY on NLP/Text** benchmarks (empirically battle-tested on tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and prompt evaluation).
+   - **Non-NLP Modalities are Unverified WIP**: Tabular, Vision, Audio, and Multimodal support are **experimental works-in-progress (WIP / Roadmap)**, have NOT been benchmarked in competitive settings, and are **NOT** working well in practice. Never claim or assume that Tabular or Vision/Audio models are "battle-tested" or "thoroughly tested".
+   - **Modality Transparency**: Assistants must be transparent regarding historical **LLM / NLP bias** (implicit assumptions favoring TF-IDF, XLM-R, and LLM prompting). While experimental scaffolding or roadmap items exist for other modalities, the assistant must treat non-NLP pipelines as experimental WIP.
 
 ---
 
@@ -61,9 +73,9 @@ The harness is task-agnostic. Competition-specific schemas and metrics are defin
   - `direction`: `maximize` or `minimize`.
   - `subtasks`: Optional array of subtasks with weights, metric formulas, and conditional filtering.
 - **Built-in Presets (`configs/tasks/`)**:
-  - `configs/tasks/kaggle_house_prices.yaml`
-  - `configs/tasks/kaggle_titanic.yaml`
-  - Competition-specific presets are distributed by their task plugins.
+  - `configs/tasks/kaggle_house_prices.yaml` (Schema reference only; Tabular is experimental WIP)
+  - `configs/tasks/kaggle_titanic.yaml` (Schema reference only; Tabular is experimental WIP)
+  - Verified competition-specific adapters are distributed via task plugins (e.g. `stereoqueereval` for NLP).
 
 ---
 

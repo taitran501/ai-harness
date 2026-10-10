@@ -132,10 +132,10 @@ def attach_project(
     if manifest_path.exists() and not force:
         current = _read_yaml(manifest_path)
         same_attachment = (
-            Path(str(current.get("task_config", ""))).as_posix() == task_rel
+            Path(str(current.get("task_config", ""))).as_posix() == Path(task_rel).as_posix()
             and current.get("plugin_id", "default") == resolved_plugin
         )
-        if same_attachment and skill_path.is_file():
+        if same_attachment:
             from harness.phase_workflow import initialize_prompt_pack
             prompt_pack = initialize_prompt_pack(root, force=False)
             return {
@@ -149,9 +149,6 @@ def attach_project(
             }
         if not same_attachment:
             raise FileExistsError(f"Harness manifest already exists: {manifest_path}; pass --force to replace it.")
-
-    if skill_path.exists() and not force:
-        raise FileExistsError(f"Agent skill already exists: {skill_path}; pass --force to replace it.")
 
     from harness.phase_workflow import initialize_prompt_pack
     prompt_pack = initialize_prompt_pack(root, force=False)

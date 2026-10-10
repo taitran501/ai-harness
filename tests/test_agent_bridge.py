@@ -62,6 +62,62 @@ class TestAgentBridge(unittest.TestCase):
             if cfg_file.exists():
                 cfg_file.unlink()
 
+    def test_create_experiment_flexible_model_config(self) -> None:
+        sess = self.bridge.start_session(goal="Test flexible model config in create_experiment")
+        sess, obs = self.bridge.execute_action(
+            action=TypedActionName.CREATE_EXPERIMENT.value,
+            params={
+                "exp_id": "exp998_feat_custom_model",
+                "parent_id": "baseline_v1_comment",
+                "branch": "feat",
+                "descriptor": "custom_model_test",
+                "model": {
+                    "name": "xgboost",
+                    "params": {"n_estimators": 50, "max_depth": 4},
+                },
+            },
+            session_id=sess.session_id,
+        )
+        self.assertEqual(obs.status, "SUCCESS")
+        cfg_file = self.project_root / "configs" / "exp998_feat_custom_model.yaml"
+        self.assertTrue(cfg_file.exists())
+        try:
+            cfg_data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+            self.assertEqual(cfg_data["model"]["name"], "xgboost")
+            self.assertEqual(cfg_data["model"]["params"]["n_estimators"], 50)
+            self.assertEqual(cfg_data["model"]["params"]["max_depth"], 4)
+        finally:
+            if cfg_file.exists():
+                cfg_file.unlink()
+
+    def test_create_experiment_preserves_custom_factory(self) -> None:
+        sess = self.bridge.start_session(goal="Test custom factory model config in create_experiment")
+        sess, obs = self.bridge.execute_action(
+            action=TypedActionName.CREATE_EXPERIMENT.value,
+            params={
+                "exp_id": "exp997_feat_custom_factory",
+                "parent_id": "baseline_v1_comment",
+                "branch": "feat",
+                "descriptor": "custom_factory_test",
+                "model": {
+                    "factory": "custom_module.models.build_custom_model",
+                    "params": {"learning_rate": 1e-4, "hidden_dim": 256},
+                },
+            },
+            session_id=sess.session_id,
+        )
+        self.assertEqual(obs.status, "SUCCESS")
+        cfg_file = self.project_root / "configs" / "exp997_feat_custom_factory.yaml"
+        self.assertTrue(cfg_file.exists())
+        try:
+            cfg_data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+            self.assertEqual(cfg_data["model"]["factory"], "custom_module.models.build_custom_model")
+            self.assertEqual(cfg_data["model"]["params"]["learning_rate"], 1e-4)
+            self.assertEqual(cfg_data["model"]["params"]["hidden_dim"], 256)
+        finally:
+            if cfg_file.exists():
+                cfg_file.unlink()
+
     def test_session_budget_and_approval_guards(self) -> None:
         sess = self.bridge.start_session(
             goal="Test session budget & USER_APPROVAL enforcement",

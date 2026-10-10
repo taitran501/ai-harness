@@ -1,6 +1,8 @@
 # Master Onboarding Protocol & Agent Prompt
 
 > [!IMPORTANT]
+> **Verification Scope**: ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (e.g. `stereoqueereval`, sequence classification, transformer fine-tuning, prompt evaluation).
+> Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)** and NOT verified in practice.<br>
 > **Lifecycle Phase**: `Phase 1: Setup` ➔ `Phase 2: Understand` ➔ `Phase 3: Baseline Anchor`<br>
 > **Target Assistants**: Google Antigravity, Anthropic Claude Code, OpenAI Codex<br>
 > **Prompt Architecture**: XML-Delimited Task Contract (Anthropic / OpenAI Alignment Standard)<br>
@@ -50,6 +52,7 @@ You operate under strict SWE-agent deterministic verification principles: do not
 3. SMOKE TEST BEFORE FULL RUN: You MUST execute a fast debug probe on Fold 0 (`--debug --fold 0`) before committing compute to full multi-fold training.
 4. IMMUTABILITY OF ARTIFACTS: Never edit files directly inside `.ml-harness/artifacts/<task-id>/`. All state transitions must be conducted via the execution runner (`ml-harness-run`) or the Agent Bridge (`ml-harness-agent`).
 5. REPRODUCIBILITY: Use the random seed declared by the task configuration.
+6. STRICT VERIFICATION SCOPE: ML-Harness is currently strictly verified and working well ONLY on NLP/Text tasks. Non-NLP modalities (Tabular, Vision, Audio, Multimodal) are experimental WIP / Roadmap; never assume or claim they are production-ready or battle-tested.
 </operating_constraints>
 
 <instructions>
@@ -108,8 +111,8 @@ Your final response MUST be formatted as a structured Markdown briefing conformi
 ## 1. Executive Summary
 | Metric | Value |
 |---|---|
-| **Platform & Modality** | [e.g. Kaggle / Tabular] |
-| **Primary Metric** | [e.g. roc_auc (maximize)] |
+| **Platform & Modality** | [e.g. CodaBench / Text NLP (Verified Core) or Kaggle / Tabular (Experimental WIP)] |
+| **Primary Metric** | [e.g. macro_f1 (maximize)] |
 | **Sample Count** | [e.g. 50,000 train instances] |
 | **ID & Target Columns** | `id_col` -> `target_col` |
 | **Anti-Leakage Group** | [Group column name or "None (IID)"] |
@@ -135,7 +138,7 @@ Your final response MUST be formatted as a structured Markdown briefing conformi
 
 ## 5. Top 3 Hypotheses for Next Iteration (Phase 4)
 1. **[feat] Hypothesis 1**: [Specific atomic feature intervention]
-2. **[model] Hypothesis 2**: [Backbone family switch, e.g. LightGBM / CatBoost]
+2. **[model] Hypothesis 2**: [Backbone family switch, e.g. DeBERTa-v3 / ModernBERT (NLP)]
 3. **[loss] Hypothesis 3**: [Calibrated loss function, e.g. Focal Loss]
 </output_format>
 ```

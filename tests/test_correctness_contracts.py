@@ -58,6 +58,105 @@ class EvaluationContracts(unittest.TestCase):
         )
         self.assertEqual(result["primary_score"], 1)
 
+    def test_multilabel_probability_metric_does_not_require_sum_to_one(self):
+        spec = UniversalTaskSpec.from_dict({
+            "task": {
+                "name": "multilabel_fixture",
+                "modality": "tabular",
+                "primary_metric": "roc_auc",
+                "direction": "maximize",
+                "data": {"id_column": "id"},
+                "inputs": [{"name": "features", "type": "tabular", "source_columns": ["x"]}],
+                "subtasks": [{
+                    "id": "target",
+                    "column_prefix": "lbl_",
+                    "task_type": "multilabel_classification",
+                    "primary_metric": "roc_auc",
+                    "direction": "maximize",
+                    "labels": ["a", "b"],
+                }],
+            }
+        })
+        truth = pd.DataFrame({
+            "id": [1, 2, 3, 4],
+            "lbl_a": [0, 0, 1, 1],
+            "lbl_b": [1, 0, 1, 0],
+        })
+        # Probabilities do NOT sum to 1 across columns (e.g. [0.8, 0.9] sums to 1.7)
+        result = spec.evaluate_predictions(
+            truth,
+            {
+                "target": [[0, 1], [0, 0], [1, 1], [1, 0]],
+                "proba_target": [[0.1, 0.8], [0.2, 0.3], [0.9, 0.9], [0.8, 0.2]],
+                "classes_target": ["a", "b"],
+            },
+        )
+        self.assertGreater(result["primary_score"], 0.5)
+
+    def test_multiclass_strictly_enforces_sum_to_one(self):
+        spec = task("multiclass_classification", "logloss", "minimize")
+        truth = pd.DataFrame({"id": [1, 2], "target": [0, 1]})
+        # Probabilities sum to 1.5 instead of 1.0 -> must raise ValueError
+        with self.assertRaises(ValueError) as ctx:
+            spec.evaluate_predictions(
+                truth,
+                {
+                    "target": [0, 1],
+                    "proba_target": [[0.5, 1.0], [0.8, 0.7]],
+                    "classes_target": [0, 1],
+                },
+            )
+        self.assertIn("sum to one", str(ctx.exception))
+
+    def test_binary_proba_does_not_require_sum_to_one(self):
+        spec = task("binary_classification", "roc_auc", "maximize")
+        truth = pd.DataFrame({"id": [1, 2, 3, 4], "target": [0, 0, 1, 1]})
+        # Positive class calibrated probabilities [0.1, 0.2, 0.8, 0.9] with arbitrary negative class column
+        result = spec.evaluate_predictions(
+            truth,
+            {
+                "target": [0, 0, 1, 1],
+                "proba_target": [[0.0, 0.1], [0.0, 0.2], [0.0, 0.8], [0.0, 0.9]],
+                "classes_target": [0, 1],
+            },
+        )
+        self.assertEqual(result["primary_score"], 1.0)
+
+    def test_native_categorical_transformer_edge_cases(self):
+        from harness.models import NativeCategoricalTransformer
+        df = pd.DataFrame({
+            "num": [1.0, 2.5, 3.8],
+            "int_cat": pd.Series([10, 20, 30], dtype="category"),
+            "str_cat": pd.Series(["a", "b", "c"], dtype="category"),
+            "mixed_obj": [1, "1", 2],
+            "unhashable_obj": [[1, 2], [3], [1, 2]],
+        })
+        t = NativeCategoricalTransformer()
+        out = t.fit_transform(df)
+        # 1. Numeric untouched
+        self.assertEqual(out["num"].tolist(), [1.0, 2.5, 3.8])
+        # 2. Integer categories preserved (not converted to all-NaN!)
+        self.assertEqual(out["int_cat"].tolist(), [10, 20, 30])
+        # 3. String categories preserved
+        self.assertEqual(out["str_cat"].tolist(), ["a", "b", "c"])
+        # 4. Mixed object cleanly handled without duplicate categories error
+        self.assertEqual(out["mixed_obj"].tolist(), ["1", "1", "2"])
+        # 5. Unhashable objects handled without TypeError
+        self.assertEqual(out["unhashable_obj"].tolist(), ["[1, 2]", "[3]", "[1, 2]"])
+
+        # 6. Novel categories in transform become NaN gracefully
+        test_df = pd.DataFrame({
+            "num": [4.0],
+            "int_cat": pd.Series([99], dtype="category"),
+            "str_cat": pd.Series(["z"], dtype="category"),
+            "mixed_obj": ["novel"],
+            "unhashable_obj": ["[novel]"],
+        })
+        out_test = t.transform(test_df)
+        self.assertTrue(pd.isna(out_test["int_cat"].iloc[0]))
+        self.assertTrue(pd.isna(out_test["str_cat"].iloc[0]))
+        self.assertTrue(pd.isna(out_test["mixed_obj"].iloc[0]))
+
     def test_contract_properties_and_incomplete(self):
         spec = task()
         self.assertEqual(spec.group_column, "group")

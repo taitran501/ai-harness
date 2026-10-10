@@ -293,6 +293,26 @@ class UniversalTaskSpec:
     def data_config(self):
         return self.metadata.get("data_config") or self.metadata.get("data", {})
 
+    @property
+    def submission_spec(self) -> Optional[Dict[str, Any]]:
+        """Resolved submission specification from metadata."""
+        return self.metadata.get("submission_spec")
+
+    @property
+    def test_path(self) -> Optional[str]:
+        """Resolved test set path from data config or metadata."""
+        return self.data_config.get("test_path") or self.metadata.get("test_path")
+
+    @property
+    def train_path(self) -> Optional[str]:
+        """Resolved train set path from data config or metadata."""
+        return self.data_config.get("train_path") or self.metadata.get("train_path")
+
+    @property
+    def dev_path(self) -> Optional[str]:
+        """Resolved dev/validation set path from data config or metadata."""
+        return self.data_config.get("dev_path") or self.metadata.get("dev_path")
+
     def resolve_seed(self, runtime_seed=42):
         return int(self.metadata.get("seed",self.metadata.get("validation", {}).get("seed", self.data_config.get("seed", runtime_seed))))
 
@@ -445,8 +465,8 @@ class UniversalTaskSpec:
         # Support both 'data_config' and 'data' keys (universal task.yaml convention)
         data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
 
-        # 1. Custom path override in data_config
-        custom_path = data_cfg.get(f"{split}_path")
+        # 1. Custom path override in data_config or metadata
+        custom_path = data_cfg.get(f"{split}_path") or self.metadata.get(f"{split}_path")
         if custom_path:
             p = Path(custom_path)
             if not p.is_absolute():

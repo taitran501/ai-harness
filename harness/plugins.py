@@ -7,6 +7,7 @@ from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 
@@ -145,6 +146,167 @@ class DeclarativeTaskPlugin(TaskPlugin):
 
     plugin_id = "default"
 
+    def __init__(self, context: Optional[TaskPluginContext] = None):
+        self.context = context
+
+    def _get_submission_spec(self, context: Optional[TaskPluginContext] = None) -> Optional[Dict[str, Any]]:
+        ctx = context or self.context
+        task_spec = ctx.task_spec if ctx else None
+        if task_spec is None:
+            try:
+                from harness.task_spec import load_active_task_spec
+                task_spec = load_active_task_spec()
+            except Exception:
+                task_spec = None
+        if task_spec is not None:
+            sub_spec = getattr(task_spec, "submission_spec", None) or task_spec.metadata.get("submission_spec")
+            if isinstance(sub_spec, dict) and sub_spec:
+                return sub_spec
+        return None
+
+    def capabilities(self) -> Dict[str, bool]:
+        caps = super().capabilities()
+        sub_spec = self._get_submission_spec()
+        has_sub_spec = bool(sub_spec)
+        caps["submission_builder"] = has_sub_spec
+        caps["submission_validator"] = has_sub_spec
+        return caps
+
+    def build_submission(
+        self, context: TaskPluginContext, predictions: pd.DataFrame, output_path: Path
+    ) -> Path:
+        sub_spec = self._get_submission_spec(context)
+        if not sub_spec:
+            raise PluginCapabilityError(
+                f"Task plugin '{self.plugin_id}' does not provide an official submission builder when submission_spec is not declared."
+            )
+        task_spec = context.task_spec
+        id_col = task_spec.id_column or task_spec.data_config.get("id_column", "id")
+        if id_col not in predictions.columns:
+            matches = [c for c in predictions.columns if c.lower() == id_col.lower()]
+            if matches:
+                id_col = matches[0]
+            else:
+                raise ValueError(f"ID column '{id_col}' not found in predictions.")
+
+        out_df = pd.DataFrame()
+        req_cols = sub_spec.get("required_columns")
+        if req_cols:
+            for col in req_cols:
+                if col == id_col:
+                    out_df[col] = predictions[id_col]
+                elif f"pred_{col}" in predictions.columns:
+                    out_df[col] = predictions[f"pred_{col}"]
+                elif col in predictions.columns:
+                    out_df[col] = predictions[col]
+                else:
+                    found = False
+                    for target, st in task_spec.subtasks.items():
+                        if st.column == col or target == col:
+                            for cand in (f"pred_{target}", f"pred_{st.column}", target, st.column):
+                                if cand and cand in predictions.columns:
+                                    out_df[col] = predictions[cand]
+                                    found = True
+                                    break
+                        if found:
+                            break
+                    if not found:
+                        raise ValueError(f"Required submission column '{col}' could not be resolved from predictions.")
+        else:
+            out_df[id_col] = predictions[id_col]
+            target_col = task_spec.data_config.get("target_column") or task_spec.primary_target
+            if target_col:
+                if f"pred_{target_col}" in predictions.columns:
+                    out_df[target_col] = predictions[f"pred_{target_col}"]
+                elif target_col in predictions.columns:
+                    out_df[target_col] = predictions[target_col]
+                else:
+                    for target, st in task_spec.subtasks.items():
+                        st_col = st.column or target
+                        for cand in (f"pred_{target}", f"pred_{st_col}", target, st_col):
+                            if cand and cand in predictions.columns:
+                                out_df[target_col] = predictions[cand]
+                                break
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        archive_format = str(sub_spec.get("archive_format", "csv")).lower()
+        if archive_format in ("zip",) or output_path.suffix.lower() == ".zip":
+            import zipfile
+            zip_path = output_path if output_path.suffix.lower() == ".zip" else output_path.with_suffix(".zip")
+            inner_name = sub_spec.get("inner_file_name") or "submission.csv"
+            csv_str = out_df.to_csv(index=False)
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(inner_name, csv_str)
+            return zip_path
+
+        out_df.to_csv(output_path, index=False)
+        return output_path
+
+    def validate_submission(self, context: TaskPluginContext, submission: Path) -> None:
+        sub_spec = self._get_submission_spec(context)
+        if not sub_spec:
+            raise PluginCapabilityError(
+                f"Task plugin '{self.plugin_id}' does not provide an official submission validator when submission_spec is not declared."
+            )
+        submission = Path(submission)
+        if not submission.is_file():
+            raise FileNotFoundError(f"Submission file does not exist: {submission}")
+
+        task_spec = context.task_spec
+        import zipfile
+        archive_format = str(sub_spec.get("archive_format", "csv")).lower()
+        if submission.suffix.lower() == ".zip" or (zipfile.is_zipfile(submission) and archive_format == "zip"):
+            with zipfile.ZipFile(submission, "r") as zf:
+                csv_members = [m for m in zf.namelist() if m.endswith(".csv")]
+                if not csv_members:
+                    raise ValueError(f"Zip submission '{submission.name}' contains no CSV file.")
+                with zf.open(csv_members[0]) as f:
+                    df = pd.read_csv(f)
+        else:
+            df = pd.read_csv(submission)
+
+        id_col = task_spec.id_column or task_spec.data_config.get("id_column", "id")
+        req_cols = sub_spec.get("required_columns")
+        if not req_cols:
+            req_cols = [id_col, task_spec.data_config.get("target_column") or task_spec.primary_target]
+            req_cols = [c for c in req_cols if c]
+
+        for col in req_cols:
+            if col not in df.columns:
+                raise ValueError(f"Submission missing required column '{col}'. Present: {list(df.columns)}")
+            if df[col].isna().any():
+                raise ValueError(f"Submission column '{col}' contains null values.")
+
+        if id_col in df.columns:
+            if df[id_col].duplicated().any():
+                raise ValueError(f"Submission column '{id_col}' contains duplicate values.")
+            test_path_val = task_spec.test_path
+            if test_path_val:
+                tp = Path(test_path_val)
+                if not tp.is_absolute():
+                    tp = context.project_root / tp
+                if tp.exists():
+                    try:
+                        test_df = task_spec.load_dataset_split("test", project_root=context.project_root)
+                        if id_col in test_df:
+                            if len(df) != len(test_df):
+                                raise ValueError(f"Submission row count ({len(df)}) does not match test set ({len(test_df)}).")
+                            if list(df[id_col]) != list(test_df[id_col]):
+                                if set(df[id_col]) != set(test_df[id_col]):
+                                    raise ValueError("Submission IDs do not match test set IDs.")
+                    except Exception as e:
+                        if isinstance(e, ValueError) and "Submission" in str(e):
+                            raise
+
+        for col in req_cols:
+            if col != id_col:
+                for st in task_spec.subtasks.values():
+                    if (st.column == col or st.id == col) and st.task_type in ("regression", "ranking"):
+                        vals = pd.to_numeric(df[col], errors="coerce")
+                        if not np.isfinite(vals).all():
+                            raise ValueError(f"Submission column '{col}' contains non-finite values.")
+
 
 def _plugin_entry_points() -> list[EntryPoint]:
     discovered = entry_points()
@@ -170,7 +332,7 @@ def load_task_plugin(
     plugin_id: Optional[str], context: TaskPluginContext
 ) -> TaskPlugin:
     if not plugin_id or plugin_id == "default":
-        return DeclarativeTaskPlugin()
+        return DeclarativeTaskPlugin(context)
 
     points = {point.name: point for point in _plugin_entry_points()}
     point = points.get(plugin_id)

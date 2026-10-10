@@ -1,8 +1,13 @@
 # Universal Task Specification Template (`UniversalTaskSpec v2.0`)
 
 > [!IMPORTANT]
+> **Verification Scope: Strictly NLP / Text Only**
+> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
+> Support for all other modalities (**Tabular, Computer Vision, Audio, Time-Series, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice.
+> The tabular schemas and examples in this document are provided for schema syntax reference only.
+>
 > This document defines the standard specification schema for onboarding arbitrary ML/DL/NLP competitions into **ML-Harness**.
-> The harness consumes this specification to autonomously configure data loaders, establish leakage-proof validation folds, parameterize evaluation metrics, and inject agent skills.
+> The harness consumes this specification to configure data loaders, establish leakage-proof validation folds, parameterize evaluation metrics, and inject agent skills.
 
 ---
 
@@ -47,7 +52,7 @@ UniversalTaskSpec
 |---|---|---|---|---|---|
 | `task.name` | `string` | **Yes** | — | Any descriptive string | Identifier for competition or benchmark (e.g. `Kaggle-Titanic`). |
 | `task.platform` | `string` | **Yes** | `generic` | `kaggle`, `codabench`, `codalab`, `huggingface`, `drivendata`, `generic` | Host competition platform. Dictates submission packaging format. |
-| `task.modality` | `string` | **Yes** | `tabular` | `tabular`, `text`, `vision`, `time-series`, `multimodal`, `generic` | Problem modality. Parameterizes Grounding Gate backbone recommendations. |
+| `task.modality` | `string` | **Yes** | `text` | `text` (Verified Core), `tabular` (WIP), `vision` (Roadmap), `time-series` (Roadmap), `multimodal` (Roadmap), `generic` (WIP) | Problem modality. Parameterizes Grounding Gate backbone recommendations. Only text/NLP is verified in practice. |
 | `task.description` | `string` | No | `""` | Freeform text | Executive summary of domain objective and problem constraints. |
 | `task.website` | `string` | No | `null` | Valid URI | Official benchmark URL or competition overview page. |
 
@@ -122,7 +127,10 @@ subtasks:
 
 ## 3. Reference Implementation Configurations
 
-### 3.1 Scenario A: Tabular Binary Classification with Group Invariant
+### 3.1 Scenario A: Tabular Binary Classification with Group Invariant *(Schema Reference Only — Tabular is WIP)*
+
+> [!NOTE]
+> Tabular modeling is experimental work-in-progress (WIP). This scenario illustrates the declarative schema syntax for tabular tasks with group anti-leakage invariants.
 
 ```yaml
 task:
@@ -213,7 +221,10 @@ task:
 
 ---
 
-### 3.3 Scenario C: Tabular Continuous Regression
+### 3.3 Scenario C: Tabular Continuous Regression *(Schema Reference Only — Tabular is WIP)*
+
+> [!NOTE]
+> Tabular modeling is experimental work-in-progress (WIP). This scenario illustrates the declarative schema syntax for regression tasks.
 
 ```yaml
 task:

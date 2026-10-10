@@ -16,7 +16,7 @@ from harness.project import HarnessProject
 
 MODALITY_GROUNDING_SUGGESTIONS: Dict[str, Dict[str, Any]] = {
     "text": {
-        "title": "Natural Language Processing (NLP)",
+        "title": "Natural Language Processing (NLP) — Verified Core",
         "backbones": [
             "microsoft/deberta-v3-base (English / General SOTA encoder)",
             "microsoft/mdeberta-v3-base (Multilingual cross-lingual transfer)",
@@ -27,7 +27,7 @@ MODALITY_GROUNDING_SUGGESTIONS: Dict[str, Dict[str, Any]] = {
         "tokenization": "Pay careful attention to token lengths, special metadata tags, and multilingual subwords.",
     },
     "tabular": {
-        "title": "Tabular & Structured Data",
+        "title": "Tabular & Structured Data (Experimental / WIP — Unverified)",
         "backbones": [
             "LightGBM (Gradient Boosting with histogram binning)",
             "XGBoost (Exact greedy & histogram tree booster)",
@@ -39,7 +39,7 @@ MODALITY_GROUNDING_SUGGESTIONS: Dict[str, Dict[str, Any]] = {
         "tokenization": "Target encoding, frequency encoding, numerical quantile transforms, and out-of-fold target statistics.",
     },
     "vision": {
-        "title": "Computer Vision",
+        "title": "Computer Vision (Roadmap / WIP — Unverified)",
         "backbones": [
             "timm/convnext_small.fb_in22k_ft_in1k (Modern ConvNet architecture)",
             "timm/swin_base_patch4_window7_224 (Hierarchical Vision Transformer)",
@@ -49,7 +49,7 @@ MODALITY_GROUNDING_SUGGESTIONS: Dict[str, Dict[str, Any]] = {
         "tokenization": "RandAugment, Mixup (alpha=0.8), CutMix (alpha=1.0), and test-time augmentation (TTA).",
     },
     "time-series": {
-        "title": "Time-Series & Forecasting",
+        "title": "Time-Series & Forecasting (Roadmap / WIP — Unverified)",
         "backbones": [
             "PatchTST (Patching and Channel-Independence Transformer)",
             "DLinear / N-Linear (Fast, interpretable linear decomposition)",
@@ -59,7 +59,7 @@ MODALITY_GROUNDING_SUGGESTIONS: Dict[str, Dict[str, Any]] = {
         "tokenization": "Rolling window splits strictly expanding or sliding; prevent forward-looking leakages.",
     },
     "generic": {
-        "title": "General Machine Learning / Deep Learning",
+        "title": "General Machine Learning / Deep Learning (Experimental / WIP — Unverified)",
         "backbones": [
             "Tree Ensembles (LightGBM, XGBoost, Random Forest)",
             "Deep Neural Networks (PyTorch MLP, Transformers)",
@@ -121,6 +121,9 @@ def generate_skill_content(
         "",
         f"> **Active Benchmark**: **{task_name}** | **Platform**: {platform} | **Modality**: {mod_info['title']}",
         f"> **Objective**: {direction.capitalize()} `{primary_metric}` across cross-validation folds.",
+        ">",
+        "> [!IMPORTANT]",
+        "> **Scope Notice**: ML-Harness is currently validated and working well ONLY on Natural Language Processing (NLP / Text) tasks. Other modalities (Tabular, Vision, Audio, Multimodal) are experimental works-in-progress (WIP / Roadmap) and NOT yet validated in practice.",
         "",
         f"Use this skill whenever planning model architectures, engineering features, formulating hypotheses,",
         f"auditing predictions, or registering verified submissions for **{task_name}**.",
@@ -253,7 +256,7 @@ def generate_skill_content(
         "",
         "### 3.3 Epistemic Grounding & Assumption Register Protocol (Anti-Hallucination)",
         f"- **MANDATORY RETRIEVAL**: Before formulating a new model configuration for {mod_info['title']}:",
-        f"  1. Inspect `docs/KNOWLEDGE_BASE.md` for verified backbones:",
+        f"  1. Inspect `docs/KNOWLEDGE_BASE.md` for reference backbones (Note: Only NLP is verified; non-NLP modalities are experimental WIP):",
     ])
 
     for b in mod_info["backbones"][:4]:

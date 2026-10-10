@@ -140,13 +140,22 @@ class UniversalRunner:
             from harness.evaluation import metric_name
 
             allowed = {
-                "regression": {"rmse", "mae", "r2"},
+                "regression": {
+                    "rmse",
+                    "mae",
+                    "r2",
+                    "mape",
+                    "spearman",
+                    "ndcg",
+                    "qwk",
+                },
                 "binary_classification": {
                     "accuracy",
                     "macro_f1",
                     "micro_f1",
                     "roc_auc",
                     "logloss",
+                    "qwk",
                 },
                 "multiclass_classification": {
                     "accuracy",
@@ -154,8 +163,20 @@ class UniversalRunner:
                     "micro_f1",
                     "roc_auc",
                     "logloss",
+                    "qwk",
                 },
-                "multilabel_classification": {"accuracy", "macro_f1", "micro_f1"},
+                "multilabel_classification": {
+                    "accuracy",
+                    "macro_f1",
+                    "micro_f1",
+                    "ndcg",
+                },
+                "ranking": {
+                    "ndcg",
+                    "spearman",
+                    "rmse",
+                    "mae",
+                },
             }
             if not self.task_spec.subtasks:
                 raise ValueError("Task must declare targets")
@@ -168,7 +189,9 @@ class UniversalRunner:
         self.estimator_metadata = []
         hook = cfg.get("paths", {}).get("metrics_evaluator")
         if hook:
-            module, name = hook.rsplit(".", 1)
+            if str(self.project_root) not in sys.path:
+                sys.path.insert(0, str(self.project_root))
+            module, name = hook.split(":", 1) if ":" in hook else hook.rsplit(".", 1)
             self.manifest["custom_scorer_sha256"] = digest(
                 inspect.getsource(getattr(importlib.import_module(module), name))
             )
@@ -177,14 +200,24 @@ class UniversalRunner:
         from harness.evaluation import validate_prediction_contract
 
         validate_prediction_contract(self.task_spec, truth, predictions)
-        result = self.task_plugin.evaluate_predictions(
-            self.plugin_context, truth, predictions
-        )
         hook = self.cfg.get("paths", {}).get("metrics_evaluator")
         if hook:
-            module, name = hook.rsplit(".", 1)
-            result.update(
-                getattr(importlib.import_module(module), name)(truth, predictions)
+            if str(self.project_root) not in sys.path:
+                sys.path.insert(0, str(self.project_root))
+            module, name = hook.split(":", 1) if ":" in hook else hook.rsplit(".", 1)
+            result = getattr(importlib.import_module(module), name)(truth, predictions)
+            if not isinstance(result, dict):
+                raise TypeError("Custom metrics_evaluator must return a metric mapping")
+            try:
+                base_result = self.task_plugin.evaluate_predictions(
+                    self.plugin_context, truth, predictions
+                )
+                result = {**base_result, **result}
+            except Exception:
+                pass
+        else:
+            result = self.task_plugin.evaluate_predictions(
+                self.plugin_context, truth, predictions
             )
         return resolve_evaluation(self.task_spec, result, len(truth))
 
@@ -442,7 +475,30 @@ class UniversalRunner:
         if len(variants) > 1 and selected not in variants:
             raise ValueError("Multiple variants require data.selection_variant")
         self.selection_variant = selected or variants[0]
+
+        test_df = None
+        test_path_val = self.task_spec.test_path
+        if test_path_val:
+            tp = Path(test_path_val)
+            if not tp.is_absolute():
+                tp = self.project_root / tp
+            if tp.exists():
+                try:
+                    test_df = self.task_spec.load_dataset_split("test", project_root=self.project_root)
+                except Exception:
+                    test_df = None
+
+        if test_df is not None:
+            id_col = self.task_spec.id_column
+            if (
+                id_col not in test_df
+                or test_df[id_col].isna().any()
+                or test_df[id_col].duplicated().any()
+            ):
+                raise ValueError("Test set requires declared unique, non-null IDs")
+
         details, rows, records, truths = [], [], [], []
+        fold_test_preds = []
         for fold, train, dev in self._resolve_validation_splits(df, val_strategy):
             partitions = [("all", train, dev)]
             partition = self.cfg.get("data", {}).get("partition_column")
@@ -458,6 +514,7 @@ class UniversalRunner:
                     for p in sorted(df[partition].dropna().unique())
                     if len(dev[dev[partition] == p])
                 ]
+            fold_partition_test_preds = []
             for part, tr, dv in partitions:
                 if tr.empty:
                     raise ValueError("Partition has no training data")
@@ -502,6 +559,34 @@ class UniversalRunner:
                         self.plugin_context, pred
                     )
                     pred = self.task_spec.apply_routing(pred, len(dv))
+
+                    if test_df is not None and variant == self.selection_variant:
+                        if part == "all":
+                            t_df_part = test_df
+                        elif partition and partition in test_df:
+                            t_df_part = test_df[test_df[partition] == part]
+                        else:
+                            t_df_part = None
+
+                        if t_df_part is not None and not t_df_part.empty:
+                            t_pred = call_model(model, "predict", t_df_part, variant)
+                            if isinstance(t_pred, PredictionBatch):
+                                if t_pred.ids != t_df_part[self.task_spec.id_column].tolist():
+                                    raise ValueError("Test prediction IDs mismatch")
+                                t_pred = {
+                                    **t_pred.labels,
+                                    **{"proba_" + k: v for k, v in t_pred.probabilities.items()},
+                                    **{"classes_" + k: v for k, v in t_pred.class_order.items()},
+                                }
+                            t_pred = self.task_plugin.normalize_predictions(
+                                self.plugin_context, t_pred
+                            )
+                            t_pred = self.task_spec.apply_routing(t_pred, len(t_df_part))
+                            if part == "all":
+                                fold_test_preds.append(t_pred)
+                            else:
+                                fold_partition_test_preds.append((part, t_df_part.index, t_pred))
+
                     evaluation = self._evaluate(dv, pred)
                     part_id = int(part) if isinstance(part, (int, np.integer)) else part
                     fold_id = int(fold) if isinstance(fold, (int, np.integer)) else fold
@@ -535,8 +620,34 @@ class UniversalRunner:
                             model, "estimator_metadata", {"class": type(model).__name__}
                         )
                     )
+            if fold_partition_test_preds and test_df is not None:
+                combined_fold_test = {}
+                for target, st in self.task_spec.subtasks.items():
+                    if any("proba_" + target in p[2] for p in fold_partition_test_preds):
+                        sample_proba = next(p[2]["proba_" + target] for p in fold_partition_test_preds if "proba_" + target in p[2])
+                        n_cls = sample_proba.shape[1] if hasattr(sample_proba, "shape") and len(sample_proba.shape) > 1 else len(sample_proba[0])
+                        full_proba = np.zeros((len(test_df), n_cls), dtype=float)
+                        for _, idxs, p_dict in fold_partition_test_preds:
+                            if "proba_" + target in p_dict:
+                                locs = test_df.index.get_indexer(idxs)
+                                full_proba[locs] = p_dict["proba_" + target]
+                        combined_fold_test["proba_" + target] = full_proba
+                    if any("classes_" + target in p[2] for p in fold_partition_test_preds):
+                        combined_fold_test["classes_" + target] = next(p[2]["classes_" + target] for p in fold_partition_test_preds if "classes_" + target in p[2])
+
+                    full_preds = [None] * len(test_df)
+                    for _, idxs, p_dict in fold_partition_test_preds:
+                        sub_preds = p_dict.get("pred_" + target, p_dict.get(target))
+                        if sub_preds is not None:
+                            locs = test_df.index.get_indexer(idxs)
+                            for loc, val in zip(locs, sub_preds):
+                                full_preds[loc] = val
+                    combined_fold_test["pred_" + target] = full_preds
+                fold_test_preds.append(combined_fold_test)
         truth = pd.concat(truths).drop_duplicates(self.task_spec.id_column)
-        return self._save_and_finalize(truth, details, rows, records, git_hash)
+        return self._save_and_finalize(
+            truth, details, rows, records, git_hash, test_df=test_df, fold_test_preds=fold_test_preds
+        )
 
     def _run_llm_prompting(self, df, git_hash):
         from harness.llm_engine import LLMEngine
@@ -617,7 +728,7 @@ class UniversalRunner:
             git_hash,
         )
 
-    def _save_and_finalize(self, truth, details, rows, records, git_hash):
+    def _save_and_finalize(self, truth, details, rows, records, git_hash, test_df=None, fold_test_preds=None):
         oof = pd.DataFrame(records)
         variants = {}
         for variant in oof.input_variant.unique():
@@ -692,6 +803,88 @@ class UniversalRunner:
         oof.to_csv(self.exp_dir / "oof_predictions.csv", index=False)
         oof.to_csv(self.exp_dir / "predictions.csv", index=False)
         truth.to_csv(self.exp_dir / "evaluation_truth.csv", index=False)
+
+        if test_df is not None and fold_test_preds:
+            id_col = self.task_spec.id_column
+            final_test_pred = {}
+            for target, st in self.task_spec.subtasks.items():
+                class_order = None
+                orders = [
+                    (json.loads(f["classes_" + target]) if isinstance(f.get("classes_" + target), str) else f.get("classes_" + target))
+                    for f in fold_test_preds
+                    if "classes_" + target in f
+                ]
+                if orders:
+                    class_order = orders[0]
+                    final_test_pred["classes_" + target] = class_order
+                elif st.classes:
+                    class_order = list(st.classes)
+                    final_test_pred["classes_" + target] = class_order
+
+                all_have_proba = all("proba_" + target in f for f in fold_test_preds)
+                if all_have_proba:
+                    probas = [
+                        np.asarray([json.loads(v) if isinstance(v, str) else v for v in f["proba_" + target]], dtype=float)
+                        for f in fold_test_preds
+                    ]
+                    avg_proba = np.mean(probas, axis=0)
+                    final_test_pred["proba_" + target] = avg_proba
+                    if st.task_type in ("regression", "ranking"):
+                        preds = [np.asarray(f.get("pred_" + target, f.get(target)), dtype=float) for f in fold_test_preds]
+                        final_test_pred["pred_" + target] = np.mean(preds, axis=0).tolist()
+                    elif st.task_type == "multilabel_classification":
+                        final_test_pred["pred_" + target] = (avg_proba > 0.5).astype(int).tolist()
+                    else:
+                        if class_order and len(class_order) == avg_proba.shape[1]:
+                            final_test_pred["pred_" + target] = np.asarray(class_order)[avg_proba.argmax(axis=1)].tolist()
+                        else:
+                            final_test_pred["pred_" + target] = avg_proba.argmax(axis=1).tolist()
+                else:
+                    if st.task_type in ("regression", "ranking"):
+                        preds = [np.asarray(f.get("pred_" + target, f.get(target)), dtype=float) for f in fold_test_preds]
+                        final_test_pred["pred_" + target] = np.mean(preds, axis=0).tolist()
+                    elif st.task_type == "multilabel_classification":
+                        preds = [
+                            np.asarray([json.loads(v) if isinstance(v, str) else v for v in f.get("pred_" + target, f.get(target))], dtype=float)
+                            for f in fold_test_preds
+                        ]
+                        avg = np.mean(preds, axis=0)
+                        final_test_pred["pred_" + target] = (avg > 0.5).astype(int).tolist()
+                    else:
+                        preds = [f.get("pred_" + target, f.get(target)) for f in fold_test_preds]
+                        order = list(class_order) if class_order else []
+                        n_samples = len(test_df)
+                        voted = []
+                        for i in range(n_samples):
+                            s_preds = [p[i] for p in preds]
+                            if order:
+                                counts = {c: s_preds.count(c) for c in order}
+                                voted.append(max(order, key=lambda c: counts[c]))
+                            else:
+                                from collections import Counter
+                                voted.append(Counter(s_preds).most_common(1)[0][0])
+                        final_test_pred["pred_" + target] = voted
+
+            test_out = pd.DataFrame({id_col: test_df[id_col].values})
+            for target, st in self.task_spec.subtasks.items():
+                if "proba_" + target in final_test_pred:
+                    test_out["proba_" + target] = [json.dumps(np.asarray(x).tolist()) for x in final_test_pred["proba_" + target]]
+                if "classes_" + target in final_test_pred:
+                    test_out["classes_" + target] = json.dumps(np.asarray(final_test_pred["classes_" + target]).tolist())
+                p_val = final_test_pred["pred_" + target]
+                if isinstance(p_val, (list, np.ndarray)) and st.task_type == "multilabel_classification":
+                    test_out["pred_" + target] = [json.dumps(np.asarray(x).tolist()) for x in p_val]
+                elif isinstance(p_val, (list, np.ndarray)):
+                    test_out["pred_" + target] = np.asarray(p_val).tolist()
+                else:
+                    test_out["pred_" + target] = p_val.item() if hasattr(p_val, "item") else p_val
+                raw_col = st.column or target
+                if raw_col not in test_out:
+                    test_out[raw_col] = test_out["pred_" + target]
+
+            test_out.to_csv(self.exp_dir / "test_predictions.csv", index=False)
+            self.manifest["prediction_splits"] = {"test_predictions.csv": "test"}
+
         (self.exp_dir / "EXPERIMENT_CARD.md").write_text(
             f"# {self.exp_id}\n\n{aggregate['primary_metric']}: {aggregate['primary_score']} ({aggregate['direction']})\n",
             encoding="utf-8",

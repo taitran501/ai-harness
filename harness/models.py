@@ -3,6 +3,8 @@
 from __future__ import annotations
 import inspect
 import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -28,6 +30,56 @@ except (ImportError, Exception):
     HAS_XGBOOST = False
 
 
+class NativeCategoricalTransformer(BaseEstimator, TransformerMixin):
+    """Passes numeric features directly and casts categorical columns to category dtype for native GBDT handling.
+
+    Allows GBDT models (LightGBM, XGBoost) to utilize native categorical splitting and avoids
+    forcing StandardScaler or arbitrary OneHotEncoder limits on tabular features.
+    """
+
+    def __init__(self):
+        self.categories_ = {}
+        self.cat_dtypes_ = {}
+
+    def fit(self, X, y=None):
+        self.categories_ = {}
+        self.cat_dtypes_ = {}
+        if hasattr(X, "columns"):
+            for c in X.columns:
+                if X[c].dtype.kind not in "biuf":
+                    if hasattr(X[c], "cat"):
+                        cats = list(X[c].cat.categories)
+                        ordered = bool(X[c].cat.ordered)
+                        cat_dtype = pd.CategoricalDtype(categories=cats, ordered=ordered)
+                    else:
+                        non_null = X[c].dropna()
+                        str_series = non_null.astype(str)
+                        cats = sorted(str_series.unique().tolist())
+                        cat_dtype = pd.CategoricalDtype(categories=cats, ordered=False)
+                    self.categories_[c] = cats
+                    self.cat_dtypes_[c] = cat_dtype
+        return self
+
+    def transform(self, X):
+        if not hasattr(X, "copy"):
+            return X
+        X_out = X.copy()
+        dtypes = getattr(self, "cat_dtypes_", {})
+        if dtypes and hasattr(X_out, "columns"):
+            for c, cat_dtype in dtypes.items():
+                if c in X_out.columns:
+                    col = X_out[c]
+                    cats = cat_dtype.categories
+                    ordered = cat_dtype.ordered
+                    if hasattr(col, "cat"):
+                        X_out[c] = col.cat.set_categories(cats, ordered=ordered)
+                    else:
+                        s_str = col.astype(str).where(col.notna(), other=np.nan)
+                        s_str = s_str.where(s_str.isin(cats), other=np.nan)
+                        X_out[c] = pd.Categorical(s_str, categories=cats, ordered=ordered)
+        return X_out
+
+
 
 def call_model(model, method, frame, variant):
     fn = getattr(model, method)
@@ -42,6 +94,7 @@ class GenericBaselineModel:
     NAMES = {
         "baseline",
         "ridge",
+        "ridge_regression",
         "tfidf_ridge",
         "logistic_regression",
         "tfidf_logistic_regression",
@@ -93,54 +146,67 @@ class GenericBaselineModel:
                     "Built-in multilabel training requires a task model plugin"
                 )
             col = st.column or key
-            reg = st.task_type == "regression"
+            reg = st.task_type in ("regression", "ranking")
             if self.model_name != "baseline" and (reg != ("ridge" in self.model_name)):
                 raise ValueError("Requested model does not match target task type")
             cls = Ridge if reg else LogisticRegression
             valid = inspect.signature(cls).parameters
-            if set(self.kwargs) - set(valid):
+            model_kwargs = dict(self.kwargs)
+            feat_transform = model_kwargs.pop("feature_transformer", None) or model_kwargs.pop("transform", None)
+            if set(model_kwargs) - set(valid):
                 raise ValueError(
-                    f"Unsupported estimator parameters: {sorted(set(self.kwargs)-set(valid))}"
+                    f"Unsupported estimator parameters: {sorted(set(model_kwargs)-set(valid))}"
                 )
             params = (
                 {"solver": "lsqr"}
                 if reg
                 else {"max_iter": 500, "class_weight": "balanced"}
             )
-            params.update(self.kwargs)
+            params.update(model_kwargs)
             if "random_state" in valid:
                 params["random_state"] = self.seed
             estimator = cls(**params)
             if inp.type in {"text", "text_template"}:
                 transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
                 x = inp.compose_text(df)
-            elif inp.type == "tabular":
-                numeric = [c for c in features if df[c].dtype.kind in "biuf"]
-                categorical = [c for c in features if c not in numeric]
-                transform = ColumnTransformer(
-                    [
-                        (
-                            "numeric",
-                            Pipeline(
-                                [
-                                    ("impute", SimpleImputer(strategy="median")),
-                                    ("scale", StandardScaler()),
-                                ]
+            elif inp.type in {"tabular", "features", "passthrough", "multimodal"}:
+                if feat_transform == "passthrough":
+                    transform = "passthrough"
+                elif feat_transform is not None:
+                    transform = feat_transform
+                else:
+                    numeric = [c for c in features if df[c].dtype.kind in "biuf"]
+                    categorical = [c for c in features if c not in numeric]
+                    transform = ColumnTransformer(
+                        [
+                            (
+                                "numeric",
+                                Pipeline(
+                                    [
+                                        ("impute", SimpleImputer(strategy="median")),
+                                        ("scale", StandardScaler()),
+                                    ]
+                                ),
+                                numeric,
                             ),
-                            numeric,
-                        ),
-                        (
-                            "category",
-                            Pipeline(
-                                [
-                                    ("impute", SimpleImputer(strategy="most_frequent")),
-                                    ("encode", OneHotEncoder(handle_unknown="ignore")),
-                                ]
+                            (
+                                "category",
+                                Pipeline(
+                                    [
+                                        ("impute", SimpleImputer(strategy="most_frequent")),
+                                        (
+                                            "encode",
+                                            OneHotEncoder(
+                                                handle_unknown="ignore",
+                                                max_categories=30,
+                                            ),
+                                        ),
+                                    ]
+                                ),
+                                categorical,
                             ),
-                            categorical,
-                        ),
-                    ]
-                )
+                        ]
+                    )
                 x = df[features]
             else:
                 raise ValueError(f"Unsupported baseline input type {inp.type}")
@@ -240,15 +306,17 @@ class LightGBMModel:
                     "Built-in multilabel training requires a task model plugin"
                 )
             col = st.column or key
-            reg = st.task_type == "regression"
+            reg = st.task_type in ("regression", "ranking")
             cls = LGBMRegressor if reg else LGBMClassifier
             valid = inspect.signature(cls).parameters
-            if set(self.kwargs) - set(valid):
+            model_kwargs = dict(self.kwargs)
+            feat_transform = model_kwargs.pop("feature_transformer", None) or model_kwargs.pop("transform", None)
+            if set(model_kwargs) - set(valid):
                 raise ValueError(
-                    f"Unsupported estimator parameters: {sorted(set(self.kwargs)-set(valid))}"
+                    f"Unsupported estimator parameters: {sorted(set(model_kwargs)-set(valid))}"
                 )
             params = {"verbosity": -1, "verbose": -1}
-            params.update(self.kwargs)
+            params.update(model_kwargs)
             if "random_state" in valid:
                 params["random_state"] = self.seed
             estimator = cls(**params)
@@ -256,33 +324,13 @@ class LightGBMModel:
             if inp.type in {"text", "text_template"}:
                 transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
                 x = inp.compose_text(df)
-            elif inp.type == "tabular":
-                numeric = [c for c in features if df[c].dtype.kind in "biuf"]
-                categorical = [c for c in features if c not in numeric]
-                transform = ColumnTransformer(
-                    [
-                        (
-                            "numeric",
-                            Pipeline(
-                                [
-                                    ("impute", SimpleImputer(strategy="median")),
-                                    ("scale", StandardScaler()),
-                                ]
-                            ),
-                            numeric,
-                        ),
-                        (
-                            "category",
-                            Pipeline(
-                                [
-                                    ("impute", SimpleImputer(strategy="most_frequent")),
-                                    ("encode", OneHotEncoder(handle_unknown="ignore")),
-                                ]
-                            ),
-                            categorical,
-                        ),
-                    ]
-                )
+            elif inp.type in {"tabular", "features", "passthrough", "multimodal"}:
+                if feat_transform == "passthrough":
+                    transform = "passthrough"
+                elif feat_transform is not None:
+                    transform = feat_transform
+                else:
+                    transform = NativeCategoricalTransformer()
                 x = df[features]
             else:
                 raise ValueError(f"Unsupported baseline input type {inp.type}")
@@ -395,16 +443,18 @@ class XGBoostModel:
                     "Built-in multilabel training requires a task model plugin"
                 )
             col = st.column or key
-            reg = st.task_type == "regression"
+            reg = st.task_type in ("regression", "ranking")
             cls = XGBRegressor if reg else XGBClassifier
             valid = inspect.signature(cls).parameters
             has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in valid.values())
-            if not has_var_kw and (set(self.kwargs) - set(valid)):
+            model_kwargs = dict(self.kwargs)
+            feat_transform = model_kwargs.pop("feature_transformer", None) or model_kwargs.pop("transform", None)
+            if not has_var_kw and (set(model_kwargs) - set(valid)):
                 raise ValueError(
-                    f"Unsupported estimator parameters: {sorted(set(self.kwargs)-set(valid))}"
+                    f"Unsupported estimator parameters: {sorted(set(model_kwargs)-set(valid))}"
                 )
-            params = {"verbosity": 0}
-            params.update(self.kwargs)
+            params = {"verbosity": 0, "enable_categorical": True}
+            params.update(model_kwargs)
             if "random_state" in valid or has_var_kw:
                 params["random_state"] = self.seed
             estimator = cls(**params)
@@ -412,33 +462,13 @@ class XGBoostModel:
             if inp.type in {"text", "text_template"}:
                 transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
                 x = inp.compose_text(df)
-            elif inp.type == "tabular":
-                numeric = [c for c in features if df[c].dtype.kind in "biuf"]
-                categorical = [c for c in features if c not in numeric]
-                transform = ColumnTransformer(
-                    [
-                        (
-                            "numeric",
-                            Pipeline(
-                                [
-                                    ("impute", SimpleImputer(strategy="median")),
-                                    ("scale", StandardScaler()),
-                                ]
-                            ),
-                            numeric,
-                        ),
-                        (
-                            "category",
-                            Pipeline(
-                                [
-                                    ("impute", SimpleImputer(strategy="most_frequent")),
-                                    ("encode", OneHotEncoder(handle_unknown="ignore")),
-                                ]
-                            ),
-                            categorical,
-                        ),
-                    ]
-                )
+            elif inp.type in {"tabular", "features", "passthrough", "multimodal"}:
+                if feat_transform == "passthrough":
+                    transform = "passthrough"
+                elif feat_transform is not None:
+                    transform = feat_transform
+                else:
+                    transform = NativeCategoricalTransformer()
                 x = df[features]
             else:
                 raise ValueError(f"Unsupported baseline input type {inp.type}")

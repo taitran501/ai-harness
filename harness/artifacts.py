@@ -115,6 +115,18 @@ def frame_hash(frame):
 
 def validate_test_prediction(path, *, task_spec, plugin=None):
     path = Path(path).resolve()
+    cand_manifest_path = path.parent / "candidate_manifest.json"
+    if cand_manifest_path.is_file() and not (path.parent / "artifact_manifest.json").is_file():
+        cand_manifest = json.loads(cand_manifest_path.read_text(encoding="utf-8"))
+        if (
+            path.name != "test_predictions.csv"
+            or cand_manifest.get("prediction_splits", {}).get(path.name) != "test"
+            or sha256(path) != cand_manifest.get("test_prediction_sha256")
+        ):
+            raise ValueError(
+                "Submission requires proven test predictions; OOF is validation evidence"
+            )
+        return cand_manifest
     manifest = validate_run(path.parent, task_spec=task_spec, plugin=plugin)
     if (
         path.name != "test_predictions.csv"

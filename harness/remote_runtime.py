@@ -18,6 +18,8 @@ CORE_RUNTIME_DISTRIBUTIONS = {
     "scikit-learn": "scikit-learn",
     "PyYAML": "PyYAML",
     "scipy": "scipy",
+    "lightgbm": "lightgbm",
+    "xgboost": "xgboost",
 }
 
 
@@ -40,11 +42,16 @@ def resolve_remote_runtime(project: HarnessProject) -> Dict[str, Any]:
     for requirement_name, distribution_name in CORE_RUNTIME_DISTRIBUTIONS.items():
         try:
             installed_version = metadata.version(distribution_name)
+            core_requirements.append(f"{requirement_name}=={installed_version}")
         except metadata.PackageNotFoundError as exc:
-            raise ValueError(
-                f"Cannot pin remote runtime dependency {distribution_name} because it is not installed locally."
-            ) from exc
-        core_requirements.append(f"{requirement_name}=={installed_version}")
+            if requirement_name == "lightgbm":
+                core_requirements.append("lightgbm>=4.0.0")
+            elif requirement_name == "xgboost":
+                core_requirements.append("xgboost>=2.0.0")
+            else:
+                raise ValueError(
+                    f"Cannot pin remote runtime dependency {distribution_name} because it is not installed locally."
+                ) from exc
 
     runtime: Dict[str, Any] = {
         "schema_version": 1,

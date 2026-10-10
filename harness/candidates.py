@@ -76,9 +76,31 @@ def build_candidate(project, name, mode, source_map):
         for field in ("task_sha256", "scorer_sha256", "split_sha256", "data_sha256"):
             if manifest[field] != manifests[0][field]:
                 raise ValueError("Source contract/split mismatch: " + field)
+    has_test_preds = all(
+        (project.artifacts_dir / exp / "test_predictions.csv").is_file()
+        for exp in ids
+    )
+    test_frames = []
+    if has_test_preds:
+        for exp in ids:
+            t_frame = pd.read_csv(project.artifacts_dir / exp / "test_predictions.csv")
+            if t_frame.empty or key not in t_frame or t_frame[key].isna().any() or t_frame[key].duplicated().any():
+                has_test_preds = False
+                break
+            if test_frames and set(t_frame[key]) != set(test_frames[0][key]):
+                has_test_preds = False
+                break
+            test_frames.append(
+                t_frame.set_index(key)
+                .reindex(test_frames[0][key] if test_frames else t_frame[key])
+                .reset_index()
+            )
     merged = frames[0].copy()
+    merged_test = test_frames[0].copy() if has_test_preds else None
     if mode == "specialist_router":
         merged = merged[[key, "fold"]].copy()
+        if has_test_preds:
+            merged_test = test_frames[0][[key]].copy()
         for target, source in routing.items():
             target = target.removeprefix("pred_")
             frame = frames[ids.index(source)]
@@ -88,6 +110,20 @@ def build_candidate(project, name, mode, source_map):
                     raise ValueError("Missing specialist target: " + col)
                 if col in frame:
                     merged[col] = frame[col].values
+            if has_test_preds:
+                t_f = test_frames[ids.index(source)]
+                for prefix in ("pred_", "proba_", "classes_"):
+                    col = prefix + target
+                    if col in t_f:
+                        merged_test[col] = t_f[col].values
+                if target in t_f and target not in merged_test:
+                    merged_test[target] = t_f[target].values
+                elif "pred_" + target in merged_test and target not in merged_test:
+                    merged_test[target] = merged_test["pred_" + target]
+                if target in spec.subtasks and spec.subtasks[target].column:
+                    st_col = spec.subtasks[target].column
+                    if st_col not in merged_test and "pred_" + target in merged_test:
+                        merged_test[st_col] = merged_test["pred_" + target]
     elif len(ids) > 1:
         weights = np.asarray(source_map.get("weights", [1.0] * len(ids)), float)
         if (
@@ -98,6 +134,8 @@ def build_candidate(project, name, mode, source_map):
         ):
             raise ValueError("Invalid blend weights")
         weights /= weights.sum()
+        if has_test_preds:
+            merged_test = test_frames[0][[key]].copy()
         for target, st in spec.subtasks.items():
             col = "pred_" + target
             if any(col not in f for f in frames):
@@ -116,10 +154,14 @@ def build_candidate(project, name, mode, source_map):
                 )
                 if not passed:
                     raise ValueError("Diversity guard: " + "; ".join(errors))
-            if st.task_type == "regression":
+            if st.task_type in ("regression", "ranking"):
                 merged[col] = sum(
                     w * f[col].astype(float).values for w, f in zip(weights, frames)
                 )
+                if has_test_preds:
+                    merged_test[col] = sum(
+                        w * f[col].astype(float).values for w, f in zip(weights, test_frames)
+                    )
             elif (
                 st.task_type == "multilabel_classification"
                 and mode != "probability_blend"
@@ -131,8 +173,21 @@ def build_candidate(project, name, mode, source_map):
                     merged.drop(
                         columns=[prefix + target], errors="ignore", inplace=True
                     )
+                if has_test_preds:
+                    t_values = np.asarray([predictions(f)[col] for f in test_frames], float)
+                    t_comb = np.sum(t_values * weights[:, None, None], axis=0) > 0.5
+                    merged_test[col] = [json.dumps(x.astype(int).tolist()) for x in t_comb]
+                    for prefix in ("proba_", "classes_"):
+                        merged_test.drop(
+                            columns=[prefix + target], errors="ignore", inplace=True
+                        )
             elif mode == "probability_blend":
-                orders = [json.loads(f["classes_" + target].iloc[0]) for f in frames]
+                orders = [
+                    json.loads(f["classes_" + target].iloc[0])
+                    if isinstance(f["classes_" + target].iloc[0], str)
+                    else f["classes_" + target].iloc[0]
+                    for f in frames
+                ]
                 if any(x != orders[0] for x in orders):
                     raise ValueError("Probability class orders differ")
                 proba = sum(
@@ -146,7 +201,29 @@ def build_candidate(project, name, mode, source_map):
                     ]
                 else:
                     merged[col] = np.asarray(orders[0])[proba.argmax(axis=1)]
+                if has_test_preds:
+                    t_orders = [
+                        json.loads(f["classes_" + target].iloc[0])
+                        if isinstance(f["classes_" + target].iloc[0], str)
+                        else f["classes_" + target].iloc[0]
+                        for f in test_frames
+                    ]
+                    if any(x != t_orders[0] for x in t_orders):
+                        raise ValueError("Probability class orders differ in test predictions")
+                    t_proba = sum(
+                        w * np.asarray(predictions(f)["proba_" + target], float)
+                        for w, f in zip(weights, test_frames)
+                    )
+                    merged_test["proba_" + target] = [json.dumps(np.asarray(x).tolist()) for x in t_proba]
+                    merged_test["classes_" + target] = json.dumps(np.asarray(t_orders[0]).tolist())
+                    if st.task_type == "multilabel_classification":
+                        merged_test[col] = [
+                            json.dumps((x > 0.5).astype(int).tolist()) for x in t_proba
+                        ]
+                    else:
+                        merged_test[col] = np.asarray(t_orders[0])[t_proba.argmax(axis=1)]
             else:
+                order_raw = list(st.classes) if st.classes else []
                 order = list(map(str, st.classes))
                 if not order:
                     raise ValueError("Voting requires declared class order")
@@ -154,11 +231,28 @@ def build_candidate(project, name, mode, source_map):
                 votes = np.asarray(
                     [np.sum((values == c) * weights[:, None], axis=0) for c in order]
                 )
-                merged[col] = np.asarray(order)[votes.argmax(axis=0)]
+                merged[col] = np.asarray(order_raw or order)[votes.argmax(axis=0)]
                 for prefix in ("proba_", "classes_"):
                     merged.drop(
                         columns=[prefix + target], errors="ignore", inplace=True
                     )
+                if has_test_preds:
+                    t_values = np.asarray([f[col].astype(str).values for f in test_frames])
+                    t_votes = np.asarray(
+                        [np.sum((t_values == c) * weights[:, None], axis=0) for c in order]
+                    )
+                    merged_test[col] = np.asarray(order_raw or order)[t_votes.argmax(axis=0)]
+                    for prefix in ("proba_", "classes_"):
+                        merged_test.drop(
+                            columns=[prefix + target], errors="ignore", inplace=True
+                        )
+            if has_test_preds:
+                target_col = st.column or target
+                if target_col not in merged_test and col in merged_test:
+                    merged_test[target_col] = merged_test[col]
+    elif mode in {"single_model", "checkpoint_selection"}:
+        if has_test_preds:
+            merged_test = test_frames[0].copy()
     truth = pd.read_csv(project.artifacts_dir / ids[0] / "evaluation_truth.csv")
     if set(truth[key]) != set(merged[key]):
         raise ValueError("Incomplete evaluation coverage")
@@ -175,6 +269,9 @@ def build_candidate(project, name, mode, source_map):
     folder.mkdir(exist_ok=False)
     merged["input_variant"] = mode
     merged.to_csv(folder / "oof_predictions.csv", index=False)
+    if has_test_preds and merged_test is not None:
+        merged_test["input_variant"] = mode
+        merged_test.to_csv(folder / "test_predictions.csv", index=False)
     entry = {
         "id": candidate_id,
         "name": name,
@@ -192,16 +289,21 @@ def build_candidate(project, name, mode, source_map):
         **result,
     }
     (folder / "metrics.json").write_text(json.dumps(result, indent=2))
+    manifest_data = {
+        **entry,
+        "schema_version": 2,
+        "prediction_sha256": sha256(folder / "oof_predictions.csv"),
+        "metrics_sha256": sha256(folder / "metrics.json"),
+    }
+    if has_test_preds and (folder / "test_predictions.csv").is_file():
+        test_sha = sha256(folder / "test_predictions.csv")
+        manifest_data["test_prediction_sha256"] = test_sha
+        manifest_data["prediction_splits"] = {"test_predictions.csv": "test"}
+        entry["test_prediction_sha256"] = test_sha
+        entry["prediction_splits"] = {"test_predictions.csv": "test"}
+        entry["test_predictions_path"] = str((folder / "test_predictions.csv").relative_to(project.root))
     (folder / "candidate_manifest.json").write_text(
-        json.dumps(
-            {
-                **entry,
-                "schema_version": 2,
-                "prediction_sha256": sha256(folder / "oof_predictions.csv"),
-                "metrics_sha256": sha256(folder / "metrics.json"),
-            },
-            indent=2,
-        )
+        json.dumps(manifest_data, indent=2)
     )
     return entry
 
@@ -215,6 +317,12 @@ def validate_candidate(project, entry):
         raise ValueError("Candidate metric hash mismatch")
     if sha256(folder / "oof_predictions.csv") != manifest["prediction_sha256"]:
         raise ValueError("Candidate prediction hash mismatch")
+    if "test_prediction_sha256" in manifest:
+        if (
+            not (folder / "test_predictions.csv").is_file()
+            or sha256(folder / "test_predictions.csv") != manifest["test_prediction_sha256"]
+        ):
+            raise ValueError("Candidate test prediction hash mismatch")
     spec = load_active_task_spec(project.task_config_path)
     context = TaskPluginContext(
         project.root, project.task_config_path, spec, project.plugin_id or "default"

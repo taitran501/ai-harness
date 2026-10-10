@@ -1,7 +1,11 @@
 # ML-Harness AI Assistant Prompt Library
 
-> [!NOTE]
-> This directory contains production-grade system prompts and execution contracts for AI coding assistants (Google Antigravity, Anthropic Claude Code, OpenAI Codex).
+> [!IMPORTANT]
+> **Verification Scope: Strictly NLP / Text Only**
+> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (e.g. `stereoqueereval`, text classification, transformer fine-tuning, prompt evaluation).
+> Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice.
+>
+> This directory contains system prompts and execution contracts for AI coding assistants (Google Antigravity, Anthropic Claude Code, OpenAI Codex).
 > Each prompt corresponds to a specific phase in the **8-Phase ML-Harness Journey**.
 
 ---
@@ -26,3 +30,4 @@
    - `AUTO`: Safe exploratory actions (inspection, configuration creation, smoke probes).
    - `AUTO_WITH_LIMIT`: Session-budgeted compute actions (full validation, candidate synthesis).
    - `USER_APPROVAL`: High-stakes irreversible actions (`freeze_candidate`, `prepare_submission`, `emergency_unfreeze`).
+5. **Strict Verification Scope**: ML-Harness is strictly verified only on NLP/Text tasks. Never claim or assume that Tabular, Vision, Audio, or Multimodal pipelines are verified or production-ready.

@@ -1462,6 +1462,118 @@ class AgentBridge:
                     )
                 )
 
+                modality = (
+                    getattr(self.task_spec, "modality", None)
+                    or self.comp_state.spec.get("modality", "")
+                ).lower()
+                task_type = (
+                    getattr(self.task_spec, "task_type", None)
+                    or self.comp_state.spec.get("task_type", "")
+                ).lower()
+                is_reg = (
+                    task_type in ("regression", "ranking")
+                    or "regression" in task_type
+                )
+
+                if "input_variants" in params:
+                    input_variants = params["input_variants"]
+                elif (
+                    hasattr(self, "task_spec")
+                    and self.task_spec
+                    and getattr(self.task_spec, "inputs_dict", None)
+                    and self.task_spec.inputs_dict
+                ):
+                    input_variants = list(self.task_spec.inputs_dict.keys())
+                else:
+                    input_variants = ["default"]
+
+                # Resolve model configuration dynamically from params or task_spec
+                spec_model_cfg = None
+                if hasattr(self, "task_spec") and self.task_spec:
+                    spec_meta = getattr(self.task_spec, "metadata", {}) or {}
+                    spec_model_cfg = (
+                        spec_meta.get("model")
+                        or spec_meta.get("default_model")
+                        or spec_meta.get("baseline_model")
+                    )
+                if not spec_model_cfg and hasattr(self, "comp_state") and self.comp_state:
+                    spec_model_cfg = (
+                        self.comp_state.spec.get("model")
+                        or self.comp_state.spec.get("default_model")
+                        or self.comp_state.spec.get("baseline_model")
+                    )
+
+                spec_name = None
+                spec_params = {}
+                if isinstance(spec_model_cfg, dict):
+                    spec_name = spec_model_cfg.get("name")
+                    spec_params = spec_model_cfg.get("params", {})
+                elif isinstance(spec_model_cfg, str):
+                    spec_name = spec_model_cfg
+
+                params_model_cfg = params.get("model")
+                if isinstance(params_model_cfg, dict):
+                    model_payload = dict(params_model_cfg)
+                    if "model_params" in params and isinstance(params["model_params"], dict):
+                        model_payload.setdefault("params", {}).update(params["model_params"])
+                elif isinstance(params_model_cfg, str):
+                    model_payload = {
+                        "name": params_model_cfg,
+                        "params": dict(params.get("model_params", {})),
+                    }
+                elif "model_name" in params:
+                    model_payload = {
+                        "name": params["model_name"],
+                        "params": dict(params.get("model_params", {})),
+                    }
+                elif spec_model_cfg:
+                    if isinstance(spec_model_cfg, dict):
+                        model_payload = dict(spec_model_cfg)
+                    else:
+                        model_payload = {"name": spec_model_cfg, "params": {}}
+                    if "model_params" in params and isinstance(params["model_params"], dict):
+                        model_payload.setdefault("params", {}).update(params["model_params"])
+                elif modality == "tabular":
+                    model_payload = {
+                        "name": "lightgbm",
+                        "params": {
+                            "n_estimators": 100,
+                            "learning_rate": 0.05,
+                            "num_leaves": 31,
+                        },
+                    }
+                    if "model_params" in params and isinstance(params["model_params"], dict):
+                        model_payload["params"].update(params["model_params"])
+                elif modality in {"text", "nlp"}:
+                    if is_reg:
+                        model_payload = {
+                            "name": "tfidf_ridge",
+                            "params": {"alpha": 1.0},
+                        }
+                    else:
+                        model_payload = {
+                            "name": "tfidf_logistic_regression",
+                            "params": {
+                                "word_max_features": 25000,
+                                "char_max_features": 25000,
+                                "C": 1.5,
+                            },
+                        }
+                    if "model_params" in params and isinstance(params["model_params"], dict):
+                        model_payload["params"].update(params["model_params"])
+                else:
+                    model_payload = {
+                        "name": "baseline",
+                        "params": {},
+                    }
+                    if "model_params" in params and isinstance(params["model_params"], dict):
+                        model_payload["params"].update(params["model_params"])
+
+                if "name" not in model_payload and "factory" not in model_payload:
+                    model_payload["name"] = spec_name or ("lightgbm" if modality == "tabular" else "baseline")
+                if "params" not in model_payload:
+                    model_payload["params"] = {}
+
                 # Strict GroundingGate-compliant YAML structure (task-agnostic defaults)
                 cfg_payload: Dict[str, Any] = {
                     "experiment": {
@@ -1514,19 +1626,10 @@ class AgentBridge:
                     },
                     "data": {
                         "folds": params.get("folds", [0, 1, 2, 3, 4]),
-                        "input_variants": params.get("input_variants", ["default"]),
+                        "input_variants": input_variants,
+                        "selection_variant": params.get("selection_variant", input_variants[0]),
                     },
-                    "model": {
-                        "name": params.get("model_name", "tfidf_logistic_regression"),
-                        "params": params.get(
-                            "model_params",
-                            {
-                                "word_max_features": 25000,
-                                "char_max_features": 25000,
-                                "C": 1.5,
-                            },
-                        ),
-                    },
+                    "model": model_payload,
                 }
 
                 # Pre-verify with GroundingGate before writing to disk
@@ -1980,11 +2083,21 @@ class AgentBridge:
                 exp_id = params.get("exp_id", default_exp)
                 cand_csv = params.get("candidate_csv")
                 if not cand_csv:
-                    raise ValueError("Explicit test candidate_csv is required")
+                    default_cand = self.artifacts_dir / exp_id / "test_predictions.csv"
+                    if default_cand.is_file():
+                        cand_csv = str(default_cand)
+                    else:
+                        raise ValueError(
+                            f"Action 'prepare_submission' requires 'candidate_csv' or existing 'test_predictions.csv' in {self.artifacts_dir / exp_id}."
+                        )
+                cand_path = Path(cand_csv)
+                if not cand_path.is_absolute():
+                    cand_path = self.project_root / cand_path
+
                 from harness.artifacts import validate_test_prediction
 
                 validate_test_prediction(
-                    self.project_root / cand_csv,
+                    cand_path,
                     task_spec=self.task_spec,
                     plugin=self.task_plugin,
                 )
@@ -1993,75 +2106,25 @@ class AgentBridge:
                     "submission_validator"
                 ):
                     raise ValueError("Task plugin must implement submission hooks")
-                if self.project.plugin_id not in (None, "default"):
-                    capabilities = self.task_plugin.capabilities()
-                    if not capabilities.get(
-                        "submission_builder"
-                    ) or not capabilities.get("submission_validator"):
-                        raise ValueError(
-                            f"Task plugin '{self.project.plugin_id}' must implement both submission_builder and submission_validator."
-                        )
-                    if not cand_csv:
-                        raise ValueError(
-                            "Provide candidate_csv containing predictions for the competition test set. "
-                            "OOF validation predictions are not a competition submission."
-                        )
-                    submission_spec = self.comp_state.spec.get("submission_spec", {})
-                    entry = sub_mgr.register_plugin_submission(
-                        exp_id=exp_id,
-                        candidate_csv=cand_csv,
-                        plugin=self.task_plugin,
-                        plugin_context=self.plugin_context,
-                        file_name=submission_spec.get("file_name", "submission.csv"),
-                        notes=params.get("notes", ""),
-                    )
-                    session.compute_usage["submissions_used"] = (
-                        int(session.compute_usage.get("submissions_used", 0)) + 1
-                    )
-                    return ActionObservation(
-                        step_index=call.step_index,
-                        action=act,
-                        status="SUCCESS",
-                        summary=f"Built and validated task submission '{entry.id}' with plugin '{self.project.plugin_id}'.",
-                        artifact_path=entry.archive_path,
-                        data=asdict(entry),
-                        elapsed_seconds=round(time.time() - t0, 3),
-                    )
-                if not cand_csv:
-                    for cand_opt in [
-                        self.artifacts_dir / exp_id / "predictions.csv",
-                        self.artifacts_dir / exp_id / "oof_predictions.csv",
-                    ]:
-                        if cand_opt.exists():
-                            cand_csv = str(cand_opt)
-                            break
-                    if not cand_csv:
-                        cand_csv = str(self.artifacts_dir / exp_id / "predictions.csv")
-
-                base_exp = (
-                    self.comp_state.state["gates"].get("baseline_exp_id") or "baseline"
-                )
-                base_csv = params.get("baseline_csv")
-                if not base_csv:
-                    for base_opt in [
-                        self.artifacts_dir / base_exp / "predictions.csv",
-                        self.artifacts_dir / base_exp / "oof_predictions.csv",
-                    ]:
-                        if base_opt.exists():
-                            base_csv = str(base_opt)
-                            break
-
-                entry = sub_mgr.register_submission(
-                    exp_id=exp_id, candidate_csv=cand_csv, baseline_csv=base_csv
+                sub_spec = getattr(self.task_spec, "submission_spec", None) or self.comp_state.spec.get("submission_spec", {})
+                file_name = sub_spec.get("file_name", "submission.csv") if isinstance(sub_spec, dict) else "submission.csv"
+                entry = sub_mgr.register_plugin_submission(
+                    exp_id=exp_id,
+                    candidate_csv=cand_path,
+                    plugin=self.task_plugin,
+                    plugin_context=self.plugin_context,
+                    file_name=file_name,
+                    notes=params.get("notes", ""),
                 )
                 session.compute_usage["submissions_used"] = (
                     int(session.compute_usage.get("submissions_used", 0)) + 1
                 )
+                plugin_label = self.project.plugin_id or "default"
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
                     status="SUCCESS",
-                    summary=f"Verified & packaged submission '{entry.id}' via AuditGate.",
+                    summary=f"Built and validated task submission '{entry.id}' with plugin '{plugin_label}'.",
                     artifact_path=entry.archive_path,
                     data=asdict(entry),
                     elapsed_seconds=round(time.time() - t0, 3),

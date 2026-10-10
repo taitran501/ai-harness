@@ -2,6 +2,11 @@
 
 This guide describes how AI coding assistants (such as Antigravity IDE, Claude Code, or OpenAI Codex) interact with the ML-Harness framework.
 
+> [!IMPORTANT]
+> **Verification Scope: Strictly NLP / Text Only**
+> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (empirically benchmarked on real-world tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and prompt evaluation).
+> All other modalities (**Tabular, Computer Vision, Audio, Multimodal**) are **experimental works-in-progress (WIP / Roadmap)**, have NOT been verified in competitive conditions, and are NOT considered ready or working well in practice. Never claim or assume that non-NLP modalities are production-ready or battle-tested.
+
 ---
 
 ## 1. Core Operating Principles
@@ -17,6 +22,9 @@ This guide describes how AI coding assistants (such as Antigravity IDE, Claude C
 
 4. **Task-Owned Contracts**:
    The installed task plugin defines data, metrics, and submission capabilities. The agent checks those declared capabilities before treating a task as submission-ready.
+
+5. **Strictly NLP Scope**:
+   The assistant must maintain transparency that ML-Harness is empirically verified and working well only on NLP/Text. Any non-NLP tasks must be treated as experimental WIP.
 
 ---
 
