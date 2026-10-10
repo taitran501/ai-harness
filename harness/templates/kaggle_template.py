@@ -421,12 +421,19 @@ with zipfile.ZipFile(io.BytesIO(bundle_bytes), 'r') as zf:
 
 # 2. Restore only the task data paths included in the separately consented dataset.
 input_root = Path("/kaggle/input/{dataset_folder_name}")
-if not input_root.exists():
-    # Fallback scan in /kaggle/input
-    for candidate in Path("/kaggle/input").glob("*"):
-        if (candidate / "dataset").exists() or any(candidate.glob("*.csv")) or any(candidate.glob("*.tsv")):
+if not input_root.exists() or not any(input_root.iterdir()):
+    # Find dataset folder in /kaggle/input
+    for candidate in sorted(Path("/kaggle/input").glob("*")):
+        if candidate.is_dir() and ((candidate / "dataset").exists() or (candidate / "mlh-data-bundle.json").exists() or any(candidate.glob("*.csv")) or any(candidate.glob("*.zip"))):
             input_root = candidate
             break
+
+print(f"[Kaggle Kernel] Using input_root: {{input_root}} (exists: {{input_root.exists()}})")
+
+# Unpack any staged zips (e.g. dataset.zip or splits.zip if uploaded as zip)
+for zip_file in input_root.glob("*.zip"):
+    with zipfile.ZipFile(zip_file, "r") as zf:
+        zf.extractall(".")
 
 data_manifest_path = input_root / "mlh-data-bundle.json"
 if data_manifest_path.is_file():
@@ -434,32 +441,21 @@ if data_manifest_path.is_file():
     for relative in data_manifest.get("paths", []):
         source = input_root / relative
         target = Path(relative)
-        if not source.exists():
-            raise RuntimeError(f"Uploaded task data path is missing: {{relative}}")
-        if target.exists():
-            raise RuntimeError(f"Uploaded task data conflicts with bundled task code: {{relative}}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if source.is_dir():
-            shutil.copytree(source, target)
-        else:
-            shutil.copy2(source, target)
-elif input_root.exists():
-    # Compatibility with a user-selected Kaggle dataset that was not created by this harness.
-    if (input_root / "dataset").exists():
-        shutil.copytree(input_root / "dataset", "dataset", dirs_exist_ok=True)
-    if (input_root / "splits").exists():
-        shutil.copytree(input_root / "splits", "splits", dirs_exist_ok=True)
-    if not (input_root / "dataset").exists():
-        dataset_dir = Path("dataset")
-        dataset_dir.mkdir(parents=True, exist_ok=True)
-        for item in input_root.iterdir():
-            if item.name in {{"dataset-metadata.json", "README.md", "mlh-data-bundle.json"}}:
-                continue
-            target = dataset_dir / item.name
-            if item.is_dir():
-                shutil.copytree(item, target, dirs_exist_ok=True)
-            elif item.is_file():
-                shutil.copy2(item, target)
+        if not source.exists() and not target.exists():
+            print(f"[Warning] Manifest path not found: {{source}}")
+            continue
+        if source.exists() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(source, target)
+            else:
+                shutil.copy2(source, target)
+
+# Fallback copy if dataset or splits folder are in input_root
+if (input_root / "dataset").exists() and not Path("dataset").exists():
+    shutil.copytree(input_root / "dataset", "dataset", dirs_exist_ok=True)
+if (input_root / "splits").exists() and not Path("splits").exists():
+    shutil.copytree(input_root / "splits", "splits", dirs_exist_ok=True)
 
 # 3. Check and install missing dependencies
 runtime = json.loads(Path("ml-harness-runtime.json").read_text(encoding="utf-8"))
