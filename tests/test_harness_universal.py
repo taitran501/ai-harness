@@ -39,27 +39,45 @@ class TestUniversalTaskSpec(unittest.TestCase):
         self.assertTrue(len(spec.name) > 0)
         self.assertIsNotNone(spec.primary_metric)
 
-        # Check multi-task preset if present
-        preset_yaml = Path("task_plugins/stereoqueereval/examples/task.yaml")
-        if preset_yaml.exists():
-            multi_spec = UniversalTaskSpec.from_yaml(preset_yaml)
-            self.assertEqual(multi_spec.name, "StereoQueerEval")
-            self.assertIn("subtask_a", multi_spec.subtasks)
-            self.assertIn("subtask_b", multi_spec.subtasks)
-            self.assertIn("subtask_c_type", multi_spec.subtasks)
-            self.assertIn("subtask_c_identity", multi_spec.subtasks)
-
-            cond = multi_spec.subtasks["subtask_c_type"].condition
-            self.assertIsNotNone(cond)
-            self.assertEqual(cond.parent_target, "subtask_b")
-            self.assertEqual(cond.operator, "not_in")
-            self.assertEqual(cond.fallback_value, "none")
-
     def test_conditional_routing(self):
-        preset_yaml = Path("task_plugins/stereoqueereval/examples/task.yaml")
-        if not preset_yaml.exists():
-            return
-        spec = UniversalTaskSpec.from_yaml(preset_yaml)
+        spec = UniversalTaskSpec(
+            name="GenericMultiTask",
+            task_type="classification",
+            primary_metric="macro_f1",
+            subtasks={
+                "subtask_b": SubtaskSpec(id="subtask_b", name="subtask_b", task_type="multiclass_classification", primary_metric="macro_f1"),
+                "subtask_c_type": SubtaskSpec(
+                    id="subtask_c_type",
+                    name="subtask_c_type",
+                    task_type="multiclass_classification",
+                    primary_metric="macro_f1",
+                    condition=ConditionalRoutingRule(
+                        parent_target="subtask_b",
+                        operator="not_in",
+                        values=["no"],
+                        fallback_value="none",
+                    ),
+                ),
+                "subtask_c_identity": SubtaskSpec(
+                    id="subtask_c_identity",
+                    name="subtask_c_identity",
+                    task_type="multilabel_classification",
+                    primary_metric="macro_f1",
+                    condition=ConditionalRoutingRule(
+                        parent_target="subtask_b",
+                        operator="not_in",
+                        values=["no"],
+                        fallback_value=0,
+                    ),
+                ),
+            },
+        )
+
+        cond = spec.subtasks["subtask_c_type"].condition
+        self.assertIsNotNone(cond)
+        self.assertEqual(cond.parent_target, "subtask_b")
+        self.assertEqual(cond.operator, "not_in")
+        self.assertEqual(cond.fallback_value, "none")
 
         raw_preds = {
             "subtask_b": np.array(["no", "yes_explicit", "no", "yes_implicit"]),

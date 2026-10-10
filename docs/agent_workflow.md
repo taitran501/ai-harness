@@ -4,7 +4,7 @@ This guide describes how AI coding assistants (such as Antigravity IDE, Claude C
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (empirically benchmarked on real-world tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and prompt evaluation).
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (empirically benchmarked on real-world tasks such as text classification, transformer fine-tuning, and prompt evaluation).
 > All other modalities (**Tabular, Computer Vision, Audio, Multimodal**) are **experimental works-in-progress (WIP / Roadmap)**, have NOT been verified in competitive conditions, and are NOT considered ready or working well in practice. Never claim or assume that non-NLP modalities are production-ready or battle-tested.
 
 ---

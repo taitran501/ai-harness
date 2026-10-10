@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (e.g. `stereoqueereval`, text classification, transformer fine-tuning, prompt evaluation).
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (e.g. text classification, transformer fine-tuning, prompt evaluation).
 > Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice.
 >
 > This directory contains system prompts and execution contracts for AI coding assistants (Google Antigravity, Anthropic Claude Code, OpenAI Codex).

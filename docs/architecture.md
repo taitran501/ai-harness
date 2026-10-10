@@ -4,7 +4,7 @@ This document details the architectural design of **AI-Harness**, drawing on pri
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as sequence classification, transformer fine-tuning, and prompt evaluation).
 > Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice. Never claim or assume that non-NLP modalities are production-ready or battle-tested.
 
 ---
@@ -71,7 +71,7 @@ AI-Harness supports three execution backends:
 ### 4.1 Verified Domain Scope: Strictly NLP / Text Only
 > [!IMPORTANT]
 > **Production & Competition Readiness**: The harness runtime, baseline suites, and diagnostics are currently **strictly validated and working well ONLY on NLP / Text** benchmarks:
-> - **NLP / Text Modeling (Verified Core)**: Sequence classification, cross-lingual transfer (XLM-R, DeBERTa, ModernBERT), LLM prompting, and QLoRA fine-tuning (empirically validated on real benchmarks such as `stereoqueereval`).
+> - **NLP / Text Modeling (Verified Core)**: Sequence classification, cross-lingual transfer (XLM-R, DeBERTa, ModernBERT), LLM prompting, and QLoRA fine-tuning (empirically validated on NLP classification benchmarks).
 > - **Other Modalities are Experimental WIP**: Tabular, Computer Vision, Audio, and Multimodal are **NOT** yet verified and **NOT** working well in practice; they are experimental works-in-progress (WIP) on the development roadmap, not ready for production or competition use.
 
 ### 4.2 Transparency on Historical LLM / NLP Bias

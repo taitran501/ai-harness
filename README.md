@@ -12,7 +12,7 @@ ai-harness provides experiment tracking, validation orchestration, and agent int
 
 The core runtime is task-agnostic. Task-specific data loading, model architectures, and competition metrics are loaded via standalone task adapters.
 
-> **Scope Notice**: ai-harness is validated and benchmarked for **Natural Language Processing (NLP / Text)** tasks (e.g., `stereoqueereval`, transformer fine-tuning, prompt evaluation). Other modalities (Tabular, Vision, Audio, Multimodal) are experimental roadmap items and are not yet validated in competition settings.
+> **Scope Notice**: ai-harness is validated and benchmarked for **Natural Language Processing (NLP / Text)** tasks (e.g., text sequence classification, transformer fine-tuning, prompt evaluation). Other modalities (Tabular, Vision, Audio, Multimodal) are experimental roadmap items and are not yet validated in competition settings.
 
 ## Quick start
 

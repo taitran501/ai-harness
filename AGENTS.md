@@ -4,7 +4,7 @@ This document outlines the workflow, conventions, and CLI commands for AI coding
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as sequence classification, transformer fine-tuning, and prompt evaluation).
 > Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice. Never claim or assume that non-NLP modalities are production-ready or battle-tested.
 
 ---
@@ -56,7 +56,7 @@ Harness Runtime (Layer 3 - harness/)
    - In the AIDE / Agentic ML paradigm, the agent (Antigravity / Codex) is the primary scientific reasoning engine responsible for writing and modifying model code (`model.factory`), feature engineering, and hyperparameters.
    - The harness is an execution and audit layer, **not a prescriptive modeling framework**. It must never hardcode feature preprocessing (e.g. forcing `StandardScaler` or restrictive one-hot encoding onto tree models) or constrain model selections. Experiments must freely configure architectures, pipelines, and loss objectives.
 6. **Verification Scope: Strictly NLP/Text Only (Non-NLP Modalities are WIP)**:
-   - **Empirical Reality**: AI-Harness is currently **strictly verified and working well ONLY on NLP/Text** benchmarks (empirically battle-tested on tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and prompt evaluation).
+   - **Empirical Reality**: AI-Harness is currently **strictly verified and working well ONLY on NLP/Text** benchmarks (empirically battle-tested on tasks such as text classification, transformer fine-tuning, and prompt evaluation).
    - **Non-NLP Modalities are Unverified WIP**: Tabular, Vision, Audio, and Multimodal support are **experimental works-in-progress (WIP / Roadmap)**, have NOT been benchmarked in competitive settings, and are **NOT** working well in practice. Never claim or assume that Tabular or Vision/Audio models are "battle-tested" or "thoroughly tested".
    - **Modality Transparency**: Assistants must be transparent regarding historical **LLM / NLP bias** (implicit assumptions favoring TF-IDF, XLM-R, and LLM prompting). While experimental scaffolding or roadmap items exist for other modalities, the assistant must treat non-NLP pipelines as experimental WIP.
 
@@ -75,7 +75,7 @@ The harness is task-agnostic. Competition-specific schemas and metrics are defin
 - **Built-in Presets (`configs/tasks/`)**:
   - `configs/tasks/kaggle_house_prices.yaml` (Schema reference only; Tabular is experimental WIP)
   - `configs/tasks/kaggle_titanic.yaml` (Schema reference only; Tabular is experimental WIP)
-  - Verified competition-specific adapters are distributed via task plugins (e.g. `stereoqueereval` for NLP).
+  - Verified competition-specific adapters are distributed via task plugins.
 
 ---
 

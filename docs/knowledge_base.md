@@ -4,7 +4,7 @@ This document lists recommended backbones, modeling frameworks, and loss functio
 
 > [!IMPORTANT]
 > **Current Verification Scope: NLP / Text ONLY**
-> AI-Harness defaults and empirical registries are currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (e.g., `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
+> AI-Harness defaults and empirical registries are currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (e.g., sequence classification, transformer fine-tuning, and prompt evaluation).
 >
 > All other modalities (**Tabular, Computer Vision, Audio, Multimodal**) are **experimental works-in-progress (WIP / Roadmap)**, have **NOT** been verified or tested in competitive conditions, and are **NOT** considered ready or working well in practice.
 >

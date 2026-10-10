@@ -1,7 +1,7 @@
 # Master Onboarding Protocol & Agent Prompt
 
 > [!IMPORTANT]
-> **Verification Scope**: AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (e.g. `stereoqueereval`, sequence classification, transformer fine-tuning, prompt evaluation).
+> **Verification Scope**: AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (e.g. sequence classification, transformer fine-tuning, prompt evaluation).
 > Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)** and NOT verified in practice.<br>
 > **Lifecycle Phase**: `Phase 1: Setup` ➔ `Phase 2: Understand` ➔ `Phase 3: Baseline Anchor`<br>
 > **Target Assistants**: Google Antigravity, Anthropic Claude Code, OpenAI Codex<br>

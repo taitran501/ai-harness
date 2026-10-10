@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks. Task plugins such as `stereoqueereval` represent the verified domain of AI-Harness. Non-NLP modalities are experimental WIP on the roadmap.
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks. Non-NLP modalities are experimental WIP on the roadmap.
 
 AI-Harness is installed as a Python distribution. Competition adapters are separate distributions discovered through the `ai_harness.task_plugins` entry-point group. The harness does not inspect a workspace's `src` package or guess a competition from its directory name.
 
@@ -12,9 +12,8 @@ Install the core runtime, then the adapter selected for a competition:
 
 ```powershell
 python -m pip install -e .
-python -m pip install -e .\task_plugins\stereoqueereval
 ai-harness plugins
-ai-harness attach --project-root C:\path\to\competition --task-config configs/task.yaml --plugin stereoqueereval
+ai-harness attach --project-root C:\path\to\competition --task-config configs/task.yaml --plugin <plugin-name>
 ```
 
 Attach writes a small `.ai-harness/project.yaml` manifest and `.agents/skills/ai-harness/SKILL.md`. It does not rewrite the competition's task config. All experiment state, including the generated experiment leaderboard, belongs to `.ai-harness/artifacts/<task-id>/`.
@@ -48,17 +47,10 @@ The attached workspace owns `prompts/ai-harness/phase-pack.yaml`, its ordered ph
 
 Each dashboard process is bound to loopback and one task workspace. It rejects non-loopback Host headers and cross-origin requests; start a separate dashboard from a separate workspace to work on another task.
 
-## StereoQueerEval adapter boundary
-
-`task_plugins/stereoqueereval` is an optional local adapter. It explicitly loads the selected task workspace's `src.data`, `src.models`, and `src.metrics`; those imports are absent from the core runner. The task-specific config example also lives inside that adapter.
-
-The adapter provides local training-data loading, deterministic grouped folds, and local evaluation. For cloud dispatch it builds a versioned wheel from the installed adapter module and includes that wheel in the remote code bundle. Extra runtime dependencies belong in the task's `runtime.requirements` list. Its official submission builder and validator deliberately remain unavailable because the current [official task page](https://stereoqueereval.github.io/) does not publish their formats or scorer contract. Submission operations therefore fail closed.
-
 ## Distribution layout
 
 ```text
 ai-harness/                         # installable generic runtime
-task_plugins/stereoqueereval/       # optional competition adapter distribution
 competition workspace/
   configs/task.yaml                 # task-owned declarative contract
   .ai-harness/project.yaml          # local attachment manifest
