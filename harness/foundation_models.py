@@ -49,7 +49,7 @@ class TeacherLogitPrior:
 
         y = auxiliary_df[self.target_column]
         if y.dtype == object or y.dtype.name == "category":
-            # Map binary strings e.g. satisfied/neutral
+            # Map binary strings or discrete labels to integer indices
             unique_vals = sorted(y.dropna().unique())
             val_map = {val: idx for idx, val in enumerate(unique_vals)}
             y_arr = y.map(val_map).values.astype(int)
@@ -140,22 +140,38 @@ class TeacherLogitPrior:
         return out
 
 
-class HierarchicalDiscretizer:
-    """Decomposes continuous mileage/corridor metrics into multi-scale discrete keys.
+class MultiScaleBinner:
+    """Decomposes continuous numeric series into multi-resolution discrete scale bins.
 
-    Generates macro-regional bands, airport corridor clusters, and route keys.
+    Generates multi-resolution discrete representations across powers of 10 or custom
+    step intervals, enabling tree models and categorical embeddings to capture hierarchical
+    grouping structure without task-specific manual discretization rules.
     """
+
+    @staticmethod
+    def bin_scales(
+        series: pd.Series,
+        scales: Tuple[Union[int, float], ...] = (10, 100, 1000),
+        prefix: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Decomposes a continuous series into multi-resolution discrete bins."""
+        col_name = prefix or series.name or "feature"
+        s = series.fillna(-1).astype(int)
+        df = pd.DataFrame(index=series.index)
+        df[f"{col_name}_exact"] = s
+        for scale in scales:
+            df[f"{col_name}_scale_{scale}"] = s // scale
+        return df
 
     @staticmethod
     def decompose_distance(
         distance_series: pd.Series,
-        col_name: str = "flight_distance",
+        col_name: str = "feature",
     ) -> pd.DataFrame:
-        """Decomposes a continuous distance into exact, corridor, and macro-band keys."""
-        s = distance_series.fillna(-1).astype(int)
-        df = pd.DataFrame(index=distance_series.index)
-        df[f"{col_name}_exact"] = s
-        df[f"{col_name}_corridor_10"] = s // 10
-        df[f"{col_name}_macro_100"] = s // 100
-        df[f"{col_name}_band_1000"] = s // 1000
-        return df
+        """Compatibility wrapper for generic multi-scale decomposition."""
+        return MultiScaleBinner.bin_scales(distance_series, scales=(10, 100, 1000), prefix=col_name)
+
+
+# Backward-compatible alias
+HierarchicalDiscretizer = MultiScaleBinner
+

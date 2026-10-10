@@ -74,7 +74,7 @@ Transfers conditional probability priors from auxiliary reference datasets witho
 from harness.foundation_models import TeacherLogitPrior
 
 teacher = TeacherLogitPrior(
-    target_column="satisfaction",
+    target_column="target",
     model_type="lightgbm",
 )
 teacher.fit(auxiliary_original_df)

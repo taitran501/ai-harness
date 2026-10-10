@@ -10,7 +10,7 @@ from .agent_bridge import AgentBridge
 from .ensemble_guard import EnsembleGuard
 from .submission_manager import SubmissionManager
 from .stacking import L2LogitStacker, RankAverager, align_prediction_frames, to_clipped_logit
-from .foundation_models import TeacherLogitPrior, HierarchicalDiscretizer
+from .foundation_models import TeacherLogitPrior, MultiScaleBinner, HierarchicalDiscretizer
 from .endgame_submission import SubmissionPreflightValidator, KaggleLeaderboardTracker
 from .io_utils import (
     atomic_write_json,
@@ -33,6 +33,7 @@ __all__ = [
     "align_prediction_frames",
     "to_clipped_logit",
     "TeacherLogitPrior",
+    "MultiScaleBinner",
     "HierarchicalDiscretizer",
     "SubmissionPreflightValidator",
     "KaggleLeaderboardTracker",

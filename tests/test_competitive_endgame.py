@@ -20,7 +20,7 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score
 
 from harness.endgame_submission import SubmissionPreflightValidator
-from harness.foundation_models import HierarchicalDiscretizer, TeacherLogitPrior
+from harness.foundation_models import MultiScaleBinner, HierarchicalDiscretizer, TeacherLogitPrior
 from harness.stacking import (
     L2LogitStacker,
     RankAverager,
@@ -134,6 +134,26 @@ class TestTeacherLogitPrior(unittest.TestCase):
         self.assertIn("teacher_prob", meta_feats.columns)
         self.assertIn("teacher_logit", meta_feats.columns)
         self.assertTrue(np.all(np.isfinite(meta_feats["teacher_logit"])))
+
+
+class TestMultiScaleBinner(unittest.TestCase):
+    def test_multi_scale_binning(self):
+        s = pd.Series([15, 235, 1250], name="metric")
+        res = MultiScaleBinner.bin_scales(s, scales=(10, 100, 1000))
+        self.assertEqual(res.shape, (3, 4))
+        self.assertIn("metric_exact", res.columns)
+        self.assertIn("metric_scale_10", res.columns)
+        self.assertIn("metric_scale_100", res.columns)
+        self.assertIn("metric_scale_1000", res.columns)
+        self.assertEqual(res["metric_scale_10"].iloc[0], 1)
+        self.assertEqual(res["metric_scale_100"].iloc[1], 2)
+        self.assertEqual(res["metric_scale_1000"].iloc[2], 1)
+
+    def test_backwards_compatible_alias(self):
+        s = pd.Series([12, 45, 102], name="dist")
+        res = HierarchicalDiscretizer.decompose_distance(s, col_name="val")
+        self.assertIn("val_exact", res.columns)
+        self.assertEqual(res["val_exact"].iloc[0], 12)
 
 
 class TestSubmissionPreflightValidator(unittest.TestCase):
