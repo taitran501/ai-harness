@@ -59,12 +59,16 @@ class KaggleKernelManager:
     def _get_task_slug(cls) -> str:
         """Derive a URL/API-safe slug from active TaskSpec."""
         try:
+            import re
             from harness.task_spec import load_active_task_spec
 
             spec = load_active_task_spec()
-            slug = "".join(c if c.isalnum() else "-" for c in spec.name.lower()).strip(
-                "-"
-            )
+            slug = re.sub(r"[^a-zA-Z0-9]+", "-", spec.name.lower()).strip("-")
+            # Kaggle kernel titles cannot exceed 50 characters.
+            # Kernel title is derived as `f"{slug}-{exp_id}".replace('-', ' ').title()`.
+            # To ensure title <= 50 chars even with experiment names, limit task slug to 25 chars.
+            if len(slug) > 25:
+                slug = slug[:25].rstrip("-")
             return slug or "competition"
         except Exception:
             return "competition"
@@ -142,8 +146,10 @@ class KaggleKernelManager:
         except Exception:
             pass
 
+        raw_title = f"{spec_name[:30].strip()} Data ({slug_name[-8:]})"
+        dataset_title = raw_title[:50].strip() if len(raw_title) >= 6 else f"Data {slug_name}"[:50]
         metadata = {
-            "title": f"{spec_name} Dataset ({slug_name})",
+            "title": dataset_title,
             "id": full_slug,
             "licenses": [{"name": license_name}],
         }
@@ -381,7 +387,13 @@ class KaggleKernelManager:
             (bundle_base / "ml-harness-runtime.json").write_text(
                 json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8"
             )
-            shutil.make_archive(str(stage / "code_bundle"), "zip", root_dir=bundle_base)
+            import io, base64, zipfile
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for file_path in bundle_base.rglob("*"):
+                    if file_path.is_file():
+                        zf.write(file_path, file_path.relative_to(bundle_base))
+            bundle_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
         dataset_folder_name = resolved_dataset.split("/")[-1]
 
@@ -396,14 +408,16 @@ import sys
 import os
 import shutil
 import zipfile
+import base64
+import io
 from pathlib import Path
 
 print("[Kaggle Kernel] Starting execution for: {exp_id}")
 
-# 1. Extract code bundle if present
-if Path("code_bundle.zip").exists():
-    with zipfile.ZipFile("code_bundle.zip", "r") as zf:
-        zf.extractall(".")
+# 1. Extract embedded code bundle
+bundle_bytes = base64.b64decode('{bundle_b64}')
+with zipfile.ZipFile(io.BytesIO(bundle_bytes), 'r') as zf:
+    zf.extractall('.')
 
 # 2. Restore only the task data paths included in the separately consented dataset.
 input_root = Path("/kaggle/input/{dataset_folder_name}")
@@ -447,10 +461,23 @@ elif input_root.exists():
             elif item.is_file():
                 shutil.copy2(item, target)
 
-# 3. Install dependencies
+# 3. Check and install missing dependencies
 runtime = json.loads(Path("ml-harness-runtime.json").read_text(encoding="utf-8"))
 requirements = ["numpy>=1.24.0", "pandas>=2.0.0", "scikit-learn>=1.3.0", "pyyaml>=6.0", "scipy>=1.11.0"] + runtime.get("requirements", [])
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", *requirements], check=True)
+missing = []
+for req in requirements:
+    pkg = req.split(">=")[0].split("==")[0].split("<")[0].strip()
+    try:
+        __import__(pkg.replace("-", "_"))
+    except ImportError:
+        missing.append(req)
+
+if missing:
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", *missing], check=True, timeout=120)
+    except Exception as exc:
+        print(f"[Warning] Failed to pip install missing packages ({{missing}}): {{exc}}", file=sys.stderr)
+
 install = (runtime.get("plugin") or {{}}).get("install") or {{}}
 if install.get("type") == "wheel":
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", install["path"]], check=True)
