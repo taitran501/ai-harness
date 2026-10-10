@@ -351,6 +351,14 @@ class PhaseWorkflow:
                 lines.append("- Competition state exists but could not be parsed; inspect it before acting.")
         else:
             lines.append("- No competition state has been recorded yet.")
+        from harness.research_memory import ResearchMemory
+        from harness.task_spec import load_active_task_spec
+        from harness.plugins import TaskPluginContext, load_task_plugin
+
+        spec = load_active_task_spec(self.project.task_config_path)
+        plugin = load_task_plugin(self.project.plugin_id, TaskPluginContext(
+            self.root, self.project.task_config_path, spec, self.project.plugin_id or "default"))
+        lines.extend(["", ResearchMemory(self.root, self.project.artifacts_dir, spec, plugin).render()])
         lines.extend([
             "",
             "## User phase prompt",

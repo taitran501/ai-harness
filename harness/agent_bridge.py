@@ -50,6 +50,10 @@ class TypedActionName(str, Enum):
     """Canonical Typed Actions exposed by AgentBridge to Antigravity in the IDE."""
 
     UPDATE_TASK_CONTRACT = "update_task_contract"
+    SEARCH_RESEARCH_MEMORY = "search_research_memory"
+    REVIEW_HYPOTHESIS = "review_hypothesis"
+    RECORD_RESEARCH_DECISION = "record_research_decision"
+    RECORD_RESEARCH_CHECKPOINT = "record_research_checkpoint"
     WRITE_EXPERIMENT_CONFIG = "write_experiment_config"
     UPDATE_WORKSPACE_SETTINGS = "update_workspace_settings"
     BOOTSTRAP_TASK = "bootstrap_task"
@@ -78,6 +82,10 @@ class TypedActionName(str, Enum):
 
 
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
+    TypedActionName.SEARCH_RESEARCH_MEMORY.value: ApprovalTier.AUTO.value,
+    TypedActionName.REVIEW_HYPOTHESIS.value: ApprovalTier.AUTO.value,
+    TypedActionName.RECORD_RESEARCH_DECISION.value: ApprovalTier.AUTO.value,
+    TypedActionName.RECORD_RESEARCH_CHECKPOINT.value: ApprovalTier.AUTO.value,
     TypedActionName.BOOTSTRAP_TASK.value: ApprovalTier.AUTO.value,
     TypedActionName.CONFIRM_TASK_SPEC.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.INSPECT_DATA_READINESS.value: ApprovalTier.AUTO.value,
@@ -252,6 +260,20 @@ class AgentBridge:
             task_config_path=self.project.task_config_path,
         )
 
+    def _research_memory(self):
+        from harness.research_memory import ResearchMemory
+
+        return ResearchMemory(self.project_root, self.artifacts_dir, self.task_spec, self.task_plugin)
+
+    def _review_research_config(self, cfg, params, for_execution=False):
+        reason = params.get("revisit_reason") or cfg.get("research", {}).get("revisit_reason", "")
+        review = self._research_memory().review(cfg, reason, for_execution=for_execution)
+        if not review["allowed"]:
+            raise ValueError("Repeated declared execution config; use search_research_memory and "
+                             "provide revisit_reason for an intentional repeat. Matches: " +
+                             json.dumps(review["exact_config_matches"]))
+        return review
+
     def _refresh_task_context(self) -> None:
         """Reload task config and plugin state after an onboarding action rewrites it."""
         from harness.plugins import TaskPluginContext, load_task_plugin
@@ -304,9 +326,17 @@ class AgentBridge:
 
     def _extract_idea_graveyard(self) -> List[str]:
         """Dynamically parse documented failed interventions from EXPERIMENTS.md."""
-        exp_md = self.project_root / "EXPERIMENTS.md"
         items: List[str] = []
-        if exp_md.exists():
+        paths = {self.project_root / "EXPERIMENTS.md", self.project_root / ".ml-harness/EXPERIMENTS.md"}
+        base_path = self.project_root / "configs/base.yaml"
+        if base_path.exists():
+            base = yaml.safe_load(base_path.read_text(encoding="utf-8")) or {}
+            location = base.get("paths", {}).get("leaderboard_path")
+            if location:
+                paths.add(self.project_root / location)
+        for exp_md in sorted(paths):
+            if not exp_md.exists():
+                continue
             try:
                 in_graveyard = False
                 for line in exp_md.read_text(encoding="utf-8").splitlines():
@@ -328,7 +358,7 @@ class AgentBridge:
                 pass
         if not items:
             items.append(
-                "No rejected approaches are recorded in the current experiment history."
+                "No legacy graveyard notes found; search structured research memory for decisions."
             )
         return items
 
@@ -604,6 +634,18 @@ class AgentBridge:
         if not active_session:
             sessions = self.list_sessions(limit=1)
             active_session = sessions[0] if sessions else None
+        if active_session:
+            active_session = {key: active_session.get(key) for key in (
+                "session_id", "status", "goal", "budget", "compute_usage", "consecutive_rejections",
+                "reassess_recommended", "pending_approval_action", "experiments_run")}
+            active_session["goal"] = str(active_session.get("goal", ""))[:600]
+            runs = active_session.get("experiments_run") or []
+            active_session["experiments_run_count"] = len(runs)
+            active_session["experiments_run"] = runs[-8:]
+            if active_session.get("pending_approval_action"):
+                pending = active_session["pending_approval_action"]
+                active_session["pending_approval_action"] = {
+                    "action": pending.get("action"), "rationale": str(pending.get("rationale", ""))[:600]}
 
         parent_id = ucb_rec.get("parent_id") or (
             snap["hud"]["what_is_current_best"]["cv_best"].get("id")
@@ -635,6 +677,10 @@ class AgentBridge:
             "ucb_recommendation": ucb_rec,
             "parent_diagnostics_bottlenecks": bottlenecks,
             "idea_graveyard": graveyard,
+            "research_memory": self._research_memory().context(
+                min_improvement=self._get_spec_min_improvement((active_session or {}).get("budget", {})),
+                patience=int((active_session or {}).get("budget", {}).get("max_consecutive_rejections") or 3),
+            ),
             "candidate_pool_summary": {
                 "baseline_id": snap["candidate_pool"]["baseline_id"],
                 "baseline_score": snap["candidate_pool"]["baseline_score"],
@@ -728,16 +774,25 @@ class AgentBridge:
         lines.extend(
             [
                 "",
-                "## 🪦 Idea Graveyard (Forbidden Interventions)",
+                "## 🪦 Idea Graveyard (Legacy notes; reassess evidence before revisiting)",
             ]
         )
         for g in pkt["idea_graveyard"]:
             lines.append(f"- ❌ {g}")
 
+        memory = pkt["research_memory"]
+        lines.extend(["", "## Research continuity (survives sessions and compaction)",
+                      json.dumps({key: memory[key] for key in (
+                          "entry_count", "verified_run_count", "latest_checkpoint", "recent_decisions",
+                          "recent_results", "consecutive_non_improvements", "reassess_recommended")},
+                          ensure_ascii=False),
+                      *[f"- {step}" for step in memory["resume_protocol"]]])
+
         lines.extend(
             [
                 "",
                 "## 🛠️ Typed Bridge Actions (`ml-harness-agent act --action <name> ...`)",
+                "- **AUTO (Research continuity)**: `search_research_memory`, `review_hypothesis`, `record_research_decision`, `record_research_checkpoint`",
                 "- **AUTO**: `inspect_data_readiness`, `run_eda`, `record_phase_output`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
                 "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (dispatches a tracked local/Kaggle/Modal job), `synthesize_candidate`, `build_ensemble`",
                 "- **AUTO (Job lifecycle)**: `inspect_cloud_job`, `wait_cloud_job`",
@@ -766,10 +821,14 @@ class AgentBridge:
             TypedActionName.FINALIZE_COMPETITION.value,
             TypedActionName.INSPECT_EXPERIMENT.value,
             TypedActionName.INSPECT_DIAGNOSTICS.value,
+            TypedActionName.SEARCH_RESEARCH_MEMORY.value,
+            TypedActionName.REVIEW_HYPOTHESIS.value,
+            TypedActionName.RECORD_RESEARCH_DECISION.value,
+            TypedActionName.RECORD_RESEARCH_CHECKPOINT.value,
         ):
             return (
                 "STOP_POLICY_TRIGGERED",
-                "Competition state is FROZEN. Only inspection, finalization, or `emergency_unfreeze` (with USER_APPROVAL) is allowed.",
+                "Competition state is FROZEN. Only inspection, research notes, finalization, or `emergency_unfreeze` (with USER_APPROVAL) is allowed.",
             )
 
         budget = session.budget
@@ -867,6 +926,8 @@ class AgentBridge:
     ) -> Tuple[bool, int, str, float]:
         """Execute subprocess with strict process tree cleanup on timeout (preventing orphan GPU processes)."""
         t0 = time.time()
+        if cmd and cmd[0] == sys.executable and "-u" not in cmd:
+            cmd = [cmd[0], "-u", *cmd[1:]]
         proc = subprocess.Popen(
             cmd,
             cwd=str(self.project_root),
@@ -998,6 +1059,16 @@ class AgentBridge:
             "build_ensemble",
         }
         token = None
+        if action == "run_full_validation" and params.get("config_path"):
+            cfg_file = self.project_root / params["config_path"]
+            if cfg_file.is_file():
+                try:
+                    self._review_research_config(yaml.safe_load(cfg_file.read_text(encoding="utf-8")), params, for_execution=True)
+                except ValueError as error:
+                    obs = ActionObservation(step_idx, action, "FAILED", str(error))
+                    session.observations.append(asdict(obs))
+                    self.save_session(session)
+                    return session, obs
         if action in resource_actions:
             from harness.resource_ledger import reserve
 
@@ -1044,6 +1115,18 @@ class AgentBridge:
                     "COMPLETED" if obs.status == "SUCCESS" else "FAILED",
                     obs.elapsed_seconds,
                 )
+        if action in {"run_smoke_test", "run_probe", "run_full_validation"}:
+            self._research_memory().record_execution(action, obs.status, obs.summary,
+                obs.data.get("exp_id"), session.session_id)
+        if action in {"create_experiment", "write_experiment_config", "run_full_validation",
+                      "inspect_cloud_job", "wait_cloud_job", "inspect_diagnostics"}:
+            continuity = self._research_memory().context(
+                min_improvement=self._get_spec_min_improvement(session),
+                patience=int(session.budget.get("max_consecutive_rejections") or 3))
+            obs.data["research_continuity"] = continuity
+            if continuity["reassess_recommended"]:
+                session.reassess_recommended = True
+                obs.advisory = "REASSESS_RECOMMENDED"
         session.observations.append(asdict(obs))
 
         self._reconcile_session_usage(session)
@@ -1095,6 +1178,27 @@ class AgentBridge:
         params = call.params
 
         try:
+            if act in {"search_research_memory", "review_hypothesis", "record_research_decision",
+                       "record_research_checkpoint"}:
+                memory = self._research_memory()
+                if act == "search_research_memory":
+                    result = {"matches": memory.search(params.get("query", ""), params.get("limit", 8))}
+                elif act == "review_hypothesis":
+                    cfg = params.get("config")
+                    if cfg is None:
+                        path = (self.project_root / params["config_path"]).resolve()
+                        path.relative_to(self.project_root)
+                        cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+                    result = memory.review(cfg, params.get("revisit_reason", ""))
+                elif act == "record_research_decision":
+                    result = memory.record_decision(outcome=params["outcome"], conclusion=params["conclusion"],
+                        evidence=params.get("evidence", []), next_action=params.get("next_action", ""),
+                        session_id=session.session_id)
+                else:
+                    result = memory.checkpoint(summary=params["summary"], next_action=params["next_action"],
+                        open_questions=params.get("open_questions", []), session_id=session.session_id)
+                return ActionObservation(call.step_index, act, "SUCCESS", "Research memory action completed",
+                                         data=result, elapsed_seconds=round(time.time() - t0, 3))
             if act == "update_workspace_settings":
                 if params.get("gates"):
                     raise ValueError("Gates require their verified actions")
@@ -1145,17 +1249,26 @@ class AgentBridge:
                     cfg, config_path=str(path), raise_on_error=True
                 )
                 exp = cfg.get("experiment", {}).get("id", path.stem)
+                cfg.setdefault("experiment", {})["id"] = exp
                 if (self.artifacts_dir / exp / "artifact_manifest.json").is_file():
                     raise ValueError(
                         "Use a new experiment ID to change a run configuration"
                     )
-                atomic_write_text(path, params["content"])
+                from harness.state_store import workspace_lock
+
+                with workspace_lock(self.artifacts_dir):
+                    review = self._review_research_config(cfg, params)
+                    if review["revisit_reason"]:
+                        cfg["research"] = {"revisit_reason": review["revisit_reason"]}
+                    atomic_write_text(path, yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
+                    self._research_memory().propose(cfg, review["revisit_reason"], session.session_id)
                 return ActionObservation(
                     call.step_index,
                     act,
                     "SUCCESS",
                     "Experiment config saved",
                     artifact_path=str(path),
+                    data={"novelty_review": review},
                 )
             if act == TypedActionName.CONFIRM_TASK_SPEC.value:
                 self.comp_state.state["gates"]["spec_confirmed"] = True
@@ -1396,20 +1509,15 @@ class AgentBridge:
                 diag_file = self.artifacts_dir / exp_id / "DIAGNOSTICS.md"
                 node = journal.nodes.get(exp_id)
                 bottlenecks = []
-                if node and isinstance(node.diagnostics_summary, dict):
+                if node and node.verified and isinstance(node.diagnostics_summary, dict):
                     bottlenecks = node.diagnostics_summary.get(
                         "critical_bottlenecks", []
                     )
-                if not bottlenecks:
-                    bottlenecks = [
-                        f"Initial baseline validation established for '{exp_id}'.",
-                        "Further feature engineering and multi-model exploration recommended.",
-                    ]
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
                     status="SUCCESS",
-                    summary=f"Extracted {len(bottlenecks)} critical bottlenecks from '{exp_id}'.",
+                    summary=f"Found {len(bottlenecks)} verified diagnostic bottlenecks from '{exp_id}'; missing diagnostics are not evidence of no errors.",
                     diagnostics_bottlenecks=bottlenecks,
                     artifact_path=(
                         str(diag_file.relative_to(self.project_root)).replace("\\", "/")
@@ -1554,8 +1662,6 @@ class AgentBridge:
                         model_payload = {
                             "name": "tfidf_logistic_regression",
                             "params": {
-                                "word_max_features": 25000,
-                                "char_max_features": 25000,
                                 "C": 1.5,
                             },
                         }
@@ -1582,7 +1688,7 @@ class AgentBridge:
                         "branch": branch,
                         "problem_addressed": params.get(
                             "problem_addressed",
-                            f"Target diagnostics bottleneck on '{task_name}' ({primary_metric}) identified in parent '{parent_id}' ({parent_score:.4f}).",
+                            f"Test a declared intervention on '{task_name}' ({primary_metric}); inspect verified parent diagnostics before implementation.",
                         ),
                         "hypothesis": params.get(
                             "hypothesis",
@@ -1595,21 +1701,23 @@ class AgentBridge:
                         "description": f"Created via AgentBridge session {session.session_id}",
                     },
                     "grounding": {
-                        "source_type": params.get("source_type", "verified_baseline"),
+                        "source_type": params.get("source_type", "empirical_journal"),
                         "source_id": params.get(
-                            "source_id", f"{branch}_{descriptor}_registry"
+                            "source_id", "research_memory:unverified_proposal"
                         ),
                         "retrieval_summary": params.get(
                             "retrieval_summary",
-                            f"Grounded hypothesis targeting {primary_metric} bottlenecks on {task_name}.",
+                            f"Declared proposal targeting {primary_metric} on {task_name}; mechanism and source require scientist review.",
                         ),
-                        "verified_via": params.get("verified_via", "local_registry"),
+                        "verified_via": params.get("verified_via", "not_verified"),
                     },
                     "assumption_register": {
                         "known_facts": params.get(
                             "known_facts",
                             [
-                                f"Parent '{parent_id}' achieved {primary_metric}={parent_score:.4f} on the configured validation scheme.",
+                                (f"Verified parent '{parent_id}' achieved {primary_metric}={parent_score:.4f}."
+                                 if parent_node and parent_node.verified else
+                                 f"Task contract declares primary metric '{primary_metric}'; parent performance is not verified."),
                             ],
                         ),
                         "assumptions": params.get(
@@ -1636,10 +1744,20 @@ class AgentBridge:
                 GroundingGate.verify_config(
                     cfg_payload, config_path=cfg_path, raise_on_error=True
                 )
-                cfg_path.write_text(
-                    yaml.safe_dump(cfg_payload, sort_keys=False, allow_unicode=True),
-                    encoding="utf-8",
-                )
+                from harness.state_store import workspace_lock
+                from harness.io_utils import atomic_write_text
+
+                cfg_path.resolve().relative_to(configs_dir.resolve())
+                if cfg_path.exists() or (self.artifacts_dir / exp_id / "artifact_manifest.json").exists():
+                    raise ValueError("Experiment ID already exists; choose a new ID")
+                with workspace_lock(self.artifacts_dir):
+                    if cfg_path.exists():
+                        raise ValueError("Experiment ID already exists; choose a new ID")
+                    review = self._review_research_config(cfg_payload, params)
+                    if review["revisit_reason"]:
+                        cfg_payload["research"] = {"revisit_reason": review["revisit_reason"]}
+                    atomic_write_text(cfg_path, yaml.safe_dump(cfg_payload, sort_keys=False, allow_unicode=True))
+                    self._research_memory().propose(cfg_payload, review["revisit_reason"], session.session_id)
                 rel_cfg = str(cfg_path.relative_to(self.project_root)).replace(
                     "\\", "/"
                 )
@@ -1648,12 +1766,14 @@ class AgentBridge:
                     step_index=call.step_index,
                     action=act,
                     status="SUCCESS",
-                    summary=f"Created & GroundingGate-verified config '{rel_cfg}' (Parent: {parent_id}).",
+                    summary=f"Created config '{rel_cfg}' with grounding schema validated (Parent: {parent_id}); source claims still require verification.",
                     artifact_path=rel_cfg,
                     data={
                         "exp_id": exp_id,
                         "config_path": rel_cfg,
                         "grounding_status": "PASSED",
+                        "grounding_verification": "schema_only",
+                        "novelty_review": review,
                     },
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
@@ -1768,6 +1888,7 @@ class AgentBridge:
                     else {}
                 )
                 exp_id = raw_cfg.get("experiment", {}).get("id", Path(cfg_path).stem)
+                self._review_research_config(raw_cfg, params, for_execution=True)
 
                 if backend in ("modal", "kaggle"):
                     from harness.cloud_job_runner import CloudJobManager
@@ -1883,7 +2004,12 @@ class AgentBridge:
                     4,
                 )
                 min_imp = self._get_spec_min_improvement(session)
-                if delta >= min_imp:
+                verified_runs = self._research_memory().sync()
+                current = next((r for r in verified_runs if r["exp_id"] == exp_id), None)
+                comparable = [r["utility"] for r in verified_runs if current and
+                              r["exp_id"] != exp_id and r["comparison_group"] == current["comparison_group"]]
+                incumbent_gain = current["utility"] - max(comparable) if current and comparable else None
+                if incumbent_gain is None or (incumbent_gain > 0 and incumbent_gain >= min_imp):
                     session.consecutive_rejections = 0
                 else:
                     session.consecutive_rejections += 1
@@ -1940,6 +2066,7 @@ class AgentBridge:
                         "exp_id": exp_id,
                         "backend": backend,
                         "scores": detail_scores,
+                        "incumbent_utility_gain": incumbent_gain,
                     },
                     elapsed_seconds=elapsed,
                 )

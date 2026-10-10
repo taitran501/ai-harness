@@ -51,6 +51,7 @@ artifacts/base/
 
 # Agent-generated experiment configs (all except the template)
 configs/exp[0-9][0-9][0-9]_*.yaml
+!configs/exp000_template.yaml
 
 # OS & Environment
 Thumbs.db

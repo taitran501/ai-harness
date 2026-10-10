@@ -508,7 +508,7 @@ class CloudJobManager:
         self._persist_job(job)
 
         # Construct execution command
-        cmd: List[str] = [sys.executable]
+        cmd: List[str] = [sys.executable, "-u"]
         if backend in ("modal", "kaggle"):
             cmd.extend(
                 [

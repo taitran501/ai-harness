@@ -458,7 +458,7 @@ elif install.get("type") == "index":
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", install["requirement"]], check=True)
 
 # 4. Run training
-cmd = [sys.executable, "-m", "harness.runner", "--project-root", ".", "--task-config", "{task_config_rel}", "--config", "{config_rel}"]
+cmd = [sys.executable, "-u", "-m", "harness.runner", "--project-root", ".", "--task-config", "{task_config_rel}", "--config", "{config_rel}"]
 print(f"Executing: {{' '.join(cmd)}}")
 ret = subprocess.run(cmd)
 

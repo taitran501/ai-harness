@@ -28,11 +28,19 @@ class DiagnosticEngine:
         """Compute confusion matrix and per-class error distribution."""
         cm = confusion_matrix(y_true, y_pred, labels=labels)
         matrix_dict = {}
+        per_class = {}
         for i, true_lbl in enumerate(labels):
+            support = int(cm[i].sum())
+            tp = int(cm[i, i])
+            predicted = int(cm[:, i].sum())
+            per_class[str(true_lbl)] = {"support": support, "tp": tp,
+                "recall": tp / support if support else 0.0,
+                "precision": tp / predicted if predicted else 0.0,
+                "is_zero_recall": support > 0 and tp == 0}
             matrix_dict[true_lbl] = {}
             for j, pred_lbl in enumerate(labels):
                 matrix_dict[true_lbl][pred_lbl] = int(cm[i, j])
-        return {"labels": labels, "matrix": matrix_dict}
+        return {"labels": labels, "matrix": matrix_dict, "per_class": per_class}
 
     @staticmethod
     def analyze_minority_labels(
@@ -117,6 +125,7 @@ class DiagnosticEngine:
         """Produce full structured diagnostic dictionary dynamically adapted to task schema."""
         # 1. Dynamically resolve ID column from TaskSpec first
         id_col = None
+        spec = task_spec
         try:
             from harness.task_spec import load_active_task_spec
             spec = task_spec or load_active_task_spec()
@@ -146,19 +155,25 @@ class DiagnosticEngine:
 
         bottlenecks: List[str] = []
         target_confusions: Dict[str, Any] = {}
+        classification_targets = {}
+        for key, subtask in getattr(spec, "subtasks", {}).items():
+            if subtask.task_type in {"binary_classification", "multiclass_classification"}:
+                classification_targets[subtask.column or key] = f"pred_{key}"
 
         # 2. Generic Target Confusion & Accuracy for all categorical/classification targets
         for col in eval_df.columns:
-            pred_col = f"pred_{col}"
+            pred_col = classification_targets.get(col, f"pred_{col}")
             # Support both pandas 2.x and pandas 3.x categorical/string types
             col_is_categorical = (
                 merged[col].dtype == object
                 or merged[col].dtype.kind == "O"
                 or str(merged[col].dtype).lower() in ("object", "string", "str", "category")
             )
-            if pred_col in merged.columns and col_is_categorical and merged[col].nunique() <= 50:
-                labels = sorted(list(merged[col].dropna().unique()))
-                cm = cls.compute_confusion_matrix(merged[col], merged[pred_col], labels)
+            if pred_col in merged.columns and (col_is_categorical or col in classification_targets) and merged[col].nunique() <= 50:
+                actual = merged[col].astype(str)
+                predicted = merged[pred_col].astype(str)
+                labels = sorted(set(actual) | set(predicted))
+                cm = cls.compute_confusion_matrix(actual, predicted, labels)
                 target_confusions[col] = cm
 
                 # Identify zero-recall or severely failing classes (recall < 40%)
@@ -173,6 +188,18 @@ class DiagnosticEngine:
 
         # 3. Generic Multi-Label / Minority Label Scan
         minority_labels: Dict[str, Any] = {}
+        for key, subtask in getattr(spec, "subtasks", {}).items():
+            if subtask.task_type != "multilabel_classification" or f"pred_{key}" not in merged:
+                continue
+            rows = [json.loads(v) if isinstance(v, str) else v for v in merged[f"pred_{key}"]]
+            matrix = np.asarray(rows)
+            if matrix.shape != (len(merged), len(subtask.labels)):
+                raise ValueError(f"Invalid multilabel diagnostic prediction shape for {key}")
+            stats = cls.analyze_minority_labels(merged, matrix, subtask.labels, subtask.column_prefix or "")
+            for label, values in stats.items():
+                minority_labels[f"{key}.{label}"] = values
+                if values["is_zero_recall"]:
+                    bottlenecks.append(f"Zero recall on label '{label}' in target '{key}'.")
         for col in eval_df.columns:
             if col.startswith("label_") or col.startswith("tag_"):
                 pred_col = f"pred_{col}"
@@ -226,7 +253,7 @@ class DiagnosticEngine:
             for s_val, s_df in merged.groupby(slice_col):
                 stats: Dict[str, Any] = {"total_samples": len(s_df)}
                 for t_name in list(target_confusions.keys())[:3]:
-                    pred_t = f"pred_{t_name}"
+                    pred_t = classification_targets.get(t_name, f"pred_{t_name}")
                     stats[f"{t_name}_acc"] = round(float((s_df[t_name] == s_df[pred_t]).mean()), 4)
                 slice_breakdown[str(s_val)] = stats
 
