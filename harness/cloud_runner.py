@@ -291,7 +291,11 @@ def run_via_kaggle(
         project_root=project.root, task_config_path=project.task_config_path,
         task_id=context["task_id"], job_id=job_id, runtime_manifest=runtime,
         enable_internet=bool((context["task"].get("runtime") or {}).get("enable_internet", False)),
+        bundle_mode=(context["task"].get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
     )
+
+    print("Preparing private Kaggle code bundle input...")
+    KaggleKernelManager.push_code_bundle(stage_dir)
 
     # 3. Push to Kaggle
     cmd = ["kaggle", "kernels", "push", "-p", str(stage_dir)]

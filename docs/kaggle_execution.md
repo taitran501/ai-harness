@@ -69,9 +69,13 @@ Sources: [dataset commands](https://github.com/Kaggle/kaggle-cli/blob/main/docs/
 
 ## Remote execution
 
-1. Packaging emits `kernel-metadata.json` and `run_kaggle.py`, embedding the
-   source/config bundle inside the script. An adjacent ZIP is not a reliable
-   code upload channel; declared data uses the separately consented dataset.
+1. Packaging emits `kernel-metadata.json`, `run_kaggle.py` (`kernel_type: script`),
+   `code-bundle.json`, and a code ZIP with dataset metadata. The default script
+   loads the ZIP from a separate private input dataset, so kernel version source
+   and dashboard previews contain no large Base64 literal. An adjacent ZIP alone
+   is not uploaded by `kaggle kernels push`; dispatch uploads the code dataset,
+   waits for it to be ready, then pushes the kernel with both input sources.
+   Training data continues to use the separately consented dataset.
 2. Title and slug are generated together. Harness slugs use ASCII, are bounded
    to 50 characters with a hash suffix when needed, and include a dispatch ID.
    Polling reads the submitted metadata ID rather than reconstructing it from
@@ -102,7 +106,41 @@ adapter wheel. Pins are not silently relaxed, and internet is not enabled implic
 Original code, input data, and nested run artifacts stay outside the saved output
 root so the importer receives one manifest rather than duplicate copies.
 
+### Compact script source across versions
+
+The default `task.runtime.kaggle_bundle_mode` is `dataset`. Code/config ZIPs use
+sorted entries and fixed timestamps: unchanged contents produce the same SHA-256
+and reuse the same private `owner/mlh-code-<hash-prefix>` dataset. Changed contents
+use a new code dataset; existing code datasets are never versioned or overwritten.
+The mounted ZIP filename contains its full SHA-256. The script requires exactly
+one matching file and verifies its bytes before extraction or dependency setup,
+so a missing, ambiguous or changed input fails before training. Mounted inputs
+also work with kernel internet access disabled.
+
+No notebook format or UI-specific folding is required. The code ZIP carries the
+workspace/core license files when available; dataset metadata retains author
+rights (`copyright-authors`) rather than assigning the task data's license to code.
+One private dataset is created per distinct bundle, with unchanged bundles reused.
+
+For a generated package, use the dashboard's bundle-aware command:
+
+```powershell
+python -m harness.templates.kaggle_template push-package --path "path/to/staged-package"
+```
+
+This uploads/reuses the private code input, waits for processing, then calls
+`kaggle kernels push`. Running the raw kernel push alone requires that its code
+dataset already exists and is ready. Normal `harness.cloud_runner` dispatch does
+these steps automatically. Preview generation only stages local files.
+
+Set `task.runtime.kaggle_bundle_mode: embedded` to retain the legacy self-contained
+script when a separate code dataset is unsuitable. That mode still displays the
+Base64 payload in Kaggle's raw version source; wrapping or moving the string does
+not remove it. Existing published versions are unchanged by this generator fix.
+
 Sources: [kernel metadata](https://github.com/Kaggle/kaggle-cli/blob/main/docs/kernels_metadata.md),
+[private dataset uploads](https://github.com/Kaggle/kaggle-cli/blob/main/docs/datasets.md),
+[dataset metadata and licenses](https://github.com/Kaggle/kaggle-cli/blob/main/docs/datasets_metadata.md),
 [CLI implementation](https://github.com/Kaggle/kaggle-cli/blob/main/src/kaggle/api/kaggle_api_extended.py).
 
 ## Polling and recovery
