@@ -56,19 +56,22 @@ class KaggleKernelManager:
         return ""
 
     @classmethod
-    def _get_task_slug(cls) -> str:
-        """Derive a URL/API-safe slug from active TaskSpec."""
+    def _get_task_slug(cls, exp_id: Optional[str] = None) -> str:
+        """Derive a URL/API-safe slug from active TaskSpec and exp_id, ensuring title <= 50 chars."""
         try:
             import re
             from harness.task_spec import load_active_task_spec
 
             spec = load_active_task_spec()
             slug = re.sub(r"[^a-zA-Z0-9]+", "-", spec.name.lower()).strip("-")
-            # Kaggle kernel titles cannot exceed 50 characters.
-            # Kernel title is derived as `f"{slug}-{exp_id}".replace('-', ' ').title()`.
-            # To ensure title <= 50 chars even with experiment names, limit task slug to 25 chars.
-            if len(slug) > 25:
-                slug = slug[:25].rstrip("-")
+            if exp_id:
+                exp_slug = re.sub(r"[^a-zA-Z0-9]+", "-", exp_id.lower()).strip("-")
+                max_task_len = max(5, 45 - len(exp_slug) - 1)
+                task_part = slug[:max_task_len].rstrip("-")
+                return f"{task_part}-{exp_slug}" if task_part else exp_slug
+            # Default static task slug <= 20 chars
+            if len(slug) > 20:
+                slug = slug[:20].rstrip("-")
             return slug or "competition"
         except Exception:
             return "competition"
@@ -283,8 +286,7 @@ class KaggleKernelManager:
         stage.mkdir(parents=True, exist_ok=True)
 
         username = cls.get_authenticated_username()
-        t_slug = cls._get_task_slug()
-        slug = f"{t_slug}-{exp_id.replace('_', '-')}"
+        slug = cls._get_task_slug(exp_id)
         resolved_dataset = dataset_slug
         if not resolved_dataset or resolved_dataset == "antigravity/dataset":
             from harness.cloud_policy import private_upload_resource_names
@@ -554,8 +556,8 @@ print("Training completed. Lightweight output artifacts copied to working root."
     ) -> Dict[str, Any]:
         """Check status of a Kaggle kernel via `kaggle kernels status <slug>`."""
         username = cls.get_authenticated_username()
-        t_slug = cls._get_task_slug()
-        slug = kernel_slug or f"{username}/{t_slug}-{exp_id.replace('_', '-')}"
+        t_slug = cls._get_task_slug(exp_id)
+        slug = kernel_slug or f"{username}/{t_slug}"
         if "/" not in slug:
             slug = f"{username}/{slug}"
 
@@ -635,8 +637,8 @@ print("Training completed. Lightweight output artifacts copied to working root."
     ) -> Dict[str, Any]:
         """Download outputs only after artifact identity matches the submitted task and run."""
         username = cls.get_authenticated_username()
-        t_slug = cls._get_task_slug()
-        slug = kernel_slug or f"{username}/{t_slug}-{exp_id.replace('_', '-')}"
+        t_slug = cls._get_task_slug(exp_id)
+        slug = kernel_slug or f"{username}/{t_slug}"
         if "/" not in slug:
             slug = f"{username}/{slug}"
 

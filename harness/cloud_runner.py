@@ -309,8 +309,8 @@ def run_via_kaggle(
     if ret.returncode != 0:
         raise RuntimeError(f"Kaggle push failed with code {ret.returncode}")
 
-    task_slug = KaggleKernelManager._get_task_slug()
-    kernel_slug = f"{KaggleKernelManager.get_authenticated_username()}/{task_slug}-{exp_id.replace('_', '-')}"
+    task_slug = KaggleKernelManager._get_task_slug(exp_id)
+    kernel_slug = f"{KaggleKernelManager.get_authenticated_username()}/{task_slug}"
     print(f"Polling Kaggle kernel until a terminal state: {kernel_slug}")
 
     def persist_kaggle_status(state: Dict[str, Any]) -> None:
