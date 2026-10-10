@@ -2046,6 +2046,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 project_root=PROJECT_ROOT, task_config_path=HARNESS_PROJECT.task_config_path,
                 task_id=task_id, job_id=job_id, runtime_manifest=runtime,
                 enable_internet=bool((task_data.get("runtime") or {}).get("enable_internet", False)),
+                bundle_mode=(task_data.get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
             )
             meta_file = stage_dir / "kernel-metadata.json"
             code_file = stage_dir / "run_kaggle.py"
@@ -2062,7 +2063,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "commands": {
                     "dataset_cmd": f"ml-harness cloud consent --provider kaggle --confirm-upload\n# private by default; declare data_config.license before uploading a new dataset",
                     "push_cmd": f"python -m harness.cloud_runner --backend kaggle --project-root . --config {config_path}",
-                    "kernel_cmd": f"kaggle kernels push -p {stage_dir}",
+                    "kernel_cmd": f'python -m harness.templates.kaggle_template push-package --path "{stage_dir}"',
                     "status_cmd": f"kaggle kernels status {meta_json.get('id', 'antigravity/' + exp_id)}",
                     "output_cmd": f"kaggle kernels output {meta_json.get('id', 'antigravity/' + exp_id)} -p {ARTIFACTS_DIR / exp_id}",
                 }

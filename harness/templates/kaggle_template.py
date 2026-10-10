@@ -2,7 +2,7 @@
 
 Enables complete headless execution via Kaggle API:
 1. `push_dataset_to_kaggle`: Packages `dataset/` + `splits/` into a private Kaggle Dataset once (`kaggle datasets create` / `version`).
-2. `setup_kernel_package`: Generates metadata and a Python script with an embedded code/config bundle.
+2. `setup_kernel_package`: Generates a short Python script and a separately mounted code/config bundle.
 3. `get_kernel_status`: Polls `kaggle kernels status <slug>` to monitor running/completed state.
 4. `pull_kernel_output`: Downloads and verifies one sealed run in the attached workspace.
 """
@@ -303,10 +303,13 @@ class KaggleKernelManager:
         job_id: Optional[str] = None,
         runtime_manifest: Optional[Dict[str, Any]] = None,
         enable_internet: bool = False,
+        bundle_mode: str = "dataset",
     ) -> Path:
-        """Create self-contained staging directory for Kaggle kernel push with code + mounted dataset."""
+        """Stage a script and code dataset; embedded mode retains the legacy single-file upload."""
         from harness.project import HarnessProject
 
+        if bundle_mode not in {"dataset", "embedded"}:
+            raise ValueError("Kaggle bundle_mode must be 'dataset' or 'embedded'.")
         root = Path(project_root or Path.cwd()).expanduser().resolve()
         project = HarnessProject.discover(root, task_config_path)
         config_file = Path(config_path).expanduser()
@@ -336,15 +339,6 @@ class KaggleKernelManager:
                 raise ValueError(
                     "Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry."
                 )
-
-        meta = cls.generate_kernel_metadata(
-            kernel_slug=slug,
-            code_file="run_kaggle.py",
-            dataset_sources=[resolved_dataset] if resolved_dataset else [],
-            enable_internet=enable_internet,
-        )
-        with open(stage / "kernel-metadata.json", "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
 
         # Bundle only code/config; dataset contents use the separately consented provider dataset.
         import tempfile
@@ -379,6 +373,12 @@ class KaggleKernelManager:
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "tests"),
             )
+            for source, destination in (
+                (root / "LICENSE", bundle_base / "LICENSE"),
+                (harness_source.parent / "LICENSE", bundle_base / "harness" / "LICENSE"),
+            ):
+                if source.is_file():
+                    shutil.copy2(source, destination)
             manifest_source = root / ".ml-harness" / "project.yaml"
             if manifest_source.is_file():
                 manifest_dest = bundle_base / ".ml-harness" / "project.yaml"
@@ -430,16 +430,65 @@ class KaggleKernelManager:
             )
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for file_path in bundle_base.rglob("*"):
+                for file_path in sorted(bundle_base.rglob("*")):
                     if file_path.is_file():
-                        zf.write(file_path, file_path.relative_to(bundle_base))
-            bundle_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                        # Stable bytes allow identical bundles to reuse a code dataset.
+                        entry = zipfile.ZipInfo(file_path.relative_to(bundle_base).as_posix())
+                        entry.compress_type = zipfile.ZIP_DEFLATED
+                        entry.external_attr = 0o644 << 16
+                        zf.writestr(entry, file_path.read_bytes())
+            bundle_bytes = buf.getvalue()
+
+        bundle_sha256 = hashlib.sha256(bundle_bytes).hexdigest()
+        sources = [resolved_dataset] if resolved_dataset else []
+        bundle_info = {"mode": bundle_mode, "sha256": bundle_sha256}
+        if bundle_mode == "dataset":
+            if not username:
+                raise ValueError("Code bundle upload requires an authenticated Kaggle username.")
+            code_slug = f"mlh-code-{bundle_sha256[:32]}"
+            code_dataset = f"{username}/{code_slug}"
+            filename = f"mlh-code-{bundle_sha256}.zip"
+            code_stage = stage / "code-dataset" / bundle_sha256
+            code_stage.mkdir(parents=True, exist_ok=True)
+            (code_stage / filename).write_bytes(bundle_bytes)
+            (code_stage / "dataset-metadata.json").write_text(json.dumps({
+                "id": code_dataset, "title": f"ML Harness Code {bundle_sha256[:32]}",
+                "licenses": [{"name": "copyright-authors"}],
+                "description": "Private execution bundle. Original source licenses and author rights are retained.",
+            }, indent=2), encoding="utf-8")
+            sources.append(code_dataset)
+            bundle_info.update({"dataset_slug": code_dataset, "filename": filename,
+                                "directory": f"code-dataset/{bundle_sha256}"})
+            bundle_loader = f'''# Code/config are mounted as a private input, not embedded in this source.
+bundle_name = {filename!r}
+input_base = Path("/kaggle/input")
+known_paths = [input_base / {code_slug!r} / bundle_name,
+               input_base / "datasets" / {username!r} / {code_slug!r} / bundle_name]
+matches = [path for path in known_paths if path.is_file()]
+if not matches:
+    matches = [path for path in input_base.rglob(bundle_name) if path.is_file()]
+if len(matches) != 1:
+    raise RuntimeError(f"Expected one mounted code bundle {{bundle_name}}, found {{len(matches)}}. Upload and attach the code dataset before pushing the kernel.")
+bundle_bytes = matches[0].read_bytes()
+if hashlib.sha256(bundle_bytes).hexdigest() != {bundle_sha256!r}:
+    raise RuntimeError("Code bundle SHA-256 mismatch; refusing to execute a different revision.")
+'''
+        else:
+            bundle_b64 = base64.b64encode(bundle_bytes).decode("ascii")
+            bundle_loader = f"bundle_bytes = base64.b64decode({bundle_b64!r})\n"
+        (stage / "code-bundle.json").write_text(json.dumps(bundle_info, indent=2), encoding="utf-8")
+        meta = cls.generate_kernel_metadata(
+            kernel_slug=slug, code_file="run_kaggle.py", dataset_sources=sources,
+            enable_internet=enable_internet,
+        )
+        (stage / "kernel-metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         task_id = (
             task_id or project.manifest.get("task_id") or project.plugin_id or "task"
         )
         artifact_dir = project.artifacts_dir.relative_to(root).as_posix()
         runner_content = f"""import base64
+import hashlib
 import io
 import json
 import os
@@ -451,12 +500,13 @@ import tempfile
 import zipfile
 
 print({('[Kaggle Kernel] Starting execution for: ' + exp_id)!r}, flush=True)
+{bundle_loader}
 output_root = Path.cwd().resolve()
 # Kaggle saves /kaggle/working recursively. Keep code, data and the original
 # run outside that directory, then publish exactly one sealed artifact set.
 with tempfile.TemporaryDirectory(prefix="mlh-kaggle-work-") as temporary:
     workspace = Path(temporary)
-    with zipfile.ZipFile(io.BytesIO(base64.b64decode({bundle_b64!r}))) as archive:
+    with zipfile.ZipFile(io.BytesIO(bundle_bytes)) as archive:
         archive.extractall(workspace)
     os.chdir(workspace)
     sys.path.insert(0, str(workspace))
@@ -485,6 +535,40 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
 """
         (stage / "run_kaggle.py").write_text(runner_content, encoding="utf-8")
         return stage
+
+    @classmethod
+    def push_code_bundle(cls, package_dir: Path | str) -> Dict[str, Any]:
+        """Upload a private, content-addressed code dataset before the kernel push."""
+        stage = Path(package_dir)
+        bundle = json.loads((stage / "code-bundle.json").read_text(encoding="utf-8"))
+        if bundle["mode"] == "embedded":
+            return {"success": True, "mode": "embedded"}
+        code_stage = (stage / bundle["directory"]).resolve()
+        if not code_stage.is_relative_to(stage.resolve()):
+            raise RuntimeError("Code bundle directory must be inside the staged package.")
+        archive = code_stage / bundle["filename"]
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != bundle["sha256"]:
+            raise RuntimeError("Staged code bundle SHA-256 mismatch; refusing upload.")
+        metadata = json.loads((code_stage / "dataset-metadata.json").read_text(encoding="utf-8"))
+        kernel = json.loads((stage / "kernel-metadata.json").read_text(encoding="utf-8"))
+        if metadata["id"] != bundle["dataset_slug"] or metadata["id"] not in kernel["dataset_sources"]:
+            raise RuntimeError("Code dataset identity does not match the staged kernel.")
+        proc = subprocess.run(
+            ["kaggle", "datasets", "create", "-p", str(code_stage), "--dir-mode", "skip", "--keep-tabular"],
+            capture_output=True, text=True, timeout=300,
+        )
+        output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        lowered = output.lower()
+        reused = any(message in lowered for message in ("already exists", "already in use")) or bool(
+            re.search(r"\b409\b", lowered)
+        )
+        if re.search(r"\b(?:401|403)\b", lowered) or (
+            (proc.returncode != 0 or "creation error:" in lowered) and not reused
+        ):
+            raise RuntimeError(f"Kaggle private code bundle upload failed: {output}")
+        # Never version/overwrite a content-addressed code dataset, even on reuse.
+        cls.wait_for_dataset(bundle["dataset_slug"])
+        return {"success": True, "dataset_slug": bundle["dataset_slug"], "reused": reused}
 
     @classmethod
     def get_kernel_status(
@@ -752,3 +836,19 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
             shutil.copy2(source_run / name, destination / name)
         validate_run(destination)
         return names
+
+
+def main(argv=None):
+    """Push an already generated package, including its required code input."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Push a staged Kaggle script and code bundle.")
+    parser.add_argument("command", choices=["push-package"])
+    parser.add_argument("--path", required=True, type=Path)
+    args = parser.parse_args(argv)
+    KaggleKernelManager.push_code_bundle(args.path)
+    subprocess.run(["kaggle", "kernels", "push", "-p", str(args.path)], check=True)
+
+
+if __name__ == "__main__":
+    main()

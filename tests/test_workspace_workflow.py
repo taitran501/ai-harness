@@ -1,7 +1,4 @@
 import hashlib
-import ast
-import base64
-import io
 import json
 import tempfile
 import unittest
@@ -303,23 +300,22 @@ class WorkspaceFixture(unittest.TestCase):
         self.assertNotIn("modal.Mount.from_local_dir", modal_source)
 
         with tempfile.TemporaryDirectory(prefix="mlh_kaggle_bundle_") as stage_dir:
-            package = KaggleKernelManager.setup_kernel_package(
-                stage_dir,
-                "configs/exp001.yaml",
-                "exp001",
-                "user/fixture-data",
-                project_root=self.root,
-                task_config_path=self.task_config,
-                task_id="fixture-task",
-                job_id="job_fixture",
-                runtime_manifest=runtime,
-            )
+            with patch.object(KaggleKernelManager, "get_authenticated_username", return_value="fixture-user"):
+                package = KaggleKernelManager.setup_kernel_package(
+                    stage_dir,
+                    "configs/exp001.yaml",
+                    "exp001",
+                    "user/fixture-data",
+                    project_root=self.root,
+                    task_config_path=self.task_config,
+                    task_id="fixture-task",
+                    job_id="job_fixture",
+                    runtime_manifest=runtime,
+                )
             source = (package / "run_kaggle.py").read_text(encoding="utf-8")
             compile(source, "run_kaggle.py", "exec")
-            bundle = next(node.args[0].value for node in ast.walk(ast.parse(source))
-                          if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                          and node.func.attr == "b64decode")
-            with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle))) as archive:
+            bundle = json.loads((package / "code-bundle.json").read_text())
+            with zipfile.ZipFile(package / bundle["directory"] / bundle["filename"]) as archive:
                 names = archive.namelist()
                 self.assertFalse(any(name.startswith("dataset/") or name.startswith("splits/") for name in names))
 

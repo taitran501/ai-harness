@@ -133,14 +133,16 @@ class KaggleRuntimeTests(unittest.TestCase):
     def test_generated_script_runs_full_validation_and_exports_one_manifest(self):
         package = self.package(job_id="job-fixture")
         source = (package / "run_kaggle.py").read_text()
-        bundle = next(node.args[0].value for node in ast.walk(ast.parse(source))
-                      if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                      and node.func.attr == "b64decode")
-        with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle))) as archive:
+        bundle = json.loads((package / "code-bundle.json").read_text())
+        archive_path = package / bundle["directory"] / bundle["filename"]
+        with zipfile.ZipFile(archive_path) as archive:
             self.assertIn("harness/runner.py", archive.namelist())
             self.assertFalse(any(name.startswith("dataset/") for name in archive.namelist()))
         mount = self.root / "mounted-input" / "datasets" / "fixture-user" / "fixture-data"
         stage_declared_data(self.project, mount)
+        code_mount = mount.parent / bundle["dataset_slug"].split("/")[-1]
+        code_mount.mkdir()
+        shutil.copy2(archive_path, code_mount / bundle["filename"])
         shutil.make_archive(str(mount / "dataset"), "zip", root_dir=mount / "dataset")
         shutil.rmtree(mount / "dataset")
         # Substitute the provider mount only; execute the generated program and actual runner.
@@ -161,6 +163,83 @@ class KaggleRuntimeTests(unittest.TestCase):
         self.assertEqual(len(list(output.rglob("artifact_manifest.json"))), 1)
         self.assertFalse((output / "dataset").exists())
         self.assertFalse((output / "harness").exists())
+
+    def test_script_has_no_base64_and_code_identity_is_stable_across_dispatches(self):
+        package = self.package(job_id="first-job")
+        first = json.loads((package / "code-bundle.json").read_text())
+        metadata = json.loads((package / "kernel-metadata.json").read_text())
+        source = (package / "run_kaggle.py").read_text()
+        self.assertEqual(metadata["kernel_type"], "script")
+        self.assertEqual(metadata["code_file"], "run_kaggle.py")
+        self.assertIn(first["dataset_slug"], metadata["dataset_sources"])
+        self.assertNotIn("base64.b64decode", source)
+        self.assertLess(len(source), 8000)
+        os.utime(self.root / "configs/exp.yaml", None)
+        second = json.loads((self.package(job_id="second-job") / "code-bundle.json").read_text())
+        self.assertEqual(first["sha256"], second["sha256"])
+        cfg = yaml.safe_load((self.root / "configs/exp.yaml").read_text())
+        cfg["model"]["params"]["C"] = 2.0
+        (self.root / "configs/exp.yaml").write_text(yaml.safe_dump(cfg))
+        third = json.loads((self.package() / "code-bundle.json").read_text())
+        self.assertNotEqual(first["sha256"], third["sha256"])
+        code_stage = package / third["directory"]
+        self.assertEqual(len(list(code_stage.glob("*.zip"))), 1)
+
+    def test_script_rejects_missing_ambiguous_or_corrupted_code_before_training(self):
+        package = self.package()
+        bundle = json.loads((package / "code-bundle.json").read_text())
+        input_root = self.root / "code-input"
+        input_root.mkdir()
+        source = (package / "run_kaggle.py").read_text().partition("output_root =")[0]
+        source = source.replace('Path("/kaggle/input")', f'Path({str(input_root)!r})')
+        with self.assertRaisesRegex(RuntimeError, "found 0"):
+            exec(source, {})
+        wrong = input_root / bundle["filename"]
+        wrong.write_bytes(b"different revision")
+        with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
+            exec(source, {})
+        other = input_root / "other"
+        other.mkdir()
+        (other / bundle["filename"]).write_bytes(wrong.read_bytes())
+        with self.assertRaisesRegex(RuntimeError, "found 2"):
+            exec(source, {})
+
+    def test_code_upload_is_private_reuses_existing_bundle_and_stops_on_errors(self):
+        package = self.package()
+        bundle = json.loads((package / "code-bundle.json").read_text())
+        with patch("harness.templates.kaggle_template.subprocess.run",
+                   return_value=Mock(returncode=0, stdout="created fixture-user/mlh-code-a401b403c409d", stderr="")) as upload, patch.object(
+            KaggleKernelManager, "wait_for_dataset") as ready:
+            result = KaggleKernelManager.push_code_bundle(package)
+        self.assertTrue(result["success"])
+        self.assertNotIn("--public", upload.call_args.args[0])
+        self.assertEqual(Path(upload.call_args.args[0][4]), package / bundle["directory"])
+        ready.assert_called_once_with(bundle["dataset_slug"])
+        for code, output, reused in [(1, "409 already exists", True), (1, "403 Forbidden", False),
+                                     (0, "Dataset creation error: quota exceeded", False)]:
+            with self.subTest(output=output), patch("harness.templates.kaggle_template.subprocess.run",
+                return_value=Mock(returncode=code, stdout=output, stderr="")) as upload, patch.object(
+                KaggleKernelManager, "wait_for_dataset") as ready:
+                if reused:
+                    self.assertTrue(KaggleKernelManager.push_code_bundle(package)["reused"])
+                    ready.assert_called_once()
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "upload failed"):
+                        KaggleKernelManager.push_code_bundle(package)
+                    ready.assert_not_called()
+                self.assertEqual(upload.call_count, 1)
+
+    def test_embedded_mode_retains_legacy_single_file_package(self):
+        package = self.package(bundle_mode="embedded")
+        source = (package / "run_kaggle.py").read_text()
+        bundle = next(node.args[0].value for node in ast.walk(ast.parse(source))
+                      if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                      and node.func.attr == "b64decode")
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(bundle))) as archive:
+            self.assertIn("harness/runner.py", archive.namelist())
+        with patch("harness.templates.kaggle_template.subprocess.run") as upload:
+            self.assertTrue(KaggleKernelManager.push_code_bundle(package)["success"])
+        upload.assert_not_called()
 
     def test_upload_auth_error_does_not_trigger_dataset_version(self):
         document = yaml.safe_load(self.project.task_config_path.read_text())
@@ -221,15 +300,24 @@ class KaggleRuntimeTests(unittest.TestCase):
                    "config_sha256": "sha-fixture", "task": {},
                    "external_kaggle_dataset": "fixture-user/fixture-data",
                    "fingerprint": {"fingerprint": "fingerprint-fixture"}}
+        events = []
+        def code_upload(package):
+            events.append("code-ready")
+            return {"success": True}
+        def kernel_push(*args, **kwargs):
+            events.append("kernel-push")
+            return Mock(returncode=0)
         with patch("harness.cloud_runner._prepare_remote_run", return_value=context), patch.object(
             KaggleKernelManager, "get_authenticated_username", return_value="fixture-user"), patch(
-            "harness.cloud_runner.subprocess.run", return_value=Mock(returncode=0)) as push, patch.object(
+            "harness.cloud_runner.subprocess.run", side_effect=kernel_push) as push, patch.object(
+            KaggleKernelManager, "push_code_bundle", side_effect=code_upload), patch.object(
             KaggleKernelManager, "wait_for_kernel", return_value={"status": "COMPLETED"}) as wait, patch.object(
             KaggleKernelManager, "pull_kernel_output", return_value={"success": True}) as pull, patch(
             "harness.cloud_runner._sync_completed_run", return_value={}), patch.dict(sys.modules, {"kaggle": None}):
             result = run_via_kaggle("configs/exp.yaml", project_root=self.root, job_id="job_20261010_exp001_fixture")
         package = Path(push.call_args.args[0][-1])
         try:
+            self.assertEqual(events, ["code-ready", "kernel-push"])
             submitted = json.loads((package / "kernel-metadata.json").read_text())["id"]
             self.assertEqual(result["kernel_slug"], submitted)
             self.assertEqual(wait.call_args.args[1], submitted)
@@ -240,6 +328,36 @@ class KaggleRuntimeTests(unittest.TestCase):
             self.assertTrue(package.name.startswith("mlh-kaggle-"))
             self.assertEqual(package.parent, Path(tempfile.gettempdir()))
             shutil.rmtree(package)
+
+    def test_staged_package_cli_never_pushes_kernel_when_code_upload_fails(self):
+        from harness.templates.kaggle_template import main
+        with patch.object(KaggleKernelManager, "push_code_bundle", side_effect=RuntimeError("upload failed")), patch(
+            "harness.templates.kaggle_template.subprocess.run") as push:
+            with self.assertRaisesRegex(RuntimeError, "upload failed"):
+                main(["push-package", "--path", str(self.root / "stage")])
+        push.assert_not_called()
+        with patch.object(KaggleKernelManager, "push_code_bundle") as upload, patch(
+            "harness.templates.kaggle_template.subprocess.run") as push:
+            main(["push-package", "--path", str(self.root / "stage")])
+        upload.assert_called_once_with(self.root / "stage")
+        self.assertEqual(push.call_args.args[0], ["kaggle", "kernels", "push", "-p", str(self.root / "stage")])
+
+    def test_dashboard_preview_is_a_short_script_with_bundle_aware_push_command(self):
+        from tools import dashboard_server
+        handler = object.__new__(dashboard_server.DashboardHandler)
+        handler.send_json = Mock()
+        with patch.multiple(dashboard_server, PROJECT_ROOT=self.root, HARNESS_PROJECT=self.project,
+                            ARTIFACTS_DIR=self.project.artifacts_dir), patch.object(
+            KaggleKernelManager, "get_authenticated_username", return_value="fixture-user"), patch(
+            "harness.remote_runtime.resolve_remote_runtime", return_value=self.runtime):
+            handler.handle_api_cloud_generate({"backend": "kaggle", "config_path": "configs/exp.yaml"})
+        result = handler.send_json.call_args.args[0]
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["metadata"]["kernel_type"], "script")
+        self.assertTrue(result["script_path"].endswith(".py"))
+        self.assertNotIn("base64.b64decode", result["code"])
+        self.assertLess(len(result["code"]), 8000)
+        self.assertIn("push-package --path", result["commands"]["kernel_cmd"])
 
     def test_failed_output_download_never_imports_partial_files(self):
         with patch.object(KaggleKernelManager, "_download_output_api", side_effect=ImportError("CLI-only fixture")), patch("harness.templates.kaggle_template.subprocess.run",
