@@ -1,10 +1,10 @@
 # AGENTS.md — Assistant Integration & Workflow Guide
 
-This document outlines the workflow, conventions, and CLI commands for AI coding assistants (such as Antigravity, OpenAI Codex, or Claude Code) working within ML-Harness.
+This document outlines the workflow, conventions, and CLI commands for AI coding assistants (such as Antigravity, OpenAI Codex, or Claude Code) working within AI-Harness.
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
 > Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice. Never claim or assume that non-NLP modalities are production-ready or battle-tested.
 
 ---
@@ -56,7 +56,7 @@ Harness Runtime (Layer 3 - harness/)
    - In the AIDE / Agentic ML paradigm, the agent (Antigravity / Codex) is the primary scientific reasoning engine responsible for writing and modifying model code (`model.factory`), feature engineering, and hyperparameters.
    - The harness is an execution and audit layer, **not a prescriptive modeling framework**. It must never hardcode feature preprocessing (e.g. forcing `StandardScaler` or restrictive one-hot encoding onto tree models) or constrain model selections. Experiments must freely configure architectures, pipelines, and loss objectives.
 6. **Verification Scope: Strictly NLP/Text Only (Non-NLP Modalities are WIP)**:
-   - **Empirical Reality**: ML-Harness is currently **strictly verified and working well ONLY on NLP/Text** benchmarks (empirically battle-tested on tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and prompt evaluation).
+   - **Empirical Reality**: AI-Harness is currently **strictly verified and working well ONLY on NLP/Text** benchmarks (empirically battle-tested on tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and prompt evaluation).
    - **Non-NLP Modalities are Unverified WIP**: Tabular, Vision, Audio, and Multimodal support are **experimental works-in-progress (WIP / Roadmap)**, have NOT been benchmarked in competitive settings, and are **NOT** working well in practice. Never claim or assume that Tabular or Vision/Audio models are "battle-tested" or "thoroughly tested".
    - **Modality Transparency**: Assistants must be transparent regarding historical **LLM / NLP bias** (implicit assumptions favoring TF-IDF, XLM-R, and LLM prompting). While experimental scaffolding or roadmap items exist for other modalities, the assistant must treat non-NLP pipelines as experimental WIP.
 
@@ -83,28 +83,28 @@ The harness is task-agnostic. Competition-specific schemas and metrics are defin
 
 ```powershell
 # 0. Attach the installed harness to this competition workspace
-ml-harness attach --project-root . --task-config configs/task.yaml --plugin <installed-plugin-id>
+ai-harness attach --project-root . --task-config configs/task.yaml --plugin <installed-plugin-id>
 
 # 1. Inspect current status and recommendations
-ml-harness-agent --project-root . context
+ai-harness-agent --project-root . context
 
 # 2. Start a work session with a specific goal
-ml-harness-agent --project-root . start-session --goal "Improve primary validation metric" --max-experiments 3
+ai-harness-agent --project-root . start-session --goal "Improve primary validation metric" --max-experiments 3
 
 # 3. Create a verified experiment configuration
-ml-harness-agent --project-root . act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_pipeline_v1"}'
+ai-harness-agent --project-root . act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_pipeline_v1"}'
 
 # 4. Run a fast smoke test (Fold 0 or debug probe)
-ml-harness-agent --project-root . act --action run_smoke_test --params '{"config_path": "configs/<exp_config>.yaml"}'
+ai-harness-agent --project-root . act --action run_smoke_test --params '{"config_path": "configs/<exp_config>.yaml"}'
 
 # 5. Run full validation (local, modal, or kaggle)
-ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path": "configs/<exp_config>.yaml", "backend": "local"}'
+ai-harness-agent --project-root . act --action run_full_validation --params '{"config_path": "configs/<exp_config>.yaml", "backend": "local"}'
 
 # 6. Promote successful experiment to the candidate pool
-ml-harness-agent --project-root . act --action promote_candidate --params '{"exp_id": "<exp_id>", "name": "candidate_v1"}'
+ai-harness-agent --project-root . act --action promote_candidate --params '{"exp_id": "<exp_id>", "name": "candidate_v1"}'
 
 # 7. Package and audit a submission (requires human approval)
-ml-harness-agent --project-root . act --action prepare_submission --user-approved --params '{"exp_id": "<id>", "candidate_csv": "<test_predictions.csv>"}'
+ai-harness-agent --project-root . act --action prepare_submission --user-approved --params '{"exp_id": "<id>", "candidate_csv": "<test_predictions.csv>"}'
 ```
 
 ---
@@ -113,14 +113,14 @@ ml-harness-agent --project-root . act --action prepare_submission --user-approve
 
 | Purpose | Command | Notes |
 |---|---|---|
-| Autonomous Task Onboarding | `ml-harness-bootstrap --project-root . --dataset dataset --context docs/TASK.md` | Auto-extracts data, builds `task.yaml`, generates splits & updates skill |
-| View Assistant Context | `ml-harness-agent --project-root . context` | Read-only status overview |
-| Execute Typed Action | `ml-harness-agent --project-root . act --action <name> --params '{...}'` | Runs supported harness actions |
-| Dashboard | `ml-harness-dashboard --project-root .` | Opens the installed dashboard for this attached task |
-| Solution Tree & UCB | `ml-harness-agent --project-root . context` | Includes the current tree and branch recommendation |
-| Fast Smoke Test | `ml-harness-run --project-root . --config configs/<config>.yaml --debug --fold 0` | Fast convergence check |
-| Full Validation | `ml-harness-run --project-root . --config configs/<config>.yaml` | Runs all configured folds |
-| Pre-Submission Audit | `ml-harness-agent --project-root . act --action prepare_submission --user-approved --params '{...}'` | Requires task plugin submission hooks and test-set predictions |
+| Autonomous Task Onboarding | `ai-harness-bootstrap --project-root . --dataset dataset --context docs/TASK.md` | Auto-extracts data, builds `task.yaml`, generates splits & updates skill |
+| View Assistant Context | `ai-harness-agent --project-root . context` | Read-only status overview |
+| Execute Typed Action | `ai-harness-agent --project-root . act --action <name> --params '{...}'` | Runs supported harness actions |
+| Dashboard | `ai-harness-dashboard --project-root .` | Opens the installed dashboard for this attached task |
+| Solution Tree & UCB | `ai-harness-agent --project-root . context` | Includes the current tree and branch recommendation |
+| Fast Smoke Test | `ai-harness-run --project-root . --config configs/<config>.yaml --debug --fold 0` | Fast convergence check |
+| Full Validation | `ai-harness-run --project-root . --config configs/<config>.yaml` | Runs all configured folds |
+| Pre-Submission Audit | `ai-harness-agent --project-root . act --action prepare_submission --user-approved --params '{...}'` | Requires task plugin submission hooks and test-set predictions |
 | Run Test Suite | `python -m unittest discover -s tests -p "test_*.py"` | Runs full test suite |
 
 

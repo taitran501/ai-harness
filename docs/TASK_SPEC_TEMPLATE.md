@@ -2,11 +2,11 @@
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
 > Support for all other modalities (**Tabular, Computer Vision, Audio, Time-Series, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice.
 > The tabular schemas and examples in this document are provided for schema syntax reference only.
 >
-> This document defines the standard specification schema for onboarding arbitrary ML/DL/NLP competitions into **ML-Harness**.
+> This document defines the standard specification schema for onboarding arbitrary ML/DL/NLP competitions into **AI-Harness**.
 > The harness consumes this specification to configure data loaders, establish leakage-proof validation folds, parameterize evaluation metrics, and inject agent skills.
 
 ---
@@ -23,11 +23,11 @@
 ### Onboarding Modes
 1. **Zero-Touch Automated Mode (Recommended)**: Drop competition notes into `docs/TASK.md` and run:
    ```powershell
-   ml-harness-bootstrap --project-root . --dataset dataset/ --context docs/TASK.md
+   ai-harness-bootstrap --project-root . --dataset dataset/ --context docs/TASK.md
    ```
 2. **Declarative Mode**: Write `configs/task.yaml` directly using the schema below, then attach the installed harness and selected adapter:
    ```powershell
-   ml-harness attach --project-root . --task-config configs/task.yaml --plugin <installed-plugin-id>
+   ai-harness attach --project-root . --task-config configs/task.yaml --plugin <installed-plugin-id>
    ```
 
 ---

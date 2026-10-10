@@ -1,10 +1,10 @@
 # AI Assistant Workflow Guide
 
-This guide describes how AI coding assistants (such as Antigravity IDE, Claude Code, or OpenAI Codex) interact with the ML-Harness framework.
+This guide describes how AI coding assistants (such as Antigravity IDE, Claude Code, or OpenAI Codex) interact with the AI-Harness framework.
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (empirically benchmarked on real-world tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and prompt evaluation).
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (empirically benchmarked on real-world tasks such as `stereoqueereval`, text classification, transformer fine-tuning, and prompt evaluation).
 > All other modalities (**Tabular, Computer Vision, Audio, Multimodal**) are **experimental works-in-progress (WIP / Roadmap)**, have NOT been verified in competitive conditions, and are NOT considered ready or working well in practice. Never claim or assume that non-NLP modalities are production-ready or battle-tested.
 
 ---
@@ -24,7 +24,7 @@ This guide describes how AI coding assistants (such as Antigravity IDE, Claude C
    The installed task plugin defines data, metrics, and submission capabilities. The agent checks those declared capabilities before treating a task as submission-ready.
 
 5. **Strictly NLP Scope**:
-   The assistant must maintain transparency that ML-Harness is empirically verified and working well only on NLP/Text. Any non-NLP tasks must be treated as experimental WIP.
+   The assistant must maintain transparency that AI-Harness is empirically verified and working well only on NLP/Text. Any non-NLP tasks must be treated as experimental WIP.
 
 ---
 
@@ -45,40 +45,40 @@ The assistant interacts with the execution harness through `tools/agent_bridge_c
 ### Viewing Context
 ```powershell
 # Retrieve current stage, best CV score, and UCB branch suggestions
-ml-harness-agent --project-root . context
+ai-harness-agent --project-root . context
 ```
 
 ### Starting a Work Session
 ```powershell
 # Start a session with experiment and runtime budgets
-ml-harness-agent --project-root . start-session --goal "Improve primary metric" --max-experiments 3
+ai-harness-agent --project-root . start-session --goal "Improve primary metric" --max-experiments 3
 ```
 
 ### Executing Actions
 ```powershell
 # Create an experiment configuration
-ml-harness-agent --project-root . act --action create_experiment --params '{"branch": "feat", "descriptor": "target_encoding"}'
+ai-harness-agent --project-root . act --action create_experiment --params '{"branch": "feat", "descriptor": "target_encoding"}'
 
 # Run a smoke test on fold 0
-ml-harness-agent --project-root . act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_target_encoding.yaml"}'
+ai-harness-agent --project-root . act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_target_encoding.yaml"}'
 
 # Run full cross-validation
-ml-harness-agent --project-root . act --action run_full_validation --params '{"config_path": "configs/exp002_feat_target_encoding.yaml"}'
+ai-harness-agent --project-root . act --action run_full_validation --params '{"config_path": "configs/exp002_feat_target_encoding.yaml"}'
 
 # Promote model to candidate pool
-ml-harness-agent --project-root . act --action promote_candidate --params '{"exp_id": "exp002", "name": "candidate_v1"}'
+ai-harness-agent --project-root . act --action promote_candidate --params '{"exp_id": "exp002", "name": "candidate_v1"}'
 ```
 
 ---
 
 ## 4. Solution Tree & Exploration (UCB)
 
-The solution tree is stored under `.ml-harness/artifacts/<task-id>/journal.json`. The Agent Bridge context packet includes the current tree and next branch recommendation:
+The solution tree is stored under `.ai-harness/artifacts/<task-id>/journal.json`. The Agent Bridge context packet includes the current tree and next branch recommendation:
 
 ```bash
 # Summary of all runs
-ml-harness-agent --project-root . context
+ai-harness-agent --project-root . context
 
 # Recommended next intervention branch
-ml-harness-agent --project-root . context --format json
+ai-harness-agent --project-root . context --format json
 ```

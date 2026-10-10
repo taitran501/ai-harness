@@ -30,6 +30,6 @@ JSON state uses reentrant thread locks plus Windows `msvcrt` / Unix `fcntl` lock
 
 ## Capability boundaries and verification scope
 
-Verification scope: ML-Harness runtime, baselines, and scoring are strictly validated and working well only on NLP/Text tasks. Non-NLP modalities (Tabular, Vision, Audio, Multimodal) are unverified experimental WIP.
+Verification scope: AI-Harness runtime, baselines, and scoring are strictly validated and working well only on NLP/Text tasks. Non-NLP modalities (Tabular, Vision, Audio, Multimodal) are unverified experimental WIP.
 
 Text metadata features work in `UniversalFeaturePipeline`. Calibration and threshold optimization remain utilities requiring explicit integration; they are not built-in runner models. Optional diagnostic failure is recorded visibly; scorer/evidence persistence failure propagates. Provider calls in regression tests are mocked. Live cloud validation requires a separately budgeted run.

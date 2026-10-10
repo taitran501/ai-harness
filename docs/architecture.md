@@ -1,10 +1,10 @@
 # Architecture & System Design
 
-This document details the architectural design of **ML-Harness**, drawing on principles from tree-search exploration (AIDE) and deterministic execution verification (SWE-agent).
+This document details the architectural design of **AI-Harness**, drawing on principles from tree-search exploration (AIDE) and deterministic execution verification (SWE-agent).
 
 > [!IMPORTANT]
 > **Verification Scope: Strictly NLP / Text Only**
-> ML-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
+> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as `stereoqueereval`, sequence classification, transformer fine-tuning, and prompt evaluation).
 > Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)**, has NOT been verified in competitive conditions, and is NOT considered ready or working well in practice. Never claim or assume that non-NLP modalities are production-ready or battle-tested.
 
 ---
@@ -29,7 +29,7 @@ Layer 3: Execution Runtime (harness/)
 ## 2. Core Components
 
 ### 2.1 Solution Tree DAG (`harness/tree_journal.py`)
-Rather than maintaining a flat, unstructured list of experiments, ML-Harness organizes iterations as a Directed Acyclic Graph (DAG):
+Rather than maintaining a flat, unstructured list of experiments, AI-Harness organizes iterations as a Directed Acyclic Graph (DAG):
 - Each experiment node records its parent, hypothesis, hyperparameters, primary validation score, and execution artifacts.
 - **Compressed State**: To prevent context window bloat for AI assistants, the journal generates concise summaries (~1,000 tokens) capturing only the top models, recent deltas, and bottleneck diagnostics.
 
@@ -59,8 +59,8 @@ To maintain experimental rigor:
 
 ## 3. Execution Backends
 
-ML-Harness supports three execution backends:
-1. **Local**: Direct execution on the developer machine via `ml-harness-run --project-root .`.
+AI-Harness supports three execution backends:
+1. **Local**: Direct execution on the developer machine via `ai-harness-run --project-root .`.
 2. **Modal.com**: Serverless GPU dispatch with persistent volume caching.
 3. **Kaggle**: Automated notebook packaging, push, and artifact synchronization.
 
