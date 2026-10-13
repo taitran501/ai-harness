@@ -168,7 +168,7 @@ class KaggleKernelManager:
         }
         logs = []
         try:
-            with tempfile.TemporaryDirectory(prefix="mlh-kaggle-dataset-") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="aih-kaggle-dataset-") as temp_dir:
                 stage_dir = Path(temp_dir)
                 staged = stage_declared_data(project, stage_dir)
                 (stage_dir / "dataset-metadata.json").write_text(
@@ -379,7 +379,7 @@ class KaggleKernelManager:
             ):
                 if source.is_file():
                     shutil.copy2(source, destination)
-            for manifest_name in (".ai-harness", ".ml-harness"):
+            for manifest_name in (".ai-harness",):
                 manifest_source = root / manifest_name / "project.yaml"
                 if manifest_source.is_file():
                     manifest_dest = bundle_base / manifest_name / "project.yaml"
@@ -429,9 +429,6 @@ class KaggleKernelManager:
             (bundle_base / "ai-harness-runtime.json").write_text(
                 json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8"
             )
-            (bundle_base / "ml-harness-runtime.json").write_text(
-                json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for file_path in sorted(bundle_base.rglob("*")):
@@ -449,9 +446,9 @@ class KaggleKernelManager:
         if bundle_mode == "dataset":
             if not username:
                 raise ValueError("Code bundle upload requires an authenticated Kaggle username.")
-            code_slug = f"mlh-code-{bundle_sha256[:32]}"
+            code_slug = f"aih-code-{bundle_sha256[:32]}"
             code_dataset = f"{username}/{code_slug}"
-            filename = f"mlh-code-{bundle_sha256}.zip"
+            filename = f"aih-code-{bundle_sha256}.zip"
             code_stage = stage / "code-dataset" / bundle_sha256
             code_stage.mkdir(parents=True, exist_ok=True)
             (code_stage / filename).write_bytes(bundle_bytes)
@@ -508,7 +505,7 @@ print({('[Kaggle Kernel] Starting execution for: ' + exp_id)!r}, flush=True)
 output_root = Path.cwd().resolve()
 # Kaggle saves /kaggle/working recursively. Keep code, data and the original
 # run outside that directory, then publish exactly one sealed artifact set.
-with tempfile.TemporaryDirectory(prefix="mlh-kaggle-work-") as temporary:
+with tempfile.TemporaryDirectory(prefix="aih-kaggle-work-") as temporary:
     workspace = Path(temporary)
     with zipfile.ZipFile(io.BytesIO(bundle_bytes)) as archive:
         archive.extractall(workspace)
@@ -517,7 +514,7 @@ with tempfile.TemporaryDirectory(prefix="mlh-kaggle-work-") as temporary:
     try:
         # Loading by path avoids importing harness.__init__ before dependencies exist.
         helpers = runpy.run_path(str(workspace / "harness" / "kaggle_runtime.py"))
-        runtime_path = Path("ai-harness-runtime.json") if Path("ai-harness-runtime.json").exists() else Path("ml-harness-runtime.json")
+        runtime_path = Path("ai-harness-runtime.json")
         runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
         helpers["ensure_dependencies"](runtime, enable_internet={enable_internet!r})
         input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
@@ -714,7 +711,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
 
         try:
             with tempfile.TemporaryDirectory(
-                prefix=f"mlh-kaggle-{exp_id}-"
+                prefix=f"aih-kaggle-{exp_id}-"
             ) as temp_dir:
                 download_dir = Path(temp_dir)
                 try:

@@ -101,8 +101,6 @@ def restore_dataset(input_root, workspace):
         raise RuntimeError(f"The selected Kaggle dataset mount is missing: {input_root}")
     manifest_path = input_root / "aih-data-bundle.json"
     if not manifest_path.is_file():
-        manifest_path = input_root / "mlh-data-bundle.json"
-    if not manifest_path.is_file():
         # Existing user-selected datasets retain the legacy dataset/ and splits/ layout.
         for item in input_root.iterdir():
             if item.name in {"dataset-metadata.json", "README.md"}:
@@ -123,7 +121,7 @@ def restore_dataset(input_root, workspace):
         raise RuntimeError("Uploaded task data manifest has no files")
     # Kaggle may mount top-level uploaded directories as <directory>.zip.
     # Extract into a temporary source tree; only manifest-listed files enter the run.
-    with tempfile.TemporaryDirectory(prefix="mlh-kaggle-data-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="aih-kaggle-data-") as temporary:
         cache = Path(temporary)
         opened = set()
         for value in files:

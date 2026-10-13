@@ -1,4 +1,4 @@
-"""Empirical stress test suite for ML-Harness Web Dashboard UI/UX:
+"""Empirical stress test suite for AI-Harness Web Dashboard UI/UX:
 1. Stage 1 Setup KPI Card 2 boundary state stress-testing.
 2. Complete absence of (CV) contamination across dashboard/src/.
 3. EN/VI i18n completeness, parity, parameter matching, and key usage.

@@ -1879,14 +1879,13 @@ const LanguageContext = createContext<LanguageContextValue>({
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [lang, setLangState] = useState<UILanguage>(() => {
-    const saved = localStorage.getItem('ai_harness_ui_lang') || localStorage.getItem('ml_harness_ui_lang');
+    const saved = localStorage.getItem('ai_harness_ui_lang');
     return saved === 'vi' ? 'vi' : 'en';
   });
 
   const setLang = (next: UILanguage) => {
     setLangState(next);
     localStorage.setItem('ai_harness_ui_lang', next);
-    localStorage.setItem('ml_harness_ui_lang', next);
   };
 
   const t = (key: string, fallback?: string, params?: Record<string, string | number>): string => {

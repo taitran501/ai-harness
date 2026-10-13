@@ -48,23 +48,16 @@ def initialize_prompt_pack(project_root: Path | str, force: bool = False) -> Dic
     """Create editable starter prompts without replacing an existing user pack."""
     root = Path(project_root).expanduser().resolve()
     pack_dir = root / "prompts" / "ai-harness"
-    legacy_pack_dir = root / "prompts" / "ml-harness"
     pack_path = pack_dir / "phase-pack.yaml"
-    legacy_pack_path = legacy_pack_dir / "phase-pack.yaml"
-    if (pack_path.exists() or legacy_pack_path.exists()) and not force:
-        active = pack_path if pack_path.exists() else legacy_pack_path
-        return {"status": "EXISTS", "pack": str(active)}
+    if pack_path.exists() and not force:
+        return {"status": "EXISTS", "pack": str(pack_path)}
 
     pack_dir.mkdir(parents=True, exist_ok=True)
-    legacy_pack_dir.mkdir(parents=True, exist_ok=True)
     phase_docs = []
-    legacy_phase_docs = []
     for index, (phase_id, title) in enumerate(PHASES, 1):
         prompt_rel = f"phases/{index:02d}-{phase_id}.md"
         prompt_path = pack_dir / prompt_rel
-        legacy_prompt_path = legacy_pack_dir / prompt_rel
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        legacy_prompt_path.parent.mkdir(parents=True, exist_ok=True)
         content = (
             f"# {title}\n\n"
             "<!-- Replace this starter with the phase instructions for your task. -->\n\n"
@@ -73,24 +66,11 @@ def initialize_prompt_pack(project_root: Path | str, force: bool = False) -> Dic
         )
         if force or not prompt_path.exists():
             prompt_path.write_text(content, encoding="utf-8")
-        if force or not legacy_prompt_path.exists():
-            legacy_prompt_path.write_text(content, encoding="utf-8")
         phase_docs.append(
             {
                 "id": phase_id,
                 "title": title,
                 "prompt_file": f"prompts/ai-harness/{prompt_rel}",
-                "output_contract": {
-                    "format": "markdown",
-                    "required_sections": ["Summary", "Evidence", "Decisions", "Next steps"],
-                },
-            }
-        )
-        legacy_phase_docs.append(
-            {
-                "id": phase_id,
-                "title": title,
-                "prompt_file": f"prompts/ml-harness/{prompt_rel}",
                 "output_contract": {
                     "format": "markdown",
                     "required_sections": ["Summary", "Evidence", "Decisions", "Next steps"],
@@ -105,14 +85,6 @@ def initialize_prompt_pack(project_root: Path | str, force: bool = False) -> Dic
         ),
         encoding="utf-8",
     )
-    legacy_pack_path.write_text(
-        yaml.safe_dump(
-            {"schema_version": 1, "phases": legacy_phase_docs},
-            sort_keys=False,
-            allow_unicode=True,
-        ),
-        encoding="utf-8",
-    )
     return {"status": "CREATED", "pack": str(pack_path)}
 
 
@@ -122,9 +94,7 @@ class PhaseWorkflow:
     def __init__(self, project_root: Path | str = ".", task_config: Optional[Path | str] = None):
         self.project = HarnessProject.discover(project_root, task_config)
         self.root = self.project.root
-        pack_primary = self.root / "prompts" / "ai-harness" / "phase-pack.yaml"
-        pack_legacy = self.root / "prompts" / "ml-harness" / "phase-pack.yaml"
-        self.pack_path = pack_primary if (pack_primary.is_file() or not pack_legacy.is_file()) else pack_legacy
+        self.pack_path = self.root / "prompts" / "ai-harness" / "phase-pack.yaml"
         self.history_path = self.project.artifacts_dir / "phase_history.json"
         self.responses_dir = self.project.artifacts_dir / "phase_responses"
 
@@ -290,7 +260,7 @@ class PhaseWorkflow:
         task = task.get("task", task)
         contract = phase["output_contract"]
         lines = [
-            f"# ML-Harness phase: {phase.get('title', selected)} (`{selected}`)",
+            f"# AI-Harness phase: {phase.get('title', selected)} (`{selected}`)",
             "",
             "## Task context",
             f"- Task: {task.get('name') or task.get('task_name') or 'Unnamed task'}",
@@ -400,7 +370,7 @@ class PhaseWorkflow:
             "",
             "## Recording the result",
             "After completing this phase, save the response and any source URLs/artifact paths with:",
-            f"`ml-harness phase record --phase {selected} --response-file <response.md> --sources-file <sources.json> --artifact <workspace-relative-path>`",
+            f"`ai-harness phase record --phase {selected} --response-file <response.md> --sources-file <sources.json> --artifact <workspace-relative-path>`",
             "Use an empty JSON array for sources when no web search was used. Cite only sources actually inspected by the IDE agent.",
         ])
         return "\n".join(lines) + "\n"

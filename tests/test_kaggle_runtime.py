@@ -30,7 +30,7 @@ from tests.test_research_continuity import config, task_document
 
 class KaggleRuntimeTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="mlh-kaggle-contract-")
+        self.temp = tempfile.TemporaryDirectory(prefix="aih-kaggle-contract-")
         self.root = Path(self.temp.name)
         (self.root / "configs").mkdir()
         (self.root / "dataset").mkdir()
@@ -208,7 +208,7 @@ class KaggleRuntimeTests(unittest.TestCase):
         package = self.package()
         bundle = json.loads((package / "code-bundle.json").read_text())
         with patch("harness.templates.kaggle_template.subprocess.run",
-                   return_value=Mock(returncode=0, stdout="created fixture-user/mlh-code-a401b403c409d", stderr="")) as upload, patch.object(
+                   return_value=Mock(returncode=0, stdout="created fixture-user/aih-code-a401b403c409d", stderr="")) as upload, patch.object(
             KaggleKernelManager, "wait_for_dataset") as ready:
             result = KaggleKernelManager.push_code_bundle(package)
         self.assertTrue(result["success"])
@@ -325,7 +325,7 @@ class KaggleRuntimeTests(unittest.TestCase):
             self.assertEqual(pull.call_args.kwargs["project_root"], self.root)
         finally:
             # This directory was returned by the dispatch mock, not the real checkout.
-            self.assertTrue(package.name.startswith("mlh-kaggle-"))
+            self.assertTrue(package.name.startswith("aih-kaggle-"))
             self.assertEqual(package.parent, Path(tempfile.gettempdir()))
             shutil.rmtree(package)
 

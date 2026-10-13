@@ -40,10 +40,8 @@ artifacts/base/
 /.agents/
 /artifacts/
 /.ai-harness/
-/.ml-harness/
 /build/
 /ai_harness.egg-info/
-/ml_harness.egg-info/
 /task_plugins/*/build/
 /task_plugins/*.egg-info/
 /task_plugins/*/*.egg-info/

@@ -187,7 +187,7 @@ def run_via_modal(
         raise RuntimeError(f"Modal dataset upload failed: {upload.get('error') or upload.get('logs')}")
 
     # Generate code in a unique temporary directory; never replace an older job bundle.
-    stage_dir = Path(tempfile.mkdtemp(prefix=f"mlh-modal-{job_id}-"))
+    stage_dir = Path(tempfile.mkdtemp(prefix=f"aih-modal-{job_id}-"))
     stage_dir.mkdir(parents=True, exist_ok=True)
     modal_script_path = stage_dir / f"app_{exp_id}.py"
 
@@ -283,7 +283,7 @@ def run_via_kaggle(
         KaggleKernelManager.wait_for_dataset(dataset_slug)
 
     # 2. Package exact core/adapter runtime and task code without credentials or dataset bytes.
-    stage_dir = Path(tempfile.mkdtemp(prefix=f"mlh-kaggle-{job_id}-"))
+    stage_dir = Path(tempfile.mkdtemp(prefix=f"aih-kaggle-{job_id}-"))
     runtime = dict(context["runtime"])
     runtime["core"]["version"] = runtime["core"].get("version", "0.2.0")
     KaggleKernelManager.setup_kernel_package(

@@ -27,12 +27,6 @@ ai-harness-dashboard = "tools.dashboard_cli:main"
 ai-harness-run = "harness.runner:main"
 ai-harness-audit = "tools.audit_gate:main"
 ai-harness-bootstrap = "tools.bootstrap_task:main"
-ml-harness = "harness.cli:main"
-ml-harness-agent = "tools.agent_bridge_cli:main"
-ml-harness-dashboard = "tools.dashboard_cli:main"
-ml-harness-run = "harness.runner:main"
-ml-harness-audit = "tools.audit_gate:main"
-ml-harness-bootstrap = "tools.bootstrap_task:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -37,10 +37,7 @@ def resolve_remote_runtime(project: HarnessProject) -> Dict[str, Any]:
     try:
         core_version = metadata.version("ai-harness")
     except metadata.PackageNotFoundError:
-        try:
-            core_version = metadata.version("ml-harness")
-        except metadata.PackageNotFoundError:
-            core_version = "0.2.0"
+        core_version = "0.2.0"
     core_requirements = []
     for requirement_name, distribution_name in CORE_RUNTIME_DISTRIBUTIONS.items():
         try:

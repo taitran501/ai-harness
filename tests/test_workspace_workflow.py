@@ -23,7 +23,7 @@ from harness.templates.modal_template import generate_modal_script, push_dataset
 
 class WorkspaceFixture(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="mlh_workspace_")
+        self.temp = tempfile.TemporaryDirectory(prefix="aih_workspace_")
         self.root = Path(self.temp.name)
         (self.root / "configs").mkdir()
         (self.root / "dataset").mkdir()
@@ -136,9 +136,9 @@ class WorkspaceFixture(unittest.TestCase):
         store.grant("kaggle", initial)
         self.assertTrue(store.is_granted("kaggle", initial["fingerprint"]))
 
-        with tempfile.TemporaryDirectory(prefix="mlh_bundle_") as bundle_dir:
+        with tempfile.TemporaryDirectory(prefix="aih_bundle_") as bundle_dir:
             result = stage_declared_data(self.project, bundle_dir)
-            manifest = json.loads((Path(bundle_dir) / "mlh-data-bundle.json").read_text(encoding="utf-8"))
+            manifest = json.loads((Path(bundle_dir) / "aih-data-bundle.json").read_text(encoding="utf-8"))
             self.assertEqual(result["file_count"], 2)
             self.assertIn("dataset/train.csv", manifest["files"])
             self.assertIn("splits/folds.csv", manifest["files"])
@@ -193,7 +193,7 @@ class WorkspaceFixture(unittest.TestCase):
     def test_private_provider_resource_names_follow_task_data_fingerprint(self):
         first = dataset_fingerprint(self.project)
         names = private_upload_resource_names(self.project, fingerprint_data=first, kaggle_username="fixture-user")
-        self.assertTrue(names["kaggle_dataset_slug"].startswith("fixture-user/mlh-fixture-task-"))
+        self.assertTrue(names["kaggle_dataset_slug"].startswith("fixture-user/aih-fixture-task-"))
         self.assertIn(first["fingerprint"][:12], names["modal_volume_name"])
         self.assertNotIn("public", names["kaggle_dataset_slug"])
         (self.root / "dataset" / "train.csv").write_text("text,label\nnew,1\n", encoding="utf-8")
@@ -253,7 +253,7 @@ class WorkspaceFixture(unittest.TestCase):
                 {"platform": "kaggle", "dataset_slug": "someone/shared-public-dataset"}
             )
 
-        self.assertEqual(push.call_args.kwargs["dataset_slug"], "fixture-user/mlh-fixture-task-" + fingerprint["fingerprint"][:12] + "-data")
+        self.assertEqual(push.call_args.kwargs["dataset_slug"], "fixture-user/aih-fixture-task-" + fingerprint["fingerprint"][:12] + "-data")
         response = handler.send_json.call_args.args[0]
         self.assertEqual(response["dataset_fingerprint"], fingerprint["fingerprint"])
         self.assertEqual(response["visibility"], "private")
@@ -299,7 +299,7 @@ class WorkspaceFixture(unittest.TestCase):
         self.assertIn("block_network=True", modal_source)
         self.assertNotIn("modal.Mount.from_local_dir", modal_source)
 
-        with tempfile.TemporaryDirectory(prefix="mlh_kaggle_bundle_") as stage_dir:
+        with tempfile.TemporaryDirectory(prefix="aih_kaggle_bundle_") as stage_dir:
             with patch.object(KaggleKernelManager, "get_authenticated_username", return_value="fixture-user"):
                 package = KaggleKernelManager.setup_kernel_package(
                     stage_dir,

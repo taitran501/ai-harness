@@ -55,8 +55,8 @@ def private_upload_resource_names(
     task_slug = re.sub(r"[^a-z0-9-]+", "-", task_id.lower()).strip("-") or "task"
     fingerprint = str(fingerprint_data["fingerprint"])
     suffix = fingerprint[:12]
-    dataset_name = f"mlh-{task_slug[:20]}-{suffix}-data"
-    volume_name = f"mlh-{task_slug[:24]}-{suffix}-data-vol"
+    dataset_name = f"aih-{task_slug[:20]}-{suffix}-data"
+    volume_name = f"aih-{task_slug[:24]}-{suffix}-data-vol"
     username = str(kaggle_username or "").strip()
     if username and not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("Kaggle CLI did not return a valid account username; authenticate through the official CLI first.")

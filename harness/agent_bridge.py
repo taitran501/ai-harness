@@ -336,7 +336,6 @@ class AgentBridge:
         paths = {
             self.project_root / "EXPERIMENTS.md",
             self.project_root / ".ai-harness/EXPERIMENTS.md",
-            self.project_root / ".ml-harness/EXPERIMENTS.md",
         }
         base_path = self.project_root / "configs/base.yaml"
         if base_path.exists():

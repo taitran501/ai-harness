@@ -19,7 +19,7 @@ from tests.test_research_continuity import config, task_document
 
 class ResearchTraceTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="mlh-insight-trace-")
+        self.temp = tempfile.TemporaryDirectory(prefix="aih-insight-trace-")
         self.root = Path(self.temp.name)
         (self.root / "configs").mkdir()
         (self.root / "configs/task.yaml").write_text(yaml.safe_dump(task_document()))

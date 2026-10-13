@@ -12,7 +12,6 @@ import pandas as pd
 
 
 TASK_PLUGIN_ENTRY_POINT_GROUP = "ai_harness.task_plugins"
-LEGACY_TASK_PLUGIN_ENTRY_POINT_GROUP = "ml_harness.task_plugins"
 
 
 class TaskPluginError(RuntimeError):
@@ -311,7 +310,7 @@ class DeclarativeTaskPlugin(TaskPlugin):
 
 def _plugin_entry_points() -> list[EntryPoint]:
     discovered = entry_points()
-    groups = [TASK_PLUGIN_ENTRY_POINT_GROUP, LEGACY_TASK_PLUGIN_ENTRY_POINT_GROUP]
+    groups = [TASK_PLUGIN_ENTRY_POINT_GROUP]
     points = []
     seen = set()
     for grp in groups:

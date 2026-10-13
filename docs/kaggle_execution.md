@@ -86,7 +86,7 @@ Sources: [dataset commands](https://github.com/Kaggle/kaggle-cli/blob/main/docs/
    mount fails explicitly instead of selecting another dataset. Nested paths
    such as `/kaggle/input/datasets/<owner>/<dataset-slug>` are also resolved by
    the selected slug/owner; ambiguous mounts fail.
-4. `mlh-data-bundle.json` lists workspace-relative files. Restoration accepts
+4. `aih-data-bundle.json` lists workspace-relative files. Restoration accepts
    expanded directories or `<directory>.zip` uploads. Only listed files enter
    the run workspace. ZIPs store paths relative to the uploaded directory.
 5. Dependency checks use distribution versions, not import names: `scikit-learn`
@@ -110,7 +110,7 @@ root so the importer receives one manifest rather than duplicate copies.
 
 The default `task.runtime.kaggle_bundle_mode` is `dataset`. Code/config ZIPs use
 sorted entries and fixed timestamps: unchanged contents produce the same SHA-256
-and reuse the same private `owner/mlh-code-<hash-prefix>` dataset. Changed contents
+and reuse the same private `owner/aih-code-<hash-prefix>` dataset. Changed contents
 use a new code dataset; existing code datasets are never versioned or overwritten.
 The mounted ZIP filename contains its full SHA-256. The script requires exactly
 one matching file and verifies its bytes before extraction or dependency setup,

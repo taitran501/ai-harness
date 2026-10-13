@@ -25,7 +25,7 @@ from tools.bootstrap_task import (
 
 
 class TestBootstrapTask(unittest.TestCase):
-    """Verifies that ML-Harness autonomously onboards arbitrary competitions and dataset formats."""
+    """Verifies that AI-Harness autonomously onboards arbitrary competitions and dataset formats."""
 
     def setUp(self) -> None:
         self.test_dir = Path(tempfile.mkdtemp(prefix="test_bootstrap_"))

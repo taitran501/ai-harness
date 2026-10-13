@@ -326,7 +326,7 @@ def inject_skill_file(
     dest.parent.mkdir(parents=True, exist_ok=True)
     content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=dest.parent.name)
     dest.write_text(content, encoding="utf-8")
-    for twin_name in ("ai-experiment-harness", "ai-harness", "ml-experiment-harness", "ml-harness"):
+    for twin_name in ("ai-experiment-harness", "ai-harness"):
         if dest.parent.parent.name == "skills" and dest.parent.name != twin_name:
             twin_dest = dest.parent.parent / twin_name / "SKILL.md"
             twin_dest.parent.mkdir(parents=True, exist_ok=True)

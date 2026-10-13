@@ -64,3 +64,16 @@ history from guesses.
 - Lesson: Harness unit tests validating lifecycle DAG transitions, anti-leakage gates, and orchestration contracts should never depend on heavy numerical convergence or live network sockets; decoupling via lightweight dummy estimators and mocked environment probes achieves sub-second test execution.
 - Next action: Partition changes into logical commits and push to remote `origin/dev`.
 
+## 2026-10-13 — Complete Eradication of Legacy ml-harness & mlh- Prefixes
+
+- Request: check if any traces of `ml-harness` remain in the repository and purge them completely.
+- Completed:
+  - **Script & CLI Removal**: Removed legacy `ml-harness*` script aliases from `pyproject.toml`.
+  - **Storage & Runtime Purity**: Removed `ml_harness_ui_lang` key in `i18n.ts`, removed fallback `LEGACY_DATA_MANIFEST_NAME = "mlh-data-bundle.json"`, and eliminated `LEGACY_MANIFEST_RELATIVE_PATH` and `.ml-harness` checks in `harness/project.py`.
+  - **Cloud & Resource Prefix Modernization**: Updated dataset, volume, code slug, and tempdir prefixes across `harness/cloud_policy.py`, `harness/cloud_runner.py`, `harness/templates/kaggle_template.py`, and `harness/kaggle_runtime.py` from `mlh-` to `aih-`.
+  - **Web Assets & Test Assertions**: Updated pre-built web asset bundle and HTML title to `AI-Harness`, cleaned `.gitignore`, and updated all corresponding test assertions and fixtures in `test_workspace_workflow.py`, `test_kaggle_runtime.py`, `test_research_trace.py`, `test_bootstrap_task.py`, and `test_universal_plugin.py`.
+- Evidence: `git grep -inE "ml[-_]harness"` yields 0 matches in codebase files; full test suite passed 392/392 tests in 79.0s.
+- Lesson: Full deprecation of legacy prefixes ensures clean naming boundaries without ambiguous dual paths across cloud policies and local file caches.
+- Next action: Commit and push changes to remote repository.
+
+

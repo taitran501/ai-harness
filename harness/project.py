@@ -12,7 +12,6 @@ import yaml
 
 
 MANIFEST_RELATIVE_PATH = Path(".ai-harness") / "project.yaml"
-LEGACY_MANIFEST_RELATIVE_PATH = Path(".ml-harness") / "project.yaml"
 DEFAULT_TASK_CONFIG = Path("configs") / "task.yaml"
 
 
@@ -30,7 +29,7 @@ def resolve_project_root(root: Optional[Path | str] = None) -> Path:
         return Path(configured).expanduser().resolve()
 
     cwd = Path.cwd().resolve()
-    if (cwd / MANIFEST_RELATIVE_PATH).is_file() or (cwd / LEGACY_MANIFEST_RELATIVE_PATH).is_file():
+    if (cwd / MANIFEST_RELATIVE_PATH).is_file():
         return cwd
     if (cwd / DEFAULT_TASK_CONFIG).is_file() or (cwd / "dataset").exists():
         return cwd
@@ -60,8 +59,6 @@ class HarnessProject:
     ) -> "HarnessProject":
         project_root = resolve_project_root(root)
         manifest_path = project_root / MANIFEST_RELATIVE_PATH
-        if not manifest_path.is_file() and (project_root / LEGACY_MANIFEST_RELATIVE_PATH).is_file():
-            manifest_path = project_root / LEGACY_MANIFEST_RELATIVE_PATH
         manifest = _read_yaml(manifest_path)
 
         # An explicit workspace root must not inherit another workspace's task-config
@@ -87,11 +84,7 @@ class HarnessProject:
         if isinstance(configured_plugin, dict):
             configured_plugin = configured_plugin.get("id") or configured_plugin.get("name")
 
-        default_artifacts = (
-            ".ml-harness/artifacts"
-            if (not manifest and (project_root / ".ml-harness").is_dir())
-            else ".ai-harness/artifacts"
-        )
+        default_artifacts = ".ai-harness/artifacts"
         artifacts_value = manifest.get("artifacts_dir", default_artifacts if manifest else "artifacts")
         artifacts_dir = Path(artifacts_value).expanduser()
         if not artifacts_dir.is_absolute():
@@ -136,13 +129,10 @@ def attach_project(
         raise ValueError("Task config must be inside the attached project root.") from exc
 
     manifest_path = root / MANIFEST_RELATIVE_PATH
-    legacy_manifest_path = root / LEGACY_MANIFEST_RELATIVE_PATH
     skill_path = root / ".agents" / "skills" / "ai-harness" / "SKILL.md"
-    legacy_skill_path = root / ".agents" / "skills" / "ml-harness" / "SKILL.md"
 
-    active_manifest_path = manifest_path if manifest_path.exists() else legacy_manifest_path
-    if active_manifest_path.exists() and not force:
-        current = _read_yaml(active_manifest_path)
+    if manifest_path.exists() and not force:
+        current = _read_yaml(manifest_path)
         same_attachment = (
             Path(str(current.get("task_config", ""))).as_posix() == Path(task_rel).as_posix()
             and current.get("plugin_id", "default") == resolved_plugin
@@ -153,14 +143,14 @@ def attach_project(
             return {
                 "status": "ALREADY_ATTACHED",
                 "project_root": str(root),
-                "manifest": str(active_manifest_path),
-                "agent_skill": str(skill_path if skill_path.exists() else legacy_skill_path),
+                "manifest": str(manifest_path),
+                "agent_skill": str(skill_path),
                 "plugin_id": str(resolved_plugin),
                 "task_id": task_id,
                 "prompt_pack": prompt_pack,
             }
         if not same_attachment:
-            raise FileExistsError(f"Harness manifest already exists: {active_manifest_path}; pass --force to replace it.")
+            raise FileExistsError(f"Harness manifest already exists: {manifest_path}; pass --force to replace it.")
 
     from harness.phase_workflow import initialize_prompt_pack
     prompt_pack = initialize_prompt_pack(root, force=False)
@@ -175,8 +165,6 @@ def attach_project(
     }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
-    legacy_manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    legacy_manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
 
     skill_content = (
         "---\n"
@@ -221,8 +209,6 @@ def attach_project(
     )
     skill_path.parent.mkdir(parents=True, exist_ok=True)
     skill_path.write_text(skill_content, encoding="utf-8")
-    legacy_skill_path.parent.mkdir(parents=True, exist_ok=True)
-    legacy_skill_path.write_text(skill_content, encoding="utf-8")
 
     return {
         "status": "ATTACHED",

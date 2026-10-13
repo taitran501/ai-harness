@@ -1,4 +1,4 @@
-"""Integration test proving Universal Pluggability of ML-Harness.
+"""Integration test proving Universal Pluggability of AI-Harness.
 
 Demonstrates that the harness can be dropped into an entirely new competition
 (e.g., SentimentPulse binary sentiment classification) with ZERO code modifications
@@ -35,7 +35,7 @@ from harness.tree_journal import TreeJournal
 
 
 class TestUniversalPlugin(unittest.TestCase):
-    """Verifies that ML-Harness operates seamlessly on arbitrary competition domains."""
+    """Verifies that AI-Harness operates seamlessly on arbitrary competition domains."""
 
     def setUp(self):
         self.test_dir = Path(tempfile.mkdtemp(prefix="test_harness_plugin_"))

@@ -28,7 +28,7 @@ or on an agent remembering to read the old Markdown graveyard.
 
 ## Iteration protocol
 
-Use `ai-harness-agent --project-root .` (the `ml-harness-agent` alias also works):
+Use `ai-harness-agent --project-root .`:
 
 1. Read `context` after restart/compaction and before planning an iteration.
 2. Call `act --action search_research_memory` with `query` describing the mechanism,
