@@ -1,4 +1,4 @@
-"""Atomic File I/O Utilities for ML-Harness.
+"""Atomic File I/O Utilities for AI-Harness.
 
 Prevents file corruption and race conditions when multiple processes (CLI,
 web dashboard, background runners) read and write shared JSON and text states.

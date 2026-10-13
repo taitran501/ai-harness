@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 
 
-TASK_PLUGIN_ENTRY_POINT_GROUP = "ml_harness.task_plugins"
+TASK_PLUGIN_ENTRY_POINT_GROUP = "ai_harness.task_plugins"
+LEGACY_TASK_PLUGIN_ENTRY_POINT_GROUP = "ml_harness.task_plugins"
 
 
 class TaskPluginError(RuntimeError):
@@ -310,13 +311,23 @@ class DeclarativeTaskPlugin(TaskPlugin):
 
 def _plugin_entry_points() -> list[EntryPoint]:
     discovered = entry_points()
-    if hasattr(discovered, "select"):
-        return list(discovered.select(group=TASK_PLUGIN_ENTRY_POINT_GROUP))
-    return list(discovered.get(TASK_PLUGIN_ENTRY_POINT_GROUP, []))
+    groups = [TASK_PLUGIN_ENTRY_POINT_GROUP, LEGACY_TASK_PLUGIN_ENTRY_POINT_GROUP]
+    points = []
+    seen = set()
+    for grp in groups:
+        if hasattr(discovered, "select"):
+            found = list(discovered.select(group=grp))
+        else:
+            found = list(discovered.get(grp, []))
+        for pt in found:
+            if pt.name not in seen:
+                seen.add(pt.name)
+                points.append(pt)
+    return points
 
 
 def list_task_plugins() -> list[Dict[str, str]]:
-    plugins = [{"id": "default", "distribution": "ml-harness", "target": "DeclarativeTaskPlugin"}]
+    plugins = [{"id": "default", "distribution": "ai-harness", "target": "DeclarativeTaskPlugin"}]
     plugins.extend(
         {
             "id": point.name,

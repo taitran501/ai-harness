@@ -59,7 +59,7 @@ export const WorkspaceHub: React.FC<{ onOpenEnvironmentModal: () => void }> = ({
       });
       if (isManual) setError('');
     } else {
-      const msg = phaseResult.reason?.message || 'Could not read the prompt pack. Run `ml-harness phase init` in this workspace.';
+      const msg = phaseResult.reason?.message || 'Could not read the prompt pack. Run `ai-harness phase init` in this workspace.';
       if (isManual || dismissedErrorRef.current !== msg) {
         setError(msg);
       }

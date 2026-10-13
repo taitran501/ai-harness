@@ -280,7 +280,7 @@ class WorkspaceFixture(unittest.TestCase):
         config.write_text("experiment:\n  id: exp001\n", encoding="utf-8")
         runtime = {
             "schema_version": 1,
-            "core": {"distribution": "ml-harness", "version": "0.2.0"},
+            "core": {"distribution": "ai-harness", "version": "0.2.0"},
             "plugin": {"id": "default", "version": "1", "install": None},
             "requirements": [],
             "bundle_files": [],

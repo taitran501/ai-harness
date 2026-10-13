@@ -1,4 +1,4 @@
-"""Environment and Multi-Account Detection Module for ML-Harness.
+"""Environment and Multi-Account Detection Module for AI-Harness.
 
 Detects and manages credentials, CLI availability, active accounts, and hardware for:
 1. Modal.com (Multi-profile switcher, tokens, workspace inspection)
@@ -565,7 +565,7 @@ class EnvironmentDetector:
         # Handle local daemons
         if prov == "ollama":
             try:
-                req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "ML-Harness/2.0"})
+                req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "AI-Harness/2.0"})
                 with urllib.request.urlopen(req, timeout=3.0, context=ctx) as resp:
                     latency = int((time.time() - t0) * 1000)
                     return {
@@ -585,7 +585,7 @@ class EnvironmentDetector:
 
         if prov == "vllm":
             try:
-                req = urllib.request.Request("http://localhost:8000/v1/models", headers={"User-Agent": "ML-Harness/2.0"})
+                req = urllib.request.Request("http://localhost:8000/v1/models", headers={"User-Agent": "AI-Harness/2.0"})
                 with urllib.request.urlopen(req, timeout=3.0, context=ctx) as resp:
                     latency = int((time.time() - t0) * 1000)
                     return {
@@ -612,7 +612,7 @@ class EnvironmentDetector:
             }
 
         headers: Dict[str, str] = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ML-Harness/2.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AI-Harness/2.0",
         }
 
         if prov == "gemini":

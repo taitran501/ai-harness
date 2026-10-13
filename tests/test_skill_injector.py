@@ -1,4 +1,4 @@
-"""Unit tests for the Dynamic Skill Injector Engine in ML-Harness."""
+"""Unit tests for the Dynamic Skill Injector Engine in AI-Harness."""
 
 import json
 import socketserver
@@ -44,7 +44,7 @@ class SkillInjectorTests(unittest.TestCase):
             "languages": ["EN", "IT", "NL"],
         }
         content = generate_skill_content(task_cfg)
-        self.assertIn("name: ml-experiment-harness", content)
+        self.assertIn("name: ai-harness", content)
         self.assertIn("My NLP Benchmark", content)
         self.assertIn("Codabench", content)
         self.assertIn("Macro-F1 (CV)", content)

@@ -99,7 +99,9 @@ def restore_dataset(input_root, workspace):
     input_root, workspace = Path(input_root), Path(workspace)
     if not input_root.is_dir():
         raise RuntimeError(f"The selected Kaggle dataset mount is missing: {input_root}")
-    manifest_path = input_root / "mlh-data-bundle.json"
+    manifest_path = input_root / "aih-data-bundle.json"
+    if not manifest_path.is_file():
+        manifest_path = input_root / "mlh-data-bundle.json"
     if not manifest_path.is_file():
         # Existing user-selected datasets retain the legacy dataset/ and splits/ layout.
         for item in input_root.iterdir():

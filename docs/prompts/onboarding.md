@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > **Verification Scope**: AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks (e.g. sequence classification, transformer fine-tuning, prompt evaluation).
 > Support for all other modalities (**Tabular, Computer Vision, Audio, Multimodal**) is **experimental work-in-progress (WIP / Roadmap)** and NOT verified in practice.<br>
-> **Lifecycle Phase**: `Phase 1: Setup` ➔ `Phase 2: Understand` ➔ `Phase 3: Baseline Anchor`<br>
+> **Lifecycle Phase**: `Phase 1: Setup` -> `Phase 2: Understand` -> `Phase 3: Baseline Anchor`<br>
 > **Target Assistants**: Google Antigravity, Anthropic Claude Code, OpenAI Codex<br>
 > **Prompt Architecture**: XML-Delimited Task Contract (Anthropic / OpenAI Alignment Standard)<br>
 
@@ -56,14 +56,14 @@ You operate under strict SWE-agent deterministic verification principles: do not
 </operating_constraints>
 
 <instructions>
-Execute the onboarding protocol systematically across the following 5 phases:
+Execute the onboarding protocol systematically across the following 5 steps:
 
-PHASE 1: INGESTION & DISCOVERY
+STEP 1: INGESTION & DISCOVERY
 1. Inspect `dataset/`. If any archives (.zip, .tar.gz, .tgz, .7z) exist, extract them in place preserving internal structures.
 2. Inspect schema headers, data types, and record volume across .parquet, .feather, .jsonl, .sqlite, .tsv, or .csv files.
 3. Determine column roles: instance identifier (`id_column`), target label (`target_column`), and anti-leakage group (`group_column`).
 
-PHASE 2: AUTONOMOUS HARNESS BOOTSTRAP
+STEP 2: AUTONOMOUS HARNESS BOOTSTRAP
 Execute the deterministic bootstrapper:
 ```powershell
 ai-harness-bootstrap --project-root . --dataset dataset --context docs/TASK.md
@@ -74,7 +74,7 @@ Verify that the bootstrapper successfully produced:
 - `splits/fold_assignments.tsv`: Deterministic fold allocations enforcing GroupKFold (if groups exist) or StratifiedKFold.
 - `.agents/skills/ai-harness/SKILL.md`: Regenerated skill markdown tailored to this competition's metric.
 
-PHASE 3: BRIDGE SESSION INITIALIZATION
+STEP 3: BRIDGE SESSION INITIALIZATION
 1. Query the Agent Bridge context packet:
    ```powershell
    ai-harness-agent context
@@ -84,7 +84,7 @@ PHASE 3: BRIDGE SESSION INITIALIZATION
    ai-harness-agent start-session --goal "Establish initial baseline anchor" --max-experiments 3
    ```
 
-PHASE 4: SMOKE PROBE & FULL BASELINE EXECUTION
+STEP 4: SMOKE PROBE & FULL BASELINE EXECUTION
 1. Run a fast single-fold debug probe (Smoke Test):
    ```powershell
    ai-harness-run --project-root . --config configs/exp000_baseline.yaml --debug --fold 0
@@ -99,7 +99,7 @@ PHASE 4: SMOKE PROBE & FULL BASELINE EXECUTION
    ai-harness-agent act --action establish_baseline_anchor --params '{"baseline_id": "exp000_baseline"}'
    ```
 
-PHASE 5: TECHNICAL BRIEFING DELIVERABLE
+STEP 5: TECHNICAL BRIEFING DELIVERABLE
 Conclude with a structured technical briefing strictly adhering to the output format below.
 </instructions>
 

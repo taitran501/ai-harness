@@ -18,7 +18,7 @@
 | **Schema Name** | `UniversalTaskSpec` |
 | **Schema Version** | `2.0.0` |
 | **Consuming Components** | `harness/task_spec.py`, `tools/bootstrap_task.py`, `harness/skill_injector.py`, `harness/diagnostics.py` |
-| **Output Locations** | Raw Context: `docs/TASK.md` ➔ Declarative Config: `configs/task.yaml` |
+| **Output Locations** | Raw Context: `docs/TASK.md` -> Declarative Config: `configs/task.yaml` |
 
 ### Onboarding Modes
 1. **Zero-Touch Automated Mode (Recommended)**: Drop competition notes into `docs/TASK.md` and run:

@@ -51,3 +51,16 @@ history from guesses.
   is still necessary; a generated journal cannot recover an insight never recorded.
 - Next action: design the actual-agent continuity evaluation with a fixed task,
   interrupted context, repetition counts, interpretation completeness and a budget.
+
+## 2026-10-13 — Canonical AI-Harness Rebranding & Decoupled Fast Testing Architecture
+
+- Request: audit repository for legacy `ml-harness` bias, rebrand to `ai-harness`, resolve unit tests running heavy local models and stalling test cycles, and commit changes cleanly to remote repo.
+- Completed:
+  - **Comprehensive Rebranding**: Standardized canonical name to `ai-harness` across runtime (`harness/project.py`, `harness/runner.py`, `harness/skill_injector.py`, `harness/phase_workflow.py`, `harness/cli.py`, `harness/plugins.py`, `harness/environment_detector.py`, `harness/data_strategy.py`, `harness/llm_engine.py`, `harness/templates/`), developer tools (`tools/bootstrap_task.py`, `tools/dashboard_server.py`, `tools/agent_bridge_cli.py`, `tools/agent_runtime_cli.py`), Web dashboard (`dashboard/src/App.tsx`, `dashboard/src/constants/i18n.ts`, modals), skills (`.agents/skills/ai-harness/SKILL.md`), and documentation (`docs/README.md`, `docs/agent_workflow.md`, `docs/CORRECTNESS_CONTRACT.md`, `docs/plugin_architecture.md`, prompts).
+  - **Dual-path Backward Compatibility**: Preserved automatic fallback resolution for legacy `.ml-harness` workspaces, manifests (`ml-harness-runtime.json`, `mlh-data-bundle.json`), and UI preference storage keys.
+  - **Decoupled Testing Engine**: Implemented `DummyBaselineModel` in `harness/models.py` (registered under aliases `dummy`, `mock`, `dummy_baseline`, `dummy_classifier`, `dummy_regressor`) providing instant `O(1)` fitting, label alignment, and probability matrix output without heavy mathematical optimization.
+  - **Mocked Process & Network Probes**: Mocked external OS and network calls in `test_cloud_jobs_and_env.py` (dropped from 18.0s to 0.3s) and replaced `localhost` with explicit `127.0.0.1` IPv4 binding in `test_llm_api_endpoints.py` (dropped from 30.5s to 1.0s), preventing Windows IPv6 fallback timeouts.
+- Evidence: Full test suite (`python -m unittest discover -s tests -p "test_*.py"`) completed 392 tests in 74.13s (reduced from ~140s) with 100% pass rate.
+- Lesson: Harness unit tests validating lifecycle DAG transitions, anti-leakage gates, and orchestration contracts should never depend on heavy numerical convergence or live network sockets; decoupling via lightweight dummy estimators and mocked environment probes achieves sub-second test execution.
+- Next action: Partition changes into logical commits and push to remote `origin/dev`.
+

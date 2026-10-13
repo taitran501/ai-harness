@@ -1,58 +1,111 @@
-# Task plugins and local agent integration
+# Task Plugins and Workspace Integration
 
-> [!IMPORTANT]
-> **Verification Scope: Strictly NLP / Text Only**
-> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** tasks. Non-NLP modalities are experimental WIP on the roadmap.
+AI-Harness is distributed as an installable Python package. Task-specific competition adapters are separate distributions discovered via Python entry points under the `ai_harness.task_plugins` group.
 
-AI-Harness is installed as a Python distribution. Competition adapters are separate distributions discovered through the `ai_harness.task_plugins` entry-point group. The harness does not inspect a workspace's `src` package or guess a competition from its directory name.
+---
 
-## Install and attach
+## 1. When to Use a Task Plugin
 
-Install the core runtime, then the adapter selected for a competition:
+There are two ways to configure a task in AI-Harness:
 
-```powershell
-python -m pip install -e .
+1. **Declarative Task Specification (`configs/task.yaml`)**:
+   - Ideal for standard benchmarks with tabular or textual datasets in standard formats (`.csv`, `.parquet`, `.tsv`).
+   - Uses built-in generic metrics (accuracy, macro/micro F1, ROC-AUC, RMSE, MAE, logloss) and standard splitters.
+   - Does not require writing Python adapter code.
+
+2. **Custom Task Plugin (`TaskPlugin`)**:
+   - Required when the competition defines custom multi-table datasets, specialized data loaders, domain-specific evaluation metrics, or strict submission packaging formats.
+   - Implements validation split logic, exploratory data analysis hooks, and submission builders/validators.
+
+---
+
+## 2. Installation and Attachment
+
+Install the core harness runtime, then install the competition adapter package:
+
+```bash
+# Install core runtime
+pip install -e .
+
+# List installed plugins
 ai-harness plugins
-ai-harness attach --project-root C:\path\to\competition --task-config configs/task.yaml --plugin <plugin-name>
+
+# Attach the harness to your competition workspace
+ai-harness attach --project-root /path/to/competition --task-config configs/task.yaml --plugin <plugin_id>
 ```
 
-Attach writes a small `.ai-harness/project.yaml` manifest and `.agents/skills/ai-harness/SKILL.md`. It does not rewrite the competition's task config. All experiment state, including the generated experiment leaderboard, belongs to `.ai-harness/artifacts/<task-id>/`.
+The `attach` command creates:
+- A local attachment manifest: `.ai-harness/project.yaml`.
+- An agent skill file tailored to the task: `.agents/skills/ai-harness/SKILL.md`.
+- Isolated experiment state and artifact directories: `.ai-harness/artifacts/<task-id>/`.
 
-The agent and runner accept explicit workspace paths, so a console script installed in a virtual environment can work from any current directory:
+The competition's own `configs/task.yaml` is preserved and not rewritten.
 
-```powershell
-ai-harness-agent --project-root C:\path\to\competition context
-ai-harness-agent --project-root . act --action inspect_data_readiness
-ai-harness-run --project-root . --config configs\exp001.yaml --debug --fold 0
-```
+---
 
-## Adapter contract
+## 3. The Adapter Contract (`TaskPlugin`)
 
-Implement `harness.plugins.TaskPlugin` and register it in your distribution's `pyproject.toml`:
+To create a competition adapter, subclass `harness.plugins.TaskPlugin` and register it in your package's `pyproject.toml`:
 
 ```toml
 [project.entry-points."ai_harness.task_plugins"]
-my_competition = "my_adapter:MyCompetitionPlugin"
+my_competition = "my_adapter_package.plugin:MyCompetitionPlugin"
 ```
 
-The public hooks cover task data loading and validation, model construction, prediction normalization, metric evaluation, validation split construction and checking, EDA extensions, submission validation, and submission building. The generic implementation delegates metrics to `UniversalTaskSpec` and raises `PluginCapabilityError` for submission operations until the adapter supplies those hooks.
+### Core Adapter Hooks
+A `TaskPlugin` implementation may override the following methods:
 
-`ai-harness-agent context` reports the selected plugin ID and which capabilities it implements. Missing adapters fail with the installed entry-point list. A plugin that lacks official submission hooks cannot be treated as submission-ready.
+| Method Hook | Responsibility |
+|---|---|
+| `load_train_data()` | Ingests raw files, performs initial type casting, and returns a clean training DataFrame. |
+| `load_test_data()` | Ingests unlabelled evaluation data for test-set inference. |
+| `build_validation_splits()` | Produces deterministic train/validation indices enforcing anti-leakage invariants. |
+| `evaluate_predictions()` | Computes competition-specific evaluation metrics on prediction batches. |
+| `build_submission()` | Formats test predictions into the competition platform's required format (CSV, TSV, or ZIP). |
+| `validate_submission()` | Verifies that the generated submission package strictly satisfies platform constraints. |
+| `run_eda()` | Generates domain-specific exploratory data analysis summaries. |
 
-## Remote runtime, phases, and workspace ownership
+If an adapter does not implement submission hooks, generic metric evaluation remains functional, but submission packaging operations fail closed with a `PluginCapabilityError`.
 
-Remote execution requires a plugin to declare a runtime manifest with its exact installed distribution and version. The manifest can identify a wheel or a pinned package requirement, plus adapter-specific dependencies and workspace-contained bundle files. Kaggle and Modal receive the selected code and declared dependencies; credentials and task data are handled separately. Uploading local task data requires explicit consent for that provider and the current data fingerprint. Generated Kaggle datasets and Modal volumes remain private by default.
+---
 
-The attached workspace owns `prompts/ai-harness/phase-pack.yaml`, its ordered phase Markdown files, and `.ai-harness/artifacts/<task-id>/phase_history.json`. The IDE agent performs reasoning and web search. AI-Harness renders a phase prompt with task configuration, EDA, run state, and prior responses, then records the response, cited URLs, and workspace artifact paths. The first pass is sequential; experiment, selection, and external-evaluation phases can repeat after evidence changes. A baseline phase result cannot be recorded until measured run metrics are locked as the baseline.
+## 4. Remote Execution and Runtime Manifests
 
-Each dashboard process is bound to loopback and one task workspace. It rejects non-loopback Host headers and cross-origin requests; start a separate dashboard from a separate workspace to work on another task.
+When dispatching runs to remote GPU infrastructure (such as Modal or Kaggle):
+- The plugin declares a runtime manifest specifying its exact package name, version, and dependencies.
+- The manifest can specify pinned requirements, custom wheels, and task bundle files.
+- Remote backends receive the selected code and dependencies; credentials and datasets are managed separately.
+- Uploading local dataset files to cloud providers requires explicit user consent and verifies dataset SHA-256 fingerprints.
 
-## Distribution layout
+---
+
+## 5. Workspace Ownership and Phase Prompt Packs
+
+In an attached competition workspace:
+- The workspace maintains editable phase instructions under `prompts/ai-harness/` with a manifest at `prompts/ai-harness/phase-pack.yaml`.
+- The AI coding assistant reads rendered phase prompts, performs domain reasoning, and writes responses.
+- AI-Harness persists recorded phase responses, evidence revisions, cited sources, and output artifacts in `.ai-harness/artifacts/<task-id>/phase_history.json`.
+
+---
+
+## 6. Workspace Layout
+
+A configured competition repository follows this directory layout:
 
 ```text
-ai-harness/                         # installable generic runtime
-competition workspace/
-  configs/task.yaml                 # task-owned declarative contract
-  .ai-harness/project.yaml          # local attachment manifest
-  .ai-harness/artifacts/<task-id>/  # isolated state and run outputs
+competition-workspace/
+|-- configs/
+|   |-- task.yaml                 # Task specification contract
+|   `-- exp000_baseline.yaml      # Baseline experiment configuration
+|-- dataset/                      # Competition data files
+|-- splits/
+|   `-- fold_assignments.tsv      # Deterministic cross-validation splits
+|-- prompts/
+|   `-- ai-harness/
+|       |-- phase-pack.yaml       # Phase workflow manifest
+|       `-- phases/               # Editable phase prompt templates
+|-- .ai-harness/
+|   |-- project.yaml              # Local attachment manifest
+|   `-- artifacts/<task-id>/      # Isolated run artifacts, manifests, and logs
+`-- .agents/skills/               # Generated assistant skills
 ```

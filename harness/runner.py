@@ -132,7 +132,7 @@ class UniversalRunner:
             **contract_identity(self.task_spec, self.task_plugin),
         }
         save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
-        self.logger = __import__("logging").getLogger("ml-harness.runner")
+        self.logger = __import__("logging").getLogger("ai-harness.runner")
         (self.exp_dir / "run.log").write_text("Starting run\n", encoding="utf-8")
         if not self.task_plugin.capabilities().get("custom_metrics") and not cfg.get(
             "paths", {}

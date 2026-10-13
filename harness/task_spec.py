@@ -1,4 +1,4 @@
-"""Universal Task Specification and Conditional Logic Engine for ML-Harness.
+"""Universal Task Specification and Conditional Logic Engine for AI-Harness.
 
 Enables declarative definition of multi-task, hierarchical, and conditional
 relationships (if-else routing, oracle masks) between prediction targets.

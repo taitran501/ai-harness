@@ -50,9 +50,9 @@ Every iteration must be an ATOMIC INTERVENTION: change exactly one variable at a
 </operating_constraints>
 
 <instructions>
-Execute the iterative exploration protocol across 5 phases:
+Execute the iterative exploration protocol across the following 5 steps:
 
-PHASE 1: CONTEXT & UCB RECOMMENDATION
+STEP 1: CONTEXT & UCB RECOMMENDATION
 1. Query the current competition HUD and active session status:
    ```powershell
    ai-harness-agent context
@@ -67,7 +67,7 @@ PHASE 1: CONTEXT & UCB RECOMMENDATION
    ai-harness-agent act --action inspect_diagnostics --params '{"exp_id": "<parent_exp_id>"}'
    ```
 
-PHASE 2: ATOMIC CONFIGURATION & GROUNDING VERIFICATION
+STEP 2: ATOMIC CONFIGURATION & GROUNDING VERIFICATION
 1. Create the experiment configuration via the bridge:
    ```powershell
    ai-harness-agent act --action create_experiment --params '{
@@ -82,15 +82,15 @@ PHASE 2: ATOMIC CONFIGURATION & GROUNDING VERIFICATION
    python harness/grounding_gate.py --config configs/exp<NNN>_<branch>_<descriptor>.yaml
    ```
 
-PHASE 3: FAST SINGLE-FOLD DEBUG PROBE (SMOKE TEST)
+STEP 3: FAST SINGLE-FOLD DEBUG PROBE (SMOKE TEST)
 Verify execution without compute waste:
 ```powershell
 ai-harness-run --project-root . --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0
 ```
 - If errors occur: diagnose tracebacks and fix in the config or feature code.
-- If convergence succeeds: proceed to Phase 4.
+- If convergence succeeds: proceed to Step 4.
 
-PHASE 4: FULL CROSS-VALIDATION
+STEP 4: FULL CROSS-VALIDATION
 Run full multi-fold validation:
 ```powershell
 ai-harness-run --project-root . --config configs/exp<NNN>_<branch>_<descriptor>.yaml
@@ -101,7 +101,7 @@ Verify generated artifacts:
 - `.ai-harness/artifacts/<task-id>/<exp_id>/DIAGNOSTICS.md`
 - `.ai-harness/artifacts/<task-id>/<exp_id>/EXPERIMENT_CARD.md`
 
-PHASE 5: EVALUATION & CANDIDATE PROMOTION
+STEP 5: EVALUATION & CANDIDATE PROMOTION
 1. Inspect the score delta against the parent:
    ```powershell
    ai-harness-agent act --action inspect_experiment --params '{"exp_id": "<exp_id>"}'

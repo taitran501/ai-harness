@@ -1,4 +1,4 @@
-"""Command line for attaching and inspecting local ML-Harness installations."""
+"""Command line for attaching and inspecting local AI-Harness installations."""
 
 from __future__ import annotations
 
@@ -15,20 +15,20 @@ from harness.cloud_policy import UploadConsentStore, dataset_fingerprint, provid
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ml-harness")
+    parser = argparse.ArgumentParser(prog="ai-harness")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     attach = subparsers.add_parser("attach", help="Attach the installed harness to a task workspace")
     attach.add_argument("--project-root", default=".", help="Task repository root")
     attach.add_argument("--task-config", default="configs/task.yaml", help="Task specification YAML")
     attach.add_argument("--plugin", default=None, help="Installed task-plugin entry point ID")
-    attach.add_argument("--force", action="store_true", help="Replace the ML-Harness manifest and skill")
+    attach.add_argument("--force", action="store_true", help="Replace the AI-Harness manifest and skill")
 
     subparsers.add_parser("plugins", help="List installed task plugins")
 
     phase = subparsers.add_parser("phase", help="Manage the workspace-owned 8-phase prompt workflow")
     phase_commands = phase.add_subparsers(dest="phase_command", required=True)
-    phase_init = phase_commands.add_parser("init", help="Create editable starter prompts under prompts/ml-harness")
+    phase_init = phase_commands.add_parser("init", help="Create editable starter prompts under prompts/ai-harness")
     phase_init.add_argument("--project-root", default=".", help="Attached task workspace root")
     phase_init.add_argument("--force", action="store_true", help="Replace starter pack files")
     phase_validate = phase_commands.add_parser("validate", help="Validate phase order, prompt files, and output contracts")

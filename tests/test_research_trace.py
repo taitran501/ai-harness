@@ -184,7 +184,7 @@ class ResearchTraceTests(unittest.TestCase):
         self.insight()
         self.assertNotEqual(revision, workflow.evidence_revision())
         self.assertIn("research_frontier", workflow.render())
-        skill = (self.root / ".agents/skills/ml-harness/SKILL.md").read_text()
+        skill = (self.root / ".agents/skills/ai-harness/SKILL.md").read_text()
         self.assertIn("trace_research_insight", skill)
         self.assertIn("plan_research_probe", skill)
 

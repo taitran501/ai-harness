@@ -24,8 +24,9 @@ DATA_PATH_KEYS = (
     "dataset_path",
     "data_path",
 )
-BLOCKED_PATH_PARTS = {".git", ".env", ".kaggle", ".modal", ".ml-harness", "artifacts", "submissions"}
-DATA_MANIFEST_NAME = "mlh-data-bundle.json"
+BLOCKED_PATH_PARTS = {".git", ".env", ".kaggle", ".modal", ".ai-harness", ".ml-harness", "artifacts", "submissions"}
+DATA_MANIFEST_NAME = "aih-data-bundle.json"
+LEGACY_DATA_MANIFEST_NAME = "mlh-data-bundle.json"
 
 
 class DataBundleError(ValueError):
@@ -145,7 +146,7 @@ def stage_declared_data(
         "paths": [relative for _, relative in roots],
         "files": [relative for _, relative in files],
     }
-    (target_root / DATA_MANIFEST_NAME).write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    manifest_text = json.dumps(manifest, indent=2, ensure_ascii=False)
+    (target_root / DATA_MANIFEST_NAME).write_text(manifest_text, encoding="utf-8")
+    (target_root / LEGACY_DATA_MANIFEST_NAME).write_text(manifest_text, encoding="utf-8")
     return {"manifest": manifest, "file_count": len(files)}

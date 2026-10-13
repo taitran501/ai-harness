@@ -39,7 +39,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 def _find_script(rel_path: str) -> Path:
-    """Finds script path either at competition project root or in ml-harness folder."""
+    """Finds script path either at competition project root or in harness folder."""
     p_root = PROJECT_ROOT / rel_path
     if p_root.exists():
         return p_root
@@ -427,12 +427,12 @@ class CloudJobManager:
             ):
                 raise ValueError(
                     f"Dataset upload is not approved for {backend} and the current data fingerprint. "
-                    f"Review and run `ml-harness cloud consent --provider {backend} --confirm-upload`."
+                    f"Review and run `ai-harness cloud consent --provider {backend} --confirm-upload`."
                 )
             upload_fingerprint = fingerprint["fingerprint"] if requires_upload else None
         if is_custom_plugin and not config_path.lower().endswith((".yaml", ".yml")):
             raise ValueError(
-                "Task-plugin experiments must use a YAML config through the ML-Harness runner."
+                "Task-plugin experiments must use a YAML config through the AI-Harness runner."
             )
 
         # Resolve experiment ID from config
@@ -559,7 +559,7 @@ class CloudJobManager:
 
         # Write initial header to log file
         with open(log_file, "w", encoding="utf-8") as f:
-            f.write(f"=== ML-Harness Cloud Job: {job_id} ===\n")
+            f.write(f"=== AI-Harness Cloud Job: {job_id} ===\n")
             f.write(
                 f"Backend: {backend} | Config: {config_path} | Target ID: {exp_id}\n"
             )

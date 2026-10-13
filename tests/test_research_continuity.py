@@ -222,8 +222,8 @@ class ResearchContinuity(unittest.TestCase):
         _, obs = bridge.execute_action("record_research_checkpoint", params={
             "summary": "Final candidate approved", "next_action": "Inspect final audit"})
         self.assertEqual(obs.status, "SUCCESS")
-        (self.root / ".ml-harness").mkdir(exist_ok=True)
-        (self.root / ".ml-harness/EXPERIMENTS.md").write_text(
+        (self.root / ".ai-harness").mkdir(exist_ok=True)
+        (self.root / ".ai-harness/EXPERIMENTS.md").write_text(
             "## Idea Graveyard\n| exp1 | approach | noise | measure | deferred augmentation |\n")
         self.assertIn("deferred augmentation", bridge.get_context_packet()["idea_graveyard"][0])
 

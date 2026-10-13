@@ -88,7 +88,7 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
     if requires_upload and not consent_store.is_granted(backend, fingerprint["fingerprint"]):
         raise ValueError(
             f"Dataset upload is not approved for {backend} and this task/data fingerprint. "
-            f"Review it, then run `ml-harness cloud consent --provider {backend} --confirm-upload`."
+            f"Review it, then run `ai-harness cloud consent --provider {backend} --confirm-upload`."
         )
     config_sha256 = hashlib.sha256(config.read_bytes()).hexdigest()
     return {
@@ -381,7 +381,7 @@ def handle_auto_submit(exp_id: str, baseline_csv: Optional[str] = None) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="ML-Harness Cloud GPU Dispatcher")
+    parser = argparse.ArgumentParser(description="AI-Harness Cloud GPU Dispatcher")
     parser.add_argument("--backend", choices=["modal", "kaggle"], default="modal")
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
     parser.add_argument("--project-root", default=None, help="Attached task workspace")

@@ -6,7 +6,7 @@ Architecture Principle:
 - The Harness provides:
   1. Task State & Memory (`CompetitionStateMachine`, `TreeJournal`, `Diagnostics`, `Idea Graveyard`).
   2. Deterministic Guardrails (`GroundingGate`, `ExperimentValidator`, `EnsembleGuard`, `AuditGate`).
-  3. Execution & Training Backends (`local` CPU/GPU via `ml-harness-run`, remote backends when the selected adapter supports them).
+  3. Execution & Training Backends (`local` CPU/GPU via `ai-harness-run`, remote backends when the selected adapter supports them).
 - `AgentBridge` connects Antigravity in the IDE with the Harness and Dashboard UI via:
   - Compact, high-signal `ContextPacket` (JSON & Markdown) so Antigravity can reason without context bloat.
   - Strictly typed Harness Actions (`TypedActionName`) returning structured `ActionObservation` payloads.
@@ -333,7 +333,11 @@ class AgentBridge:
     def _extract_idea_graveyard(self) -> List[str]:
         """Dynamically parse documented failed interventions from EXPERIMENTS.md."""
         items: List[str] = []
-        paths = {self.project_root / "EXPERIMENTS.md", self.project_root / ".ml-harness/EXPERIMENTS.md"}
+        paths = {
+            self.project_root / "EXPERIMENTS.md",
+            self.project_root / ".ai-harness/EXPERIMENTS.md",
+            self.project_root / ".ml-harness/EXPERIMENTS.md",
+        }
         base_path = self.project_root / "configs/base.yaml"
         if base_path.exists():
             base = yaml.safe_load(base_path.read_text(encoding="utf-8")) or {}
@@ -754,7 +758,7 @@ class AgentBridge:
                 pa = sess["pending_approval_action"]
                 lines.append(
                     f"- ⚠️ **PENDING USER APPROVAL**: Action `{pa.get('action')}` — {pa.get('rationale')} "
-                    f"(Resume via `ml-harness-agent approve --session-id {sess['session_id']}`)"
+                    f"(Resume via `ai-harness-agent approve --session-id {sess['session_id']}`)"
                 )
 
         if hud.get("what_is_blocking_me"):
@@ -799,7 +803,7 @@ class AgentBridge:
         lines.extend(
             [
                 "",
-                "## 🛠️ Typed Bridge Actions (`ml-harness-agent act --action <name> ...`)",
+                "## 🛠️ Typed Bridge Actions (`ai-harness-agent act --action <name> ...`)",
                 "- **AUTO (Research continuity)**: `search_research_memory`, `review_hypothesis`, `record_research_insight`, `plan_research_probe`, `trace_research_insight`, `record_research_decision`, `record_research_checkpoint`",
                 "- **AUTO**: `inspect_data_readiness`, `run_eda`, `record_phase_output`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
                 "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (dispatches a tracked local/Kaggle/Modal job), `synthesize_candidate`, `build_ensemble`",
@@ -1048,7 +1052,7 @@ class AgentBridge:
                 status="PAUSED_FOR_APPROVAL",
                 summary=(
                     f"Action '{action}' is in tier USER_APPROVAL. Execution paused until confirmed by user "
-                    f"(pass `--user-approved` or run `ml-harness-agent approve --session-id {session.session_id}`)."
+                    f"(pass `--user-approved` or run `ai-harness-agent approve --session-id {session.session_id}`)."
                 ),
                 data={"pending_action": asdict(call)},
             )
@@ -1768,7 +1772,7 @@ class AgentBridge:
                         "uncertainty_level": uncertainty,
                         "verification_probe": params.get(
                             "verification_probe",
-                            f"Run single-fold smoke test: ml-harness-run --project-root . --task-config {self.project.task_config_path.relative_to(self.project_root)} --config configs/{exp_id}.yaml --debug --fold 0",
+                            f"Run single-fold smoke test: ai-harness-run --project-root . --task-config {self.project.task_config_path.relative_to(self.project_root)} --config configs/{exp_id}.yaml --debug --fold 0",
                         ),
                     },
                     "data": {

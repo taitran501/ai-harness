@@ -67,6 +67,7 @@ class TestBoostEndToEnd(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / "configs").mkdir(parents=True)
         (self.root / "dataset").mkdir(parents=True)
+        (self.root / ".ai-harness").mkdir(parents=True)
         (self.root / ".ml-harness").mkdir(parents=True)
 
         # Train data (20 samples, 2 folds)
@@ -489,6 +490,7 @@ class TestBoostEndToEnd(unittest.TestCase):
         clf_root = self.root / "clf_task"
         (clf_root / "configs").mkdir(parents=True)
         (clf_root / "dataset").mkdir(parents=True)
+        (clf_root / ".ai-harness").mkdir(parents=True)
         (clf_root / ".ml-harness").mkdir(parents=True)
 
         np.random.seed(42)

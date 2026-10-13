@@ -1,1 +1,1 @@
-"""Installed command-line entry points for ML-Harness."""
+"""Installed command-line entry points for AI-Harness."""

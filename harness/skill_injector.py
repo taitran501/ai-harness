@@ -1,6 +1,6 @@
-"""Skill Injector Engine for ML-Harness.
+"""Skill Injector Engine for AI-Harness.
 
-Dynamically adapts and injects the AI Agent skill (.agents/skills/ml-harness/SKILL.md)
+Dynamically adapts and injects the AI Agent skill (.agents/skills/ai-harness/SKILL.md)
 to perfectly match any competition or benchmark (Kaggle, Codabench, SemEval, DrivenData, Hugging Face),
 parameterizing task modalities, metrics, subtasks, grounding backbones, and audit rules.
 """
@@ -92,8 +92,8 @@ def load_task_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
 
 def generate_skill_content(
     task: Dict[str, Any],
-    artifact_path: str = ".ml-harness/artifacts/<task-id>",
-    skill_name: str = "ml-experiment-harness",
+    artifact_path: str = ".ai-harness/artifacts/<task-id>",
+    skill_name: str = "ai-harness",
 ) -> str:
     """Generate Markdown content for SKILL.md dynamically tailored to the target task."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
@@ -117,13 +117,13 @@ def generate_skill_content(
         f"description: Manages ML experiments for {task_name} on {platform} via AIDE tree search, enforces SWE-agent deterministic audit gate, and mandates Epistemic Grounding & Assumption Registers.",
         "---",
         "",
-        f"# ML Experiment Harness Skill — {task_name}",
+        f"# AI Experiment Harness Skill — {task_name}",
         "",
         f"> **Active Benchmark**: **{task_name}** | **Platform**: {platform} | **Modality**: {mod_info['title']}",
         f"> **Objective**: {direction.capitalize()} `{primary_metric}` across cross-validation folds.",
         ">",
         "> [!IMPORTANT]",
-        "> **Scope Notice**: ML-Harness is currently validated and working well ONLY on Natural Language Processing (NLP / Text) tasks. Other modalities (Tabular, Vision, Audio, Multimodal) are experimental works-in-progress (WIP / Roadmap) and NOT yet validated in practice.",
+        "> **Scope Notice**: AI-Harness is currently validated and working well ONLY on Natural Language Processing (NLP / Text) tasks. Other modalities (Tabular, Vision, Audio, Multimodal) are experimental works-in-progress (WIP / Roadmap) and NOT yet validated in practice.",
         "",
         f"Use this skill whenever planning model architectures, engineering features, formulating hypotheses,",
         f"auditing predictions, or registering verified submissions for **{task_name}**.",
@@ -220,20 +220,20 @@ def generate_skill_content(
         "## 2. Three-Layer Architecture (`Antigravity IDE` <-> `AgentBridge` <-> `Harness`)",
         "",
         "- **Layer 1 — True Agent Runtime (`Antigravity in IDE`)**: Performs scientific reasoning, hypothesis formulation, and the `Observe -> Decide -> Next Action` loop. The Harness does **not** run a separate internal LLM planner.",
-        "- **Layer 2 — Agent Bridge & Context Bridge (`harness/agent_bridge.py`, `ml-harness-agent`)**:",
+        "- **Layer 2 — Agent Bridge & Context Bridge (`harness/agent_bridge.py`, `ai-harness-agent`)**:",
         "  - Feeds Antigravity a compressed **Context Packet** (`CompetitionState` 8-Phase HUD, Parallel Tracks, `TreeJournal` UCB recommendation, Parent `DIAGNOSTICS` bottlenecks, Idea Graveyard, and active `BridgeSession` budget/usage):",
         "    ```powershell",
-        "    ml-harness-agent context",
+        "    ai-harness-agent context",
         "    ```",
         "  - Tracks stateful **`BridgeSession` (`session_XXXX`)** (`goal`, `experiments_run`, `compute_usage`, `consecutive_rejections`, optional `max_experiments` / `max_gpu_hours` / `max_cloud_runs` budgets) and enforces **`USER_APPROVAL` governance** on sensitive actions (`prepare_submission`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`).",
         "  - Exposes **Typed Harness Actions** returning structured `ActionObservation` JSON payloads (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `new_blockers`):",
         "    ```powershell",
-        "    ml-harness-agent start-session --goal \"Improve target metric\" --max-experiments 3",
-        "    ml-harness-agent act --action <typed_action> --params '{\"...\": \"...\"}'",
+        "    ai-harness-agent start-session --goal \"Improve target metric\" --max-experiments 3",
+        "    ai-harness-agent act --action <typed_action> --params '{\"...\": \"...\"}'",
         "    ```",
-        "- **Layer 3 — Task State & Execution Runtime (`harness/competition_state.py`, `ml-harness-run`, `harness/cloud_runner.py`)**:",
+        "- **Layer 3 — Task State & Execution Runtime (`harness/competition_state.py`, `ai-harness-run`, `harness/cloud_runner.py`)**:",
         "  - **8-Phase Journey**: `1. Setup` -> `2. Understand` -> `3. Baseline Anchor` -> **Parallel Iteration Tracks** (`4. Experiment Loop` || `5. Candidate Management` || `6. External Evaluation`) -> `7. Freeze (Lock Candidate Portfolio & Mutations)` -> `8. Closure`.",
-        "  - **Execution Backends**: Local (`ml-harness-run`); remote backends require the selected task adapter to be installed remotely.",
+        "  - **Execution Backends**: Local (`ai-harness-run`); remote backends require the selected task adapter to be installed remotely.",
         "",
         "---",
         "",
@@ -243,14 +243,14 @@ def generate_skill_content(
         f"- **NEVER** attempt to dump raw fold logs or the entire `{artifact_path}/` directory into prompt context.",
         "- **ALWAYS** query the Agent Bridge Context Packet first:",
         "  ```powershell",
-        "  ml-harness-agent context",
+        "  ai-harness-agent context",
         "  ```",
         "",
         "### 3.2 The Anti-Pivot & Branch Exploration Rule (AIDE UCB Tree Search)",
         "- **DO NOT** make speculative guesses or pivot arbitrarily without mathematical justification.",
         "- Query the optimal branch recommendation according to Upper Confidence Bound (UCB):",
         "  ```powershell",
-        "  ml-harness-agent context --format json",
+        "  ai-harness-agent context --format json",
         "  ```",
         "- Ensure every experiment implements **EXACTLY ONE ATOMIC INTERVENTION** (Control vs Treatment).",
         "",
@@ -282,7 +282,7 @@ def generate_skill_content(
         "- **Task Contract and Approval Gates**: Apply validation and submission requirements only when the task or selected plugin declares them.",
         "- **Submission checks**: Inspect the selected plugin capabilities and declared task contract. Do not infer scoring or audit thresholds.",
         "  ```powershell",
-        "  ml-harness-agent act --action prepare_submission --user-approved --params '{\"exp_id\": \"<experiment-id>\", \"candidate_csv\": \"<test-predictions.csv>\"}'",
+        "  ai-harness-agent act --action prepare_submission --user-approved --params '{\"exp_id\": \"<experiment-id>\", \"candidate_csv\": \"<test-predictions.csv>\"}'",
         "  ```",
         "",
         "### 3.6 Approval Governance (`AUTO` / `AUTO_WITH_LIMIT` / `USER_APPROVAL`)",
@@ -294,11 +294,11 @@ def generate_skill_content(
         "",
         "## 4. Standard Operating Procedure (SOP) for Antigravity in IDE",
         "",
-        "1. **Read Bridge Context Packet**: Run `ml-harness-agent context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
-        "2. **Start / Configure Session (Optional Budgets)**: Run `ml-harness-agent start-session --goal \"...\" --max-experiments 3`.",
-        "3. **Create Grounded Experiment**: Run `ml-harness-agent act --action create_experiment --params '{...}'` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
-        "4. **Execute Smoke Test**: Run `ml-harness-agent act --action run_smoke_test --params '{\"config_path\": \"configs/<exp>.yaml\"}'`.",
-        "5. **Execute Task-Declared Validation**: Run `ml-harness-agent act --action run_full_validation --params '{\"config_path\": \"configs/<exp>.yaml\", \"backend\": \"local\"}'`.",
+        "1. **Read Bridge Context Packet**: Run `ai-harness-agent context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
+        "2. **Start / Configure Session (Optional Budgets)**: Run `ai-harness-agent start-session --goal \"...\" --max-experiments 3`.",
+        "3. **Create Grounded Experiment**: Run `ai-harness-agent act --action create_experiment --params '{...}'` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
+        "4. **Execute Smoke Test**: Run `ai-harness-agent act --action run_smoke_test --params '{\"config_path\": \"configs/<exp>.yaml\"}'`.",
+        "5. **Execute Task-Declared Validation**: Run `ai-harness-agent act --action run_full_validation --params '{\"config_path\": \"configs/<exp>.yaml\", \"backend\": \"local\"}'`.",
         "6. **Observe & Decide Next Step**: Antigravity analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
         "7. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
         "",
@@ -322,11 +322,11 @@ def inject_skill_file(
         artifact_path = project.artifacts_dir.relative_to(project.root).as_posix()
     except ValueError:
         artifact_path = str(project.artifacts_dir)
-    dest = output_path or (project.root / ".agents" / "skills" / "ml-experiment-harness" / "SKILL.md")
+    dest = output_path or (project.root / ".agents" / "skills" / "ai-harness" / "SKILL.md")
     dest.parent.mkdir(parents=True, exist_ok=True)
     content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=dest.parent.name)
     dest.write_text(content, encoding="utf-8")
-    for twin_name in ("ml-experiment-harness", "ml-harness"):
+    for twin_name in ("ai-experiment-harness", "ai-harness", "ml-experiment-harness", "ml-harness"):
         if dest.parent.parent.name == "skills" and dest.parent.name != twin_name:
             twin_dest = dest.parent.parent / twin_name / "SKILL.md"
             twin_dest.parent.mkdir(parents=True, exist_ok=True)

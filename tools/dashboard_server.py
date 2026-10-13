@@ -308,7 +308,7 @@ def create_and_activate_task(task_spec: Dict[str, Any]) -> Dict[str, Any]:
     """A new task must be bootstrapped and attached in its own workspace."""
     return {
         "success": False,
-        "error": "Create or bootstrap the task in its own workspace, then run `ml-harness attach`.",
+        "error": "Create or bootstrap the task in its own workspace, then run `ai-harness attach`.",
     }
 
 
@@ -694,11 +694,11 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "2. **Declare Baseline Configuration**: Create `configs/exp001_baseline_<name>.yaml` declaring the foundational control model with explicit `grounding:` and `assumption_register:` blocks.",
             "3. **Execute Smoke Test Probe**: Verify execution on Fold 0 with minimal samples:",
             "   ```powershell",
-            "   ml-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml --debug --fold 0",
+            "   ai-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml --debug --fold 0",
             "   ```",
             f"4. **Run Full Validation**: Execute {validation_label} and verify generated metrics and experiment artifacts:",
             "   ```powershell",
-            "   ml-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml",
+            "   ai-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml",
             "   ```",
             "5. **Register Champion Baseline**: Ensure the result is recorded in `EXPERIMENTS.md` and registered in `TreeJournal`.",
             "",
@@ -721,8 +721,8 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "## 2. INITIALIZATION SEQUENCE (PLAN -> CODE -> SMOKE TEST -> FULL CV)",
             "1. **Inspect Repo**: Read `configs/task.yaml`, `harness/task_spec.py`, and `harness/data_strategy.py`.",
             "2. **Formulate exp001 Baseline**: Create `configs/exp001_baseline_<name>.yaml` with valid `grounding:` and `assumption_register:` blocks.",
-            "3. **Run Smoke Test**: Execute `ml-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml --debug --fold 0`.",
-            "4. **Run Full Cross-Validation**: Execute `ml-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml`.",
+            "3. **Run Smoke Test**: Execute `ai-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml --debug --fold 0`.",
+            "4. **Run Full Cross-Validation**: Execute `ai-harness-run --project-root . --config configs/exp001_baseline_<name>.yaml`.",
             f"5. **Verify Receipts**: Confirm `{artifact_rel}/exp001_.../` contains the expected metrics and experiment record.",
         ]
     elif tid == "codex_iterate":
@@ -756,7 +756,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "## 4. EXECUTION LOOP (PLAN -> CODE -> VERIFY)",
             "1. **Plan & Declare**: Output a 3-bullet plan: (a) parent baseline, (b) single atomic intervention, (c) grounded justification.",
             "2. **Implement**: Create a new config `configs/exp<NNN>_<branch>_<descriptor>.yaml` and necessary `src/` modules.",
-            "3. **Validate**: Execute CV validation: `ml-harness-run --project-root . --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0` (smoke test first), then full CV.",
+            "3. **Validate**: Execute CV validation: `ai-harness-run --project-root . --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0` (smoke test first), then full CV.",
             "4. **Output Format**: Provide a concise summary, git diff, and resulting validation scores.",
         ]
     else:  # antigravity_iterate (default)
@@ -1131,7 +1131,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 elif action == "finalize":
                     comp.finalize_competition(data, TreeJournal(auto_sync=True), SubmissionManager())
                 elif action == "agent-run":
-                    self.send_json({"error": "The dashboard does not run an internal agent. Use the attached IDE agent with `ml-harness phase render` and the Agent Bridge."}, status=409)
+                    self.send_json({"error": "The dashboard does not run an internal agent. Use the attached IDE agent with `ai-harness phase render` and the Agent Bridge."}, status=409)
                     return
                 elif action == "agent-approve":
                     self.send_json({"error": "Use the IDE agent's Agent Bridge session approval endpoint."}, status=409)
@@ -1192,9 +1192,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, status=400)
         elif path == "/api/tasks/switch":
-            self.send_json({"error": "Each task needs its own workspace. Run `ml-harness attach` from the task workspace you want to use."}, status=409)
+            self.send_json({"error": "Each task needs its own workspace. Run `ai-harness attach` from the task workspace you want to use."}, status=409)
         elif path == "/api/tasks/create":
-            self.send_json({"error": "Create or bootstrap the task in its own workspace, then run `ml-harness attach`."}, status=409)
+            self.send_json({"error": "Create or bootstrap the task in its own workspace, then run `ai-harness attach`."}, status=409)
         elif path == "/api/environment/modal/activate":
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
@@ -2032,7 +2032,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "script_path": str(script_path.relative_to(PROJECT_ROOT)),
                 "code": code_content,
                 "commands": {
-                    "dataset_cmd": f"ml-harness cloud consent --provider modal --confirm-upload\n# then: python harness/cloud_runner.py --backend modal --project-root . --config {config_path}",
+                    "dataset_cmd": f"ai-harness cloud consent --provider modal --confirm-upload\n# then: python harness/cloud_runner.py --backend modal --project-root . --config {config_path}",
                     "push_cmd": f"python -m harness.cloud_runner --backend modal --project-root . --config {config_path} --gpu {gpu}",
                     "status_cmd": "modal app list",
                     "output_cmd": f"modal volume ls {volume_name}",
@@ -2061,7 +2061,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "code": code_content,
                 "metadata": meta_json,
                 "commands": {
-                    "dataset_cmd": f"ml-harness cloud consent --provider kaggle --confirm-upload\n# private by default; declare data_config.license before uploading a new dataset",
+                    "dataset_cmd": f"ai-harness cloud consent --provider kaggle --confirm-upload\n# private by default; declare data_config.license before uploading a new dataset",
                     "push_cmd": f"python -m harness.cloud_runner --backend kaggle --project-root . --config {config_path}",
                     "kernel_cmd": f'python -m harness.templates.kaggle_template push-package --path "{stage_dir}"',
                     "status_cmd": f"kaggle kernels status {meta_json.get('id', 'antigravity/' + exp_id)}",

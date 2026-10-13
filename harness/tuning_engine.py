@@ -1,4 +1,4 @@
-"""Universal Tuning, Calibration, and Threshold Optimization Engine for ML-Harness.
+"""Universal Tuning, Calibration, and Threshold Optimization Engine for AI-Harness.
 
 Implements per-class and per-group out-of-fold threshold search, Platt/Isotonic
 probability calibration, and cascaded error control for hierarchical tasks.

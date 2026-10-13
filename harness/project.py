@@ -1,4 +1,4 @@
-"""Explicit workspace discovery and attachment for local ML-Harness installs."""
+"""Explicit workspace discovery and attachment for local AI-Harness installs."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from typing import Any, Dict, Optional
 import yaml
 
 
-MANIFEST_RELATIVE_PATH = Path(".ml-harness") / "project.yaml"
+MANIFEST_RELATIVE_PATH = Path(".ai-harness") / "project.yaml"
+LEGACY_MANIFEST_RELATIVE_PATH = Path(".ml-harness") / "project.yaml"
 DEFAULT_TASK_CONFIG = Path("configs") / "task.yaml"
 
 
@@ -29,7 +30,7 @@ def resolve_project_root(root: Optional[Path | str] = None) -> Path:
         return Path(configured).expanduser().resolve()
 
     cwd = Path.cwd().resolve()
-    if (cwd / MANIFEST_RELATIVE_PATH).is_file():
+    if (cwd / MANIFEST_RELATIVE_PATH).is_file() or (cwd / LEGACY_MANIFEST_RELATIVE_PATH).is_file():
         return cwd
     if (cwd / DEFAULT_TASK_CONFIG).is_file() or (cwd / "dataset").exists():
         return cwd
@@ -59,6 +60,8 @@ class HarnessProject:
     ) -> "HarnessProject":
         project_root = resolve_project_root(root)
         manifest_path = project_root / MANIFEST_RELATIVE_PATH
+        if not manifest_path.is_file() and (project_root / LEGACY_MANIFEST_RELATIVE_PATH).is_file():
+            manifest_path = project_root / LEGACY_MANIFEST_RELATIVE_PATH
         manifest = _read_yaml(manifest_path)
 
         # An explicit workspace root must not inherit another workspace's task-config
@@ -84,7 +87,12 @@ class HarnessProject:
         if isinstance(configured_plugin, dict):
             configured_plugin = configured_plugin.get("id") or configured_plugin.get("name")
 
-        artifacts_value = manifest.get("artifacts_dir", ".ml-harness/artifacts" if manifest else "artifacts")
+        default_artifacts = (
+            ".ml-harness/artifacts"
+            if (not manifest and (project_root / ".ml-harness").is_dir())
+            else ".ai-harness/artifacts"
+        )
+        artifacts_value = manifest.get("artifacts_dir", default_artifacts if manifest else "artifacts")
         artifacts_dir = Path(artifacts_value).expanduser()
         if not artifacts_dir.is_absolute():
             artifacts_dir = project_root / artifacts_dir
@@ -128,9 +136,13 @@ def attach_project(
         raise ValueError("Task config must be inside the attached project root.") from exc
 
     manifest_path = root / MANIFEST_RELATIVE_PATH
-    skill_path = root / ".agents" / "skills" / "ml-harness" / "SKILL.md"
-    if manifest_path.exists() and not force:
-        current = _read_yaml(manifest_path)
+    legacy_manifest_path = root / LEGACY_MANIFEST_RELATIVE_PATH
+    skill_path = root / ".agents" / "skills" / "ai-harness" / "SKILL.md"
+    legacy_skill_path = root / ".agents" / "skills" / "ml-harness" / "SKILL.md"
+
+    active_manifest_path = manifest_path if manifest_path.exists() else legacy_manifest_path
+    if active_manifest_path.exists() and not force:
+        current = _read_yaml(active_manifest_path)
         same_attachment = (
             Path(str(current.get("task_config", ""))).as_posix() == Path(task_rel).as_posix()
             and current.get("plugin_id", "default") == resolved_plugin
@@ -141,14 +153,14 @@ def attach_project(
             return {
                 "status": "ALREADY_ATTACHED",
                 "project_root": str(root),
-                "manifest": str(manifest_path),
-                "agent_skill": str(skill_path),
+                "manifest": str(active_manifest_path),
+                "agent_skill": str(skill_path if skill_path.exists() else legacy_skill_path),
                 "plugin_id": str(resolved_plugin),
                 "task_id": task_id,
                 "prompt_pack": prompt_pack,
             }
         if not same_attachment:
-            raise FileExistsError(f"Harness manifest already exists: {manifest_path}; pass --force to replace it.")
+            raise FileExistsError(f"Harness manifest already exists: {active_manifest_path}; pass --force to replace it.")
 
     from harness.phase_workflow import initialize_prompt_pack
     prompt_pack = initialize_prompt_pack(root, force=False)
@@ -158,26 +170,27 @@ def attach_project(
         "task_id": task_id,
         "task_config": task_rel,
         "plugin_id": str(resolved_plugin),
-        "artifacts_dir": f".ml-harness/artifacts/{task_id}",
-        "leaderboard_path": f".ml-harness/artifacts/{task_id}/EXPERIMENTS.md",
+        "artifacts_dir": f".ai-harness/artifacts/{task_id}",
+        "leaderboard_path": f".ai-harness/artifacts/{task_id}/EXPERIMENTS.md",
     }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    legacy_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
 
-    skill_path.parent.mkdir(parents=True, exist_ok=True)
-    skill_path.write_text(
+    skill_content = (
         "---\n"
-        "name: ml-harness\n"
-        "description: Work with this competition through the installed ML-Harness task plugin and Agent Bridge.\n"
+        "name: ai-harness\n"
+        "description: Work with this competition through the installed AI-Harness task plugin and Agent Bridge.\n"
         "---\n\n"
-        f"# ML-Harness for {task_name}\n\n"
+        f"# AI-Harness for {task_name}\n\n"
         "Use the task's declared plugin for data loading, validation, metrics, and submission checks. "
         "Do not infer or replace the official scorer or submission contract.\n\n"
         "## Agent workflow\n\n"
         f"- Workspace: `{root}`\n"
         f"- Task config: `{task_rel}`\n"
         f"- Task plugin: `{resolved_plugin}`\n"
-        "- Read current state: `ml-harness-agent --project-root . context`\n"
+        "- Read current state: `ai-harness-agent --project-root . context`\n"
         "- After restart or context compaction, recover the latest research checkpoint before brainstorming.\n"
         "- Search the full history with `act --action search_research_memory --params '{\"query\":\"mechanism keywords\"}'`.\n"
         "- Before implementation, use `act --action review_hypothesis` with a config object or config_path.\n"
@@ -195,18 +208,22 @@ def attach_project(
         "then record_research_checkpoint (summary, next_action, open_questions, insight_ids).\n"
         "- On stagnation, inspect verified diagnostics and old lessons, compare alternative mechanisms, "
         "then choose a bounded discriminating probe with a promotion/stop criterion. Plateau never authorizes freeze.\n"
-        "- Review the task contract: `ml-harness-agent --project-root . act --action confirm_task_spec --user-approved`\n"
-        "- Inspect data: `ml-harness-agent --project-root . act --action inspect_data_readiness`\n"
-        "- Confirm reviewed data risks: `ml-harness-agent --project-root . act --action confirm_data_risks --user-approved`\n"
-        "- Start a bounded session: `ml-harness-agent --project-root . start-session --goal \"...\" --max-experiments 3`\n"
+        "- Review the task contract: `ai-harness-agent --project-root . act --action confirm_task_spec --user-approved`\n"
+        "- Inspect data: `ai-harness-agent --project-root . act --action inspect_data_readiness`\n"
+        "- Confirm reviewed data risks: `ai-harness-agent --project-root . act --action confirm_data_risks --user-approved`\n"
+        "- Start a bounded session: `ai-harness-agent --project-root . start-session --goal \"...\" --max-experiments 3`\n"
         "- Run a smoke test before a full validation run.\n"
-        "- Render the next phase prompt: `ml-harness phase render`\n"
-        "- Validate the workspace prompt pack: `ml-harness phase validate`\n"
-        "- Record response, inspected source URLs, and artifact paths with `ml-harness phase record`.\n"
-        "- Run privacy-conscious EDA: `ml-harness eda run`\n"
-        "- Use the IDE agent's native web search and cite only sources actually inspected.\n",
-        encoding="utf-8",
+        "- Render the next phase prompt: `ai-harness phase render`\n"
+        "- Validate the workspace prompt pack: `ai-harness phase validate`\n"
+        "- Record response, inspected source URLs, and artifact paths with `ai-harness phase record`.\n"
+        "- Run privacy-conscious EDA: `ai-harness eda run`\n"
+        "- Use the IDE agent's native web search and cite only sources actually inspected.\n"
     )
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(skill_content, encoding="utf-8")
+    legacy_skill_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_skill_path.write_text(skill_content, encoding="utf-8")
+
     return {
         "status": "ATTACHED",
         "project_root": str(root),

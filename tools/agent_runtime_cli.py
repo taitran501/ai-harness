@@ -4,7 +4,7 @@
 Allows running, inspecting, and approving multi-step AgentRuns (`run_0001`, ...)
 without requiring the Web UI to be open:
 
-  ml-harness-agent start-session --goal "Improve the primary metric" --max-experiments 3
+  ai-harness-agent start-session --goal "Improve the primary metric" --max-experiments 3
 """
 
 from __future__ import annotations

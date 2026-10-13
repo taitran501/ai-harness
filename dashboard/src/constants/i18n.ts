@@ -22,7 +22,7 @@ export const UI_TRANSLATIONS: Record<UILanguage, Record<string, string>> = {
     refresh: 'Refresh',
     language_label: 'Language',
     loading_telemetry: 'Loading workspace telemetry & experiment tree…',
-    connection_error: 'ML-Harness Connection Error',
+    connection_error: 'AI-Harness Connection Error',
     retry_connection: 'Retry Connection',
     recorded_runs: '{count} recorded runs',
     view_leaderboard_title: 'Leaderboard & Experiment History',
@@ -81,10 +81,10 @@ export const UI_TRANSLATIONS: Record<UILanguage, Record<string, string>> = {
 
     // Error & Resilience
     err_server_offline_title: 'Backend Service Offline or Initializing',
-    err_server_offline_desc: 'The ML-Harness API service is unreachable. If launching, it will connect automatically. Run `ml-harness dashboard` in terminal.',
+    err_server_offline_desc: 'The AI-Harness API service is unreachable. If launching, it will connect automatically. Run `ai-harness dashboard` in terminal.',
     err_service_notice_title: 'Workspace Service Notice',
     err_offline_banner_title: 'Backend Service Offline or Initializing',
-    err_offline_banner_desc: 'Telemetry unavailable. Ensure `ml-harness dashboard` is running.',
+    err_offline_banner_desc: 'Telemetry unavailable. Ensure `ai-harness dashboard` is running.',
     btn_retry: 'Retry',
     btn_details: 'Details',
     btn_hide_details: 'Hide',
@@ -946,7 +946,7 @@ export const UI_TRANSLATIONS: Record<UILanguage, Record<string, string>> = {
     refresh: 'Làm mới',
     language_label: 'Ngôn ngữ',
     loading_telemetry: 'Đang tải dữ liệu đo lường & cây thử nghiệm…',
-    connection_error: 'Lỗi kết nối ML-Harness',
+    connection_error: 'Lỗi kết nối AI-Harness',
     retry_connection: 'Thử kết nối lại',
     recorded_runs: '{count} lượt chạy đã ghi nhận',
     view_leaderboard_title: 'Bảng xếp hạng & Lịch sử thử nghiệm',
@@ -1005,10 +1005,10 @@ export const UI_TRANSLATIONS: Record<UILanguage, Record<string, string>> = {
 
     // Error & Resilience
     err_server_offline_title: 'Dịch vụ nền đang khởi tạo hoặc ngoại tuyến',
-    err_server_offline_desc: 'Không thể kết nối đến dịch vụ ML-Harness API. Nếu đang khởi động, hệ thống sẽ tự kết nối lại. Bạn có thể chạy `ml-harness dashboard` trong terminal.',
+    err_server_offline_desc: 'Không thể kết nối đến dịch vụ AI-Harness API. Nếu đang khởi động, hệ thống sẽ tự kết nối lại. Bạn có thể chạy `ai-harness dashboard` trong terminal.',
     err_service_notice_title: 'Thông báo dịch vụ không gian làm việc',
     err_offline_banner_title: 'Dịch vụ nền đang ngoại tuyến hoặc khởi tạo',
-    err_offline_banner_desc: 'Dữ liệu đo lường chưa sẵn sàng. Hãy đảm bảo lệnh `ml-harness dashboard` đang chạy.',
+    err_offline_banner_desc: 'Dữ liệu đo lường chưa sẵn sàng. Hãy đảm bảo lệnh `ai-harness dashboard` đang chạy.',
     btn_retry: 'Thử lại',
     btn_details: 'Chi tiết',
     btn_hide_details: 'Ẩn',
@@ -1879,12 +1879,13 @@ const LanguageContext = createContext<LanguageContextValue>({
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [lang, setLangState] = useState<UILanguage>(() => {
-    const saved = localStorage.getItem('ml_harness_ui_lang');
+    const saved = localStorage.getItem('ai_harness_ui_lang') || localStorage.getItem('ml_harness_ui_lang');
     return saved === 'vi' ? 'vi' : 'en';
   });
 
   const setLang = (next: UILanguage) => {
     setLangState(next);
+    localStorage.setItem('ai_harness_ui_lang', next);
     localStorage.setItem('ml_harness_ui_lang', next);
   };
 

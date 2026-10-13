@@ -47,26 +47,46 @@ def _safe_workspace_path(root: Path, value: str | Path) -> Path:
 def initialize_prompt_pack(project_root: Path | str, force: bool = False) -> Dict[str, Any]:
     """Create editable starter prompts without replacing an existing user pack."""
     root = Path(project_root).expanduser().resolve()
-    pack_dir = root / "prompts" / "ml-harness"
+    pack_dir = root / "prompts" / "ai-harness"
+    legacy_pack_dir = root / "prompts" / "ml-harness"
     pack_path = pack_dir / "phase-pack.yaml"
-    if pack_path.exists() and not force:
-        return {"status": "EXISTS", "pack": str(pack_path)}
+    legacy_pack_path = legacy_pack_dir / "phase-pack.yaml"
+    if (pack_path.exists() or legacy_pack_path.exists()) and not force:
+        active = pack_path if pack_path.exists() else legacy_pack_path
+        return {"status": "EXISTS", "pack": str(active)}
 
     pack_dir.mkdir(parents=True, exist_ok=True)
+    legacy_pack_dir.mkdir(parents=True, exist_ok=True)
     phase_docs = []
+    legacy_phase_docs = []
     for index, (phase_id, title) in enumerate(PHASES, 1):
         prompt_rel = f"phases/{index:02d}-{phase_id}.md"
         prompt_path = pack_dir / prompt_rel
+        legacy_prompt_path = legacy_pack_dir / prompt_rel
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        content = (
+            f"# {title}\n\n"
+            "<!-- Replace this starter with the phase instructions for your task. -->\n\n"
+            "## User prompt\n\n"
+            "Add the task-specific instruction here. The IDE agent owns reasoning and any web search.\n"
+        )
         if force or not prompt_path.exists():
-            prompt_path.write_text(
-                f"# {title}\n\n"
-                "<!-- Replace this starter with the phase instructions for your task. -->\n\n"
-                "## User prompt\n\n"
-                "Add the task-specific instruction here. The IDE agent owns reasoning and any web search.\n",
-                encoding="utf-8",
-            )
+            prompt_path.write_text(content, encoding="utf-8")
+        if force or not legacy_prompt_path.exists():
+            legacy_prompt_path.write_text(content, encoding="utf-8")
         phase_docs.append(
+            {
+                "id": phase_id,
+                "title": title,
+                "prompt_file": f"prompts/ai-harness/{prompt_rel}",
+                "output_contract": {
+                    "format": "markdown",
+                    "required_sections": ["Summary", "Evidence", "Decisions", "Next steps"],
+                },
+            }
+        )
+        legacy_phase_docs.append(
             {
                 "id": phase_id,
                 "title": title,
@@ -85,6 +105,14 @@ def initialize_prompt_pack(project_root: Path | str, force: bool = False) -> Dic
         ),
         encoding="utf-8",
     )
+    legacy_pack_path.write_text(
+        yaml.safe_dump(
+            {"schema_version": 1, "phases": legacy_phase_docs},
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
     return {"status": "CREATED", "pack": str(pack_path)}
 
 
@@ -94,14 +122,16 @@ class PhaseWorkflow:
     def __init__(self, project_root: Path | str = ".", task_config: Optional[Path | str] = None):
         self.project = HarnessProject.discover(project_root, task_config)
         self.root = self.project.root
-        self.pack_path = self.root / "prompts" / "ml-harness" / "phase-pack.yaml"
+        pack_primary = self.root / "prompts" / "ai-harness" / "phase-pack.yaml"
+        pack_legacy = self.root / "prompts" / "ml-harness" / "phase-pack.yaml"
+        self.pack_path = pack_primary if (pack_primary.is_file() or not pack_legacy.is_file()) else pack_legacy
         self.history_path = self.project.artifacts_dir / "phase_history.json"
         self.responses_dir = self.project.artifacts_dir / "phase_responses"
 
     def load_pack(self) -> List[Dict[str, Any]]:
         if not self.pack_path.is_file():
             raise PromptPackError(
-                f"Prompt pack not found at {self.pack_path}. Run `ml-harness phase init` first."
+                f"Prompt pack not found at {self.pack_path}. Run `ai-harness phase init` first."
             )
         document = yaml.safe_load(self.pack_path.read_text(encoding="utf-8")) or {}
         phases = document.get("phases") if isinstance(document, dict) else None

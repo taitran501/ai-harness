@@ -1,35 +1,123 @@
-# Run evidence and correctness contract (schema v2)
+# Run Evidence and Correctness Contract (Schema v2)
 
-The canonical local and remote runner is `harness.runner`. Legacy `train.py` delegates to it. Supported built-in estimators are `baseline`, `logistic_regression`, `ridge`, `tfidf_logistic_regression`, and `tfidf_ridge`; `baseline` resolves from the target type. Other architectures require a task plugin or explicit factory. Invalid parameters and unsupported generic metrics fail instead of silently selecting another estimator/scorer.
+This document specifies the invariants, evidence contracts, and verification gates enforced by the AI-Harness runtime. All execution backends, agents, and CLI tools must comply with this contract.
 
-## Predictions and scoring
+---
 
-`PredictionBatch` carries IDs, labels, probabilities and class order. Probability metrics reject labels alone. Generic metrics: accuracy, macro/micro F1, ROC-AUC, logloss, RMSE, MAE and R2. Plugin scorers retain their official aggregate. Generic weighted aggregation requires matching subtask metric and direction. Every declared target must be complete.
+## 1. Execution Engine and Estimators
 
-`primary_score` is the original metric; `utility` negates it for minimize tasks. Ranking, UCB and improvement use utility. Fold metrics are diagnostics; the primary score is recomputed on complete OOF predictions for the selected input variant. Multiple variants require `data.selection_variant`. Task seed is authoritative; otherwise use runtime seed or 42. Declared split/dev paths never fall back when missing.
+### Canonical Runner
+- The canonical execution entry point for local and remote runs is `harness.runner` (`ai-harness-run`).
+- The legacy script `train.py` delegates directly to `harness.runner`.
 
-## Immutable artifacts
+### Supported Built-in Estimators
+- Built-in estimators include: `baseline`, `logistic_regression`, `ridge`, `tfidf_logistic_regression`, and `tfidf_ridge`.
+- The `baseline` estimator resolves dynamically based on target task type (e.g., majority class for classification, mean value for regression).
+- Any other model architecture requires a registered task plugin or an explicit model factory (`model.factory`).
+- Invalid configuration parameters or unsupported generic metrics fail immediately instead of silently falling back to a default estimator or scorer.
 
-Full validation claims `<artifact-directory>/<exp_id>` exclusively. Use a new experiment ID for another full run. `--force` does not overwrite evidence. Debug, selected-fold and sample probes use `probes/<exp_id>/<run_id>` and never enter the main journal/candidate pool.
+---
 
-Manifest v2 records run identity/kind/status, task/scorer identities, resolved-config/data/split hashes, actual estimator parameters and artifact hashes. Required artifacts include metrics, OOF predictions, evaluation truth and resolved config. Consumers reject incomplete or changed hashes. Historical artifacts remain visible as `LEGACY_UNVERIFIED` and cannot establish a new baseline or candidate. No automatic migration or re-certification occurs.
+## 2. Predictions and Scoring Invariants
 
-## Candidate and submission gates
+### Prediction Batch Contract (`PredictionBatch`)
+- Every prediction batch carries instance IDs, predicted labels, class probabilities, and declared class ordering.
+- Probability-based metrics (such as `roc_auc` or `logloss`) strictly reject label-only inputs.
+- Supported generic evaluation metrics: `accuracy`, `macro_f1`, `micro_f1`, `roc_auc`, `logloss`, `rmse`, `mae`, and `r2`.
+- Custom plugin scorers retain their official aggregate score.
+- Multi-task weighted score aggregation requires matching subtask metrics and optimization directions.
+- Every declared target column must be completely evaluated across all instances.
 
-Promotion requires the exact `exp_id`. Candidate IDs are unique and retain source IDs and manifest hashes. Sources must share task/scorer/data/split identities and identical ID sets. Joins are one-to-one. Classification voting uses declared class order for ties; probability blending requires matching probability class order; regression blending operates on continuous predictions. All positive-weight targets pass diversity checks and a combined candidate must outperform its best constituent before publication.
+### Primary Score vs. Utility
+- `primary_score` records the exact mathematical value of the evaluated metric.
+- `utility` normalizes the score such that higher is always better (negated for minimization metrics like RMSE or logloss).
+- Model ranking, tree exploration, UCB recommendations, and candidate promotion strictly evaluate `utility`.
+- Per-fold scores serve as diagnostic telemetry only. The authoritative primary score is computed globally on complete Out-Of-Fold (OOF) predictions.
+- Tasks with multiple input variants require an explicit `data.selection_variant`.
+- The task random seed is authoritative; if omitted, the runtime defaults to 42.
+- Declared split and development dataset paths never silently fall back if missing.
 
-Submission requires a task plugin implementing both builder and validator, and a hashed `test_predictions.csv` explicitly marked `test` in the full-run manifest. OOF is not test evidence. Generic tasks without submission hooks fail closed. Standalone audit supports an explicit `--id-column`; it compares prediction columns only and rejects null/duplicate IDs and invalid domains.
+---
 
-## Governance, state and budgets
+## 3. Immutable Run Evidence and Manifest v2
 
-Dashboard candidate/freeze/unfreeze/cloud and score endpoints delegate to Agent Bridge. Approval remains mandatory for sensitive actions. Freeze validates eligible candidates, unique IDs and slot count; unfreeze requires a reason. Audit history is retained.
+### Directory Exclusivity
+- Full validation runs claim `.ai-harness/artifacts/<task-id>/<exp_id>` exclusively.
+- Re-running an experiment under an existing full-run ID is prohibited; new runs require a unique sequential experiment ID.
+- The `--force` flag does not overwrite completed run evidence.
+- Debug probes, single-fold checks, and sample probes write exclusively to `probes/<exp_id>/<run_id>` and never enter the official solution tree or candidate pool.
 
-Resource reservations are durable JSON transactions, separate for training, probes and candidate operations. Terminal accounting is idempotent. Failed runs count consumed resources; unknown GPU allocation remains null. A local wall-time budget terminates the process tree. GPU hard budgets and remote hard runtime budgets are rejected because these backends currently lack verified allocation/termination accounting. Kaggle/Modal remain usable without a hard runtime budget. Stopping a monitor never certifies remote cancellation.
+### Manifest v2 Specification
+Every full run generates a cryptographic manifest recording:
+- **Run Identity**: Experiment ID, run kind (`full` vs. `probe`), and terminal status.
+- **Task Identity**: Task name, platform, and scorer specification.
+- **Input Hashes**: SHA-256 hashes of the resolved configuration, training dataset, and validation split file.
+- **Estimator Details**: Actual resolved estimator hyperparameters and feature pipeline settings.
+- **Artifact Hashes**: SHA-256 hashes of generated artifacts (`metrics.json`, `oof_predictions.csv`, evaluation truth, and resolved config).
 
-JSON state uses reentrant thread locks plus Windows `msvcrt` / Unix `fcntl` locks, fresh reads and atomic writes. Locks cover state updates only. Unrelated snapshot changes and append-only events merge; conflicting scalar updates fail. Task caching hashes file content. TLS always verifies certificates; `HARNESS_CA_BUNDLE` selects an explicit trusted CA file.
+Consumers (such as the candidate pool and dashboard) reject artifacts with missing or mismatched manifest hashes. Historical artifacts lacking Schema v2 manifests remain visible as `LEGACY_UNVERIFIED` and cannot establish a baseline anchor or be promoted to candidate status.
 
-## Capability boundaries and verification scope
+---
 
-Verification scope: AI-Harness runtime, baselines, and scoring are strictly validated and working well only on NLP/Text tasks. Non-NLP modalities (Tabular, Vision, Audio, Multimodal) are unverified experimental WIP.
+## 4. Candidate Management and Ensembling
 
-Text metadata features work in `UniversalFeaturePipeline`. Calibration and threshold optimization remain utilities requiring explicit integration; they are not built-in runner models. Optional diagnostic failure is recorded visibly; scorer/evidence persistence failure propagates. Provider calls in regression tests are mocked. Live cloud validation requires a separately budgeted run.
+### Candidate Promotion
+- Promoting an experiment to the candidate pool requires its exact `exp_id`.
+- Candidate IDs are unique and retain source experiment IDs and manifest hashes.
+- Ensemble source models must share identical task, scorer, dataset, and split identities, and must cover identical instance ID sets (1-to-1 joins).
+
+### Blending and Voting Rules
+- **Classification Voting**: Uses the declared task class order for deterministic tie-breaking.
+- **Probability Blending**: Requires identical probability class ordering across all constituent models.
+- **Regression Blending**: Operates directly on continuous out-of-fold predictions.
+- All positive-weight targets must satisfy configured diversity thresholds (`harness/ensemble_guard.py`).
+- An ensemble candidate must strictly outperform its best constituent under the declared validation protocol before publication.
+
+---
+
+## 5. Submission Packaging and Audit Gates
+
+### Submission Contract
+- Packaging a competition submission requires an active task plugin that implements both `submission_builder` and `submission_validator`.
+- Submissions require a hashed `test_predictions.csv` explicitly tagged as `test` in the full-run manifest.
+- **Out-of-fold validation predictions are never accepted as test submission predictions.**
+- Generic declarative tasks lacking official submission hooks fail closed when packaging is attempted.
+
+### Standalone Pre-Submission Audit (`ai-harness-audit`)
+- Supports an explicit `--id-column` flag.
+- Compares prediction columns against test ground specifications.
+- Strictly rejects null values, duplicate row IDs, mismatched row counts, and invalid domain values (e.g., probabilities outside $[0, 1]$).
+
+---
+
+## 6. Governance, Concurrency, and Resource Budgets
+
+### Approval Governance
+- Dashboard endpoints for candidate promotion, candidate freezing, emergency unfreezing, cloud dispatch, and metric scoring delegate directly to the Agent Bridge.
+- Explicit user approval (`--user-approved`) is mandatory for high-stakes actions: `freeze_candidate`, `prepare_submission`, and `emergency_unfreeze`.
+- Candidate freezing validates candidate eligibility, unique instance keys, and allocated slot limits. Unfreezing requires an explicit audit reason.
+
+### Resource Reservations and Budgets
+- Compute resource reservations are recorded as durable JSON transactions, separated for training, probes, and candidate operations.
+- Terminal resource accounting is idempotent.
+- Failed runs count consumed resources; unverified GPU allocations remain null.
+- A local wall-time budget terminates the running process tree if exceeded.
+- Remote hard runtime budgets and hard GPU budgets are rejected for Kaggle and Modal because these backends do not provide verified immediate termination guarantees.
+- Halting a local monitoring process never certifies remote job cancellation.
+
+### State Concurrency and File Locks
+- State files use reentrant thread locks combined with OS-level file locks (`msvcrt` on Windows, `fcntl` on Unix/Linux).
+- State updates perform fresh disk reads and atomic file writes.
+- File locks protect state updates exclusively and are released immediately after writing.
+- Non-conflicting snapshot updates and append-only event logs merge automatically; conflicting scalar updates fail explicitly.
+- Task configuration caching hashes file content.
+- Network requests always verify TLS certificates; `HARNESS_CA_BUNDLE` allows specifying a custom trusted CA certificate file.
+
+---
+
+## 7. Verification Scope and Boundaries
+
+- **NLP / Text Tasks**: Strictly verified and benchmarked across all runtime pipelines.
+- **Non-NLP Modalities**: Tabular, Vision, Audio, and Multimodal support is experimental work-in-progress on the roadmap.
+- **Feature Extraction**: Text metadata and TF-IDF feature pipelines are supported in `UniversalFeaturePipeline`. Probability calibration and decision threshold tuning are utility functions requiring explicit integration, not built-in runner models.
+- **Test Integrity**: External provider calls in regression tests are strictly mocked. Live cloud verification runs require separately budgeted executions.

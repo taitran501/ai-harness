@@ -232,7 +232,7 @@ def provider_preflight(project: HarnessProject, provider: str) -> Dict[str, Any]
     if internet is False and provider == "kaggle":
         warnings.append("Task runtime explicitly disables internet access; Kaggle kernels will also have internet disabled.")
     if provider == "modal" and not version_supported:
-        warnings.append("ML-Harness cloud jobs require Modal CLI/SDK version 1.5.0 or newer; upgrade the official Modal CLI.")
+        warnings.append("AI-Harness cloud jobs require Modal CLI/SDK version 1.5.0 or newer; upgrade the official Modal CLI.")
     return {
         "provider": provider,
         "cli_installed": bool(status.get("installed")),

@@ -1,4 +1,4 @@
-"""Command line entry point for the installed ML-Harness dashboard."""
+"""Command line entry point for the installed AI-Harness dashboard."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Optional, Sequence
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Start the ML-Harness dashboard for a task workspace")
+    parser = argparse.ArgumentParser(description="Start the AI-Harness dashboard for a task workspace")
     parser.add_argument("--project-root", default=None, help="Attached task workspace (defaults to the current directory)")
     parser.add_argument("--task-config", default=None, help="Task YAML path relative to the workspace")
     parser.add_argument("--port", type=int, default=8080, help="HTTP port (default: 8080)")

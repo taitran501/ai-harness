@@ -35,9 +35,12 @@ def resolve_remote_runtime(project: HarnessProject) -> Dict[str, Any]:
     )
     plugin = load_task_plugin(project.plugin_id, context)
     try:
-        core_version = metadata.version("ml-harness")
+        core_version = metadata.version("ai-harness")
     except metadata.PackageNotFoundError:
-        core_version = "0.2.0"
+        try:
+            core_version = metadata.version("ml-harness")
+        except metadata.PackageNotFoundError:
+            core_version = "0.2.0"
     core_requirements = []
     for requirement_name, distribution_name in CORE_RUNTIME_DISTRIBUTIONS.items():
         try:
@@ -55,7 +58,7 @@ def resolve_remote_runtime(project: HarnessProject) -> Dict[str, Any]:
 
     runtime: Dict[str, Any] = {
         "schema_version": 1,
-        "core": {"distribution": "ml-harness", "version": core_version, "source": "bundled"},
+        "core": {"distribution": "ai-harness", "version": core_version, "source": "bundled"},
         "plugin": {"id": plugin_id, "version": str(plugin.version), "distribution": None, "install": None},
         "requirements": core_requirements,
         "bundle_files": [],

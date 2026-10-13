@@ -347,7 +347,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
     const parentNode = experiments.find((e) => e.id === selectedParentId);
     const parentScore = parentNode?.score ? parentNode.score.toFixed(4) : 'baseline';
     const primaryMetric = taskInfo?.primary_metric || 'primary metric';
-    const artifactDir = taskInfo?.artifacts_dir || '.ml-harness/artifacts/<task-id>';
+    const artifactDir = taskInfo?.artifacts_dir || '.ai-harness/artifacts/<task-id>';
     const foldCount = taskInfo?.data_config?.n_folds;
     const validationPlan = foldCount ? `${foldCount}-fold configured validation` : 'configured validation';
 
@@ -367,7 +367,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
    - Grounding citation from local knowledge base or Hugging Face Hub.
 3. Execute Smoke Test:
    \`\`\`powershell
-   ml-harness-run --project-root . --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0
+   ai-harness-run --project-root . --config configs/exp<NNN>_<branch>_<descriptor>.yaml --debug --fold 0
    \`\`\`
 4. Run Full Validation: Execute the configured ${validationPlan} and record artifacts.
 5. Verify the declared task metric and follow the selected task plugin's submission contract. Do not treat validation predictions as test-set predictions.`
@@ -405,7 +405,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 - Protocol:
   1. Create \`configs/exp<NNN>_model_<name>.yaml\` with explicit model backbone.
   2. Implement necessary model loader or pipeline in \`src/\`.
-  3. Run smoke test on Fold 0: \`ml-harness-run --project-root . --config configs/exp<NNN>_...yaml --debug --fold 0\`.
+  3. Run smoke test on Fold 0: \`ai-harness-run --project-root . --config configs/exp<NNN>_...yaml --debug --fold 0\`.
   4. Run full CV and output evaluation metrics.`;
     }
 
@@ -428,7 +428,7 @@ export const ExperimentConfigModal: React.FC<ExperimentConfigModalProps> = ({
 2. Implement the controlled intervention in \`harness/\` or \`src/\`.
 3. Run smoke test verification:
    \`\`\`powershell
-   ml-harness-run --project-root . --config configs/exp<NNN>_${card.descriptor}.yaml --debug --fold 0
+   ai-harness-run --project-root . --config configs/exp<NNN>_${card.descriptor}.yaml --debug --fold 0
    \`\`\`
 4. Execute the configured ${validationPlan} and verify generated artifacts in \`${artifactDir}/\`.`;
     }

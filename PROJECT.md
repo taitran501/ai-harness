@@ -1,4 +1,4 @@
-# Project: ML-Harness Web Dashboard UI/UX Optimization
+# Project: AI-Harness Web Dashboard UI/UX Optimization
 
 ## Architecture
 - **Frontend Layer**: React 18 SPA with TypeScript, Tailwind CSS, Lucide icons, Vite (`dashboard/`).

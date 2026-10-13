@@ -114,7 +114,7 @@ class KaggleKernelManager:
         if not license_name:
             return {
                 "success": False,
-                "error": "Dataset upload needs data_config.license in the task specification; ML-Harness will not invent a license.",
+                "error": "Dataset upload needs data_config.license in the task specification; AI-Harness will not invent a license.",
             }
         from harness.cloud_policy import (
             UploadConsentStore,
@@ -268,7 +268,7 @@ class KaggleKernelManager:
     ) -> Dict[str, Any]:
         """Generate kernel-metadata.json configuration dictionary."""
         username = cls.get_authenticated_username()
-        owner = username or "ml-harness-user"
+        owner = username or "ai-harness-user"
         if "/" in kernel_slug:
             owner, kernel_slug = kernel_slug.split("/", 1)
         kernel_slug = cls._bounded_slug(kernel_slug)
@@ -346,7 +346,7 @@ class KaggleKernelManager:
         runtime = copy.deepcopy(runtime_manifest) if runtime_manifest else {
             "schema_version": 2,
             "core": {
-                "distribution": "ml-harness",
+                "distribution": "ai-harness",
                 "version": "0.2.0",
                 "source": "bundled",
             },
@@ -358,7 +358,7 @@ class KaggleKernelManager:
             "requirements": [],
             "bundle_files": [],
         }
-        with tempfile.TemporaryDirectory(prefix="mlh-kaggle-code-") as temp_stage:
+        with tempfile.TemporaryDirectory(prefix="aih-kaggle-code-") as temp_stage:
             bundle_base = Path(temp_stage) / "code_bundle"
             bundle_base.mkdir(parents=True, exist_ok=True)
             for rel in ("src", "configs"):
@@ -379,11 +379,12 @@ class KaggleKernelManager:
             ):
                 if source.is_file():
                     shutil.copy2(source, destination)
-            manifest_source = root / ".ml-harness" / "project.yaml"
-            if manifest_source.is_file():
-                manifest_dest = bundle_base / ".ml-harness" / "project.yaml"
-                manifest_dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(manifest_source, manifest_dest)
+            for manifest_name in (".ai-harness", ".ml-harness"):
+                manifest_source = root / manifest_name / "project.yaml"
+                if manifest_source.is_file():
+                    manifest_dest = bundle_base / manifest_name / "project.yaml"
+                    manifest_dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(manifest_source, manifest_dest)
             if not config_file.is_relative_to(root):
                 raise ValueError("Experiment config must be inside the task workspace.")
             config_dest = bundle_base / config_rel
@@ -425,6 +426,9 @@ class KaggleKernelManager:
                 shutil.copy2(source, destination)
                 bundled_rel_paths.append(rel_path.as_posix())
             runtime["bundle_files"] = bundled_rel_paths
+            (bundle_base / "ai-harness-runtime.json").write_text(
+                json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
             (bundle_base / "ml-harness-runtime.json").write_text(
                 json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8"
             )
@@ -513,7 +517,8 @@ with tempfile.TemporaryDirectory(prefix="mlh-kaggle-work-") as temporary:
     try:
         # Loading by path avoids importing harness.__init__ before dependencies exist.
         helpers = runpy.run_path(str(workspace / "harness" / "kaggle_runtime.py"))
-        runtime = json.loads(Path("ml-harness-runtime.json").read_text(encoding="utf-8"))
+        runtime_path = Path("ai-harness-runtime.json") if Path("ai-harness-runtime.json").exists() else Path("ml-harness-runtime.json")
+        runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
         helpers["ensure_dependencies"](runtime, enable_internet={enable_internet!r})
         input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
         print(f"[Kaggle Kernel] Using input_root: {{input_root}}", flush=True)

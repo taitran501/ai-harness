@@ -263,9 +263,9 @@ export const SubmissionsTab: React.FC<SubmissionsTabProps> = ({
             </p>
             {!isCustomTaskPlugin && (
               <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300 max-w-xl mx-auto text-left">
-                ml-harness-audit --candidate {artifactDir}/&lt;exp_id&gt;/oof_predictions.csv --output-zip submission.zip
+                ai-harness-audit --candidate {artifactDir}/&lt;exp_id&gt;/oof_predictions.csv --output-zip submission.zip
                 <br />
-                ml-harness-agent --project-root . act --action prepare_submission --params {'{'}"exp_id": "&lt;exp_id&gt;"{'}'}
+                ai-harness-agent --project-root . act --action prepare_submission --params {'{'}"exp_id": "&lt;exp_id&gt;"{'}'}
               </div>
             )}
           </div>

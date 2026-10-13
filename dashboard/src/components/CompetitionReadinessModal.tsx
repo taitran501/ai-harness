@@ -155,7 +155,7 @@ export const CompetitionReadinessModal: React.FC<CompetitionReadinessModalProps>
       summary: 'EXPERIMENT_CARD.md and summary tables generated per run',
       attributes: [
         { label: 'Artifact Storage', value: `${taskInfo?.artifacts_dir || 'artifacts'}/<exp_id>/` },
-        { label: 'Lineage Ledger', value: '.ml-harness/EXPERIMENTS.md' },
+        { label: 'Lineage Ledger', value: '.ai-harness/EXPERIMENTS.md' },
       ],
       tabKey: 'task',
     },

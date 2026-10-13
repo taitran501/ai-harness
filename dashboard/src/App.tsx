@@ -150,7 +150,7 @@ const DashboardContent: React.FC = () => {
     return (
       <main className="min-h-screen bg-zinc-950 text-zinc-100 p-8 flex flex-col items-center justify-center space-y-3">
         <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
-        <h1 className="text-lg font-bold">{t('app_title', 'ML-Harness Workspace')}</h1>
+        <h1 className="text-lg font-bold">{t('app_title', 'AI-Harness Workspace')}</h1>
         <p role="status" className="text-xs text-zinc-400">{t('loading_telemetry', 'Loading workspace telemetry & experiment tree…')}</p>
       </main>
     );
@@ -173,12 +173,12 @@ const DashboardContent: React.FC = () => {
 
       {apiError && (
         <div className="px-4 sm:px-6 pt-3">
-          <div role="alert" title={t('connection_error', 'ML-Harness Connection Error')} className="bg-red-950/40 border border-red-800/60 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-red-200">
+          <div role="alert" title={t('connection_error', 'AI-Harness Connection Error')} className="bg-red-950/40 border border-red-800/60 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs text-red-200">
             <div className="flex items-center gap-2.5">
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
               <div>
                 <strong className="font-semibold text-rose-200">{t('err_offline_banner_title', 'Backend Service Offline or Initializing')}</strong>
-                <p className="text-[11px] text-red-300/80 mt-0.5">{t('err_offline_banner_desc', 'Telemetry unavailable. Ensure `ml-harness dashboard` is running.')} {apiError && `(${apiError})`}</p>
+                <p className="text-[11px] text-red-300/80 mt-0.5">{t('err_offline_banner_desc', 'Telemetry unavailable. Ensure `ai-harness dashboard` is running.')} {apiError && `(${apiError})`}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">

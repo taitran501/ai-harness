@@ -1,87 +1,96 @@
-# Architecture & System Design
+# Architecture and System Design
 
-This document details the architectural design of **AI-Harness**, drawing on principles from tree-search exploration (AIDE) and deterministic execution verification (SWE-agent).
-
-> [!IMPORTANT]
-> **Implementation and Competition Verification Scope**
-> AI-Harness is currently **strictly verified and working well ONLY on Natural Language Processing (NLP / Text)** benchmarks (such as sequence classification, transformer fine-tuning, and prompt evaluation).
-> **Tabular has implemented and locally tested paths** for categorical handling, scikit-learn pipelines, LightGBM, and XGBoost; competition-level performance remains unverified. Computer Vision, Audio, and Multimodal remain experimental WIP / Roadmap.
+This document details the architectural design of **AI-Harness**, which decouples creative machine learning exploration from execution and deterministic validation.
 
 ---
 
 ## 1. System Layers
 
-The harness organizes competitive machine learning workflows into three decoupled layers:
+AI-Harness organizes machine learning workflows into three decoupled layers:
 
 ```text
-Layer 1: Reasoning & Planning (Assistant / Engineer)
-   │ Hypotheses, failure slice diagnostics, literature retrieval
-   ▼
-Layer 2: Agent Bridge (tools/agent_bridge_cli.py)
-   │ Context compression, session budgets, typed action governance
-   ▼
+Layer 1: Reasoning and Planning (Assistant / Engineer)
+   |  Formulates hypotheses, inspects failure slices, designs pipelines.
+   v
+Layer 2: Agent Bridge (tools/agent_bridge_cli.py & harness/agent_bridge.py)
+   |  Provides context compression, session budgets, and typed action governance.
+   v
 Layer 3: Execution Runtime (harness/)
-   │ Validation schemes, Solution Tree DAG, guardrails & audit gates
+      Executes cross-validation, maintains the Solution Tree DAG, and enforces audit gates.
 ```
+
+### Layer 1: Reasoning and Planning
+The engineer or AI coding assistant (Antigravity, Codex, Claude Code) functions as the research scientist. Layer 1 analyzes problem specifications, reviews diagnostic reports from past runs, retrieves relevant domain techniques, and formulates specific atomic hypotheses.
+
+### Layer 2: Agent Bridge
+The bridge layer mediates between the reasoning assistant and the execution engine:
+- **Context Compression**: Distills multi-megabyte run histories and logs into a compact Heads-Up Display (~1,000 tokens) to preserve the assistant's context window.
+- **Session and Budget Management**: Tracks experiment quotas and execution runtime limits to prevent compute runaway.
+- **Typed Action Governance**: Translates high-level agent intentions (`create_experiment`, `run_smoke_test`, `promote_candidate`) into validated system calls.
+
+### Layer 3: Execution Runtime
+The execution engine runs pipelines against declared datasets and validation schemes:
+- **Solution Tree DAG**: Records parent-child lineages and metrics in an immutable graph structure.
+- **Validation Engine**: Executes multi-fold cross-validation with strict anti-leakage grouping invariants.
+- **Audit and Guardrails**: Verifies prediction integrity, checks manifest hashes, and blocks invalid submissions.
 
 ---
 
 ## 2. Core Components
 
 ### 2.1 Solution Tree DAG (`harness/tree_journal.py`)
-Rather than maintaining a flat, unstructured list of experiments, AI-Harness organizes iterations as a Directed Acyclic Graph (DAG):
-- Each experiment node records its parent, hypothesis, hyperparameters, primary validation score, and execution artifacts.
-- **Compressed State**: To prevent context window bloat for AI assistants, the journal generates concise summaries (~1,000 tokens) capturing only the top models, recent deltas, and bottleneck diagnostics.
+Rather than maintaining an unstructured flat list of runs, AI-Harness organizes iterations as a Directed Acyclic Graph (DAG):
+- **Lineage Tracking**: Each node records its parent experiment ID, hypothesis statement, hyperparameters, cross-validation metrics, and output artifact paths.
+- **State Compression**: Summaries highlight the best model, recent score deltas, and current error bottlenecks without dumping raw prediction files.
 
-### 2.2 UCB Search & Exploration (`tools/journal_tool.py`)
-To prevent prematurely abandoning promising directions or getting stuck in local optima, the harness uses an Upper Confidence Bound (UCB) heuristic:
+### 2.2 Upper Confidence Bound (UCB) Search (`tools/journal_tool.py`)
+To prevent premature convergence on a single model family or early abandonment of promising directions, the harness applies an Upper Confidence Bound heuristic:
 
 $$\text{Score}_{\text{UCB}}(N) = \text{Metric}(N) + c \cdot \sqrt{\frac{\ln(\text{Total Runs})}{\text{Visits}(N) + 1}}$$
 
-This balances **exploitation** (iterating on the current highest-performing model family) with **exploration** (testing under-explored feature pipelines or model backends).
+Where:
+- $\text{Metric}(N)$ represents the normalized utility of node $N$.
+- $\text{Total Runs}$ is the cumulative experiment count.
+- $\text{Visits}(N)$ is the number of times branch $N$ has been iterated upon.
+- $c$ is an exploration parameter balancing exploitation of top models with exploration of under-tested intervention branches (`feat`, `model`, `loss`, `post`).
 
 ### 2.3 Universal Execution Engine (`harness/runner.py`)
-The execution engine is task-agnostic and supports multiple modeling paradigms:
-- **Deep Transformers (Verified Core - NLP)**: Pretrained Hugging Face encoders with customizable task heads.
-- **PEFT / QLoRA (Verified Core - NLP)**: 4-bit quantized LoRA fine-tuning for consumer GPUs.
-- **LLM Prompting & Reasoning (Verified Core - NLP)**: Multi-step prompting with structured output validation.
-- **Classical ML (Tabular; locally tested, competition verification pending)**: Scikit-learn pipelines, native categorical handling, LightGBM and XGBoost. Other architectures can use custom factories.
+The execution engine supports diverse modeling paradigms:
+- **Deep Transformers (Verified Core - NLP)**: Pretrained Hugging Face encoders (such as DeBERTa, RoBERTa, ModernBERT) with customizable task heads.
+- **PEFT / QLoRA (Verified Core - NLP)**: Parameter-efficient fine-tuning and quantized training for consumer GPUs.
+- **LLM Prompting (Verified Core - NLP)**: Structured prompt pipelines and few-shot reasoning workflows.
+- **Classical Gradient Boosting (Tabular; locally tested, competition verification pending)**: Scikit-learn pipelines, LightGBM, XGBoost, and optional CatBoost.
 
-**Non-Prescriptive Principle**: In the AIDE / Agentic ML paradigm, the agent (Antigravity / Codex) is the creative scientist responsible for designing and modifying `model.factory`, feature pipelines, and hyperparameters. The harness runtime acts purely as an execution runtime and audit gate—it never imposes rigid preprocessing rules (such as forcing scalers or restrictive categorical limits) or dictates model choices.
+**The Non-Prescriptive Principle**: In this framework, the assistant or engineer designs the model factory (`model.factory`), feature representations, and hyperparameter grids. The harness runtime acts strictly as an execution runner and verification auditor—it never imposes rigid preprocessing or forces specific scalers.
 
-### 2.4 Guardrails & Verification Gates
-To maintain experimental rigor:
-- **Epistemic Grounding Gate (`harness/grounding_gate.py`)**: Checks experiment configurations for explicit hypotheses, literature references, and assumptions before running.
-- **Ensemble Diversity Guard (`harness/ensemble_guard.py`)**: Applies configured diversity thresholds when the task declares them.
-- **Submission Gate**: Uses the selected task plugin's submission builder and validator. The generic audit applies only to declarative tasks.
+### 2.4 Guardrails and Verification Gates
+- **Grounding Gate (`harness/grounding_gate.py`)**: Validates that experiment configurations declare explicit hypotheses, rationale, and assumption registers prior to execution.
+- **Ensemble Diversity Guard (`harness/ensemble_guard.py`)**: Checks prediction correlation thresholds between ensemble constituents to ensure meaningful diversity.
+- **Submission Gate (`tools/audit_gate.py`)**: Verifies prediction format, row count, null absence, domain validity, and column ordering before allowing submission packaging.
 
 ---
 
 ## 3. Execution Backends
 
-AI-Harness supports three execution backends:
-1. **Local**: Direct execution on the developer machine via `ai-harness-run --project-root .`.
-2. **Modal.com**: Serverless GPU dispatch with persistent volume caching.
-3. **Kaggle**: Automated notebook packaging, push, and artifact synchronization.
+AI-Harness supports three execution targets:
+1. **Local**: Direct execution on the local host machine via `ai-harness-run --project-root .`.
+2. **Modal.com**: Serverless GPU dispatch with persistent volume caching for heavy transformer training.
+3. **Kaggle**: Automated kernel generation, push, and remote artifact synchronization.
 
 ---
 
-## 4. Empirical Scope & Evolution Roadmap
+## 4. Verification Scope and Development Roadmap
 
-### 4.1 Verified Domain Scope: Strictly NLP / Text Only
-> [!IMPORTANT]
-> **Production & Competition Readiness**: The harness runtime, baseline suites, and diagnostics are currently **strictly validated and working well ONLY on NLP / Text** benchmarks:
-> - **NLP / Text Modeling (Verified Core)**: Sequence classification, cross-lingual transfer (XLM-R, DeBERTa, ModernBERT), LLM prompting, and QLoRA fine-tuning (empirically validated on NLP classification benchmarks).
-> - **Tabular engineering support**: Implemented and tested locally; competitive generalization remains unverified. Computer Vision, Audio, and Multimodal remain experimental roadmap work.
+### Verified Domain Scope: Natural Language Processing (NLP / Text)
+The harness runtime, baseline suites, and default diagnostics are benchmarked and verified for NLP/Text tasks:
+- Sequence classification (single-label and multi-label).
+- Cross-lingual transfer (XLM-RoBERTa, mDeBERTa).
+- Modern transformer backends (ModernBERT, DeBERTa-v3).
+- LLM prompting and QLoRA fine-tuning.
 
-### 4.2 Transparency on Historical LLM / NLP Bias
-Early scaffolding within the project carried an implicit bias toward textual problem structures (e.g. TF-IDF feature extraction, transformer encoders, and language model inference). We explicitly recognize this bias:
-- Built-in heuristics, defaults, and TreeJournal clustering now avoid pigeonholing models into narrow textual families.
-- The execution layer treats all model definitions, pipelines, and inputs as flexible, pluggable, and agent-directed.
-
-### 4.3 Experimental & Roadmap Modalities (WIP — Unverified)
-To expand beyond the currently verified NLP scope, active and planned development targets:
-1. **Tabular Modeling**: Implemented categorical handling and locally tested LightGBM/XGBoost classification/regression paths. Competitive performance across tasks remains unverified.
-2. **Computer Vision**: Backbone architectures via `timm` (ConvNeXt, Swin, ViT), visual augmentation pipelines, and image classification/segmentation metrics.
-3. **Audio Processing**: Acoustic feature extraction, spectrogram transforms, and models such as Whisper, Wav2Vec2, and Audio Spectrogram Transformers (AST).
-4. **Multimodal Fusion**: Cross-attention and early/late fusion architectures combining tabular, textual, and visual modalities (CLIP, SigLIP, Qwen2-VL).
+### Experimental Modalities (Roadmap WIP)
+Support for other modalities is currently in progress:
+- **Tabular Modeling**: Implemented categorical handling and locally tested LightGBM/XGBoost classification/regression paths; optional CatBoost support. Competitive performance across tasks remains unverified.
+- **Computer Vision**: Backbone integration via `timm` (ConvNeXt, Swin, ViT) and spatial augmentations.
+- **Audio Processing**: Acoustic features and speech models (Whisper, Wav2Vec2, AST).
+- **Multimodal Fusion**: Cross-attention architectures combining text, tabular, and visual features.

@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""Bidirectional CLI Bridge between Antigravity (IDE Agent Runtime) and the ML Harness.
+"""Bidirectional CLI Bridge between Antigravity (IDE Agent Runtime) and the AI Harness.
 
 Provides structured Context Packets and Typed Harness Action execution with stateful
 BridgeSession tracking, optional budget enforcement, and USER_APPROVAL governance:
 
   # 1. Read compressed Context Packet (Competition State + UCB + Diagnostics + Session):
-  ml-harness-agent context
-  ml-harness-agent context --format json
+  ai-harness-agent context
+  ai-harness-agent context --format json
 
   # 2. Start or configure a BridgeSession with optional budget limits:
-  ml-harness-agent start-session --goal "Improve the primary metric" --max-experiments 3
+  ai-harness-agent start-session --goal "Improve the primary metric" --max-experiments 3
 
   # 3. Invoke a Typed Harness Action (returns structured ActionObservation JSON):
-  ml-harness-agent act --action inspect_diagnostics --params '{"exp_id": "exp001_baseline"}'
-  ml-harness-agent act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_v1"}'
-  ml-harness-agent act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_feature_v1.yaml"}'
-  ml-harness-agent act --action run_full_validation --params '{"config_path": "configs/exp002_feat_feature_v1.yaml", "backend": "local"}'
-  ml-harness-agent act --action synthesize_candidate --params '{"name": "ensemble_v1", "mode": "ensemble_vote"}'
+  ai-harness-agent act --action inspect_diagnostics --params '{"exp_id": "exp001_baseline"}'
+  ai-harness-agent act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_v1"}'
+  ai-harness-agent act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_feature_v1.yaml"}'
+  ai-harness-agent act --action run_full_validation --params '{"config_path": "configs/exp002_feat_feature_v1.yaml", "backend": "local"}'
+  ai-harness-agent act --action synthesize_candidate --params '{"name": "ensemble_v1", "mode": "ensemble_vote"}'
 
   # 4. Approve a paused USER_APPROVAL action (submit, freeze, unfreeze, finalize):
-  ml-harness-agent approve --session-id session_0001
+  ai-harness-agent approve --session-id session_0001
 """
 
 from __future__ import annotations

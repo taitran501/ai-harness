@@ -1,4 +1,4 @@
-"""Universal Feature Pipeline for ML-Harness.
+"""Universal Feature Pipeline for AI-Harness.
 
 Provides modular text composition, sparse n-gram extraction (word + char),
 dense transformer embeddings, and tabular metadata feature engineering.

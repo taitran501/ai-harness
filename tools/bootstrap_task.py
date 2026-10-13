@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Autonomous Task Bootstrapper and Data Ingestion Engine for ML-Harness.
+"""Autonomous Task Bootstrapper and Data Ingestion Engine for AI-Harness.
 
 Enables zero-touch task onboarding:
 1. Discovers and auto-extracts data archives (.zip, .tar.gz) in dataset/
@@ -7,7 +7,7 @@ Enables zero-touch task onboarding:
 3. Synthesizes task specification from docs/TASK.md or heuristics
 4. Generates configs/task.yaml conforming to UniversalTaskSpec
 5. Generates leakage-proof validation folds in splits/fold_assignments.tsv
-6. Synchronizes the AI Agent skill in .agents/skills/ml-harness/SKILL.md
+6. Synchronizes the AI Agent skill in .agents/skills/ai-harness/SKILL.md
 """
 
 from __future__ import annotations
@@ -351,7 +351,7 @@ def generate_baseline_config(
                 "Features are linearly or logistically separable with L2 regularization.",
             ],
             "uncertainty_level": "low",
-            "verification_probe": "Run smoke test: ml-harness-run --project-root . --config configs/exp000_baseline.yaml --debug --fold 0",
+            "verification_probe": "Run smoke test: ai-harness-run --project-root . --config configs/exp000_baseline.yaml --debug --fold 0",
         },
         "constraints": {
             "max_params_limit": 150000000,
@@ -507,7 +507,7 @@ def bootstrap_competition_task(
         num_folds=schema.get("num_folds", 5),
     )
 
-    # 7. Automatically Attach Project (.ml-harness/project.yaml)
+    # 7. Automatically Attach Project (.ai-harness/project.yaml)
     from harness.project import attach_project
     attach_project(
         project_root=root,
@@ -517,7 +517,7 @@ def bootstrap_competition_task(
     )
 
     # 8. Inject AI Agent Skill
-    skill_output = root / ".agents" / "skills" / "ml-experiment-harness" / "SKILL.md"
+    skill_output = root / ".agents" / "skills" / "ai-harness" / "SKILL.md"
     injected_skill = inject_skill_file(config_path=cfg_path, output_path=skill_output)
 
     try:
@@ -538,7 +538,7 @@ def bootstrap_competition_task(
     try:
         skill_rel = str(injected_skill.resolve().relative_to(root)).replace("\\", "/")
     except ValueError:
-        skill_rel = f".agents/skills/ml-experiment-harness/{injected_skill.name}"
+        skill_rel = f".agents/skills/ai-harness/{injected_skill.name}"
 
     report = {
         "status": "SUCCESS",
@@ -557,13 +557,13 @@ def bootstrap_competition_task(
         "config_file": cfg_rel,
         "baseline_config": baseline_rel,
         "skill_file": skill_rel,
-        "project_file": ".ml-harness/project.yaml",
+        "project_file": ".ai-harness/project.yaml",
     }
     return report
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bootstrap task onboarding and data ingestion for ML-Harness")
+    parser = argparse.ArgumentParser(description="Bootstrap task onboarding and data ingestion for AI-Harness")
     parser.add_argument("--project-root", type=str, default=None, help="Competition workspace root")
     parser.add_argument("--dataset", type=str, default="dataset", help="Directory containing dataset files or archives")
     parser.add_argument("--context", type=str, default="docs/TASK.md", help="Markdown context document describing task")

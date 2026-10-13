@@ -1,4 +1,4 @@
-"""Universal Data Strategy and Leakage-Proof Splitting Engine for ML-Harness.
+"""Universal Data Strategy and Leakage-Proof Splitting Engine for AI-Harness.
 
 Provides standardized dataset ingestion, multiple cross-validation strategies
 (GroupKFold, StratifiedGroupKFold, Holdout Test, Zero-Shot domain split),

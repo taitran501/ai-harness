@@ -1,4 +1,4 @@
-"""Diagnostic and Error Slicing Engine for ML-Harness.
+"""Diagnostic and Error Slicing Engine for AI-Harness.
 
 Extracts rich diagnostic signals (confusion matrices, minority class recall,
 subgroup error slices, top confident failures) so AI agents have actionable,
