@@ -14,7 +14,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 class TestLLMAPIEndpoints(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        from unittest.mock import patch
+        from harness.llm_engine import LLMEngine
         cls.port = 8995
+        cls._class_patches = [
+            patch("harness.llm_engine.LLMEngine.check_local_endpoint", return_value=False),
+            patch("harness.llm_engine.LLMEngine.fetch_hf_models", return_value=LLMEngine.CURATED_HF_FALLBACK_MODELS[:5]),
+            patch("harness.environment_detector.EnvironmentDetector.verify_llm_api_key", return_value={
+                "success": True, "valid": False, "provider": "openai", "error": "Invalid API key"
+            }),
+        ]
+        for p in cls._class_patches:
+            p.start()
+
         socketserver.TCPServer.allow_reuse_address = True
         cls.httpd = socketserver.ThreadingTCPServer(("", cls.port), DashboardHandler)
         cls.server_thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
@@ -25,9 +37,11 @@ class TestLLMAPIEndpoints(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
+        for p in reversed(cls._class_patches):
+            p.stop()
 
     def test_get_llm_providers(self):
-        url = f"http://localhost:{self.port}/api/llm/providers"
+        url = f"http://127.0.0.1:{self.port}/api/llm/providers"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
@@ -42,7 +56,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertIn("openrouter", provider_ids)
 
     def test_get_llm_sample_data(self):
-        url = f"http://localhost:{self.port}/api/llm/sample_data"
+        url = f"http://127.0.0.1:{self.port}/api/llm/sample_data"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
@@ -53,7 +67,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertIsInstance(data["rows"], list)
 
     def test_post_llm_generate_peft_script(self):
-        url = f"http://localhost:{self.port}/api/llm/generate_peft_script"
+        url = f"http://127.0.0.1:{self.port}/api/llm/generate_peft_script"
         payload = {
             "model_name": "Qwen/Qwen2.5-7B-Instruct",
             "lora_r": 16,
@@ -70,7 +84,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertIn("SFTTrainer", res["script_code"])
 
     def test_post_save_llm_key(self):
-        url = f"http://localhost:{self.port}/api/environment/llm/key"
+        url = f"http://127.0.0.1:{self.port}/api/environment/llm/key"
         payload = {
             "key_name": "TEST_LLM_API_KEY",
             "key_value": "dummy-key-for-test-12345",
@@ -83,7 +97,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertTrue(res["success"])
 
     def test_get_llm_hf_models(self):
-        url = f"http://localhost:{self.port}/api/llm/hf_models?search=qwen&limit=5"
+        url = f"http://127.0.0.1:{self.port}/api/llm/hf_models?search=qwen&limit=5"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
@@ -92,7 +106,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertIsInstance(data["models"], list)
 
     def test_get_llm_unsloth_models(self):
-        url = f"http://localhost:{self.port}/api/llm/unsloth_models?limit=10"
+        url = f"http://127.0.0.1:{self.port}/api/llm/unsloth_models?limit=10"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
@@ -101,7 +115,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertIsInstance(data["models"], list)
 
     def test_get_llm_provider_models(self):
-        url = f"http://localhost:{self.port}/api/llm/provider_models?provider=gemini"
+        url = f"http://127.0.0.1:{self.port}/api/llm/provider_models?provider=gemini"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
@@ -112,7 +126,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertGreater(len(data["models"]), 0)
 
     def test_post_llm_generate_unsloth_script(self):
-        url = f"http://localhost:{self.port}/api/llm/generate_unsloth_script"
+        url = f"http://127.0.0.1:{self.port}/api/llm/generate_unsloth_script"
         payload = {
             "model_name": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
             "lora_r": 16,
@@ -128,7 +142,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
             self.assertIn("FastLanguageModel", res["script_code"])
             self.assertIn("unsloth", res["script_code"])
     def test_post_verify_llm_key_endpoint(self):
-        url = f"http://localhost:{self.port}/api/environment/llm/verify"
+        url = f"http://127.0.0.1:{self.port}/api/environment/llm/verify"
         payload = {
             "provider": "openai",
             "key_value": "sk-dummy-test-key-12345",

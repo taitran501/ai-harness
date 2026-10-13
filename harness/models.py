@@ -527,9 +527,128 @@ class XGBoostModel:
         return max(total, 1)
 
 
+class DummyBaselineModel:
+    """Fast, zero-overhead dummy estimator for testing, debugging, and rapid orchestration prototyping."""
+
+    NAMES = {
+        "dummy",
+        "mock",
+        "dummy_baseline",
+        "dummy_classifier",
+        "dummy_regressor",
+    }
+
+    def __init__(self, task_spec, model_name="dummy", **kwargs):
+        self.task_spec = task_spec
+        self.model_name = str(model_name).lower()
+        self.kwargs = kwargs
+        self.fitted_targets = {}
+        self.estimator_metadata = {}
+        self.seed = getattr(task_spec, "resolve_seed", lambda: 42)()
+
+    def fit(self, df, variant=None):
+        subtasks = getattr(self.task_spec, "subtasks", {})
+        if not subtasks:
+            target_col = (
+                getattr(self.task_spec, "primary_target", None)
+                or getattr(self.task_spec, "target_column", None)
+                or (self.task_spec.metadata.get("task", {}).get("target_column") if hasattr(self.task_spec, "metadata") else None)
+                or "target"
+            )
+            task_type = str(getattr(self.task_spec, "task_type", "")).lower()
+            is_reg = any(r in task_type for r in ("regression", "ranking")) or (target_col in df and df[target_col].dtype.kind in "fc")
+            if not is_reg:
+                classes = sorted(df[target_col].dropna().unique().tolist()) if target_col in df else [0, 1]
+                if not classes:
+                    classes = [0, 1]
+                self.fitted_targets[target_col] = {
+                    "type": "clf",
+                    "classes": classes,
+                    "default": classes[0],
+                }
+            else:
+                default_val = float(df[target_col].dropna().mean()) if (target_col in df and not df[target_col].dropna().empty) else 0.0
+                self.fitted_targets[target_col] = {
+                    "type": "reg",
+                    "default": default_val,
+                }
+            self.estimator_metadata[target_col] = {
+                "class": "DummyBaselineModel",
+                "params": self.kwargs,
+                "features": [],
+            }
+            return self
+
+        for key, st in subtasks.items():
+            col = getattr(st, "column", None) or key
+            task_type = getattr(st, "task_type", "regression")
+            is_reg = task_type in ("regression", "ranking")
+            if not is_reg:
+                classes = list(getattr(st, "classes", []) or [])
+                if not classes and col in df:
+                    try:
+                        classes = sorted(df[col].dropna().unique().tolist())
+                    except Exception:
+                        classes = [0, 1]
+                if not classes:
+                    classes = [0, 1]
+                self.fitted_targets[key] = {
+                    "type": "clf",
+                    "classes": classes,
+                    "default": classes[0],
+                }
+            else:
+                default_val = 0.0
+                if col in df:
+                    try:
+                        s = pd.to_numeric(df[col], errors="coerce").dropna()
+                        if not s.empty:
+                            default_val = float(s.mean())
+                    except Exception:
+                        default_val = 0.0
+                self.fitted_targets[key] = {
+                    "type": "reg",
+                    "default": default_val,
+                }
+            self.estimator_metadata[key] = {
+                "class": "DummyBaselineModel",
+                "params": self.kwargs,
+                "features": [],
+            }
+        return self
+
+    def predict(self, df, variant=None):
+        n = len(df)
+        result = {}
+        for key, info in self.fitted_targets.items():
+            if info["type"] == "clf":
+                classes = info["classes"]
+                k = len(classes)
+                result[key] = np.array([info["default"]] * n)
+                if k > 1:
+                    proba = np.zeros((n, k), dtype=float)
+                    proba[:, 0] = 0.6
+                    proba[:, 1:] = 0.4 / (k - 1)
+                    result[f"proba_{key}"] = proba
+                    result[f"classes_{key}"] = list(classes)
+            else:
+                base = info["default"]
+                result[key] = (
+                    np.linspace(base, base + 0.01, n, dtype=float)
+                    if n > 1
+                    else np.full(n, base, dtype=float)
+                )
+        return result
+
+    def num_parameters(self):
+        return max(len(self.fitted_targets), 1)
+
+
 def create_model(task_spec, model_name="baseline", **kwargs):
-    """Unified factory creating built-in models across linear, LightGBM, and XGBoost families."""
+    """Unified factory creating built-in models across linear, GBDT, and dummy testing families."""
     name_clean = str(model_name).lower()
+    if name_clean in DummyBaselineModel.NAMES:
+        return DummyBaselineModel(task_spec, model_name, **kwargs)
     if name_clean in GenericBaselineModel.NAMES:
         return GenericBaselineModel(task_spec, model_name, **kwargs)
     if name_clean in LightGBMModel.NAMES:

@@ -40,15 +40,20 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         cleanup_dashboard_workspace(self)
 
     def test_environment_detector_full_status(self):
-        status = EnvironmentDetector.get_full_status()
-        self.assertIn("modal", status)
-        self.assertIn("kaggle", status)
-        self.assertIn("docker", status)
-        self.assertIn("gpu", status)
-        self.assertTrue(status["modal"]["installed"])
-        self.assertTrue(status["kaggle"]["installed"])
-        self.assertTrue(status["docker"]["installed"])
-        self.assertTrue(status["gpu"]["detected"])
+        with patch.object(EnvironmentDetector, "detect_modal", return_value={"installed": True, "profiles": []}), \
+             patch.object(EnvironmentDetector, "detect_kaggle", return_value={"installed": True, "authenticated": True}), \
+             patch.object(EnvironmentDetector, "detect_docker", return_value={"installed": True, "running": True}), \
+             patch.object(EnvironmentDetector, "detect_gpu", return_value={"detected": True, "count": 1}), \
+             patch.object(EnvironmentDetector, "detect_llm_status", return_value={"providers": {}, "total_configured": 0}):
+            status = EnvironmentDetector.get_full_status()
+            self.assertIn("modal", status)
+            self.assertIn("kaggle", status)
+            self.assertIn("docker", status)
+            self.assertIn("gpu", status)
+            self.assertTrue(status["modal"]["installed"])
+            self.assertTrue(status["kaggle"]["installed"])
+            self.assertTrue(status["docker"]["installed"])
+            self.assertTrue(status["gpu"]["detected"])
 
     def test_get_next_experiment_id(self):
         res = get_next_experiment_id(branch="feat", descriptor="test_cleaning")

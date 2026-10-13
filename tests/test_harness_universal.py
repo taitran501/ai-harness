@@ -1,8 +1,9 @@
-"""Unit tests for Universal ML-Harness components:
+"""Unit tests for Universal AI-Harness components:
 - Task Spec & Conditional Engine
 - Data Strategy & Leakage Auditor
 - Feature Pipeline
 - Tuning & Calibration Engine
+- Dummy Estimator for Decoupled Testing
 """
 
 import unittest
@@ -197,6 +198,64 @@ class TestTuningEngine(unittest.TestCase):
         self.assertEqual(calibrated.shape, (6, 1))
         # Monotonically increasing or well calibrated
         self.assertLess(calibrated[0, 0], calibrated[-1, 0])
+
+
+class TestDummyBaselineModel(unittest.TestCase):
+    def test_dummy_model_classification(self):
+        from harness.models import DummyBaselineModel, create_model
+
+        spec = UniversalTaskSpec(
+            name="TestClf",
+            task_type="binary_classification",
+            primary_metric="macro_f1",
+            subtasks={
+                "target": SubtaskSpec(
+                    id="target",
+                    name="target",
+                    task_type="binary_classification",
+                    classes=["no", "yes"],
+                    primary_metric="macro_f1",
+                )
+            },
+        )
+        model = create_model(spec, "dummy")
+        self.assertIsInstance(model, DummyBaselineModel)
+        df_train = pd.DataFrame({"id": [1, 2, 3, 4], "feature": [10, 20, 30, 40], "target": ["no", "yes", "no", "yes"]})
+        model.fit(df_train)
+        preds = model.predict(df_train)
+        self.assertIn("target", preds)
+        self.assertIn("proba_target", preds)
+        self.assertIn("classes_target", preds)
+        self.assertEqual(len(preds["target"]), 4)
+        self.assertEqual(preds["proba_target"].shape, (4, 2))
+        self.assertEqual(model.num_parameters(), 1)
+
+    def test_dummy_model_regression(self):
+        from harness.models import DummyBaselineModel, create_model
+
+        spec = UniversalTaskSpec(
+            name="TestReg",
+            task_type="regression",
+            primary_metric="rmse",
+            subtasks={
+                "price": SubtaskSpec(
+                    id="price",
+                    name="price",
+                    task_type="regression",
+                    primary_metric="rmse",
+                )
+            },
+        )
+        model = create_model(spec, "mock")
+        self.assertIsInstance(model, DummyBaselineModel)
+        df_train = pd.DataFrame({"id": [1, 2], "feature": [1.0, 2.0], "price": [100.0, 200.0]})
+        model.fit(df_train)
+        preds = model.predict(df_train)
+        self.assertIn("price", preds)
+        self.assertEqual(len(preds["price"]), 2)
+        # Non-degenerate slope to prevent division by zero in correlation metrics
+        self.assertNotEqual(preds["price"][0], preds["price"][1])
+        self.assertEqual(model.num_parameters(), 1)
 
 
 if __name__ == "__main__":

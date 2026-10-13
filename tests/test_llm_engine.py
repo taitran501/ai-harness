@@ -1,12 +1,14 @@
 """Unit tests for LLMEngine and LLM integration."""
 
 import unittest
+import unittest.mock
 from harness.llm_engine import LLMEngine, LLMConfig
 
 
 class TestLLMEngine(unittest.TestCase):
     def test_list_providers(self):
-        providers = LLMEngine.list_providers()
+        with unittest.mock.patch.object(LLMEngine, "check_local_endpoint", return_value=False):
+            providers = LLMEngine.list_providers()
         self.assertTrue(len(providers) >= 6)
         provider_ids = [p["id"] for p in providers]
         self.assertIn("gemini", provider_ids)
