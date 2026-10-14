@@ -181,3 +181,158 @@ class KaggleLeaderboardTracker:
                     pass
 
         return {"status": "TIMEOUT", "message": f"Scoring exceeded {max_wait_sec}s timeout"}
+
+
+class ThresholdOptimizer:
+    """Optimizes classification decision thresholds on Out-Of-Fold probabilities."""
+
+    @staticmethod
+    def optimize_threshold(
+        y_true: np.ndarray,
+        y_prob: np.ndarray,
+        metric: str = "f1",
+        num_thresholds: int = 181,
+    ) -> Tuple[float, float]:
+        """Finds the optimal scalar threshold maximizing the specified metric.
+
+        Args:
+            y_true: Binary ground truth labels (0 or 1).
+            y_prob: Predicted probabilities in [0, 1].
+            metric: Target metric to optimize ('f1', 'kappa', 'accuracy').
+            num_thresholds: Number of evaluation thresholds in [0.05, 0.95].
+
+        Returns:
+            Tuple of (optimal_threshold, best_metric_score).
+        """
+        from sklearn.metrics import f1_score, cohen_kappa_score, accuracy_score
+
+        metric_lower = str(metric).lower()
+        if metric_lower in {"kappa", "cohen_kappa"}:
+            fn = cohen_kappa_score
+        elif metric_lower in {"accuracy", "acc"}:
+            fn = accuracy_score
+        else:
+            fn = f1_score
+
+        best_th = 0.5
+        best_score = float("-inf")
+        y_true_clean = np.asarray(y_true).ravel()
+        y_prob_clean = np.asarray(y_prob).ravel()
+
+        for th in np.linspace(0.05, 0.95, num_thresholds):
+            preds = (y_prob_clean >= th).astype(int)
+            try:
+                score = float(fn(y_true_clean, preds))
+                if score > best_score:
+                    best_score = score
+                    best_th = float(th)
+            except Exception:
+                continue
+
+        return best_th, best_score
+
+
+class QuantileMatcher:
+    """Non-parametric quantile alignment matching test prediction CDF to a reference distribution."""
+
+    @staticmethod
+    def match_quantiles(
+        source_preds: np.ndarray,
+        target_reference: np.ndarray,
+    ) -> np.ndarray:
+        """Projects source_preds onto the empirical quantile distribution of target_reference.
+
+        Args:
+            source_preds: Array of predictions to calibrate.
+            target_reference: Ground truth or OOF reference predictions with desired distribution.
+
+        Returns:
+            Calibrated numpy array matching target_reference CDF.
+        """
+        from scipy.stats import rankdata
+
+        src = np.asarray(source_preds).ravel()
+        tgt = np.asarray(target_reference).ravel()
+        ranks = rankdata(src, method="average") / (len(src) + 1.0)
+        matched = np.percentile(np.sort(tgt), ranks * 100.0)
+        return matched.reshape(np.asarray(source_preds).shape)
+
+
+class MicroDoseProbeGenerator:
+    """Generates low-drift, safe leaderboard probing submissions to test orthogonal hypotheses."""
+
+    @staticmethod
+    def generate_probe(
+        base_csv: Union[str, Path],
+        probe_csv: Union[str, Path],
+        output_csv: Union[str, Path],
+        alpha: float = 0.03,
+        id_column: str = "id",
+        target_column: Optional[str] = None,
+        space: str = "logit",
+    ) -> Dict[str, Any]:
+        """Blends a verified base submission with a small micro-dose (alpha <= 0.08) of a probe signal.
+
+        Args:
+            base_csv: Path to proven, verified high-scoring submission CSV.
+            probe_csv: Path to candidate probe submission CSV containing novel signal.
+            output_csv: Destination path for the blended probe CSV.
+            alpha: Dose ratio for probe (default: 0.03 = 3%).
+            id_column: Name of ID column.
+            target_column: Name of target column (auto-detected if None).
+            space: Blending space ('logit', 'probability', 'rank').
+
+        Returns:
+            Audit dictionary with Spearman correlation, max change, and drift metrics.
+        """
+        from scipy.special import expit, logit
+        from scipy.stats import spearmanr, rankdata
+
+        df_base = pd.read_csv(base_csv)
+        df_probe = pd.read_csv(probe_csv)
+
+        if len(df_base) != len(df_probe):
+            raise ValueError(f"Row count mismatch: base={len(df_base)}, probe={len(df_probe)}")
+
+        if target_column is None:
+            cand = [c for c in df_base.columns if c != id_column]
+            if not cand:
+                raise ValueError("Target column could not be inferred")
+            target_col = cand[0]
+        else:
+            target_col = target_column
+
+        s_base = df_base[target_col].values.astype(float)
+        s_probe = df_probe[target_col].values.astype(float)
+
+        if space == "logit":
+            eps = 1e-6
+            z_base = logit(np.clip(s_base, eps, 1.0 - eps))
+            z_probe = logit(np.clip(s_probe, eps, 1.0 - eps))
+            blended = expit((1.0 - alpha) * z_base + alpha * z_probe)
+        elif space == "rank":
+            r_base = rankdata(s_base) / len(s_base)
+            r_probe = rankdata(s_probe) / len(s_probe)
+            blended = (1.0 - alpha) * r_base + alpha * r_probe
+        else:  # probability
+            blended = (1.0 - alpha) * s_base + alpha * s_probe
+
+        corr, _ = spearmanr(s_base, blended)
+        max_diff = float(np.max(np.abs(s_base - blended)))
+        mean_diff = float(np.mean(np.abs(s_base - blended)))
+
+        out_df = df_base.copy()
+        out_df[target_col] = blended
+        out_p = Path(output_csv)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_df.to_csv(out_p, index=False)
+
+        return {
+            "output_path": str(out_p),
+            "alpha": alpha,
+            "space": space,
+            "spearman_correlation_vs_base": float(corr),
+            "max_absolute_diff": max_diff,
+            "mean_absolute_diff": mean_diff,
+            "rows": len(out_df),
+        }

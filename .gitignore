@@ -40,6 +40,7 @@ artifacts/base/
 /.agents/
 /artifacts/
 /.ai-harness/
+/submissions/
 /build/
 /ai_harness.egg-info/
 /task_plugins/*/build/

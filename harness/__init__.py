@@ -11,7 +11,13 @@ from .ensemble_guard import EnsembleGuard
 from .submission_manager import SubmissionManager
 from .stacking import L2LogitStacker, RankAverager, align_prediction_frames, to_clipped_logit
 from .foundation_models import TeacherLogitPrior, MultiScaleBinner, HierarchicalDiscretizer
-from .endgame_submission import SubmissionPreflightValidator, KaggleLeaderboardTracker
+from .endgame_submission import (
+    SubmissionPreflightValidator,
+    KaggleLeaderboardTracker,
+    ThresholdOptimizer,
+    QuantileMatcher,
+    MicroDoseProbeGenerator,
+)
 from .io_utils import (
     atomic_write_json,
     atomic_write_text,
@@ -37,6 +43,9 @@ __all__ = [
     "HierarchicalDiscretizer",
     "SubmissionPreflightValidator",
     "KaggleLeaderboardTracker",
+    "ThresholdOptimizer",
+    "QuantileMatcher",
+    "MicroDoseProbeGenerator",
     "atomic_write_json",
     "atomic_write_text",
     "json_default_serializer",

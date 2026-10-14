@@ -40,6 +40,62 @@ from harness.agent_bridge import AgentBridge
 from harness.project import HarnessProject
 
 
+def _coerce_value(val: str) -> Any:
+    """Coerce string into int, float, bool, or json dict/list if applicable."""
+    val_lower = val.lower()
+    if val_lower == "true":
+        return True
+    if val_lower == "false":
+        return False
+    if val_lower in {"none", "null"}:
+        return None
+    try:
+        if val.isdigit() or (val.startswith("-") and val[1:].isdigit()):
+            return int(val)
+        return float(val)
+    except ValueError:
+        pass
+    if (val.startswith("{") and val.endswith("}")) or (val.startswith("[") and val.endswith("]")):
+        try:
+            return json.loads(val)
+        except Exception:
+            pass
+    return val
+
+
+def _parse_dynamic_kv_args(args_list: list[str]) -> Dict[str, Any]:
+    """Parse dynamic CLI flags (--exp-id value, --weight 0.5, --flag) into a dict.
+
+    Converts kebab-case keys (--config-path) to snake_case (config_path) and parses
+    ints, floats, booleans, and JSON-like strings automatically.
+    """
+    params: Dict[str, Any] = {}
+    i = 0
+    while i < len(args_list):
+        arg = args_list[i]
+        if arg.startswith("--"):
+            # Handle --key=val format
+            if "=" in arg:
+                key_part, val_part = arg[2:].split("=", 1)
+                key = key_part.replace("-", "_")
+                params[key] = _coerce_value(val_part)
+                i += 1
+                continue
+
+            key = arg[2:].replace("-", "_")
+            # Peek next token
+            if i + 1 < len(args_list) and not args_list[i + 1].startswith("--"):
+                val_part = args_list[i + 1]
+                params[key] = _coerce_value(val_part)
+                i += 2
+            else:
+                params[key] = True
+                i += 1
+        else:
+            i += 1
+    return params
+
+
 def _parse_json_arg(raw: str | None) -> Dict[str, Any]:
     if not raw:
         return {}
@@ -55,7 +111,7 @@ def _parse_json_arg(raw: str | None) -> Dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Antigravity <-> ML Harness Bidirectional Context & Action Bridge CLI"
+        description="Antigravity <-> AI Harness Bidirectional Context & Action Bridge CLI"
     )
     parser.add_argument("--project-root", default=None, help="Competition workspace root")
     parser.add_argument("--task-config", default=None, help="Task spec path relative to workspace root")
@@ -118,7 +174,10 @@ def main(argv: list[str] | None = None) -> int:
     # 6. list
     subparsers.add_parser("list", help="List recent BridgeSessions")
 
-    args = parser.parse_args(argv)
+    args, extra_argv = parser.parse_known_args(argv)
+    if args.command != "act" and extra_argv:
+        parser.error(f"Unrecognized arguments: {' '.join(extra_argv)}")
+
     project = HarnessProject.discover(args.project_root, args.task_config)
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
@@ -154,6 +213,8 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as error:
                 parser.error(f"Cannot read --param-file: {error}")
         params = _parse_json_arg(raw)
+        dynamic_params = _parse_dynamic_kv_args(extra_argv)
+        params.update(dynamic_params)
         if args.backend:
             params["backend"] = args.backend
 

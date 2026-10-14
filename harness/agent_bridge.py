@@ -77,6 +77,10 @@ class TypedActionName(str, Enum):
     SYNTHESIZE_CANDIDATE = "synthesize_candidate"
     PROMOTE_CANDIDATE = "promote_candidate"
     BUILD_ENSEMBLE = "build_ensemble"
+    REGISTER_EXTERNAL_PREDICTION = "register_external_prediction"
+    OPTIMIZE_BLEND = "optimize_blend"
+    OPTIMIZE_THRESHOLD = "optimize_threshold"
+    GENERATE_MICRODOSE_PROBE = "generate_microdose_probe"
     PREPARE_SUBMISSION = "prepare_submission"
     RECORD_EXTERNAL_SCORE = "record_external_score"
     FREEZE_CANDIDATE = "freeze_candidate"
@@ -110,6 +114,10 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.SYNTHESIZE_CANDIDATE.value: ApprovalTier.AUTO_WITH_LIMIT.value,
     TypedActionName.PROMOTE_CANDIDATE.value: ApprovalTier.AUTO_WITH_LIMIT.value,
     TypedActionName.BUILD_ENSEMBLE.value: ApprovalTier.AUTO_WITH_LIMIT.value,
+    TypedActionName.REGISTER_EXTERNAL_PREDICTION.value: ApprovalTier.AUTO_WITH_LIMIT.value,
+    TypedActionName.OPTIMIZE_BLEND.value: ApprovalTier.AUTO_WITH_LIMIT.value,
+    TypedActionName.OPTIMIZE_THRESHOLD.value: ApprovalTier.AUTO.value,
+    TypedActionName.GENERATE_MICRODOSE_PROBE.value: ApprovalTier.AUTO_WITH_LIMIT.value,
     TypedActionName.PREPARE_SUBMISSION.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.RECORD_EXTERNAL_SCORE.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.FREEZE_CANDIDATE.value: ApprovalTier.USER_APPROVAL.value,
@@ -1071,6 +1079,9 @@ class AgentBridge:
             "promote_candidate",
             "synthesize_candidate",
             "build_ensemble",
+            "register_external_prediction",
+            "optimize_blend",
+            "generate_microdose_probe",
         }
         token = None
         if action == "run_full_validation" and params.get("config_path"):
@@ -2240,6 +2251,249 @@ class AgentBridge:
                     ),
                     artifact_path=entry["oof_path"],
                     data={**entry, "scores": detail_scores},
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            elif act == TypedActionName.REGISTER_EXTERNAL_PREDICTION.value:
+                from harness.candidates import register_external_prediction
+
+                name = params.get("name") or params.get("exp_id")
+                if not name:
+                    raise ValueError("Action 'register_external_prediction' requires 'name' (or 'exp_id').")
+                oof_file = params.get("oof_file") or params.get("oof_path")
+                if not oof_file:
+                    raise ValueError("Action 'register_external_prediction' requires 'oof_file'.")
+                test_file = params.get("test_file") or params.get("test_path")
+
+                res = register_external_prediction(
+                    project=self.project,
+                    name=name,
+                    oof_path=oof_file,
+                    test_path=test_file,
+                    author=params.get("author", "grandmaster"),
+                    source=params.get("source", "external_import"),
+                    notes=params.get("notes", ""),
+                )
+                session.compute_usage["candidate_operations_used"] = (
+                    int(session.compute_usage.get("candidate_operations_used", 0)) + 1
+                )
+                cand_score = float(res.get("primary_score", 0.0))
+                base_score = float(
+                    self.comp_state.compute_candidate_pool(journal).get("baseline_score")
+                    or self.comp_state.spec.get("primary_metric_baseline")
+                    or 0.0
+                )
+                delta = round(
+                    (cand_score - base_score) * (1 if self.task_spec.direction == "maximize" else -1),
+                    4,
+                )
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=f"Registered external prediction '{name}' ({res.get('metric')}={cand_score:.4f}, Δ={delta:+.4f}, rows={res.get('rows')}).",
+                    composite_score=cand_score,
+                    metric_delta=delta,
+                    artifact_path=res.get("artifact_dir"),
+                    data=res,
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            elif act == TypedActionName.OPTIMIZE_BLEND.value:
+                from harness.candidates import find_optimal_blend_weights
+
+                components = params.get("components") or params.get("component_ids") or []
+                if isinstance(components, str):
+                    try:
+                        components = json.loads(components)
+                    except Exception:
+                        components = [c.strip() for c in components.split(",") if c.strip()]
+                if len(components) < 2:
+                    raise ValueError("Action 'optimize_blend' requires at least 2 experiment IDs in 'components'.")
+
+                blend_mode = params.get("mode") or params.get("blend_mode")
+                opt_res = find_optimal_blend_weights(
+                    project=self.project,
+                    component_ids=components,
+                    blend_mode=blend_mode,
+                    maxiter=int(params.get("maxiter", 150)),
+                )
+
+                create_cand = params.get("create_candidate", True)
+                cand_entry = None
+                if create_cand and opt_res.get("superiority_satisfied"):
+                    name = params.get("name", f"blend_{'_'.join(components[:3])}")
+                    cand_entry = self.comp_state.synthesize_candidate(
+                        name=name,
+                        mode=opt_res["blend_mode"],
+                        source_map={
+                            "components": components,
+                            "weights": opt_res["optimal_weights"],
+                        },
+                    )
+                    session.compute_usage["candidate_operations_used"] = (
+                        int(session.compute_usage.get("candidate_operations_used", 0)) + 1
+                    )
+
+                if cand_entry:
+                    summary_msg = f"Optimized blend candidate '{cand_entry['id']}' ({opt_res['blend_mode']}) at {opt_res['best_score']:.4f} (Δ vs best constituent={opt_res['gain_vs_best_constituent']:+.4f})."
+                    art_path = cand_entry.get("oof_path")
+                else:
+                    summary_msg = f"Blend optimization found weights {opt_res['weights_dict']}, best_score={opt_res['best_score']:.4f} (Δ vs best={opt_res['gain_vs_best_constituent']:+.4f})."
+                    art_path = None
+
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=summary_msg,
+                    composite_score=opt_res["best_score"],
+                    metric_delta=opt_res["gain_vs_best_constituent"],
+                    artifact_path=art_path,
+                    data={"optimization": opt_res, "candidate": cand_entry},
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            elif act == TypedActionName.OPTIMIZE_THRESHOLD.value:
+                from harness.endgame_submission import ThresholdOptimizer
+
+                pool = self.comp_state.compute_candidate_pool(journal)
+                default_exp = (
+                    (pool.get("overall_best") or {}).get("id")
+                    or self.comp_state.state["gates"].get("baseline_exp_id")
+                    or "baseline"
+                )
+                exp_id = params.get("exp_id", default_exp)
+                exp_dir = self.artifacts_dir / exp_id
+                if not exp_dir.is_dir():
+                    raise ValueError(f"Experiment artifact folder not found: {exp_dir}")
+
+                oof_csv = exp_dir / "oof_predictions.csv"
+                truth_csv = exp_dir / "evaluation_truth.csv"
+                if not oof_csv.is_file() or not truth_csv.is_file():
+                    raise ValueError(f"OOF predictions or truth missing in {exp_dir}")
+
+                oof_df = pd.read_csv(oof_csv)
+                truth_df = pd.read_csv(truth_csv)
+                id_col = self.task_spec.id_column
+
+                merged = oof_df.merge(truth_df, on=id_col, suffixes=("_pred", "_truth"))
+
+                target_col = None
+                for st_name, st in self.task_spec.subtasks.items():
+                    target_col = st.column or st_name
+                    break
+                if not target_col:
+                    target_col = [c for c in truth_df.columns if c != id_col][0]
+
+                y_raw = merged[target_col].values
+                unique_vals = np.unique(y_raw)
+                if len(unique_vals) == 2 and set(unique_vals).issubset({0, 1}):
+                    y_true = y_raw.astype(int)
+                else:
+                    med = np.median(y_raw)
+                    y_true = (y_raw > med).astype(int)
+
+                proba_col = f"proba_{target_col}"
+                if proba_col in merged.columns:
+                    raw_p = merged[proba_col].values
+                    if isinstance(raw_p[0], str) and raw_p[0].startswith("["):
+                        y_prob = np.asarray([json.loads(p)[1] if len(json.loads(p)) > 1 else json.loads(p)[0] for p in raw_p], float)
+                    else:
+                        y_prob = raw_p.astype(float)
+                elif f"pred_{target_col}" in merged.columns:
+                    y_prob = merged[f"pred_{target_col}"].values.astype(float)
+                elif target_col + "_pred" in merged.columns:
+                    y_prob = merged[target_col + "_pred"].values.astype(float)
+                else:
+                    raise ValueError(f"Could not locate probability column for target '{target_col}'.")
+
+                metric = params.get("metric", "f1")
+                num_th = int(params.get("num_thresholds", 181))
+                best_th, best_score = ThresholdOptimizer.optimize_threshold(
+                    y_true=y_true,
+                    y_prob=y_prob,
+                    metric=metric,
+                    num_thresholds=num_th,
+                )
+
+                preds_05 = (y_prob >= 0.5).astype(int)
+                from sklearn.metrics import f1_score, cohen_kappa_score, accuracy_score
+                m_lower = metric.lower()
+                if m_lower in {"kappa", "cohen_kappa"}:
+                    base_05_score = float(cohen_kappa_score(y_true, preds_05))
+                elif m_lower in {"accuracy", "acc"}:
+                    base_05_score = float(accuracy_score(y_true, preds_05))
+                else:
+                    base_05_score = float(f1_score(y_true, preds_05, zero_division=0))
+                delta = round(best_score - base_05_score, 4)
+
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=f"Optimized decision threshold for '{exp_id}': best_th={best_th:.3f} ({metric}={best_score:.4f}, Δ vs 0.5={delta:+.4f}).",
+                    composite_score=best_score,
+                    metric_delta=delta,
+                    data={
+                        "exp_id": exp_id,
+                        "metric": metric,
+                        "best_threshold": round(best_th, 4),
+                        "best_score": round(best_score, 5),
+                        "baseline_score_at_05": round(base_05_score, 5),
+                        "gain": delta,
+                    },
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            elif act == TypedActionName.GENERATE_MICRODOSE_PROBE.value:
+                from harness.endgame_submission import MicroDoseProbeGenerator
+
+                base = params.get("base") or params.get("base_exp_id") or params.get("base_csv")
+                probe = params.get("probe") or params.get("probe_exp_id") or params.get("probe_csv")
+                if not base or not probe:
+                    raise ValueError("Action 'generate_microdose_probe' requires 'base' and 'probe'.")
+
+                base_path = Path(base)
+                if not base_path.exists():
+                    cand = self.artifacts_dir / base / "test_predictions.csv"
+                    if cand.is_file():
+                        base_path = cand
+                    else:
+                        raise FileNotFoundError(f"Base submission file not found: {base}")
+
+                probe_path = Path(probe)
+                if not probe_path.exists():
+                    cand = self.artifacts_dir / probe / "test_predictions.csv"
+                    if cand.is_file():
+                        probe_path = cand
+                    else:
+                        raise FileNotFoundError(f"Probe submission file not found: {probe}")
+
+                alpha = float(params.get("alpha", 0.03))
+                if alpha > 0.08:
+                    alpha = 0.08
+
+                out_file = params.get("output_csv")
+                if not out_file:
+                    out_file = self.project_root / "submissions" / f"probe_{base_path.parent.name}_{probe_path.parent.name}_a{int(alpha*100)}.csv"
+
+                report = MicroDoseProbeGenerator.generate_probe(
+                    base_csv=base_path,
+                    probe_csv=probe_path,
+                    output_csv=out_file,
+                    alpha=alpha,
+                    space=params.get("space", "logit"),
+                    id_column=self.task_spec.id_column,
+                )
+
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=f"Generated micro-dose probe (α={alpha:.2f}, space='{report['space']}'): Spearman r={report['spearman_correlation_vs_base']:.4f}, max_diff={report['max_absolute_diff']:.4f}.",
+                    artifact_path=report["output_path"],
+                    data=report,
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 

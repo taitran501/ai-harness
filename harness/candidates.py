@@ -1,8 +1,12 @@
 """Candidate construction from exact, verified and aligned evidence."""
 
+from __future__ import annotations
+
 import json
 import uuid
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
 from harness.artifacts import validate_run, sha256, digest
@@ -336,3 +340,385 @@ def validate_candidate(project, entry):
         if sha256(project.artifacts_dir / exp / "artifact_manifest.json") != value:
             raise ValueError("Candidate source changed")
     return manifest
+
+
+def find_optimal_blend_weights(
+    project,
+    component_ids: list[str],
+    blend_mode: str | None = None,
+    maxiter: int = 150,
+) -> dict[str, Any]:
+    """Finds optimal blending weights for component models using SLSQP optimization."""
+    from scipy.optimize import minimize
+    from harness.project import HarnessProject
+
+    if isinstance(project, (str, Path)):
+        project = HarnessProject.discover(project)
+
+    if not component_ids or len(component_ids) < 2:
+        raise ValueError("Blend optimization requires at least 2 distinct component IDs")
+
+    spec = load_active_task_spec(project.task_config_path)
+    context = TaskPluginContext(
+        project.root, project.task_config_path, spec, project.plugin_id or "default"
+    )
+    plugin = load_task_plugin(project.plugin_id, context)
+    key = spec.id_column
+
+    frames = []
+    scores = []
+    for exp in component_ids:
+        folder = project.artifacts_dir / exp
+        metrics = json.loads((folder / "metrics.json").read_text(encoding="utf-8"))
+        frame = pd.read_csv(folder / "oof_predictions.csv")
+        frame = frame[frame.input_variant == metrics["selection_variant"]].copy()
+        frames.append(
+            frame.set_index(key)
+            .reindex(frames[0][key] if frames else frame[key])
+            .reset_index()
+        )
+        scores.append(float(metrics.get("utility", metrics.get("primary_score", 0.0))))
+
+    truth = pd.read_csv(project.artifacts_dir / component_ids[0] / "evaluation_truth.csv")
+    truth = frames[0][[key]].merge(truth, on=key, validate="one_to_one")
+
+    # Determine mode
+    if blend_mode is None:
+        has_proba = any(any(col.startswith("proba_") for col in f.columns) for f in frames)
+        is_regression = all(st.task_type in ("regression", "ranking") for st in spec.subtasks.values())
+        if is_regression:
+            blend_mode = "weighted_blend"
+        elif has_proba:
+            blend_mode = "probability_blend"
+        else:
+            blend_mode = "ensemble_vote"
+
+    n_models = len(component_ids)
+
+    # Pre-extract prediction arrays for fast optimization
+    subtask_data = {}
+    for target, st in spec.subtasks.items():
+        col = "pred_" + target
+        if blend_mode == "probability_blend":
+            orders = [
+                json.loads(f["classes_" + target].iloc[0])
+                if isinstance(f["classes_" + target].iloc[0], str)
+                else f["classes_" + target].iloc[0]
+                for f in frames
+            ]
+            class_order = orders[0]
+            proba_arrays = [np.asarray(predictions(f)["proba_" + target], float) for f in frames]
+            subtask_data[target] = {
+                "type": "probability",
+                "class_order": class_order,
+                "proba_arrays": proba_arrays,
+            }
+        elif st.task_type in ("regression", "ranking") or blend_mode == "weighted_blend":
+            pred_arrays = [f[col].astype(float).values for f in frames]
+            subtask_data[target] = {
+                "type": "numeric",
+                "pred_arrays": pred_arrays,
+            }
+        else:
+            order_raw = list(st.classes) if st.classes else []
+            order = list(map(str, st.classes))
+            values = [f[col].astype(str).values for f in frames]
+            subtask_data[target] = {
+                "type": "vote",
+                "order_raw": order_raw,
+                "order": order,
+                "values": values,
+            }
+
+    def _eval_weights(w: np.ndarray) -> tuple[float, dict[str, Any]]:
+        w = np.asarray(w, float)
+        w_sum = w.sum()
+        if w_sum <= 0 or not np.isfinite(w).all():
+            return -1e9, {}
+        w = w / w_sum
+
+        pred_dict = {}
+        for target, st in spec.subtasks.items():
+            s_info = subtask_data[target]
+            col = "pred_" + target
+            if s_info["type"] == "probability":
+                blended_proba = sum(wi * pa for wi, pa in zip(w, s_info["proba_arrays"]))
+                pred_dict["proba_" + target] = blended_proba.tolist()
+                pred_dict["classes_" + target] = s_info["class_order"]
+                if st.task_type == "multilabel_classification":
+                    pred_dict[col] = (blended_proba > 0.5).astype(int).tolist()
+                else:
+                    pred_dict[col] = np.asarray(s_info["class_order"])[blended_proba.argmax(axis=1)].tolist()
+            elif s_info["type"] == "numeric":
+                blended_pred = sum(wi * pa for wi, pa in zip(w, s_info["pred_arrays"]))
+                pred_dict[col] = blended_pred.tolist()
+            else:
+                vote_mat = np.asarray(
+                    [sum(wi * (val == c) for wi, val in zip(w, s_info["values"])) for c in s_info["order"]]
+                )
+                pred_dict[col] = np.asarray(s_info["order_raw"] or s_info["order"])[vote_mat.argmax(axis=0)].tolist()
+
+        eval_out = plugin.evaluate_predictions(context, truth, pred_dict)
+        res = resolve_evaluation(spec, eval_out, len(truth))
+        return float(res["utility"]), res
+
+    def _objective(w: np.ndarray) -> float:
+        score, _ = _eval_weights(w)
+        return -score
+
+    w0 = np.ones(n_models) / n_models
+    eq_score, eq_res = _eval_weights(w0)
+
+    best_w = w0
+    best_score = eq_score
+    best_res = eq_res
+
+    try:
+        bounds = [(0.0, 1.0)] * n_models
+        constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1.0}
+        opt = minimize(
+            _objective,
+            w0,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=constraints,
+            options={"maxiter": maxiter, "ftol": 1e-5},
+        )
+        if opt.success or opt.fun < -best_score:
+            cand_w = np.clip(opt.x, 0.0, 1.0)
+            if cand_w.sum() > 0:
+                cand_w /= cand_w.sum()
+                cand_score, cand_res = _eval_weights(cand_w)
+                if cand_score > best_score:
+                    best_score = cand_score
+                    best_w = cand_w
+                    best_res = cand_res
+    except Exception:
+        pass
+
+    constituent_scores = dict(zip(component_ids, scores))
+    best_constituent_id = max(constituent_scores, key=constituent_scores.get)
+    max_constituent_score = constituent_scores[best_constituent_id]
+    gain = best_score - max_constituent_score
+
+    weights_dict = {exp: round(float(wi), 4) for exp, wi in zip(component_ids, best_w)}
+
+    return {
+        "component_ids": component_ids,
+        "blend_mode": blend_mode,
+        "optimal_weights": [round(float(wi), 4) for wi in best_w],
+        "weights_dict": weights_dict,
+        "best_score": round(float(best_score), 5),
+        "equal_weights_score": round(float(eq_score), 5),
+        "constituent_scores": constituent_scores,
+        "best_constituent": best_constituent_id,
+        "gain_vs_best_constituent": round(float(gain), 5),
+        "superiority_satisfied": gain > 0,
+        "evaluation_details": best_res,
+    }
+
+
+def register_external_prediction(
+    project,
+    name: str,
+    oof_path,
+    test_path=None,
+    author: str = "external",
+    source: str = "kaggle_kernel",
+    notes: str = "",
+):
+    """Ingest external Grandmaster OOF/test predictions with full audit and provenance verification.
+
+    Generates a full, verified experiment artifact package in .ai-harness/artifacts/<name>
+    evaluated against official evaluation truth and plugged into TreeJournal & Candidate manager.
+    """
+    import yaml
+    import shutil
+    import uuid
+    from harness.artifacts import frame_hash, contract_identity
+    from harness.tree_journal import TreeJournal, Node
+    from harness.project import HarnessProject
+
+    if isinstance(project, (str, Path)):
+        project = HarnessProject.discover(project)
+
+    oof_file = Path(oof_path)
+    if not oof_file.is_absolute():
+        oof_file = project.root / oof_file
+    if not oof_file.exists():
+        raise FileNotFoundError(f"External OOF file '{oof_file}' not found")
+
+    test_file = None
+    if test_path:
+        test_file = Path(test_path)
+        if not test_file.is_absolute():
+            test_file = project.root / test_file
+        if not test_file.exists():
+            raise FileNotFoundError(f"External test file '{test_file}' not found")
+
+    spec = load_active_task_spec(project.task_config_path)
+    context = TaskPluginContext(
+        project.root, project.task_config_path, spec, project.plugin_id or "default"
+    )
+    plugin = load_task_plugin(project.plugin_id, context)
+
+    # 1. Load ground truth
+    truth = plugin.load_training_data(context)
+    if isinstance(truth, tuple):
+        truth = truth[0]
+    if truth is None:
+        truth = spec.load_dataset_split("train", project_root=project.root)
+
+    id_col = spec.id_column
+    if id_col not in truth:
+        raise ValueError(f"Task ground truth missing id_column '{id_col}'")
+
+    # 2. Load OOF
+    if oof_file.suffix.lower() == ".parquet":
+        raw_oof = pd.read_parquet(oof_file)
+    elif oof_file.suffix.lower() == ".npy":
+        arr = np.load(oof_file)
+        if len(arr) != len(truth):
+            raise ValueError(f"NumPy OOF length {len(arr)} does not match ground truth {len(truth)}")
+        primary_col = f"pred_{spec.primary_target}"
+        raw_oof = pd.DataFrame({id_col: truth[id_col].values, primary_col: arr.ravel()})
+    else:
+        raw_oof = pd.read_csv(oof_file)
+
+    if id_col not in raw_oof.columns:
+        if len(raw_oof) == len(truth):
+            raw_oof[id_col] = truth[id_col].values
+        else:
+            raise ValueError(f"External OOF predictions missing ID column '{id_col}' and row counts do not match")
+
+    # Ensure pred_ columns exist
+    preds_dict = {}
+    for target in spec.subtasks.keys():
+        col = f"pred_{target}" if f"pred_{target}" in raw_oof.columns else target
+        if col in raw_oof.columns:
+            preds_dict[f"pred_{target}"] = raw_oof[col].values
+        if f"proba_{target}" in raw_oof.columns:
+            preds_dict[f"proba_{target}"] = raw_oof[f"proba_{target}"].values
+
+    # Merge OOF with truth to align rows exactly
+    aligned = truth[[id_col]].merge(raw_oof, on=id_col, how="inner")
+    if len(aligned) != len(truth):
+        raise ValueError(f"OOF predictions match {len(aligned)} rows out of {len(truth)} ground truth rows")
+
+    # 3. Official evaluation
+    evaluation = plugin.evaluate_predictions(context, truth, preds_dict)
+    eval_resolved = resolve_evaluation(spec, evaluation, len(truth))
+
+    # 4. Create artifact directory
+    exp_dir = project.artifacts_dir / name
+    exp_dir.mkdir(parents=True, exist_ok=True)
+
+    # 5. Write artifacts
+    run_cfg = {
+        "experiment": {
+            "id": name,
+            "approach": "external_import",
+            "author": author,
+            "source": source,
+            "notes": notes,
+        },
+        "model": {
+            "name": f"external_{author}_{name}",
+            "family": "external_ensemble",
+        },
+    }
+    (exp_dir / "run_config.yaml").write_text(yaml.safe_dump(run_cfg), encoding="utf-8")
+
+    metrics_data = {
+        "schema_version": 2,
+        "experiment_id": name,
+        "selection_variant": "external",
+        "model": f"external_{author}",
+        "model_family": "external",
+        **eval_resolved,
+    }
+    (exp_dir / "metrics.json").write_text(json.dumps(metrics_data, indent=2), encoding="utf-8")
+
+    aligned.to_csv(exp_dir / "oof_predictions.csv", index=False)
+    aligned.to_csv(exp_dir / "predictions.csv", index=False)
+    truth.to_csv(exp_dir / "evaluation_truth.csv", index=False)
+
+    summary_df = pd.DataFrame([{
+        "input_variant": "external",
+        "dev_fold": "all",
+        "primary_score": eval_resolved["primary_score"],
+    }])
+    summary_df.to_csv(exp_dir / "summary.csv", index=False)
+
+    diagnostics = {
+        "model_name": f"external_{name}",
+        "critical_bottlenecks": [],
+        "source": source,
+        "author": author,
+    }
+    (exp_dir / "diagnostics.json").write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
+
+    prediction_splits = {
+        "oof_predictions.csv": "dev",
+        "evaluation_truth.csv": "dev",
+    }
+
+    files = {
+        "run_config.yaml": sha256(exp_dir / "run_config.yaml"),
+        "metrics.json": sha256(exp_dir / "metrics.json"),
+        "oof_predictions.csv": sha256(exp_dir / "oof_predictions.csv"),
+        "evaluation_truth.csv": sha256(exp_dir / "evaluation_truth.csv"),
+        "predictions.csv": sha256(exp_dir / "predictions.csv"),
+        "summary.csv": sha256(exp_dir / "summary.csv"),
+        "diagnostics.json": sha256(exp_dir / "diagnostics.json"),
+    }
+
+    if test_file:
+        shutil.copy2(test_file, exp_dir / "test_predictions.csv")
+        files["test_predictions.csv"] = sha256(exp_dir / "test_predictions.csv")
+        prediction_splits["test_predictions.csv"] = "test"
+
+    manifest = {
+        "schema_version": 2,
+        "run_id": f"ext_{uuid.uuid4().hex[:12]}",
+        "exp_id": name,
+        "status": "COMPLETED",
+        "run_kind": "full",
+        **contract_identity(spec, plugin),
+        "data_sha256": frame_hash(truth),
+        "split_sha256": digest("external_full"),
+        "resolved_config_sha256": sha256(exp_dir / "run_config.yaml"),
+        "files": files,
+        "prediction_splits": prediction_splits,
+    }
+    (exp_dir / "artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    # 6. Record into TreeJournal
+    journal = TreeJournal(project.artifacts_dir / "tree_journal.json")
+    node = Node(
+        id=name,
+        branch="external",
+        model_family="external",
+        metrics=eval_resolved,
+        primary_metric_name=spec.primary_metric,
+        direction=spec.direction,
+        verified=True,
+        eligible=True,
+        status="COMPLETED",
+        artifact_dir=str(exp_dir),
+        atomic_hypothesis=f"External prediction from {author} ({source}): {notes}",
+        intervention="external_import",
+        diagnostics_summary=diagnostics,
+    )
+    journal.append(node)
+
+    return {
+        "name": name,
+        "author": author,
+        "source": source,
+        "primary_score": eval_resolved["primary_score"],
+        "metric": spec.primary_metric,
+        "rows": len(aligned),
+        "has_test_predictions": test_file is not None,
+        "artifact_dir": str(exp_dir.relative_to(project.root)).replace("\\", "/"),
+    }

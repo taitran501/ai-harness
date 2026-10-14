@@ -280,9 +280,10 @@ class UniversalRunner:
             if frame["fold"].isna().any():
                 raise ValueError("Split file does not cover training IDs")
         approach = self.cfg.get("experiment", {}).get("approach", "ml_classical")
-        if approach not in {"ml_classical", "ml", "dl", "llm_peft", "llm_prompt"}:
+        execution_mode = self.cfg.get("execution", {}).get("mode") or ("script" if approach in {"script", "custom_script"} else "built_in")
+        if execution_mode != "script" and approach not in {"ml_classical", "ml", "dl", "llm_peft", "llm_prompt"}:
             raise ValueError(f"Unsupported approach {approach}")
-        if approach in {"dl", "llm_peft"} and not (
+        if approach in {"dl", "llm_peft"} and execution_mode != "script" and not (
             self.cfg.get("model", {}).get("factory")
             or self.task_plugin.capabilities()["custom_model_factory"]
         ):
@@ -295,6 +296,8 @@ class UniversalRunner:
         strategy = self.cfg.get("validation", {}).get(
             "strategy", self.task_spec.validation.strategy
         )
+        if execution_mode == "script":
+            return self._run_custom_script(frame, strategy, git_hash)
         return (
             self._run_llm_prompting(frame, git_hash)
             if approach == "llm_prompt"
@@ -498,6 +501,157 @@ class UniversalRunner:
                     )
             records.append(record)
         return records
+
+    def _run_custom_script(self, df, val_strategy, git_hash):
+        """Execute user/agent-defined script (PyTorch, DL, custom pipeline) while enforcing harness audit gates."""
+        import subprocess
+
+        exec_cfg = self.cfg.get("execution", {})
+        script_path_str = exec_cfg.get("entrypoint") or self.cfg.get("experiment", {}).get("entrypoint")
+        if not script_path_str:
+            raise ValueError("Script execution requires 'execution.entrypoint' in experiment config")
+
+        script_path = Path(script_path_str)
+        if not script_path.is_absolute():
+            script_path = self.project_root / script_path
+        if not script_path.exists():
+            raise FileNotFoundError(f"Custom script entrypoint '{script_path}' not found")
+
+        # 1. Resolve validation splits and audit expected validation IDs
+        splits = self._resolve_validation_splits(df, val_strategy)
+        if "fold" not in df.columns:
+            df = df.copy()
+            df["fold"] = 0
+            for fold, _, dev in splits:
+                df.loc[dev.index, "fold"] = fold
+
+        # 2. Resolve test dataframe if test_path declared
+        test_df = None
+        if self.task_spec.test_path:
+            tp = Path(self.task_spec.test_path)
+            if not tp.is_absolute():
+                tp = self.project_root / tp
+            if tp.exists():
+                try:
+                    test_df = self.task_spec.load_dataset_split("test", project_root=self.project_root)
+                except Exception:
+                    test_df = None
+
+        # 3. Export splits
+        splits_file = self.exp_dir / "splits.tsv"
+        id_col = self.task_spec.id_column
+        df[[id_col, "fold"]].to_csv(splits_file, sep="\t", index=False)
+
+        # 3. Environment & command setup
+        child_env = os.environ.copy()
+        python_bin = str(Path(sys.executable).parent)
+        child_env["PATH"] = python_bin + os.pathsep + child_env.get("PATH", "")
+        child_env["HARNESS_EXP_ID"] = self.exp_id
+        child_env["HARNESS_EXP_DIR"] = str(self.exp_dir)
+        child_env["HARNESS_PROJECT_ROOT"] = str(self.project_root)
+        child_env["HARNESS_RUN_CONFIG"] = str(self.exp_dir / "run_config.yaml")
+        child_env["HARNESS_TASK_CONFIG"] = str(self.project.task_config_path)
+        child_env["HARNESS_SEED"] = str(self.seed)
+        if splits_file.exists():
+            child_env["HARNESS_SPLIT_FILE"] = str(splits_file)
+
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--exp-dir", str(self.exp_dir),
+            "--config", str(self.exp_dir / "run_config.yaml"),
+        ]
+        extra_args = exec_cfg.get("args") or []
+        if isinstance(extra_args, list):
+            cmd.extend([str(a) for a in extra_args])
+
+        self._progress(f"Launching custom script adapter: {' '.join(cmd)}")
+        start_time = time.monotonic()
+        res = subprocess.run(
+            cmd,
+            cwd=str(self.project_root),
+            env=child_env,
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            err_msg = res.stderr or res.stdout or f"Exited with code {res.returncode}"
+            raise RuntimeError(f"Custom script execution failed:\n{err_msg}")
+
+        # 4. Verify output artifacts
+        oof_path = self.exp_dir / "oof_predictions.csv"
+        if not oof_path.exists():
+            pred_fallback = self.exp_dir / "predictions.csv"
+            if pred_fallback.exists():
+                oof_df = pd.read_csv(pred_fallback)
+                oof_df.to_csv(oof_path, index=False)
+            else:
+                raise FileNotFoundError(f"Custom script must generate '{oof_path.name}' in target experiment dir")
+
+        oof_df = pd.read_csv(oof_path)
+        if id_col not in oof_df.columns:
+            raise ValueError(f"OOF predictions file missing ID column '{id_col}'")
+
+        # 5. Extract predictions and align with evaluation truth
+        truth = df.drop_duplicates(id_col).copy()
+        merged_oof = truth[[id_col]].merge(oof_df, on=id_col, how="inner")
+        if len(merged_oof) != len(truth):
+            raise ValueError(f"OOF predictions cover {len(merged_oof)} rows, expected {len(truth)}")
+
+        variant = "script"
+        self.selection_variant = variant
+        records = []
+        for i in range(len(merged_oof)):
+            row = merged_oof.iloc[i]
+            rec = {
+                id_col: row[id_col],
+                "fold": int(row.get("fold", 0)) if "fold" in row and pd.notna(row["fold"]) else 0,
+                "input_variant": variant,
+            }
+            for target in self.task_spec.subtasks.keys():
+                col_name = f"pred_{target}" if f"pred_{target}" in row else target
+                if col_name in row:
+                    rec[f"pred_{target}"] = row[col_name]
+                if f"proba_{target}" in row:
+                    rec[f"proba_{target}"] = row[f"proba_{target}"]
+            records.append(rec)
+
+        elapsed = time.monotonic() - start_time
+        details = [{
+            "input_variant": variant,
+            "dev_fold": "all",
+            "train_rows": len(df),
+            "dev_rows": len(df),
+            "fit_time_seconds": elapsed,
+        }]
+        rows = [{
+            "input_variant": variant,
+            "dev_fold": "all",
+            "primary_score": 0.0,
+        }]
+
+        fold_test_preds = []
+        test_pred_path = self.exp_dir / "test_predictions.csv"
+        if test_pred_path.exists() and test_df is not None:
+            t_df = pd.read_csv(test_pred_path)
+            cand_test = {}
+            for target in self.task_spec.subtasks.keys():
+                col_name = f"pred_{target}" if f"pred_{target}" in t_df.columns else target
+                if col_name in t_df.columns:
+                    cand_test[f"pred_{target}"] = t_df[col_name].values
+                if f"proba_{target}" in t_df.columns:
+                    cand_test[f"proba_{target}"] = t_df[f"proba_{target}"].values
+            fold_test_preds.append(cand_test)
+
+        self.estimator_metadata.append({
+            "class": "CustomScriptAdapter",
+            "script": str(script_path),
+            "args": extra_args,
+        })
+
+        return self._save_and_finalize(
+            truth, details, rows, records, git_hash, test_df=test_df, fold_test_preds=fold_test_preds
+        )
 
     def _run_model_training(self, df, val_strategy, git_hash):
         variants = self.cfg.get("data", {}).get("input_variants") or list(
