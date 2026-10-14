@@ -68,6 +68,10 @@ ai-harness-dashboard --project-root .
 
 Run before pushing changes to this repository:
 ```bash
-python -m unittest discover -s tests -p "test_*.py"   # Full test suite (330+ tests must pass 100%)
-ai-harness-run --config configs/exp000_template.yaml --debug --fold 0  # Smoke probe validation
+python -m unittest discover -s tests -p "test_*.py"   # Full test suite (390+ tests must pass 100%)
+```
+
+In a competition workspace with attached data:
+```bash
+ai-harness-run --config configs/<exp_config>.yaml --debug --fold 0  # Smoke probe validation
 ```

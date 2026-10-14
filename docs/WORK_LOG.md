@@ -75,5 +75,13 @@ history from guesses.
 - Evidence: `git grep -inE "ml[-_]harness"` yields 0 matches in codebase files; full test suite passed 392/392 tests in 79.0s.
 - Lesson: Full deprecation of legacy prefixes ensures clean naming boundaries without ambiguous dual paths across cloud policies and local file caches.
 - Next action: Commit and push changes to remote repository.
+## 2026-10-14 — Dashboard Metadata, Test Fixtures, and AGENTS.md Quality Gate Alignment
 
-
+- Request: audit repository for any lingering legacy metadata or clean-up targets.
+- Completed:
+  - **Dashboard Source Sync**: Updated `dashboard/package.json` name from `mldl-experiment-dashboard` to `ai-harness-dashboard`, and updated `dashboard/index.html` title to `AI-Harness & Priming Dashboard`.
+  - **Skill Fixture Modernization**: Modernized mock skill directory path in `tests/test_bootstrap_task.py` from `.agents/skills/ml-experiment-harness` to canonical `.agents/skills/ai-harness`.
+  - **Documentation & Quality Gates**: Updated `AGENTS.md` test count baseline from 330+ to 390+ tests, and clarified invocation context for single-fold smoke probe validation.
+- Evidence: Full test suite (`python -m unittest discover -s tests -p "test_*.py"`) executes 392/392 tests with 100% pass rate in ~79s.
+- Lesson: Keeping development documentation, package descriptors, and test fixtures synchronized prevents subtle drift between the core harness and auxiliary web/skill scaffolding.
+- Next action: Stage and commit all verified changes to remote `origin/dev`.

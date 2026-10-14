@@ -35,7 +35,7 @@ class TestBootstrapTask(unittest.TestCase):
         self.docs_dir.mkdir(parents=True, exist_ok=True)
         self.configs_dir = self.test_dir / "configs"
         self.configs_dir.mkdir(parents=True, exist_ok=True)
-        self.skills_dir = self.test_dir / ".agents" / "skills" / "ml-experiment-harness"
+        self.skills_dir = self.test_dir / ".agents" / "skills" / "ai-harness"
         self.skills_dir.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self) -> None:
