@@ -6,12 +6,14 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+import shutil
 from typing import Any, Dict, Optional
 
 import yaml
 
 
 MANIFEST_RELATIVE_PATH = Path(".ai-harness") / "project.yaml"
+LEGACY_MANIFEST_RELATIVE_PATH = Path(".ml-harness") / "project.yaml"
 DEFAULT_TASK_CONFIG = Path("configs") / "task.yaml"
 
 
@@ -29,7 +31,7 @@ def resolve_project_root(root: Optional[Path | str] = None) -> Path:
         return Path(configured).expanduser().resolve()
 
     cwd = Path.cwd().resolve()
-    if (cwd / MANIFEST_RELATIVE_PATH).is_file():
+    if (cwd / MANIFEST_RELATIVE_PATH).is_file() or (cwd / LEGACY_MANIFEST_RELATIVE_PATH).is_file():
         return cwd
     if (cwd / DEFAULT_TASK_CONFIG).is_file() or (cwd / "dataset").exists():
         return cwd
@@ -59,6 +61,8 @@ class HarnessProject:
     ) -> "HarnessProject":
         project_root = resolve_project_root(root)
         manifest_path = project_root / MANIFEST_RELATIVE_PATH
+        if not manifest_path.is_file() and (project_root / LEGACY_MANIFEST_RELATIVE_PATH).is_file():
+            manifest_path = project_root / LEGACY_MANIFEST_RELATIVE_PATH
         manifest = _read_yaml(manifest_path)
 
         # An explicit workspace root must not inherit another workspace's task-config
@@ -209,6 +213,11 @@ def attach_project(
     )
     skill_path.parent.mkdir(parents=True, exist_ok=True)
     skill_path.write_text(skill_content, encoding="utf-8")
+
+    for legacy_name in ("ml-harness", "ml-experiment-harness"):
+        legacy_dir = root / ".agents" / "skills" / legacy_name
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir, ignore_errors=True)
 
     return {
         "status": "ATTACHED",

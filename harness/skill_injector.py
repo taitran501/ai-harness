@@ -282,12 +282,12 @@ def generate_skill_content(
         "- **Task Contract and Approval Gates**: Apply validation and submission requirements only when the task or selected plugin declares them.",
         "- **Submission checks**: Inspect the selected plugin capabilities and declared task contract. Do not infer scoring or audit thresholds.",
         "  ```powershell",
-        "  ai-harness-agent act --action prepare_submission --user-approved --params '{\"exp_id\": \"<experiment-id>\", \"candidate_csv\": \"<test-predictions.csv>\"}'",
+        "  ai-harness-agent act --action prepare_submission --user-approved --exp-id <experiment-id> --candidate-csv <test-predictions.csv>",
         "  ```",
         "",
         "### 3.6 Approval Governance (`AUTO` / `AUTO_WITH_LIMIT` / `USER_APPROVAL`)",
-        "- **AUTO**: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
-        "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation`, `promote_candidate`, `synthesize_candidate`, `build_ensemble`",
+        "- **AUTO**: `inspect_data_readiness`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`, `optimize_threshold`",
+        "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation`, `promote_candidate`, `synthesize_candidate`, `build_ensemble`, `optimize_blend`, `register_external_prediction`, `generate_microdose_probe`",
         "- **USER_APPROVAL (Mandatory Human Confirmation)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
         "",
         "---",
@@ -296,11 +296,12 @@ def generate_skill_content(
         "",
         "1. **Read Bridge Context Packet**: Run `ai-harness-agent context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
         "2. **Start / Configure Session (Optional Budgets)**: Run `ai-harness-agent start-session --goal \"...\" --max-experiments 3`.",
-        "3. **Create Grounded Experiment**: Run `ai-harness-agent act --action create_experiment --params '{...}'` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
-        "4. **Execute Smoke Test**: Run `ai-harness-agent act --action run_smoke_test --params '{\"config_path\": \"configs/<exp>.yaml\"}'`.",
-        "5. **Execute Task-Declared Validation**: Run `ai-harness-agent act --action run_full_validation --params '{\"config_path\": \"configs/<exp>.yaml\", \"backend\": \"local\"}'`.",
+        "3. **Create Grounded Experiment**: Run `ai-harness-agent act --action create_experiment --branch <branch> --descriptor <descriptor>` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
+        "4. **Execute Smoke Test**: Run `ai-harness-agent act --action run_smoke_test --config-path configs/<exp>.yaml`.",
+        "5. **Execute Task-Declared Validation**: Run `ai-harness-agent act --action run_full_validation --config-path configs/<exp>.yaml --backend local`.",
         "6. **Observe & Decide Next Step**: Antigravity analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
-        "7. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
+        "7. **Endgame Blending & Post-Processing**: Run `ai-harness-agent act --action optimize_blend --components \"exp001,exp002\"` or `optimize_threshold --exp-id <exp> --metric f1`.",
+        "8. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
         "",
     ])
 
@@ -313,6 +314,8 @@ def inject_skill_file(
     output_path: Optional[Path] = None,
 ) -> Path:
     """Inject/write dynamic SKILL.md tailored to the specified task configuration."""
+    import shutil
+
     project = HarnessProject.discover()
     task_path = Path(config_path).expanduser() if config_path is not None else project.task_config_path
     if not task_path.is_absolute():
@@ -337,6 +340,14 @@ def inject_skill_file(
             twin_dest.parent.mkdir(parents=True, exist_ok=True)
             twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=twin_name)
             twin_dest.write_text(twin_content, encoding="utf-8")
+
+    # Purge legacy skills so Antigravity doesn't inject obsolete ml-harness prompts
+    skills_dir = dest.parent.parent if dest.parent.parent.name == "skills" else project.root / ".agents" / "skills"
+    for legacy_name in ("ml-harness", "ml-experiment-harness"):
+        legacy_dir = skills_dir / legacy_name
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir, ignore_errors=True)
+
     return dest
 
 
