@@ -84,4 +84,13 @@ history from guesses.
   - **Documentation & Quality Gates**: Updated `AGENTS.md` test count baseline from 330+ to 390+ tests, and clarified invocation context for single-fold smoke probe validation.
 - Evidence: Full test suite (`python -m unittest discover -s tests -p "test_*.py"`) executes 392/392 tests with 100% pass rate in ~79s.
 - Lesson: Keeping development documentation, package descriptors, and test fixtures synchronized prevents subtle drift between the core harness and auxiliary web/skill scaffolding.
-- Next action: Stage and commit all verified changes to remote `origin/dev`.
+## 2026-10-14 — Fix Kaggle Windows MAX_PATH Overflow and Valid License Identification
+
+- Request: investigate and fix two root causes under `kaggle_bundle_mode: dataset` on Windows: `[Errno 2] No such file or directory` due to path length exceeding Windows `MAX_PATH` (260 characters) during Kaggle CLI token flattening, and `Dataset creation error: Please select a valid license` due to unrecognized `copyright-authors` license name in `dataset-metadata.json`.
+- Completed:
+  - **Windows MAX_PATH Protection**: Shortened code staging directory structure from `stage / "code-dataset" / bundle_sha256` (77 chars) to compact isolated `stage / "code" / bundle_sha256[:12]` (17 chars). Shortened bundle filename from `aih-code-{64-char-hash}.zip` (77 chars) to `aih-code-{16-char-hash}.zip` (29 chars). Shortened staging prefix in `cloud_runner.py` to `aih-kaggle-{job_id[:8]}-`. This reduces the flattened upload token file path from ~285+ characters to ~145 characters, safely below the 260-character limit.
+  - **Valid Kaggle License Specification**: Changed hardcoded `"licenses": [{"name": "copyright-authors"}]` in `harness/templates/kaggle_template.py` to Kaggle's recognized custom license identifier `"licenses": [{"name": "other"}]` while preserving the full retained rights in the description. Also standardized code dataset title to `AI Harness Code {bundle_sha256[:32]}` and updated `docs/kaggle_execution.md`.
+  - **Verification**: Updated `tests/test_kaggle_runtime.py` with explicit assertions verifying `"other"` license metadata, "AI Harness Code" title, and relative archive path length < 50 characters.
+- Evidence: 392/392 tests passed (100%) across the full test suite.
+- Lesson: Windows file paths when manipulated by third-party CLI tools (like Kaggle's flattened upload token files) require proactive defensive length budgeting; custom licenses for Kaggle datasets must conform to Kaggle's recognized license taxonomy (`other`).
+- Next action: Commit and push changes to remote `origin/dev`.

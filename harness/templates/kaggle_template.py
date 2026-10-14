@@ -448,18 +448,18 @@ class KaggleKernelManager:
                 raise ValueError("Code bundle upload requires an authenticated Kaggle username.")
             code_slug = f"aih-code-{bundle_sha256[:32]}"
             code_dataset = f"{username}/{code_slug}"
-            filename = f"aih-code-{bundle_sha256}.zip"
-            code_stage = stage / "code-dataset" / bundle_sha256
+            filename = f"aih-code-{bundle_sha256[:16]}.zip"
+            code_stage = stage / "code" / bundle_sha256[:12]
             code_stage.mkdir(parents=True, exist_ok=True)
             (code_stage / filename).write_bytes(bundle_bytes)
             (code_stage / "dataset-metadata.json").write_text(json.dumps({
-                "id": code_dataset, "title": f"ML Harness Code {bundle_sha256[:32]}",
-                "licenses": [{"name": "copyright-authors"}],
+                "id": code_dataset, "title": f"AI Harness Code {bundle_sha256[:32]}",
+                "licenses": [{"name": "other"}],
                 "description": "Private execution bundle. Original source licenses and author rights are retained.",
             }, indent=2), encoding="utf-8")
             sources.append(code_dataset)
             bundle_info.update({"dataset_slug": code_dataset, "filename": filename,
-                                "directory": f"code-dataset/{bundle_sha256}"})
+                                "directory": f"code/{bundle_sha256[:12]}"})
             bundle_loader = f'''# Code/config are mounted as a private input, not embedded in this source.
 bundle_name = {filename!r}
 input_base = Path("/kaggle/input")

@@ -184,6 +184,11 @@ class KaggleRuntimeTests(unittest.TestCase):
         self.assertNotEqual(first["sha256"], third["sha256"])
         code_stage = package / third["directory"]
         self.assertEqual(len(list(code_stage.glob("*.zip"))), 1)
+        meta = json.loads((code_stage / "dataset-metadata.json").read_text())
+        self.assertEqual(meta["licenses"], [{"name": "other"}])
+        self.assertTrue(meta["title"].startswith("AI Harness Code"))
+        rel_zip_path = Path(third["directory"]) / third["filename"]
+        self.assertLess(len(str(rel_zip_path)), 50)
 
     def test_script_rejects_missing_ambiguous_or_corrupted_code_before_training(self):
         package = self.package()

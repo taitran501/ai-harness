@@ -112,14 +112,14 @@ The default `task.runtime.kaggle_bundle_mode` is `dataset`. Code/config ZIPs use
 sorted entries and fixed timestamps: unchanged contents produce the same SHA-256
 and reuse the same private `owner/aih-code-<hash-prefix>` dataset. Changed contents
 use a new code dataset; existing code datasets are never versioned or overwritten.
-The mounted ZIP filename contains its full SHA-256. The script requires exactly
-one matching file and verifies its bytes before extraction or dependency setup,
+The mounted ZIP filename contains a compact SHA-256 hash prefix to prevent path overflow on Windows MAX_PATH limits. The script requires exactly
+one matching file and verifies its full 64-character SHA-256 before extraction or dependency setup,
 so a missing, ambiguous or changed input fails before training. Mounted inputs
 also work with kernel internet access disabled.
 
 No notebook format or UI-specific folding is required. The code ZIP carries the
 workspace/core license files when available; dataset metadata retains author
-rights (`copyright-authors`) rather than assigning the task data's license to code.
+rights using Kaggle's recognized custom license identifier (`other`) with full description rather than assigning the task data's license to code.
 One private dataset is created per distinct bundle, with unchanged bundles reused.
 
 For a generated package, use the dashboard's bundle-aware command:

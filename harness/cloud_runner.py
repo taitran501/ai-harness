@@ -283,7 +283,7 @@ def run_via_kaggle(
         KaggleKernelManager.wait_for_dataset(dataset_slug)
 
     # 2. Package exact core/adapter runtime and task code without credentials or dataset bytes.
-    stage_dir = Path(tempfile.mkdtemp(prefix=f"aih-kaggle-{job_id}-"))
+    stage_dir = Path(tempfile.mkdtemp(prefix=f"aih-kaggle-{job_id[:8]}-"))
     runtime = dict(context["runtime"])
     runtime["core"]["version"] = runtime["core"].get("version", "0.2.0")
     KaggleKernelManager.setup_kernel_package(
