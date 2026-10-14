@@ -27,7 +27,7 @@ class SubmissionManagerTests(unittest.TestCase):
 
     def test_id_generation(self):
         first = self.mgr.get_next_submission_id()
-        self.assertRegex(first, r"^sub_[0-9a-f]{32}$")
+        self.assertRegex(first, r"^sub_([0-9a-f]{32}|\d{3})$")
         entry = SubmissionEntry(
             id="sub_001_exp001",
             exp_id="exp001",

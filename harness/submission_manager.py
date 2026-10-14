@@ -108,6 +108,10 @@ class SubmissionManager:
         )
         self.submissions = {r["id"]: SubmissionEntry(**r) for r in records}
         self._snapshot = records
+        if self.submissions_dir != self.project_root / "submissions":
+            root_sub_dir = self.project_root / "submissions"
+            root_sub_dir.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(root_sub_dir / "registry.json", data, indent=2, ensure_ascii=False)
         self.render_submissions_markdown()
 
     def get_next_submission_id(self) -> str:
@@ -115,14 +119,15 @@ class SubmissionManager:
         existing_indices = []
         for sid in self.submissions.keys():
             if sid.startswith("sub_"):
-                try:
-                    num = int(sid.split("_")[1])
-                    existing_indices.append(num)
-                except (IndexError, ValueError):
-                    pass
-        import uuid
-
-        return "sub_" + uuid.uuid4().hex
+                parts = sid.split("_")
+                if len(parts) > 1:
+                    try:
+                        num = int(parts[1])
+                        existing_indices.append(num)
+                    except (IndexError, ValueError):
+                        pass
+        next_idx = max(existing_indices, default=0) + 1
+        return f"sub_{next_idx:03d}"
 
     def register_submission(
         self,
@@ -278,6 +283,12 @@ class SubmissionManager:
                 indent=2,
                 ensure_ascii=False,
             )
+            if self.submissions_dir != self.project_root / "submissions":
+                root_target_dir = self.project_root / "submissions" / sub_id
+                root_target_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(final_path, root_target_dir / safe_name)
+                shutil.copy2(receipt_path, root_target_dir / "PLUGIN_AUDIT_RECEIPT.json")
+                shutil.copy2(target_dir / "metadata.json", root_target_dir / "metadata.json")
             self.submissions[sub_id] = entry
             self.save()
             return entry
@@ -384,6 +395,11 @@ class SubmissionManager:
         if sub_dir.exists():
             with open(sub_dir / "metadata.json", "w", encoding="utf-8") as f:
                 json.dump(asdict(entry), f, indent=2)
+        if self.submissions_dir != self.project_root / "submissions":
+            root_sub_dir = self.project_root / "submissions" / sub_id
+            if root_sub_dir.exists():
+                with open(root_sub_dir / "metadata.json", "w", encoding="utf-8") as f:
+                    json.dump(asdict(entry), f, indent=2)
 
         self.save()
         return entry
@@ -510,4 +526,8 @@ class SubmissionManager:
         from harness.io_utils import atomic_write_text
 
         atomic_write_text(out_file, content, encoding="utf-8")
+        if self.submissions_dir != self.project_root / "submissions":
+            root_out = self.project_root / "submissions" / "SUBMISSIONS.md"
+            root_out.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(root_out, content, encoding="utf-8")
         return content

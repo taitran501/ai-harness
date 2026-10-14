@@ -194,7 +194,10 @@ class DeclarativeTaskPlugin(TaskPlugin):
         if req_cols:
             for col in req_cols:
                 if col == id_col:
-                    out_df[col] = predictions[id_col]
+                    if str(id_col).upper() == "GEOID":
+                        out_df[col] = predictions[id_col].astype(str).str.split(".").str[0].str.zfill(11)
+                    else:
+                        out_df[col] = predictions[id_col]
                 elif f"pred_{col}" in predictions.columns:
                     out_df[col] = predictions[f"pred_{col}"]
                 elif col in predictions.columns:
@@ -213,7 +216,10 @@ class DeclarativeTaskPlugin(TaskPlugin):
                     if not found:
                         raise ValueError(f"Required submission column '{col}' could not be resolved from predictions.")
         else:
-            out_df[id_col] = predictions[id_col]
+            if str(id_col).upper() == "GEOID":
+                out_df[id_col] = predictions[id_col].astype(str).str.split(".").str[0].str.zfill(11)
+            else:
+                out_df[id_col] = predictions[id_col]
             target_col = task_spec.data_config.get("target_column") or task_spec.primary_target
             if target_col:
                 if f"pred_{target_col}" in predictions.columns:

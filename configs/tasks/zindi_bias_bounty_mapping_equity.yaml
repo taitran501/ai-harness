@@ -1,0 +1,141 @@
+task:
+  id: zindi_bias_bounty_mapping_equity
+  platform: zindi
+  task_name: Bias Bounty Mapping Equity Challenge
+  name: Bias Bounty Mapping Equity Challenge
+  task_type: regression
+  type: Tabular Regression
+  modality: tabular
+  primary_metric: RMSE
+  direction: minimize
+  primary_metric_baseline: 0.150
+  primary_metric_target: 0.080
+
+  inputs:
+    - name: tabular_strata_features
+      type: tabular
+      source_columns:
+        - housing_units
+        - ALAND
+        - pop_total
+        - pop_urban
+        - pop_rural
+        - pct_urban
+        - ur_class
+        - svi_overall
+        - svi_socioeconomic
+        - svi_household
+        - region
+
+  subtasks:
+    - id: coverage_gap_score
+      name: Composite Coverage Gap Score
+      metric: RMSE
+      type: rmse
+      task_type: regression
+      column: coverage_gap_score
+      direction: minimize
+      baseline_score: 0.150
+      target_score: 0.080
+      weight: 1.0
+      description: Overall Census tract mapping coverage gap score (0 to 1)
+
+    - id: building_gap
+      name: Building Footprint Gap
+      metric: RMSE
+      type: rmse
+      task_type: regression
+      column: building_gap
+      direction: minimize
+      weight: 0.0
+      description: Building footprint coverage gap
+
+    - id: transport_gap
+      name: Road Network Gap
+      metric: RMSE
+      type: rmse
+      task_type: regression
+      column: transport_gap
+      direction: minimize
+      weight: 0.0
+      description: Road network coverage gap
+
+    - id: poi_gap
+      name: POI & Amenity Gap
+      metric: RMSE
+      type: rmse
+      task_type: regression
+      column: poi_gap
+      direction: minimize
+      weight: 0.0
+      description: Point of interest and critical facility coverage gap
+
+  metrics:
+    - id: rmse
+      name: Root Mean Squared Error
+      metric: RMSE
+      direction: minimize
+      baseline_score: 0.150
+      target_score: 0.080
+      weight: 1.0
+      description: RMSE on coverage gap score
+    - id: mae
+      name: Mean Absolute Error
+      metric: MAE
+      direction: minimize
+      baseline_score: 0.120
+      target_score: 0.060
+      weight: 0.0
+      description: L1 error reference
+    - id: r2
+      name: R-Squared
+      metric: R2
+      direction: maximize
+      baseline_score: 0.650
+      target_score: 0.850
+      weight: 0.0
+      description: Variance explained
+
+  languages: []
+  description: "Zindi Bias Bounty: Mapping Equity Challenge — Estimating open geospatial data coverage gaps across climate-vulnerable communities."
+
+  data_config:
+    train_path: dataset/train.csv
+    test_path: dataset/test.csv
+    sample_submission_path: dataset/sample_submission.csv
+    split_strategy: StratifiedKFold
+    split_file: splits/fold_assignments.tsv
+    n_folds: 5
+    seed: 42
+    id_column: GEOID
+    target_column: coverage_gap_score
+    group_column: region
+    missing_data_policy: impute_median_categorical_missing
+    external_data_policy: forbidden
+
+  competition_rules:
+    allow_llm: false
+    allow_api: false
+    allow_external_data: false
+    allow_pretrained_models: true
+    max_params_limit: 50000000
+    max_gpu_hours: 6
+    daily_submission_limit: 10
+    total_submission_limit: 300
+    deadline: '2026-10-31T23:59:00Z'
+    team_policy: Max 4 members
+    reproducibility_required: true
+
+  submission_spec:
+    file_name: submission.csv
+    archive_format: csv
+    id_column: GEOID
+    required_columns:
+      - GEOID
+      - coverage_gap_score
+      - transport_gap
+      - building_gap
+      - poi_gap
+    min_diff_pct: 2.0
+    max_kappa: 0.85
+    min_disagreement: 5.0

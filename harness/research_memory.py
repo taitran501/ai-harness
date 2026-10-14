@@ -22,6 +22,8 @@ from harness.artifacts import contract_identity, digest, validate_run
 from harness.io_utils import atomic_write_text
 from harness.state_store import transaction, workspace_lock
 
+_SYNC_CACHE: dict = {}
+
 
 class ResearchMemory:
     def __init__(self, project_root, artifacts_dir, task_spec, plugin=None):
@@ -180,12 +182,24 @@ class ResearchMemory:
         runs = []
         for folder in sorted(self.artifacts.iterdir()) if self.artifacts.exists() else []:
             manifest_path = folder / "artifact_manifest.json"
+            cfg_path = folder / "run_config.yaml"
+            metrics_path = folder / "metrics.json"
             if not folder.is_dir() or not manifest_path.is_file():
                 continue
             try:
+                cache_key = (
+                    str(folder.resolve()),
+                    manifest_path.stat().st_mtime_ns,
+                    cfg_path.stat().st_mtime_ns if cfg_path.is_file() else 0,
+                    metrics_path.stat().st_mtime_ns if metrics_path.is_file() else 0,
+                )
+                if cache_key in _SYNC_CACHE:
+                    runs.append(_SYNC_CACHE[cache_key])
+                    continue
+
                 manifest = validate_run(folder, task_spec=self.spec, plugin=self.plugin)
-                cfg = yaml.safe_load((folder / "run_config.yaml").read_text(encoding="utf-8"))
-                metrics = json.loads((folder / "metrics.json").read_text(encoding="utf-8"))
+                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+                metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
                 score = float(metrics["primary_score"])
                 value = score if metrics["direction"] == "maximize" else -score
                 if not math.isfinite(value):
@@ -193,16 +207,31 @@ class ResearchMemory:
                 diag = {}
                 if "diagnostics.json" in manifest["files"]:
                     diag = json.loads((folder / "diagnostics.json").read_text(encoding="utf-8"))
-                runs.append({"exp_id": manifest["exp_id"], "path": str(folder),
-                    "fingerprint": self.fingerprint(cfg), **self._narrative(cfg),
+                record = {
+                    "exp_id": manifest["exp_id"],
+                    "path": str(folder),
+                    "fingerprint": self.fingerprint(cfg),
+                    **self._narrative(cfg),
                     "model": cfg.get("model", {}),
                     "insight_id": (cfg.get("research") or {}).get("insight_id"),
-                    "score": score, "utility": value,
-                    "comparison_group": digest({key: manifest.get(key) for key in
-                        ("task_sha256", "scorer_sha256", "custom_scorer_sha256",
-                         "data_sha256", "split_sha256")}),
+                    "score": score,
+                    "utility": value,
+                    "comparison_group": digest({
+                        key: manifest.get(key)
+                        for key in (
+                            "task_sha256",
+                            "scorer_sha256",
+                            "custom_scorer_sha256",
+                            "data_sha256",
+                            "split_sha256",
+                        )
+                    }),
                     "bottlenecks": diag.get("critical_bottlenecks", [])[:5],
-                    "timestamp": manifest_path.stat().st_mtime, "evidence_status": "verified_full"})
+                    "timestamp": manifest_path.stat().st_mtime,
+                    "evidence_status": "verified_full",
+                }
+                _SYNC_CACHE[cache_key] = record
+                runs.append(record)
             except (ValueError, KeyError, OSError, TypeError, yaml.YAMLError):
                 continue
         return sorted(runs, key=lambda r: (r["timestamp"], r["exp_id"]))

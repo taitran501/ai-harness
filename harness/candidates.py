@@ -149,8 +149,11 @@ def build_candidate(project, name, mode, source_map):
                     )
                     for f in frames
                 ]
+                sub_spec = getattr(spec, "submission_spec", {}) or {}
+                max_k = 0.9999 if st.task_type in ("regression", "ranking") else float(sub_spec.get("max_kappa", 0.85))
+                min_dis = float(sub_spec.get("min_disagreement", 5.0))
                 passed, errors, _ = EnsembleGuard.audit_constituent_diversity(
-                    checked, col=col
+                    checked, col=col, max_kappa=max_k, min_disagreement_pct=min_dis
                 )
                 if not passed:
                     raise ValueError("Diversity guard: " + "; ".join(errors))

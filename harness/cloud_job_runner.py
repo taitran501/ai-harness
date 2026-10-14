@@ -572,11 +572,22 @@ class CloudJobManager:
         # Launch process with stdout/stderr appended to log file
         log_handle = open(log_file, "a", encoding="utf-8", buffering=1)
         child_env = os.environ.copy()
+        python_bin = str(Path(sys.executable).parent)
+        child_env["PATH"] = python_bin + os.pathsep + child_env.get("PATH", "")
         child_env["HARNESS_PROJECT_ROOT"] = str(self.project_root)
         child_env["HARNESS_TASK_CONFIG"] = str(self.project.task_config_path)
         child_env["PYTHONPATH"] = os.pathsep.join(
             p for p in (str(HARNESS_DIR), child_env.get("PYTHONPATH", "")) if p
         )
+        popen_kwargs: Dict[str, Any] = {}
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP
+                | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            )
+        else:
+            popen_kwargs["start_new_session"] = True
+
         proc = subprocess.Popen(
             cmd,
             stdout=log_handle,
@@ -584,7 +595,7 @@ class CloudJobManager:
             cwd=str(self.project_root),
             text=True,
             env=child_env,
-            start_new_session=sys.platform != "win32",
+            **popen_kwargs,
         )
         job.pid = proc.pid
         job.status = "RUNNING"

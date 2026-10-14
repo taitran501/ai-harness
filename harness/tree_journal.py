@@ -226,8 +226,10 @@ class TreeJournal:
     def save(self) -> None:
         """Save the journal to disk."""
         from harness.state_store import save_registry
+        import dataclasses
+        valid_fields = {f.name for f in dataclasses.fields(Node)}
         records=save_registry(self.storage_path,"nodes",[asdict(n) for n in self.nodes.values()],getattr(self,"_snapshot",[]))
-        self.nodes={r["id"]:Node(**r) for r in records}
+        self.nodes={r["id"]:Node(**{k: v for k, v in r.items() if k in valid_fields}) for r in records}
         self._snapshot=records
 
     def append(self, node: Node) -> None:

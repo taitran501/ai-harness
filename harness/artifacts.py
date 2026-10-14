@@ -15,8 +15,31 @@ REQUIRED = (
 )
 
 
-def sha256(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+_HASH_CACHE: dict = {}
+
+
+def sha256(path, chunk_size: int = 1048576) -> str:
+    """Compute SHA256 using chunked reading and mtime/size caching to avoid I/O bottlenecks."""
+    p = Path(path).resolve()
+    try:
+        st = p.stat()
+        key = (str(p), st.st_mtime_ns, st.st_size)
+        if key in _HASH_CACHE:
+            return _HASH_CACHE[key]
+    except OSError:
+        key = None
+
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    digest_val = h.hexdigest()
+    if key is not None:
+        _HASH_CACHE[key] = digest_val
+    return digest_val
 
 
 def digest(value):
