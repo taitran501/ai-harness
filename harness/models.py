@@ -108,6 +108,62 @@ class NativeCategoricalTransformer(BaseEstimator, TransformerMixin):
         return X_out
 
 
+class RobustTabularTransformer(BaseEstimator, TransformerMixin):
+    """Encodes categorical columns ordinally and imputes missing numeric values so standard scikit-learn estimators train seamlessly without crashing on strings or NaNs."""
+
+    def __init__(self):
+        self.cat_mappings_ = {}
+        self.numeric_medians_ = {}
+        self.column_order_ = []
+
+    def fit(self, X, y=None):
+        self.cat_mappings_ = {}
+        self.numeric_medians_ = {}
+        self.column_order_ = []
+        if not hasattr(X, "columns"):
+            return self
+        self.column_order_ = list(X.columns)
+        for c in self.column_order_:
+            col = X[c]
+            if col.dtype.kind in "biuf":
+                non_null = col.dropna()
+                median = non_null.median() if len(non_null) > 0 else 0.0
+                self.numeric_medians_[c] = 0.0 if pd.isna(median) else float(median)
+            else:
+                non_null = col.dropna().astype(str)
+                cats = sorted(non_null.unique().tolist())
+                self.cat_mappings_[c] = {cat: float(i) for i, cat in enumerate(cats)}
+        return self
+
+    def transform(self, X):
+        if not hasattr(X, "columns"):
+            return X
+        cols = getattr(self, "column_order_", list(X.columns))
+        arr_list = []
+        n_rows = len(X)
+        for c in cols:
+            if c not in X.columns:
+                if c in self.numeric_medians_:
+                    arr_list.append(np.full(n_rows, self.numeric_medians_[c], dtype=float))
+                else:
+                    arr_list.append(np.full(n_rows, -1.0, dtype=float))
+                continue
+
+            col = X[c]
+            if c in self.cat_mappings_:
+                mapping = self.cat_mappings_[c]
+                mapped = np.array(col.astype(str).map(mapping).fillna(-1.0), dtype=float, copy=True)
+                mapped[col.isna().to_numpy()] = -1.0
+                arr_list.append(mapped)
+            else:
+                median = self.numeric_medians_.get(c, 0.0)
+                vals = np.array(pd.to_numeric(col, errors="coerce").fillna(median), dtype=float, copy=True)
+                arr_list.append(vals)
+
+        if not arr_list:
+            return np.empty((n_rows, 0), dtype=float)
+        return np.column_stack(arr_list)
+
 
 def call_model(model, method, frame, variant):
     fn = getattr(model, method)
@@ -776,10 +832,12 @@ class RandomForestModel:
             elif inp.type in {"tabular", "features", "passthrough", "multimodal", "categorical"}:
                 if feat_transform == "passthrough":
                     transform = "passthrough"
+                elif feat_transform == "native":
+                    transform = NativeCategoricalTransformer()
                 elif feat_transform is not None:
                     transform = feat_transform
                 else:
-                    transform = NativeCategoricalTransformer()
+                    transform = RobustTabularTransformer()
                 x = df[features]
             else:
                 transform = StandardScaler()

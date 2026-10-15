@@ -434,6 +434,23 @@ class UniversalRunner:
                         project_root=self.project_root,
                     )
                     result = [(0, df, dev)]
+            elif strategy in {"time_series", "time_series_split", "timeseries", "temporal"}:
+                from harness.data_strategy import DataStrategyEngine, SplitMode
+
+                n_splits = int(
+                    config.get(
+                        "num_folds", getattr(self.task_spec.validation, "num_folds", 5)
+                    )
+                )
+                indices = DataStrategyEngine.generate_splits(
+                    df,
+                    mode=SplitMode.TIME_SERIES,
+                    n_splits=n_splits,
+                )
+                result = [
+                    (i, df.iloc[t].copy(), df.iloc[v].copy())
+                    for i, (t, v) in enumerate(indices)
+                ]
             else:
                 raise ValueError(f"Unsupported validation strategy {strategy}")
         if not result:
@@ -1046,6 +1063,8 @@ class UniversalRunner:
             m_lower = str(model_name).lower()
             if any(k in m_lower for k in ["lightgbm", "lgbm", "xgboost", "xgb", "catboost"]):
                 model_family = "gbdt"
+            elif any(k in m_lower for k in ["random_forest", "randomforest", "rf"]):
+                model_family = "random_forest"
             elif any(k in m_lower for k in ["roberta", "deberta", "bert"]):
                 model_family = "transformer"
             elif any(k in m_lower for k in ["llm", "llama", "qwen"]):

@@ -23,9 +23,10 @@ class InputVariantSpec:
     """Specification for an input representation variant."""
 
     name: str
-    type: str  # 'text', 'text_template', 'tabular', 'multimodal'
+    type: str  # 'text', 'text_template', 'tabular', 'multimodal', 'image', 'audio'
     source_columns: List[str] = field(default_factory=list)
     template: Optional[str] = None
+    media_dir: Optional[str] = None
 
     def compose_text(self, df: pd.DataFrame) -> pd.Series:
         """Compose text series according to the specification."""
@@ -43,6 +44,91 @@ class InputVariantSpec:
             return df[self.source_columns[0]].fillna("").astype(str)
 
         raise ValueError(f"Cannot compose input for variant '{self.name}' with type '{self.type}'.")
+
+    def resolve_media_paths(
+        self,
+        df: pd.DataFrame,
+        project_root: Path | str | None = None,
+        column: Optional[str] = None,
+        extensions: Optional[List[str]] = None,
+    ) -> pd.Series:
+        """Resolve image/audio file paths in a DataFrame column across candidate data directories.
+
+        Searches candidate roots (media_dir, project_root, dataset/, images/, audio/, /kaggle/input/, etc.)
+        and returns a pd.Series of absolute or resolved path strings.
+        """
+        root = Path(project_root) if project_root else Path.cwd()
+        col = column or (self.source_columns[0] if self.source_columns else "filepath")
+        if col not in df.columns:
+            raise KeyError(f"Media column '{col}' not found in DataFrame. Available columns: {list(df.columns)}")
+
+        candidate_dirs = []
+        if self.media_dir:
+            md = Path(self.media_dir)
+            candidate_dirs.append(md if md.is_absolute() else root / md)
+        candidate_dirs.extend([
+            root,
+            root / "dataset",
+            root / "data",
+            root / "images",
+            root / "audio",
+            root / "train",
+            root / "test",
+            root / "raw",
+        ])
+        kaggle_input = Path("/kaggle/input")
+        if kaggle_input.exists():
+            candidate_dirs.append(kaggle_input)
+            for sub in kaggle_input.iterdir():
+                if sub.is_dir():
+                    candidate_dirs.append(sub)
+
+        discovered_base: Optional[Path] = None
+
+        def resolve_one(val: Any) -> str:
+            nonlocal discovered_base
+            if pd.isna(val) or val is None or val == "":
+                return ""
+            raw_str = str(val).strip()
+            p = Path(raw_str)
+            if p.is_absolute() and p.exists():
+                return str(p)
+
+            if discovered_base is not None:
+                cand = discovered_base / raw_str
+                if cand.exists():
+                    return str(cand)
+                if extensions:
+                    for ext in extensions:
+                        cand_ext = discovered_base / f"{raw_str}{ext}"
+                        if cand_ext.exists():
+                            return str(cand_ext)
+
+            for base in candidate_dirs:
+                if not base.exists():
+                    continue
+                cand = base / raw_str
+                if cand.exists():
+                    discovered_base = base
+                    return str(cand)
+                for sub in ("images", "train", "test", "audio", "data"):
+                    sub_cand = base / sub / raw_str
+                    if sub_cand.exists():
+                        discovered_base = base / sub
+                        return str(sub_cand)
+                if extensions:
+                    for ext in extensions:
+                        cand_ext = base / f"{raw_str}{ext}"
+                        if cand_ext.exists():
+                            discovered_base = base
+                            return str(cand_ext)
+
+            if self.media_dir:
+                md = Path(self.media_dir)
+                return str(md / raw_str if md.is_absolute() else root / md / raw_str)
+            return str(root / raw_str)
+
+        return df[col].apply(resolve_one)
 
 
 @dataclass
@@ -336,6 +422,7 @@ class UniversalTaskSpec:
                     type=inp.get("type", "text"),
                     source_columns=inp.get("source_columns", []),
                     template=inp.get("template"),
+                    media_dir=inp.get("media_dir"),
                 )
             )
 
