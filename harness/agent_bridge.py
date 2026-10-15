@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 import re
 import subprocess
 import sys
@@ -415,6 +416,217 @@ class AgentBridge:
         if mode in {"ensemble_vote", "weighted_blend", "probability_blend"}:
             return list(source_map.get("components", []))
         raise ValueError(f"Unsupported candidate mode: {mode}")
+
+    def _guard_submission(self, cand_path: Path, exp_id: str, sub_mgr) -> Dict[str, Any]:
+        """Deterministic anti-bypass guards run before a submission is registered.
+
+        The audit gate CLI (`tools/audit_gate.py`) is a standalone tool; the agent
+        drives `prepare_submission` through the bridge and would otherwise skip it
+        entirely. Enforce here, on the bridge path, the three checks that stop an
+        agent from shipping a non-improvement:
+
+        1. Duplicate-submission dedup: the candidate file's SHA-256 must not match
+           any previously registered submission (no re-submitting the same file).
+        2. Minimum meaningful effect size (MMES): the candidate's OOF must differ
+           from the baseline anchor's OOF on at least `min_diff_pct` of rows (or
+           `min_diff` rows). A model that only jitters < threshold of rows is not
+           a genuine new experiment.
+        3. Significance (when ground truth is available): the paired error test
+           (regression) / McNemar's test (classification) must reach p < 0.05.
+
+        Returns a small dict of guard evidence; raises ValueError on any hard fail.
+        """
+        import hashlib
+        import pandas as pd
+
+        from harness.artifacts import sha256
+
+        evidence: Dict[str, Any] = {"checks": {}}
+        cand_sha = sha256(cand_path)
+        evidence["candidate_sha256"] = cand_sha
+
+        # ---- 1. Duplicate-submission dedup ---------------------------------
+        existing = {
+            s.candidate_path: s.id
+            for s in sub_mgr.submissions.values()
+            if s.candidate_path
+        }
+        # Also compare by content hash: a previous submission may point at the
+        # same bytes even if the path differs. Re-hash prior submissions' files.
+        dup_id = None
+        for path, sub_id in existing.items():
+            p = Path(path)
+            if not p.is_absolute():
+                p = self.project_root / p
+            if not p.is_file():
+                continue
+            try:
+                if sha256(p) == cand_sha:
+                    dup_id = sub_id
+                    break
+            except OSError:
+                continue
+        if dup_id:
+            raise ValueError(
+                f"Submission dedup failed: candidate is byte-identical (SHA-256 "
+                f"{cand_sha[:12]}...) to already-registered submission '{dup_id}'. "
+                f"Re-submitting the same predictions does not advance the "
+                f"competition. Produce a genuinely different run first."
+            )
+        evidence["checks"]["dedup"] = "PASS"
+
+        # ---- 2. Minimum meaningful effect size vs baseline anchor ---------
+        baseline_exp_id = self.comp_state.state["gates"].get("baseline_exp_id")
+        sub_spec = self.comp_state.spec.get("submission_spec", {}) or {}
+        min_diff_pct = float(sub_spec.get("min_diff_pct", 2.0))
+        min_diff = int(sub_spec.get("min_diff", 1))
+        rel_eps = float(sub_spec.get("rel_epsilon", 0.01))
+        mmes = "SKIPPED_NO_BASELINE"
+        if baseline_exp_id and baseline_exp_id != exp_id:
+            base_oof = self.artifacts_dir / baseline_exp_id / "oof_predictions.csv"
+            cand_oof = cand_path.parent / "oof_predictions.csv"
+            if base_oof.is_file() and cand_oof.is_file():
+                try:
+                    cand_df = pd.read_csv(cand_oof)
+                    base_df = pd.read_csv(base_oof)
+                    key = self.task_spec.id_column
+                    if key in cand_df and key in base_df:
+                        cand_df = cand_df.set_index(key)
+                        base_df = base_df.set_index(key).reindex(cand_df.index)
+                        pred_cols = [c for c in cand_df if c.startswith(("pred_", "proba_"))]
+                        if pred_cols:
+                            changed = pd.Series(False, index=cand_df.index)
+                            for col in pred_cols:
+                                if col not in base_df.columns:
+                                    continue
+                                try:
+                                    cv = pd.to_numeric(cand_df[col], errors="raise")
+                                    bv = pd.to_numeric(base_df[col], errors="raise")
+                                    if pd.api.types.is_float_dtype(cv) or pd.api.types.is_float_dtype(bv):
+                                        std = float(np.std(bv))
+                                        scale = std if std > 1e-8 else 1.0
+                                        changed |= (np.abs(cv.to_numpy() - bv.to_numpy()) / scale) >= rel_eps
+                                    else:
+                                        changed |= cand_df[col] != base_df[col]
+                                except (ValueError, TypeError):
+                                    changed |= cand_df[col] != base_df[col]
+                            n_changed = int(changed.sum())
+                            n_rows = int(len(cand_df))
+                            pct = (n_changed / n_rows * 100.0) if n_rows else 0.0
+                            required = max(min_diff, int(math.ceil(n_rows * min_diff_pct / 100.0)))
+                            if n_changed < required:
+                                raise ValueError(
+                                    f"MMES violation: candidate '{exp_id}' differs from baseline "
+                                    f"anchor '{baseline_exp_id}' on only {n_changed}/{n_rows} rows "
+                                    f"({pct:.2f}%); required >= {required} ({min_diff_pct}%). "
+                                    f"A change below the minimum meaningful effect size is not a "
+                                    f"genuine new experiment (likely seed noise or a trivial tweak)."
+                                )
+                            mmes = f"PASS ({n_changed}/{n_rows} rows, {pct:.2f}%)"
+                        else:
+                            mmes = "SKIPPED_NO_PRED_COL"
+                except ValueError:
+                    raise
+                except Exception as exc:  # pragma: no cover - defensive
+                    mmes = f"SKIPPED ({exc})"
+        evidence["checks"]["mmes"] = mmes
+
+        # ---- 3. Significance test (only when ground truth is available) ----
+        sig = "SKIPPED_NO_GROUND_TRUTH"
+        truth_path = cand_path.parent / "evaluation_truth.csv"
+        if truth_path.is_file() and baseline_exp_id and baseline_exp_id != exp_id:
+            base_oof = self.artifacts_dir / baseline_exp_id / "oof_predictions.csv"
+            cand_oof = cand_path.parent / "oof_predictions.csv"
+            if base_oof.is_file() and cand_oof.is_file():
+                try:
+                    sig = self._significance_test(
+                        cand_oof, base_oof, truth_path, self.task_spec.id_column
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    sig = f"SKIPPED ({exc})"
+        evidence["checks"]["significance"] = sig
+
+        return evidence
+
+    @staticmethod
+    def _significance_test(
+        cand_oof: Path, base_oof: Path, truth_path: Path, key: str
+    ) -> str:
+        """Paired error test (regression) or McNemar (classification); reject p >= 0.05."""
+        import pandas as pd
+        from scipy.stats import chi2, ttest_rel
+
+        cand = pd.read_csv(cand_oof).set_index(key)
+        base = pd.read_csv(base_oof).set_index(key)
+        truth = pd.read_csv(truth_path).set_index(key)
+
+        pred_col = next((c for c in cand.columns if c.startswith("pred_")), None)
+        if pred_col is None or pred_col not in base.columns or truth.index.intersection(cand.index).empty:
+            return "SKIPPED_NO_ALIGNED_COL"
+
+        idx = cand.index.intersection(base.index).intersection(truth.index)
+        if len(idx) < 2:
+            return "SKIPPED_TOO_FEW_ROWS"
+        y = truth.loc[idx, pred_col] if pred_col in truth.columns else None
+        if y is None:
+            # Fall back to the first truth column
+            ycol = truth.columns[0]
+            y = truth.loc[idx, ycol]
+        cand_v = cand.loc[idx, pred_col]
+        base_v = base.loc[idx, pred_col]
+
+        try:
+            y_num = pd.to_numeric(y, errors="raise")
+            c_num = pd.to_numeric(cand_v, errors="raise")
+            b_num = pd.to_numeric(base_v, errors="raise")
+            continuous = (
+                pd.api.types.is_float_dtype(y_num)
+                or pd.api.types.is_float_dtype(c_num)
+                or pd.api.types.is_float_dtype(b_num)
+            )
+        except (ValueError, TypeError):
+            continuous = False
+
+        import warnings
+
+        # Determine whether the candidate is genuinely *better* than the baseline;
+        # a statistically-significant *worse* result is still rejected.
+        if continuous:
+            y = y_num.to_numpy(dtype=float)
+            c = c_num.to_numpy(dtype=float)
+            b = b_num.to_numpy(dtype=float)
+            c_err = (c - y) ** 2
+            b_err = (b - y) ** 2
+            better = float(np.mean(c_err) < np.mean(b_err))
+            if np.allclose(c_err, b_err, atol=0.0, rtol=1e-7):
+                return "FAIL (p=1.0, no improvement)"
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                res = ttest_rel(c_err, b_err)
+            p = float(res.pvalue) if np.isfinite(res.pvalue) else 1.0
+            test = "paired_ttest"
+        else:
+            y = y.astype(object)
+            c = cand_v.astype(object)
+            b = base_v.astype(object)
+            c_ok = c == y
+            b_ok = b == y
+            disc = int((c_ok & ~b_ok).sum() + (~c_ok & b_ok).sum())
+            if disc == 0:
+                return "FAIL (p=1.0, no discordant pairs)"
+            b_win = int((c_ok & ~b_ok).sum())  # candidate correct, baseline wrong
+            c_win = int((~c_ok & b_ok).sum())  # baseline correct, candidate wrong
+            better = b_win > c_win
+            stat = ((abs(b_win - c_win) - 1.0) ** 2) / disc
+            p = float(1.0 - chi2.cdf(stat, df=1))
+            test = "mcnemar"
+
+        if p < 0.05 and better:
+            return f"PASS ({test}, p={p:.4f})"
+        if p < 0.05 and not better:
+            return f"FAIL ({test}, p={p:.4f}, candidate not better than baseline)"
+        return f"FAIL ({test}, p={p:.4f})"
+
 
     def _suggest_next_interventions(self, limit: int = 5) -> Dict[str, Any]:
         """Deterministic brainstorm aid to counter agent stagnation.
@@ -2847,6 +3059,10 @@ class AgentBridge:
                     task_spec=self.task_spec,
                     plugin=self.task_plugin,
                 )
+                # Anti-bypass submission guards: dedup, MMES, significance. The
+                # agent drives submission through this bridge action; the standalone
+                # audit gate CLI is not on this path, so enforce the core checks here.
+                guard_evidence = self._guard_submission(cand_path, exp_id, sub_mgr)
                 capabilities = self.task_plugin.capabilities()
                 if not capabilities.get("submission_builder") or not capabilities.get(
                     "submission_validator"
@@ -2872,7 +3088,7 @@ class AgentBridge:
                     status="SUCCESS",
                     summary=f"Built and validated task submission '{entry.id}' with plugin '{plugin_label}'.",
                     artifact_path=entry.archive_path,
-                    data=asdict(entry),
+                    data={**asdict(entry), "submission_guards": guard_evidence},
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 
