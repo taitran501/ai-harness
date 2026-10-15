@@ -271,9 +271,14 @@ class UniversalTaskSpec:
 
     @property
     def id_column(self) -> Optional[str]:
-        """ID column from data config."""
+        """ID column from data config or task metadata."""
         data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
-        return data_cfg.get("id_column", "id")
+        return (
+            data_cfg.get("id_column")
+            or self.metadata.get("id_column")
+            or self.metadata.get("id_col")
+            or "id"
+        )
 
     @property
     def group_column(self) -> Optional[str]:
@@ -321,10 +326,13 @@ class UniversalTaskSpec:
         from harness.evaluation import metric_name
         task_cfg = cfg.get("task", cfg)
         inputs_list = []
-        for inp in task_cfg.get("inputs", []):
+        inputs_raw = task_cfg.get("inputs", [])
+        if isinstance(inputs_raw, dict):
+            inputs_raw = [{"name": key, **value} for key, value in inputs_raw.items()]
+        for inp in inputs_raw:
             inputs_list.append(
                 InputVariantSpec(
-                    name=inp["name"],
+                    name=inp.get("name", inp.get("id")),
                     type=inp.get("type", "text"),
                     source_columns=inp.get("source_columns", []),
                     template=inp.get("template"),
@@ -466,7 +474,12 @@ class UniversalTaskSpec:
         data_cfg = self.metadata.get("data_config") or self.metadata.get("data", {})
 
         # 1. Custom path override in data_config or metadata
-        custom_path = data_cfg.get(f"{split}_path") or self.metadata.get(f"{split}_path")
+        custom_path = (
+            data_cfg.get(f"{split}_path")
+            or data_cfg.get(split)
+            or self.metadata.get(f"{split}_path")
+            or self.metadata.get(split)
+        )
         if custom_path:
             p = Path(custom_path)
             if not p.is_absolute():
