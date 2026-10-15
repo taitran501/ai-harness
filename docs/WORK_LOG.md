@@ -6,6 +6,63 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-07-23 — P2 Defense-in-Depth Fixes (Config Path Guard, Per-Subtask Direction) (PR #38)
+
+**Task:** After the full codebase audit (runner, dashboard_server, skill_injector,
+competition_state, and the 14 modules from the previous two passes), two P2
+issues were identified and fixed with regression tests. A third candidate P2
+(LLM rate-limiting) was investigated and ruled out: LLM runs go through the
+runner, which already tracks them via `experiments_used`, so no separate rate
+limit is needed on the bridge.
+
+**Findings (checked carefully before fixing, per the "don't fix blindly" rule)**
+
+- **P2-1 — Unvalidated `config_path` in execution actions.**
+  `run_full_validation`, `run_smoke_test`, and `run_probe` accept a
+  `config_path` from the caller and load it without a path-traversal guard.
+  `write_experiment_config` already constrains writes to `configs/`, but an
+  agent could still pass an arbitrary path (e.g. `../../etc/passwd.yaml`) to an
+  execution action. `run_smoke_test` is an AUTO action, so it is reachable
+  without human approval. Risk is low (`yaml.safe_load` does not execute code
+  and the runner re-validates grounding), but it is a real gap worth closing.
+- **P2-2 — Specialist ranking used the aggregate spec direction.**
+  `compute_candidate_pool` ranked subtask specialists with
+  `self.spec.get("direction")` instead of each subtask's own direction. If a
+  subtask is minimized while the overall metric is maximized, the ranking is
+  inverted.
+
+**Fixes**
+
+- `harness/agent_bridge.py`
+  - New `_validate_config_path(config_path)`: resolves the path and requires the
+    result to stay within the project root (rejects `../` traversal and
+    absolute paths outside the workspace). Called before `run_full_validation`,
+    `run_smoke_test`, and `run_probe` load their config.
+- `harness/competition_state.py`
+  - `compute_candidate_pool` now builds a `sub_directions` lookup from the spec
+    `subtasks` (handling both dict and list shapes) and uses the per-subtask
+    direction for specialist ranking, falling back to the aggregate spec
+    direction when a subtask declares none.
+
+**Validation**
+
+- `tests/test_p2_fixes.py` — 4 regression tests: valid config path accepted,
+  `../` traversal rejected, absolute-outside path rejected, and a minimized
+  subtask ranks the lower-score candidate as the specialist.
+- `python -m pytest tests/ -q` → 458/458 pass.
+
+**Notes**
+
+- The per-subtask direction fix initially used `subtask_meta.get(crit_key)`
+  assuming a dict, but the spec declares `subtasks` as a *list* of dicts. The
+  fix now handles both shapes; the regression test catches this regression.
+- P2-3 (LLM rate-limiting) was investigated: `llm_engine.generate_completion` is
+  not called directly by the agent bridge. LLM experiments are dispatched via
+  the runner, which consumes the `experiments_used` budget, so no additional
+  guard is needed on the bridge path.
+
+### 2026-07-23 — Anti-Bypass Agent-Integration Hardening (Submission Guards) (PR #37)
+
 ### 2026-07-23 — Anti-Bypass Agent-Integration Hardening (Submission Guards) (PR #37)
 
 **Task:** Follow-up to the anti-bypass audit. The agent drives submission through

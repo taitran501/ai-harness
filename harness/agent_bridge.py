@@ -295,6 +295,25 @@ class AgentBridge:
                              json.dumps(review["exact_config_matches"]))
         return review
 
+    def _validate_config_path(self, config_path: str) -> Path:
+        """Resolve a config path and reject traversal outside the project root.
+
+        Defense-in-depth: the agent passes `config_path` to `run_full_validation`,
+        `run_smoke_test`, and `run_probe`. While `write_experiment_config` already
+        constrains writes to `configs/`, an agent could still pass an arbitrary
+        path (e.g. `../../etc/passwd.yaml`). Resolving and requiring the result
+        to stay within the project root prevents reading files outside the workspace.
+        """
+        resolved = (self.project_root / config_path).resolve()
+        try:
+            resolved.relative_to(self.project_root.resolve())
+        except ValueError:
+            raise ValueError(
+                f"Config path '{config_path}' resolves outside the project root; "
+                f"only configs within the workspace are allowed."
+            )
+        return resolved
+
     def _refresh_task_context(self) -> None:
         """Reload task config and plugin state after an onboarding action rewrites it."""
         from harness.plugins import TaskPluginContext, load_task_plugin
@@ -2444,6 +2463,7 @@ class AgentBridge:
                     raise ValueError(
                         "Parameter 'config_path' is required for 'run_full_validation'."
                     )
+                self._validate_config_path(cfg_path)
 
                 backend = str(params.get("backend", "local")).lower()
                 force = bool(params.get("force", False))
