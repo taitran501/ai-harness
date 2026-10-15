@@ -156,12 +156,26 @@ class TreeJournal:
         self.append(node)
         return node
 
-    def load(self) -> None:
-        """Load the journal from disk if it exists."""
-        if not self.storage_path.exists():
-            return
+    @classmethod
+    def load_from_file(cls, path: str | Path, **kwargs) -> "TreeJournal":
+        """Load a TreeJournal directly from an explicit file path."""
+        journal = cls(storage_path=path, **kwargs)
+        journal.load()
+        return journal
+
+    def load(self, path: Optional[str | Path] = None) -> "TreeJournal":
+        """Load the journal from disk if it exists. Supports both instance and class invocation."""
+        if isinstance(self, (str, Path)):
+            # Handle call pattern: TreeJournal.load("path/to/journal.json")
+            instance = TreeJournal(storage_path=self)
+            instance.load()
+            return instance
+
+        target_path = Path(path) if path is not None else self.storage_path
+        if not target_path.exists():
+            return self
         try:
-            with open(self.storage_path, "r", encoding="utf-8") as f:
+            with open(target_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             node_fields = Node.__dataclass_fields__.keys()
             for item in data.get("nodes", []):
@@ -169,7 +183,8 @@ class TreeJournal:
                 node = Node(**filtered)
                 self.nodes[node.id] = node
         except Exception as e:
-            print(f"[TreeJournal] Warning: Failed to load {self.storage_path}: {e}")
+            print(f"[TreeJournal] Warning: Failed to load {target_path}: {e}")
+        return self
 
     def sync_from_artifacts(self, artifacts_dir: Optional[str | Path] = None) -> int:
         """Scan artifacts/ directory and auto-discover completed experiment runs."""

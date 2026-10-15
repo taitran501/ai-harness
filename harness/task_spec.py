@@ -496,6 +496,19 @@ class UniversalTaskSpec:
                 if files:
                     return pd.concat([load_dataframe_file(f) for f in files], ignore_index=True)
 
+            # Fallback for cross-environment / portable execution:
+            # If an absolute path configured on another machine/container (e.g. /kaggle/working/dataset/train.csv)
+            # is missing on this machine, search for the basename in root and root/dataset/
+            for candidate in [root / p.name, root / "dataset" / p.name]:
+                if candidate.is_file() and candidate.exists():
+                    return load_dataframe_file(candidate)
+                elif candidate.is_dir() and candidate.exists():
+                    extract_archives_in_directory(candidate)
+                    exts = ("*.tsv", "*.csv", "*.parquet", "*.pq", "*.feather", "*.jsonl", "*.json")
+                    files = sorted([f for ext in exts for f in candidate.glob(ext)])
+                    if files:
+                        return pd.concat([load_dataframe_file(f) for f in files], ignore_index=True)
+
             raise FileNotFoundError(f"Declared {split} dataset path is missing or empty: {p}")
 
         # 2. Standard convention search
