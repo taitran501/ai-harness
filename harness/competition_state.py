@@ -722,17 +722,31 @@ class CompetitionStateMachine:
 
         overall_best = candidates_list[0] if candidates_list else None
         specialists = {}
+        subtask_meta = self.spec.get("subtasks", {}) or {}
+        # `subtasks` may be a list of dicts (with an `id`/`column` key) or a dict
+        # keyed by subtask id. Build a lookup by subtask key regardless of shape.
+        sub_directions: Dict[str, str] = {}
+        if isinstance(subtask_meta, dict):
+            for k, v in subtask_meta.items():
+                if isinstance(v, dict):
+                    sub_directions[k] = v.get("direction") or self.spec.get("direction", "maximize")
+        elif isinstance(subtask_meta, list):
+            for item in subtask_meta:
+                if isinstance(item, dict):
+                    key = item.get("id") or item.get("column") or item.get("name")
+                    if key:
+                        sub_directions[str(key)] = item.get("direction") or self.spec.get("direction", "maximize")
+        default_dir = self.spec.get("direction", "maximize")
         for crit_key in criteria.keys():
             matching = [c for c in candidates_list if crit_key in c.get("subtasks", {})]
             if matching:
+                # Use the per-subtask direction when declared; fall back to the
+                # aggregate spec direction. This keeps ranking correct when a
+                # subtask is minimized while the overall metric is maximized.
+                sign = 1 if sub_directions.get(str(crit_key), default_dir) == "maximize" else -1
                 specialists[crit_key] = max(
                     matching,
-                    key=lambda x: x["subtasks"][crit_key]
-                    * (
-                        1
-                        if self.spec.get("direction", "maximize") == "maximize"
-                        else -1
-                    ),
+                    key=lambda x: x["subtasks"][crit_key] * sign,
                 )
         stable_candidates = sorted(
             [c for c in candidates_list if c["verdict"] == "KEEP"],
