@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     cloud_consent.add_argument("--confirm-upload", action="store_true", required=True, help="Explicitly authorize this provider to receive the current task dataset")
     cloud_status = cloud_commands.add_parser("status", help="Show account and task-scoped upload-consent status")
     cloud_status.add_argument("--project-root", default=".", help="Attached task workspace root")
+    cloud_pull = cloud_commands.add_parser("pull", help="Pull artifacts from completed remote Kaggle kernel")
+    cloud_pull.add_argument("--project-root", default=".", help="Attached task workspace root")
+    cloud_pull.add_argument("--exp-id", required=True, help="Experiment ID to pull")
+    cloud_pull.add_argument("--kernel-slug", default=None, help="Explicit Kaggle kernel slug (owner/title)")
+    cloud_pull.add_argument("--force-import", action="store_true", help="Import even if non-critical identity mismatches occur")
 
     nb_export = subparsers.add_parser("export-kaggle-notebook", help="Export standalone offline Kaggle submission notebook (.ipynb)")
     nb_export.add_argument("--exp-dir", required=True, help="Experiment artifact directory")
@@ -150,6 +155,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "consent": consent,
                     "message": "Consent is scoped to this task, provider, and exact data fingerprint. Visibility remains private by default.",
                 }
+            elif args.cloud_command == "pull":
+                from harness.templates.kaggle_template import KaggleKernelManager
+                result = KaggleKernelManager.pull_kernel_output(
+                    exp_id=args.exp_id,
+                    kernel_slug=args.kernel_slug,
+                    project_root=project.root,
+                    force_import=args.force_import,
+                )
             else:
                 result = provider_preflight(project, args.provider)
                 if args.config:

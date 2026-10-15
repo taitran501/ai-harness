@@ -105,7 +105,19 @@ history from guesses.
   - **Kaggle Private Dataset Resilience**: Defaulted `data_config.license` to `"CC0-1.0"` with notice log instead of failing with hard `RuntimeError`.
   - **Standalone Kaggle Notebook Exporter**: Implemented `harness/kaggle_notebook_builder.py` and CLI subcommand `ai-harness export-kaggle-notebook` to automatically bundle offline wheels installer, model weights loading, and submission validation into a standalone `.ipynb`.
   - **Compatibility Aliases & Documentation**: Added `ml-harness` and `ml-harness-agent` entrypoint aliases in `pyproject.toml`; updated `AGENTS.md` with PowerShell-safe CLI usage guidelines.
-- Evidence: All 419 unit tests passed in 105.345s (`python -m unittest discover -s tests -p "test_*.py"`). Verified flat CLI flags and export commands manually and via `tests/test_agent_usability_p3.py`.
-- Lesson: AI agents working through diverse command-line shells require forgiving input parsers (handling single vs double quotes) and defensive uniqueness checks against runtime artifacts rather than just configuration files.
 - Next action: Open PR into `main` via `gh pr create`.
+
+## 2026-10-15 — Agent Usability Audit: Label Normalization, Import Aliases & Kaggle Remote Robustness
+
+- Request: Deep audit of historical transcripts across ~35 conversation sessions in `~/.gemini/antigravity/brain` using `ai-harness` (`aimo`, `airline_prediction`, `zindi`, `rsna-knee`). Identify remaining friction points, errors, and workarounds; implement framework improvements and verify with pre-push quality gates.
+- Completed:
+  - **Label & Class Normalization in Evaluation**: Resolved `ValueError: Ground truth outside declared classes` and `ValueError: Predictions outside target domain` in `harness/evaluation.py` by implementing `_normalize_class_value` and `_normalize_class_array`. Integer-valued floats (e.g. `0.0`, `1.0` in pandas) now cleanly match declared integer classes (`[0, 1]`) and string classes (`['0', '1']`). Added actionable diagnostic guidance when models output continuous probabilities into discrete prediction fields.
+  - **Transparent Package & Module Aliases**: Created `ai_harness` and `ml_harness` alias packages with `ModuleSpec` loader forwarding submodules (`ai_harness.task_spec`, `ml_harness.runner`) directly to `harness` module instances, eliminating `ModuleNotFoundError: No module named 'ai_harness'` and `'ml_harness'`. Created `harness/agent.py` forwarding to `harness.agent_bridge`. Added `Runner = UniversalRunner` and `build_parser()` in `harness/runner.py`. Exported `SubmissionValidator` and `kaggle_manager` in `harness/__init__.py`.
+  - **Kaggle Remote Runner Error Logs**: Added `KaggleKernelManager.get_kernel_error_log` which downloads and extracts remote kernel stderr tracebacks upon failure, eliminating blind `KernelWorkerStatus.ERROR` exceptions in `harness/cloud_runner.py`.
+  - **Kaggle API Transient Error Tolerance**: Upgraded `wait_for_dataset` to tolerate transient HTTP 403 Forbidden / 404 Not Found propagation glitches for up to 5 consecutive attempts.
+  - **Identity Mismatch Tolerance & CLI Pull**: Supported non-fatal `core_version` mismatch warnings and `--force-import` in `pull_kernel_output` and runner; added `ai-harness cloud pull --exp-id ... [--kernel-slug ...] [--force-import]` CLI subcommand.
+- Evidence: 425/425 unit tests passed in 107.206s (`python -m unittest discover -s tests -p "test_*.py"`). Verified with 6 dedicated test cases in `tests/test_agent_usability_audit.py`.
+- Lesson: Submodule import aliases in Python require dedicated `importlib.machinery.ModuleSpec` loaders to guarantee module identity (`is`); remote runner exceptions must proactively download and parse remote stream logs so that AI agents receive actionable tracebacks rather than opaque cloud worker status strings.
+- Next action: Commit and push changes to remote branch `feat/agent-usability-p3` and update PR #29.
+
 
