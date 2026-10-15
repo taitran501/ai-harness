@@ -79,6 +79,7 @@ class CloudJob:
     artifact_identity_verified: bool = False
     provider_status: Optional[str] = None
     upload_fingerprint: Optional[str] = None
+    gpu: Optional[str] = None
     result_metrics: Dict[str, Any] = field(default_factory=dict)
     artifact_paths: List[str] = field(default_factory=list)
 
@@ -121,13 +122,33 @@ class CloudJobManager:
             from harness.resource_ledger import terminal
 
             ledger = json.loads(ledger_path.read_text())
+            wall_seconds = max(0, (job.ended_at or time.time()) - job.started_at)
             for token, row in ledger.get("reservations", {}).items():
                 if row.get("job_id") == job.job_id:
+                    # Compute gpu_hours from the job's GPU allocation so that the
+                    # session's `max_gpu_hours` budget is actually enforced for
+                    # cloud runs. A row with gpu_hours=None would otherwise make
+                    # `_reconcile_session_usage` set gpu_hours_used=None, which
+                    # silently disables the GPU budget.
+                    gpu_count = None
+                    allocation_seconds = None
+                    try:
+                        if getattr(job, "gpu", None):
+                            import re
+
+                            m = re.search(r"(\d+(?:\.\d+)?)", str(job.gpu))
+                            if m:
+                                gpu_count = float(m.group(1))
+                                allocation_seconds = wall_seconds
+                    except Exception:
+                        gpu_count = None
                     terminal(
                         ledger_path,
                         token,
                         job.status,
-                        max(0, (job.ended_at or time.time()) - job.started_at),
+                        wall_seconds,
+                        gpu_count=gpu_count,
+                        allocation_seconds=allocation_seconds,
                     )
 
     def _load_saved_jobs(self) -> None:
@@ -504,6 +525,7 @@ class CloudJobManager:
             or "task",
             config_sha256=config_sha256,
             upload_fingerprint=upload_fingerprint,
+            gpu=gpu if backend in ("modal", "kaggle") else None,
         )
         self._jobs[job_id] = job
         self._persist_job(job)

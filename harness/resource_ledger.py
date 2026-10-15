@@ -1,22 +1,33 @@
 """Durable reservation and exactly-once terminal resource accounting."""
 
+import json
 import uuid
-from harness.state_store import transaction
+from pathlib import Path
+from harness.state_store import transaction, workspace_lock
 
 TRAIN = {"run_full_validation"}
 PROBE = {"run_smoke_test", "run_probe"}
 
 
+def _freeze_locked(artifacts_dir) -> bool:
+    """Read the freeze gate under the workspace lock so the check is not stale
+    while another process is in the middle of freezing/unfreezing."""
+    state_path = Path(artifacts_dir) / "competition_state.json"
+    if not state_path.is_file():
+        return False
+    try:
+        with workspace_lock(Path(artifacts_dir)):
+            data = json.loads(state_path.read_text(encoding="utf-8"))
+        return bool(data.get("gates", {}).get("freeze_locked"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def reserve(path, session, action, backend, budget, deadline=None):
     token = uuid.uuid4().hex
+    if _freeze_locked(Path(path).parent):
+        raise ValueError("Competition is frozen")
     with transaction(path, {"reservations": {}}) as ledger:
-        import json
-
-        state_path = path.parent / "competition_state.json"
-        if state_path.is_file() and json.loads(state_path.read_text()).get(
-            "gates", {}
-        ).get("freeze_locked"):
-            raise ValueError("Competition is frozen")
         rows = [
             r for r in ledger["reservations"].values() if r["session_id"] == session
         ]
