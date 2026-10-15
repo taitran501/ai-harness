@@ -169,7 +169,7 @@ class GenericBaselineModel:
             if inp.type in {"text", "text_template"}:
                 transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
                 x = inp.compose_text(df)
-            elif inp.type in {"tabular", "features", "passthrough", "multimodal"}:
+            elif inp.type in {"tabular", "features", "passthrough", "multimodal", "categorical"}:
                 if feat_transform == "passthrough":
                     transform = "passthrough"
                 elif feat_transform is not None:
@@ -324,7 +324,7 @@ class LightGBMModel:
             if inp.type in {"text", "text_template"}:
                 transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
                 x = inp.compose_text(df)
-            elif inp.type in {"tabular", "features", "passthrough", "multimodal"}:
+            elif inp.type in {"tabular", "features", "passthrough", "multimodal", "categorical"}:
                 if feat_transform == "passthrough":
                     transform = "passthrough"
                 elif feat_transform is not None:
@@ -462,7 +462,7 @@ class XGBoostModel:
             if inp.type in {"text", "text_template"}:
                 transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
                 x = inp.compose_text(df)
-            elif inp.type in {"tabular", "features", "passthrough", "multimodal"}:
+            elif inp.type in {"tabular", "features", "passthrough", "multimodal", "categorical"}:
                 if feat_transform == "passthrough":
                     transform = "passthrough"
                 elif feat_transform is not None:

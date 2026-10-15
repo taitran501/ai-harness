@@ -499,6 +499,21 @@ class UniversalRunner:
                         if isinstance(item, (list, np.ndarray))
                         else item
                     )
+                    # Float decomposition for downstream agent stacking/blending ergonomics
+                    if column.startswith("proba_") and isinstance(item, (list, np.ndarray)):
+                        item_arr = np.asarray(item)
+                        target_name = column.replace("proba_", "")
+                        class_key = f"classes_{target_name}"
+                        c_order = predictions.get(class_key)
+                        if c_order and len(c_order) == len(item_arr):
+                            for c_idx, c_label in enumerate(c_order):
+                                clean_lbl = str(c_label).replace(" ", "_")
+                                record[f"{column}_{clean_lbl}"] = float(item_arr[c_idx])
+                        else:
+                            for c_idx in range(len(item_arr)):
+                                record[f"{column}_{c_idx}"] = float(item_arr[c_idx])
+                        if len(item_arr) == 2 and f"{column}_1" not in record:
+                            record[f"{column}_1"] = float(item_arr[1])
             records.append(record)
         return records
 
@@ -961,7 +976,11 @@ class UniversalRunner:
                         for v in values
                     ]
                 elif col.startswith("proba_"):
-                    predictions[col] = [json.loads(v) for v in selected[col]]
+                    if any(f"proba_{target}" == col for target in self.task_spec.subtasks.keys()):
+                        predictions[col] = [
+                            json.loads(v) if isinstance(v, str) and (v.startswith("[") or v.startswith("{")) else v
+                            for v in selected[col]
+                        ]
                 elif col.startswith("classes_"):
                     if selected[col].nunique() != 1:
                         raise ValueError("Class order changed across folds")
@@ -1011,6 +1030,10 @@ class UniversalRunner:
         oof.to_csv(self.exp_dir / "oof_predictions.csv", index=False)
         oof.to_csv(self.exp_dir / "predictions.csv", index=False)
         truth.to_csv(self.exp_dir / "evaluation_truth.csv", index=False)
+        try:
+            oof.to_parquet(self.exp_dir / "oof_predictions.parquet", index=False)
+        except Exception:
+            pass
 
         if test_df is not None and fold_test_preds:
             id_col = self.task_spec.id_column
@@ -1077,6 +1100,18 @@ class UniversalRunner:
             for target, st in self.task_spec.subtasks.items():
                 if "proba_" + target in final_test_pred:
                     test_out["proba_" + target] = [json.dumps(np.asarray(x).tolist()) for x in final_test_pred["proba_" + target]]
+                    avg_p = np.asarray(final_test_pred["proba_" + target])
+                    c_order = final_test_pred.get("classes_" + target)
+                    if hasattr(avg_p, "ndim") and avg_p.ndim > 1:
+                        if c_order and len(c_order) == avg_p.shape[1]:
+                            for c_idx, c_label in enumerate(c_order):
+                                clean_lbl = str(c_label).replace(" ", "_")
+                                test_out[f"proba_{target}_{clean_lbl}"] = avg_p[:, c_idx]
+                        else:
+                            for c_idx in range(avg_p.shape[1]):
+                                test_out[f"proba_{target}_{c_idx}"] = avg_p[:, c_idx]
+                        if avg_p.shape[1] == 2 and f"proba_{target}_1" not in test_out.columns:
+                            test_out[f"proba_{target}_1"] = avg_p[:, 1]
                 if "classes_" + target in final_test_pred:
                     test_out["classes_" + target] = json.dumps(np.asarray(final_test_pred["classes_" + target]).tolist())
                 p_val = final_test_pred["pred_" + target]

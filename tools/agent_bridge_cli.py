@@ -99,14 +99,34 @@ def _parse_dynamic_kv_args(args_list: list[str]) -> Dict[str, Any]:
 def _parse_json_arg(raw: str | None) -> Dict[str, Any]:
     if not raw:
         return {}
+    # 1. Standard JSON parse
     try:
         parsed = json.loads(raw)
-        if not isinstance(parsed, dict):
-            raise ValueError("Action parameters must be a JSON object")
-        return parsed
-    except Exception as e:
-        print(f"Error parsing --params JSON: {e}", file=sys.stderr)
-        sys.exit(1)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    # 2. YAML safe_load (handles single quotes, unquoted keys often generated on PowerShell)
+    try:
+        import yaml
+        parsed = yaml.safe_load(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    # 3. Python AST literal eval
+    try:
+        import ast
+        parsed = ast.literal_eval(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    print(f"Error parsing --params JSON: {raw}", file=sys.stderr)
+    sys.exit(1)
 
 
 def main(argv: list[str] | None = None) -> int:
