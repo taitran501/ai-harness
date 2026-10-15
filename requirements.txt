@@ -8,3 +8,8 @@ scipy>=1.11.0
 # Cloud execution backends (optional for remote training)
 modal>=0.62.0
 kaggle>=1.6.0
+
+# Test / dev (used by the unit + regression suite; enables -n auto parallelism)
+# Run in parallel with: python -m pytest tests -n auto
+pytest>=8.0
+pytest-xdist>=3.6
