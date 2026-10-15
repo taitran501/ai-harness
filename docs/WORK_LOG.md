@@ -158,5 +158,31 @@ history from guesses.
 - Lesson: For non-GBDT tabular estimators, tree-safe numeric encoding with `-1.0` unseen-category sentinel values prevents catastrophic string conversion failures while preserving tree partition boundaries; time-series cross-validation requires expanding-window splits where validation samples strictly succeed training partitions.
 - Next action: Commit, push to `feat/non-nlp-modalities`, create PR #33, and squash-merge into `main`.
 
+## 2026-10-15 — Agent Usability Phase 8: Universal Modality Expansion (Forecasting, Financial Splits, CV, Audio & Multilabel)
+
+- Request: Expand framework across all competition paradigms (Financial / Tabular Sequential, Computer Vision, Audio / Speech, NLP Generation & Seq2Seq, Multilabel Classification) so agents never encounter missing metrics, improper splits, or validation barriers.
+- Completed:
+  - **Comprehensive Metric Expansion**:
+    - **Time-Series / Financial**: Implemented `compute_rmsle`, `compute_smape`, `compute_wape`, `compute_pinball_loss`, `compute_pearson`, and `compute_mrr` with aliases (`rmsle`, `smape`, `wape`, `pinball`, `quantile_loss`, `medae`, `pearson`, `mrr`).
+    - **Computer Vision**: Implemented `compute_dice_score`, `compute_iou_score`, `mask_to_rle`, `rle_to_mask` (with integer-float parsing), `compute_box_iou`, and `compute_map_50` with aliases (`dice`, `iou`, `bbox_iou`, `map_50`, `map50`).
+    - **Speech & Audio**: Implemented `compute_wer` and `compute_cer` with aliases (`wer`, `cer`).
+    - **NLP Generation & Seq2Seq**: Implemented `compute_bleu` (with Laplace smoothing for short sentences), `compute_exact_match`, `compute_token_f1`, and `compute_token_accuracy` with aliases (`bleu`, `exact_match`, `token_f1`, `token_accuracy`).
+    - **Classification & Probabilities**: Added `balanced_accuracy`, `weighted_f1`, `mcc` (Matthews correlation), `pr_auc`, and `brier_score`.
+    - **Direction Inference**: Implemented `default_metric_direction(metric)` automatically inferring minimize vs. maximize for all new metrics.
+  - **Financial & Sequential Data Strategy**:
+    - Implemented `PurgedGroupTimeSeriesSplit` (and `SplitMode.PURGED_GROUP_TIME_SERIES`) with configurable embargo buffer (`embargo_pct`), preventing lookahead and auto-correlation leakage across sequential trading sessions / dates.
+  - **Multilabel Stratified Split**:
+    - Implemented `MultilabelStratifiedKFold` (and `SplitMode.MULTILABEL_STRATIFIED_KFOLD`) providing greedy iterative multi-label stratification without external dependencies.
+  - **Task Specification & Auto-Normalization**:
+    - Defined `TASK_TYPE_NORMALIZATIONS` mapping aliases (`forecasting`, `ts_forecast`, `segmentation`, `detection`, `ner`, `asr`, `generation`, `seq2seq`, `retrieval`, `ranking`) to canonical task types.
+    - Updated `SubtaskSpec.from_dict` to auto-normalize task types and infer default metric direction.
+  - **Submission Validator Flexibility**:
+    - Updated `SubmissionPreflightValidator` to accept non-numeric predictions (such as RLE masks, ASR text transcripts, and string class names) when `probability_mode=False`.
+  - **Runner Split Integration**:
+    - Added runner branches for `purged_group_time_series` / `financial_time_series` and `multilabel_stratified` / `multilabel_stratified_kfold` in `UniversalRunner._resolve_validation_splits`.
+- Evidence: Full test suite passes 100% (449/449 tests) in 94.790s (`python -m unittest discover -s tests -p "test_*.py"`). Verified with 9 dedicated unit tests in `tests/test_agent_usability_p8.py`.
+- Lesson: Providing built-in domain metrics, anti-leakage purged financial splits, and string-tolerant submission validation enables autonomous agents to immediately tackle competitive tasks across CV, audio, NLP generation, and quantitative finance without writing fragile custom scoring loops.
+- Next action: Stage, commit, push to `feat/universal-modalities-expansion`, create PR #34, and squash-merge into `main`.
+
 
 

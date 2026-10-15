@@ -111,7 +111,12 @@ class SubmissionPreflightValidator:
                     if min_v < 0.0 or max_v > 1.0:
                         errors.append(f"Probability out of bounds [0, 1]: min={min_v:.4f}, max={max_v:.4f}")
             else:
-                errors.append(f"Target column '{target_col}' is not numeric")
+                if probability_mode:
+                    errors.append(f"Target column '{target_col}' is expected to be numeric probabilities [0, 1] but is non-numeric")
+                else:
+                    empty_count = int((series.astype(str).str.strip() == "").sum())
+                    if empty_count > 0:
+                        errors.append(f"Target column '{target_col}' contains {empty_count} empty strings")
 
         is_valid = len(errors) == 0
         return ValidationReport(

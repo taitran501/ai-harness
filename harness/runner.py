@@ -451,6 +451,63 @@ class UniversalRunner:
                     (i, df.iloc[t].copy(), df.iloc[v].copy())
                     for i, (t, v) in enumerate(indices)
                 ]
+            elif strategy in {
+                "purged_group_time_series",
+                "purged_time_series",
+                "purged_kfold",
+                "financial_time_series",
+            }:
+                from harness.data_strategy import DataStrategyEngine, SplitMode
+
+                n_splits = int(
+                    config.get(
+                        "num_folds", getattr(self.task_spec.validation, "num_folds", 5)
+                    )
+                )
+                embargo = float(
+                    config.get(
+                        "embargo_pct", getattr(self.task_spec.validation, "embargo_pct", 0.01)
+                    )
+                )
+                indices = DataStrategyEngine.generate_splits(
+                    df,
+                    mode=SplitMode.PURGED_GROUP_TIME_SERIES,
+                    n_splits=n_splits,
+                    group_col=self.task_spec.group_column,
+                    holdout_ratio=embargo,
+                )
+                result = [
+                    (i, df.iloc[t].copy(), df.iloc[v].copy())
+                    for i, (t, v) in enumerate(indices)
+                ]
+            elif strategy in {
+                "multilabel_stratified",
+                "multilabel_stratified_kfold",
+                "multilabel_kfold",
+            }:
+                from harness.data_strategy import DataStrategyEngine, SplitMode
+
+                n_splits = int(
+                    config.get(
+                        "num_folds", getattr(self.task_spec.validation, "num_folds", 5)
+                    )
+                )
+                target_cols = [
+                    (s.column_prefix + label) if s.column_prefix else (s.column or s.id)
+                    for s in self.task_spec.subtasks.values()
+                    for label in (s.labels or [s.id])
+                ]
+                indices = DataStrategyEngine.generate_splits(
+                    df,
+                    mode=SplitMode.MULTILABEL_STRATIFIED_KFOLD,
+                    n_splits=n_splits,
+                    target_cols=target_cols,
+                    seed=self.seed,
+                )
+                result = [
+                    (i, df.iloc[t].copy(), df.iloc[v].copy())
+                    for i, (t, v) in enumerate(indices)
+                ]
             else:
                 raise ValueError(f"Unsupported validation strategy {strategy}")
         if not result:
