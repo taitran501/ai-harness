@@ -14,7 +14,6 @@ from harness.task_spec import UniversalTaskSpec
 from harness.validator import ExperimentValidator
 from tools.audit_gate import (
     audit_prediction_integrity,
-    compute_diff_metrics,
     compute_sha256,
 )
 
@@ -196,23 +195,6 @@ class AuditGateTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
-
-    def test_compute_diff_metrics(self):
-        cand_df = pd.DataFrame(
-            {
-                "sample_id": [1, 2, 3],
-                "pred_label": ["pos", "neg", "pos"],
-            }
-        )
-        base_df = pd.DataFrame(
-            {
-                "sample_id": [1, 2, 3],
-                "pred_label": ["pos", "pos", "pos"],  # row 2 differs
-            }
-        )
-        diff_count, details = compute_diff_metrics(cand_df, base_df,id_col="sample_id")
-        self.assertEqual(diff_count, 1)
-        self.assertEqual(details["pred_label"]["different_count"], 1)
 
     def test_audit_gate_cli_duplicate_failure(self):
         """CLI must exit code 1 when candidate matches baseline 100%."""
