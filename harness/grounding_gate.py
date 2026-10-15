@@ -38,6 +38,28 @@ class GroundingGate:
 
     VALID_UNCERTAINTY_LEVELS = {"low", "medium", "high"}
 
+    # verified_via values that prove the grounding source was actually checked.
+    # A proposal whose source was never verified is exactly the anti-hallucination
+    # failure the gate exists to stop: an agent can otherwise fill in the length
+    # requirements and ship an ungrounded, recycled-default hypothesis.
+    #
+    # Methods include both the *channels* used to verify (web search, reading a
+    # URL, MCP doc tools) and the *registries* that count as a verified local
+    # source (local_registry, verified_baseline, and a Hugging Face Hub model
+    # that the agent actually loaded/inspected). Empty or the sentinel
+    # "not_verified" are explicitly rejected below.
+    VALID_VERIFIED_VIA = {
+        "search_web",
+        "read_url_content",
+        "mcp_gemini-docs",
+        "local_registry",
+        "verified_baseline",
+        "huggingface_hub",
+    }
+
+    # Sentinel values that mean "the source was never actually verified".
+    UNVERIFIED_SENTINELS = {"", "not_verified", "unverified", "none", "null", "n/a"}
+
     # Banned / Lazy intervention patterns that indicate trial-and-error or hallucinated certainty
     LAZY_INTERVENTION_PATTERNS = [
         r"^(tune|tuning|adjust|adjusting|tweak|tweaking)\s+(parameters?|hyperparameters?)$",
@@ -156,6 +178,21 @@ class GroundingGate:
             if not summary or len(str(summary).strip()) < 15:
                 errors.append(
                     f"[GROUNDING RATIONALE ERROR] 'retrieval_summary' must explain empirical justification (>=15 chars)."
+                )
+
+            # Anti-bypass: the grounding source must have been genuinely verified.
+            # `verified_via` defaults to "not_verified" when an agent does not supply
+            # it; accepting that would let an ungrounded proposal pass the gate.
+            verified_via = str(grounding.get("verified_via", "")).strip().lower()
+            if is_root_baseline:
+                pass  # root baseline grounding is synthesized and self-verified
+            elif verified_via in cls.UNVERIFIED_SENTINELS or verified_via not in cls.VALID_VERIFIED_VIA:
+                errors.append(
+                    f"[GROUNDING VERIFICATION ERROR] 'verified_via' must be one of "
+                    f"{sorted(cls.VALID_VERIFIED_VIA)} (a method by which the source was "
+                    f"actually checked). Value '{verified_via or '(missing)'}' means the "
+                    f"grounding source was not verified. Do not propose an ungrounded "
+                    f"hypothesis; verify the source first and record how."
                 )
 
         # 3. Inspect Assumption Register (According to 'Ask or Assume?', Edwards & Schuster 2026)

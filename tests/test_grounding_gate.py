@@ -64,6 +64,58 @@ class GroundingGateTests(unittest.TestCase):
         self.assertFalse(passed)
         self.assertTrue(any("GROUNDING TYPE ERROR" in err for err in errors))
 
+    def test_unverified_grounding_rejected(self):
+        """A non-baseline proposal whose source was never verified must be rejected.
+
+        This is the anti-hallucination bypass an agent can hit by filling in the
+        length requirements with `verified_via='not_verified'` (or empty). The gate
+        must force the agent to record a real verification channel.
+        """
+        for bad in ("not_verified", "", "unverified", "none"):
+            cfg = dict(self.valid_config)
+            cfg["grounding"] = dict(self.valid_config["grounding"])
+            if bad:
+                cfg["grounding"]["verified_via"] = bad
+            else:
+                cfg["grounding"].pop("verified_via", None)
+            passed, errors, _ = GroundingGate.verify_config(cfg, raise_on_error=False)
+            self.assertFalse(
+                passed,
+                f"Should have rejected unverified grounding with verified_via='{bad}'",
+            )
+            self.assertTrue(any("GROUNDING VERIFICATION ERROR" in err for err in errors))
+
+    def test_verified_grounding_passes(self):
+        """A non-baseline proposal that names a real verification channel passes."""
+        for good in ("search_web", "read_url_content", "mcp_gemini-docs", "local_registry"):
+            cfg = dict(self.valid_config)
+            cfg["grounding"] = dict(self.valid_config["grounding"])
+            cfg["grounding"]["verified_via"] = good
+            passed, errors, _ = GroundingGate.verify_config(cfg, raise_on_error=False)
+            self.assertTrue(
+                passed, f"Should have accepted verified grounding via '{good}': {errors}"
+            )
+
+    def test_root_baseline_does_not_require_verified_via(self):
+        """The root baseline grounding is synthesized and self-verified."""
+        cfg = {
+            "experiment": {
+                "id": "exp000_baseline",
+                "branch": "baseline",
+                "parent_id": "none",
+                "problem_addressed": "Establish the canonical TF-IDF baseline anchor.",
+                "hypothesis": "A canonical baseline anchors the primary metric.",
+                "intervention": "Run the canonical baseline pipeline.",
+            },
+            "assumption_register": {
+                "known_facts": ["Dataset validated through the active CompetitionSpec."],
+                "assumptions": ["The canonical baseline is a stable anchor."],
+                "uncertainty_level": "low",
+            },
+        }
+        passed, errors, _ = GroundingGate.verify_config(cfg, raise_on_error=False)
+        self.assertTrue(passed, f"Root baseline should pass without verified_via: {errors}")
+
     def test_lazy_intervention_rejected(self):
         """Lazy trial-and-error interventions like 'tune parameters' must be rejected."""
         lazy_phrases = [
