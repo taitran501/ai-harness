@@ -41,6 +41,58 @@ Every iteration must be an ATOMIC INTERVENTION: change exactly one variable at a
 - Branch recommendation: `ai-harness-agent --project-root . context --format json`
 </context>
 
+<grounding_reference>
+**BASE FOR HYPOTHESIS & GROUNDING (do not hallucinate these — adapt them to the diagnosed bottleneck).**
+
+A. Verified model backbones you may cite as `grounding.source_id` (see `docs/knowledge_base.md` for the full, verified NLP list):
+   - NLP / text (verified core): `microsoft/deberta-v3-base`, `microsoft/mdeberta-v3-base`, `FacebookAI/xlm-roberta-base`, `answerdotai/ModernBERT-base`, `unsloth/Qwen2.5-7B-Instruct-bnb-4bit` (QLoRA).
+   - Tabular (experimental, unverified in competition): `LightGBM`, `XGBoost`, `CatBoost`.
+   - CV / Audio / Multimodal (roadmap, unverified) — treat as unverified; state uncertainty explicitly.
+   - Verified baselines you may reference as `source_id` under `source_type: verified_baseline`:
+     `sklearn_tfidf_logreg_canonical` (text classification), `lightgbm_tabular_baseline` (tabular).
+
+B. Filled-in example of a grounded `experiment` block for a NON-baseline iteration
+   (the values below are placeholders to be replaced with your *actual* diagnosis):
+
+   ```yaml
+   experiment:
+     id: "exp004_loss_focal"
+     branch: "loss"
+     parent_id: "exp003_model_deberta"      # must be a real, verified parent in journal.json
+     problem_addressed: "Parent exp003 scores 0.71 macro-F1 but collapses to 0.42 on the 8% rare
+       'fraud' slice; DIAGNOSTICS.md shows the model over-weights the majority class."
+     hypothesis: "Focal loss (gamma=2.0) downweights easy majority examples and lifts rare-slice
+       recall by >= 0.03 without dropping overall macro-F1 below 0.70."
+     intervention: "Switch objective from standard cross-entropy to focal loss (gamma=2.0, alpha=0.5)
+       in model.factory; everything else identical to parent exp003."
+   grounding:
+     source_type: "arxiv"                    # the REAL channel you used to verify
+     source_id: "Lin et al. 2017, Focal Loss for Dense Object Detection, arxiv:1708.02002"
+     retrieval_summary: "Focal loss was verified via search_web; it targets class-imbalance by
+       modulating the loss with (1-p_t)^gamma, directly addressing the majority-class dominance
+       seen in parent diagnostics."
+     verified_via: "search_web"              # how you ACTUALLY verified: search_web | read_url_content |
+                                             # mcp_gemini-docs | local_registry | verified_baseline | huggingface_hub
+   assumption_register:
+     known_facts:
+       - "Parent exp003 achieved macro-F1=0.71 on 5-fold CV (verified, artifact exp003/metrics.json)."
+     assumptions:
+       - "Focal loss helps rare slices without raising fold variance beyond 0.01."
+     uncertainty_level: "medium"
+     verification_probe: "ai-harness-run --config configs/exp004_loss_focal.yaml --debug --fold 0"
+   ```
+
+C. HARD RULE (anti-hallucination, enforced by the harness):
+   - `grounding.verified_via` must be a *real* channel you actually used. If you do not supply
+     it, `ai-harness-agent create_experiment` writes `verified_via: not_verified`, and
+     **`ai-harness-run` will REFUSE to train** the config until you provide a real
+     `source_id` + `verified_via`. A fabricated channel is rejected by the Epistemic Grounding
+     Gate (`python harness/grounding_gate.py --config <cfg>`).
+   - The `problem_addressed` field must cite a *specific* documented bottleneck from the parent's
+     `DIAGNOSTICS.md`, not a generic statement. `hypothesis` must name the mechanism and a
+     quantitative target delta.
+</grounding_reference>
+
 <operating_constraints>
 1. ATOMIC INTERVENTIONS ONLY: Change exactly one variable (feature representation OR model backbone OR loss function OR post-processing). Shotgun multi-variable modifications are strictly prohibited.
 2. DIAGNOSTIC-FIRST FORMULATION: You must directly inspect the parent model's failure slices in `.ai-harness/artifacts/<task-id>/<parent_id>/DIAGNOSTICS.md` and formulate an intervention targeting that specific error mode.
@@ -68,16 +120,24 @@ STEP 1: CONTEXT & UCB RECOMMENDATION
    ```
 
 STEP 2: ATOMIC CONFIGURATION & GROUNDING VERIFICATION
-1. Create the experiment configuration via the bridge:
+1. Create the experiment configuration via the bridge. ALWAYS pass a *real* grounding
+   source so the config is grounded on creation (see `<grounding_reference>` above for the
+   verified backbone list and a filled-in example). Omitting grounding writes
+   `verified_via: not_verified`, which the runner refuses to train:
    ```powershell
    ai-harness-agent act --action create_experiment --params '{
      "branch": "<feat|model|loss|post>",
      "descriptor": "<short_descriptive_name>",
-     "parent_id": "<parent_exp_id>"
+     "parent_id": "<parent_exp_id>",
+     "source_type": "<arxiv|huggingface_hub|empirical_journal|paperswithcode|verified_baseline>",
+     "source_id": "<the REAL model/paper/baseline id you verified>",
+     "retrieval_summary": "<why this source solves the diagnosed bottleneck>",
+     "verified_via": "<search_web|read_url_content|mcp_gemini-docs|local_registry|verified_baseline|huggingface_hub>"
    }'
    ```
-2. Customize the generated `configs/exp<NNN>_<branch>_<descriptor>.yaml` to implement your atomic intervention.
-3. Verify compliance with the Epistemic Grounding Gate:
+2. Customize the generated `configs/exp<NNN>_<branch>_<descriptor>.yaml` to implement your atomic
+   intervention. Use `configs/exp000_template.yaml` and `docs/knowledge_base.md` as the base reference.
+3. Verify compliance with the Epistemic Grounding Gate (must PASS before training):
    ```powershell
    python harness/grounding_gate.py --config configs/exp<NNN>_<branch>_<descriptor>.yaml
    ```
