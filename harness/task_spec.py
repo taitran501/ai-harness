@@ -163,13 +163,62 @@ class ConditionalRoutingRule:
             raise ValueError(f"Unsupported conditional operator: {self.operator}")
 
 
+TASK_TYPE_NORMALIZATIONS = {
+    # Classification
+    "classification": "multiclass_classification",
+    "multiclass": "multiclass_classification",
+    "binary": "binary_classification",
+    "binary_class": "binary_classification",
+    "multi_label": "multilabel_classification",
+    "multilabel": "multilabel_classification",
+
+    # Regression & Forecasting
+    "reg": "regression",
+    "regression": "regression",
+    "forecasting": "time_series_forecasting",
+    "time_series_forecasting": "time_series_forecasting",
+    "timeseries": "time_series_forecasting",
+    "time_series": "time_series_forecasting",
+    "ts_forecast": "time_series_forecasting",
+    "multi_output_regression": "multi_output_regression",
+
+    # Ranking & Retrieval
+    "rank": "ranking",
+    "ranking": "ranking",
+    "ltr": "ranking",
+    "learning_to_rank": "ranking",
+    "retrieval": "ranking",
+    "recommendation": "ranking",
+
+    # Computer Vision
+    "object_detection": "object_detection",
+    "detection": "object_detection",
+    "segmentation": "segmentation",
+    "semantic_segmentation": "segmentation",
+    "instance_segmentation": "segmentation",
+
+    # NLP & Speech
+    "ner": "token_classification",
+    "token_classification": "token_classification",
+    "span_extraction": "token_classification",
+    "asr": "speech_recognition",
+    "speech_recognition": "speech_recognition",
+    "transcription": "speech_recognition",
+    "generation": "text_generation",
+    "text_generation": "text_generation",
+    "seq2seq": "text_generation",
+    "summarization": "text_generation",
+    "translation": "text_generation",
+}
+
+
 @dataclass
 class SubtaskSpec:
     """Specification for an individual subtask."""
 
     id: str
     name: str
-    task_type: str  # 'binary_classification', 'multiclass_classification', 'multilabel_classification', 'regression'
+    task_type: str
     column: Optional[str] = None
     column_prefix: Optional[str] = None  # Column prefix for multi-label targets (e.g., 'label_')
     classes: List[str] = field(default_factory=list)
@@ -192,16 +241,22 @@ class SubtaskSpec:
                 eval_condition_only=cond_data.get("eval_condition_only", True),
             )
 
+        raw_type = str(data.get("task_type", data.get("type", "binary_classification"))).lower().strip()
+        resolved_type = TASK_TYPE_NORMALIZATIONS.get(raw_type, raw_type)
+        metric = data.get("primary_metric", data.get("metric", "macro_f1"))
+        from harness.evaluation import default_metric_direction
+        direction = data.get("direction", default_metric_direction(metric))
+
         return cls(
             id=data["id"],
             name=data.get("name", data["id"]),
-            task_type={"classification":"multiclass_classification","multi_label":"multilabel_classification"}.get(data.get("task_type",data.get("type")),data.get("task_type", data.get("type", "binary_classification"))),
+            task_type=resolved_type,
             column=data.get("column"),
             column_prefix=data.get("column_prefix"),
             classes=data.get("classes", []),
             labels=data.get("labels", []),
-            primary_metric=data.get("primary_metric", data.get("metric", "macro_f1")),
-            direction=data.get("direction", "maximize"),
+            primary_metric=metric,
+            direction=direction,
             weight=float(data.get("weight", 1.0)),
             condition=cond_obj,
         )
@@ -211,12 +266,13 @@ class SubtaskSpec:
 class ValidationSpec:
     """Specification for validation strategy across ML, DL, and LLM approaches."""
 
-    strategy: str = "kfold"  # 'kfold', 'holdout', 'zero_shot_eval', 'sample_probe'
+    strategy: str = "kfold"
     num_folds: int = 5
     dev_split_name: str = "dev"
     probe_samples: int = 200
     split_column: Optional[str] = None
     split_file: Optional[str] = None
+    embargo_pct: float = 0.01
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> ValidationSpec:
@@ -229,6 +285,7 @@ class ValidationSpec:
             probe_samples=int(data.get("probe_samples", 200)),
             split_column=data.get("split_column"),
             split_file=data.get("split_file"),
+            embargo_pct=float(data.get("embargo_pct", 0.01)),
         )
 
 

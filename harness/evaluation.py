@@ -13,39 +13,324 @@ from sklearn import metrics
 def metric_name(value: str) -> str:
     name = re.sub(r"[^a-z0-9]", "", value.lower())
     aliases = {
+        # Classification
         "macrof1": "macro_f1",
         "f1macro": "macro_f1",
         "microf1": "micro_f1",
         "f1micro": "micro_f1",
+        "weightedf1": "weighted_f1",
+        "f1weighted": "weighted_f1",
+        "accuracy": "accuracy",
+        "acc": "accuracy",
+        "balancedaccuracy": "balanced_accuracy",
+        "balancedacc": "balanced_accuracy",
         "rocauc": "roc_auc",
         "aucroc": "roc_auc",
         "auc": "roc_auc",
+        "prauc": "pr_auc",
+        "auprc": "pr_auc",
+        "averageprecision": "pr_auc",
         "logloss": "logloss",
-        "accuracy": "accuracy",
-        "rmse": "rmse",
-        "mae": "mae",
-        "r2": "r2",
-        "rsquared": "r2",
-        "acc": "accuracy",
-        "rootmeansquarederror": "rmse",
-        "meanabsoluteerror": "mae",
+        "brierscore": "brier_score",
+        "brier": "brier_score",
+        "mcc": "mcc",
+        "matthewscorrcoef": "mcc",
+        "matthewscorrelationcoefficient": "mcc",
         "qwk": "qwk",
         "quadraticweightedkappa": "qwk",
         "cohenkappa": "qwk",
         "cohenkappascore": "qwk",
         "kappa": "qwk",
-        "ndcg": "ndcg",
-        "ndcgscore": "ndcg",
-        "normalizeddiscountedcumulativegain": "ndcg",
+
+        # Regression & Forecasting
+        "rmse": "rmse",
+        "rootmeansquarederror": "rmse",
+        "mae": "mae",
+        "meanabsoluteerror": "mae",
+        "r2": "r2",
+        "rsquared": "r2",
+        "rmsle": "rmsle",
+        "rootmeansquaredlogerror": "rmsle",
+        "rootmeansquaredlogarithmicerror": "rmsle",
+        "mape": "mape",
+        "meanabsolutepercentageerror": "mape",
+        "smape": "smape",
+        "symmetricmeanabsolutepercentageerror": "smape",
+        "wape": "wape",
+        "weightedabsolutepercentageerror": "wape",
+        "medae": "medae",
+        "medianabsoluteerror": "medae",
+        "pinballloss": "pinball_loss",
+        "quantileloss": "pinball_loss",
+        "pinball": "pinball_loss",
         "spearman": "spearman",
         "spearmanr": "spearman",
         "spearmanrho": "spearman",
         "spearmancorrelation": "spearman",
         "spearmanrankcorrelation": "spearman",
-        "mape": "mape",
-        "meanabsolutepercentageerror": "mape",
+        "pearson": "pearson",
+        "pearsonr": "pearson",
+        "pearsoncorrelation": "pearson",
+
+        # Ranking, Recommendation & Information Retrieval
+        "ndcg": "ndcg",
+        "ndcgscore": "ndcg",
+        "normalizeddiscountedcumulativegain": "ndcg",
+        "mrr": "mrr",
+        "meanreciprocalrank": "mrr",
+        "map": "map",
+        "meanaverageprecision": "map",
+        "mapatk": "map",
+
+        # Computer Vision: Segmentation & Detection
+        "dice": "dice",
+        "dicecoef": "dice",
+        "dicecoefficient": "dice",
+        "iou": "iou",
+        "jaccard": "iou",
+        "jaccardscore": "iou",
+        "bboxiou": "bbox_iou",
+        "map50": "map_50",
+
+        # Audio, Speech & NLP Generation
+        "wer": "wer",
+        "worderrorrate": "wer",
+        "cer": "cer",
+        "charactererrorrate": "cer",
+        "bleu": "bleu",
+        "bleuscore": "bleu",
+        "rouge": "rouge_l",
+        "rougel": "rouge_l",
+        "exactmatch": "exact_match",
+        "em": "exact_match",
+        "tokenf1": "token_f1",
+        "tokenaccuracy": "token_accuracy",
     }
     return aliases.get(name, value)
+
+
+def default_metric_direction(metric: str) -> str:
+    """Infer whether an evaluation metric should be minimized or maximized."""
+    m = metric_name(metric)
+    minimize_metrics = {
+        "rmse",
+        "mae",
+        "rmsle",
+        "mape",
+        "smape",
+        "wape",
+        "medae",
+        "pinball_loss",
+        "logloss",
+        "brier_score",
+        "wer",
+        "cer",
+    }
+    return "minimize" if m in minimize_metrics else "maximize"
+
+
+def compute_rmsle(y_true, y_pred) -> float:
+    """Root Mean Squared Logarithmic Error with zero clipping."""
+    y_t = np.clip(np.asarray(y_true, dtype=float), 0, None)
+    y_p = np.clip(np.asarray(y_pred, dtype=float), 0, None)
+    return float(np.sqrt(np.mean((np.log1p(y_t) - np.log1p(y_p)) ** 2)))
+
+
+def compute_smape(y_true, y_pred) -> float:
+    """Symmetric Mean Absolute Percentage Error."""
+    y_t = np.asarray(y_true, dtype=float)
+    y_p = np.asarray(y_pred, dtype=float)
+    denom = np.abs(y_t) + np.abs(y_p)
+    mask = denom > 1e-8
+    if not mask.any():
+        return 0.0
+    return float(np.mean(2.0 * np.abs(y_t[mask] - y_p[mask]) / denom[mask]))
+
+
+def compute_wape(y_true, y_pred) -> float:
+    """Weighted Absolute Percentage Error."""
+    y_t = np.asarray(y_true, dtype=float)
+    y_p = np.asarray(y_pred, dtype=float)
+    sum_t = np.sum(np.abs(y_t))
+    if sum_t == 0:
+        return 0.0
+    return float(np.sum(np.abs(y_t - y_p)) / sum_t)
+
+
+def compute_pinball_loss(y_true, y_pred, alpha: float = 0.5) -> float:
+    """Quantile / Pinball loss for probabilistic forecasting."""
+    y_t = np.asarray(y_true, dtype=float)
+    y_p = np.asarray(y_pred, dtype=float)
+    diff = y_t - y_p
+    return float(np.mean(np.maximum(alpha * diff, (alpha - 1.0) * diff)))
+
+
+def compute_pearson(y_true, y_pred) -> float:
+    """Pearson correlation coefficient."""
+    y_t = np.asarray(y_true, dtype=float)
+    y_p = np.asarray(y_pred, dtype=float)
+    if len(y_t) < 2 or np.std(y_t) == 0 or np.std(y_p) == 0:
+        return 0.0
+    val = np.corrcoef(y_t, y_p)[0, 1]
+    return 0.0 if np.isnan(val) else float(val)
+
+
+def compute_mrr(y_true, y_pred) -> float:
+    """Mean Reciprocal Rank."""
+    y_t = np.asarray(y_true)
+    y_p = np.asarray(y_pred)
+    if y_t.ndim == 1:
+        order = np.argsort(-y_p)
+        sorted_t = y_t[order]
+        pos = np.where(sorted_t > 0)[0]
+        return float(1.0 / (pos[0] + 1)) if len(pos) > 0 else 0.0
+    rr_list = []
+    for t_row, p_row in zip(y_t, y_p):
+        order = np.argsort(-p_row)
+        pos = np.where(t_row[order] > 0)[0]
+        rr_list.append(1.0 / (pos[0] + 1) if len(pos) > 0 else 0.0)
+    return float(np.mean(rr_list)) if rr_list else 0.0
+
+
+def compute_dice_score(y_true, y_pred, smooth: float = 1e-6) -> float:
+    """Dice / F1 coefficient on binary masks."""
+    y_t = (np.asarray(y_true) > 0.5).astype(float).ravel()
+    y_p = (np.asarray(y_pred) > 0.5).astype(float).ravel()
+    intersection = np.sum(y_t * y_p)
+    return float((2.0 * intersection + smooth) / (np.sum(y_t) + np.sum(y_p) + smooth))
+
+
+def compute_iou_score(y_true, y_pred, smooth: float = 1e-6) -> float:
+    """Intersection over Union (Jaccard) on binary masks."""
+    y_t = (np.asarray(y_true) > 0.5).astype(float).ravel()
+    y_p = (np.asarray(y_pred) > 0.5).astype(float).ravel()
+    intersection = np.sum(y_t * y_p)
+    union = np.sum(y_t) + np.sum(y_p) - intersection
+    return float((intersection + smooth) / (union + smooth))
+
+
+def mask_to_rle(mask: np.ndarray) -> str:
+    """Convert binary 2D mask array to 1-indexed Run-Length Encoded (RLE) string."""
+    dots = mask.T.flatten()
+    runs = np.where(dots[1:] != dots[:-1])[0] + 2
+    runs = np.concatenate([[1] if dots[0] else [], runs, [len(dots) + 1] if dots[-1] else []])
+    lengths = runs[1::2] - runs[::2]
+    starts = runs[::2]
+    return " ".join(f"{int(start)} {int(length)}" for start, length in zip(starts, lengths))
+
+
+def rle_to_mask(rle_str: str, shape: tuple[int, int]) -> np.ndarray:
+    """Convert Run-Length Encoded string back to 2D binary numpy mask (height, width)."""
+    if not rle_str or pd.isna(rle_str):
+        return np.zeros(shape, dtype=np.uint8)
+    s = [int(float(x)) for x in str(rle_str).split()]
+    starts, lengths = s[0::2], s[1::2]
+    starts = [x - 1 for x in starts]
+    ends = [x + y for x, y in zip(starts, lengths)]
+    img = np.zeros(shape[0] * shape[1], dtype=np.uint8)
+    for start, end in zip(starts, ends):
+        img[start:end] = 1
+    return img.reshape(shape, order="F")
+
+
+def compute_box_iou(box1: np.ndarray | list, box2: np.ndarray | list) -> float:
+    """Compute IoU between two bounding boxes in [xmin, ymin, xmax, ymax] format."""
+    b1_x1, b1_y1, b1_x2, b1_y2 = box1
+    b2_x1, b2_y1, b2_x2, b2_y2 = box2
+    inter_x1 = max(b1_x1, b2_x1)
+    inter_y1 = max(b1_y1, b2_y1)
+    inter_x2 = min(b1_x2, b2_x2)
+    inter_y2 = min(b1_y2, b2_y2)
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    b1_area = max(0.0, (b1_x2 - b1_x1)) * max(0.0, (b1_y2 - b1_y1))
+    b2_area = max(0.0, (b2_x2 - b2_x1)) * max(0.0, (b2_y2 - b2_y1))
+    union_area = b1_area + b2_area - inter_area
+    return float(inter_area / union_area) if union_area > 0 else 0.0
+
+
+def compute_edit_distance(seq1: list | str, seq2: list | str) -> int:
+    """Levenshtein distance between two sequences."""
+    n, m = len(seq1), len(seq2)
+    dp = np.zeros((n + 1, m + 1), dtype=int)
+    for i in range(n + 1):
+        dp[i][0] = i
+    for j in range(m + 1):
+        dp[0][j] = j
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            cost = 0 if seq1[i - 1] == seq2[j - 1] else 1
+            dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
+    return int(dp[n][m])
+
+
+def compute_wer(y_true: list[str] | np.ndarray, y_pred: list[str] | np.ndarray) -> float:
+    """Word Error Rate for speech recognition and transcription."""
+    total_dist, total_words = 0, 0
+    for ref, hyp in zip(y_true, y_pred):
+        ref_words = str(ref).strip().split()
+        hyp_words = str(hyp).strip().split()
+        total_dist += compute_edit_distance(ref_words, hyp_words)
+        total_words += max(len(ref_words), 1)
+    return float(total_dist / total_words) if total_words > 0 else 0.0
+
+
+def compute_cer(y_true: list[str] | np.ndarray, y_pred: list[str] | np.ndarray) -> float:
+    """Character Error Rate for OCR and speech recognition."""
+    total_dist, total_chars = 0, 0
+    for ref, hyp in zip(y_true, y_pred):
+        ref_chars = list(str(ref).strip())
+        hyp_chars = list(str(hyp).strip())
+        total_dist += compute_edit_distance(ref_chars, hyp_chars)
+        total_chars += max(len(ref_chars), 1)
+    return float(total_dist / total_chars) if total_chars > 0 else 0.0
+
+
+def compute_exact_match(y_true: list[str] | np.ndarray, y_pred: list[str] | np.ndarray) -> float:
+    """Exact Match ratio for QA or code generation."""
+    matches = [1.0 if str(yt).strip() == str(yp).strip() else 0.0 for yt, yp in zip(y_true, y_pred)]
+    return float(np.mean(matches)) if matches else 0.0
+
+
+def compute_bleu(y_true: list[str] | np.ndarray, y_pred: list[str] | np.ndarray, max_n: int = 4) -> float:
+    """Corpus-level BLEU approximation with Chen-Cherry smoothing for short sentences."""
+    precisions = []
+    total_ref_len, total_hyp_len = 0, 0
+    max_ref_len = max((len(str(r).strip().split()) for r in y_true), default=1)
+    max_hyp_len = max((len(str(h).strip().split()) for h in y_pred), default=1)
+    effective_n = min(max_n, max(1, min(max_ref_len, max_hyp_len)))
+
+    for n in range(1, effective_n + 1):
+        match_count, hyp_count = 0, 0
+        for ref, hyp in zip(y_true, y_pred):
+            ref_tokens = str(ref).strip().split()
+            hyp_tokens = str(hyp).strip().split()
+            if n == 1:
+                total_ref_len += len(ref_tokens)
+                total_hyp_len += len(hyp_tokens)
+            ref_ngrams = {}
+            for i in range(len(ref_tokens) - n + 1):
+                ng = tuple(ref_tokens[i : i + n])
+                ref_ngrams[ng] = ref_ngrams.get(ng, 0) + 1
+            hyp_ngrams = {}
+            for i in range(len(hyp_tokens) - n + 1):
+                ng = tuple(hyp_tokens[i : i + n])
+                hyp_ngrams[ng] = hyp_ngrams.get(ng, 0) + 1
+            for ng, cnt in hyp_ngrams.items():
+                match_count += min(cnt, ref_ngrams.get(ng, 0))
+                hyp_count += cnt
+        if hyp_count > 0:
+            if match_count == 0 and n > 1:
+                precisions.append(1.0 / (2.0 * hyp_count))
+            else:
+                precisions.append(max(match_count, 1e-4) / hyp_count)
+        else:
+            precisions.append(1e-4)
+
+    geo_mean = np.exp(np.mean(np.log(precisions)))
+    bp = 1.0 if total_hyp_len >= total_ref_len else np.exp(1.0 - (total_ref_len / max(total_hyp_len, 1e-8)))
+    return float(bp * geo_mean)
 
 
 def utility(score: float, direction: str) -> float:
@@ -217,7 +502,14 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
             y = truth[column].to_numpy()[mask]
         p = np.asarray(label)[mask]
         name = metric_name(st.primary_metric)
-        if st.task_type in {"regression", "ranking"}:
+        if st.task_type in {
+            "regression",
+            "ranking",
+            "time_series_forecasting",
+            "forecasting",
+            "time_series",
+            "multi_output_regression",
+        }:
             y, p = np.asarray(y, float), np.asarray(p, float)
             if not np.isfinite(y).all() or not np.isfinite(p).all():
                 raise ValueError("Regression values must be finite")
@@ -225,6 +517,12 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                 "rmse": float(np.sqrt(metrics.mean_squared_error(y, p))),
                 "mae": float(metrics.mean_absolute_error(y, p)),
                 "r2": float(metrics.r2_score(y, p)) if len(y) > 1 else 0.0,
+                "rmsle": compute_rmsle(y, p),
+                "smape": compute_smape(y, p),
+                "wape": compute_wape(y, p),
+                "pinball_loss": compute_pinball_loss(y, p),
+                "medae": float(metrics.median_absolute_error(y, p)),
+                "pearson": compute_pearson(y, p),
             }
             try:
                 available["mape"] = float(metrics.mean_absolute_percentage_error(y, p))
@@ -248,6 +546,10 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                     available["ndcg"] = 0.0
             except Exception:
                 available["ndcg"] = 0.0
+            try:
+                available["mrr"] = compute_mrr(y, p)
+            except Exception:
+                available["mrr"] = 0.0
             try:
                 val = float(
                     metrics.cohen_kappa_score(
@@ -292,7 +594,21 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                         y, p, labels=classes, average="micro", zero_division=0
                     )
                 ),
+                "weighted_f1": float(
+                    metrics.f1_score(
+                        y, p, labels=classes, average="weighted", zero_division=0
+                    )
+                ),
             }
+            try:
+                available["balanced_accuracy"] = float(metrics.balanced_accuracy_score(y, p))
+            except Exception:
+                available["balanced_accuracy"] = 0.0
+            try:
+                available["mcc"] = float(metrics.matthews_corrcoef(y, p))
+            except Exception:
+                available["mcc"] = 0.0
+
             if st.task_type != "multilabel_classification":
                 try:
                     val = float(
@@ -309,7 +625,7 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                     available["ndcg"] = 0.0 if np.isnan(val) else val
                 except Exception:
                     available["ndcg"] = 0.0
-            if name in {"roc_auc", "logloss"}:
+            if name in {"roc_auc", "logloss", "pr_auc", "brier_score"}:
                 raw = next(
                     (
                         batch.probabilities[k]
@@ -365,6 +681,12 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                         with warnings.catch_warnings():
                             warnings.filterwarnings("ignore", category=UserWarning)
                             available[name] = float(metrics.log_loss(y, reordered))
+                    elif name == "pr_auc":
+                        try:
+                            val = float(metrics.average_precision_score(y, reordered, average="macro"))
+                            available[name] = 0.0 if np.isnan(val) else val
+                        except Exception:
+                            available[name] = 0.0
                     else:
                         try:
                             val = float(metrics.roc_auc_score(y, reordered, average="macro"))
@@ -374,10 +696,28 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                 else:
                     sorted_order = sorted(order)
                     reordered = prob[:, [order.index(c) for c in sorted_order]]
-                    available[name] = float(
-                        metrics.log_loss(y, reordered, labels=sorted_order)
-                        if name == "logloss"
-                        else (
+                    if name == "logloss":
+                        available[name] = float(metrics.log_loss(y, reordered, labels=sorted_order))
+                    elif name == "brier_score":
+                        if len(order) == 2:
+                            available[name] = float(metrics.brier_score_loss(y == order[1], prob[:, 1]))
+                        else:
+                            try:
+                                dum = pd.get_dummies(y)[sorted_order].to_numpy()
+                                available[name] = float(np.mean(np.sum((dum - reordered) ** 2, axis=1)))
+                            except Exception:
+                                available[name] = 0.0
+                    elif name == "pr_auc":
+                        if len(order) == 2:
+                            available[name] = float(metrics.average_precision_score(y == order[1], prob[:, 1]))
+                        else:
+                            try:
+                                dum = pd.get_dummies(y)[sorted_order].to_numpy()
+                                available[name] = float(metrics.average_precision_score(dum, reordered, average="macro"))
+                            except Exception:
+                                available[name] = 0.0
+                    else:
+                        available[name] = float(
                             metrics.roc_auc_score(y == order[1], prob[:, 1])
                             if len(order) == 2
                             else metrics.roc_auc_score(
@@ -388,7 +728,50 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                                 average="macro",
                             )
                         )
-                    )
+        elif st.task_type in {"segmentation", "semantic_segmentation", "instance_segmentation"}:
+            dice_scores = [compute_dice_score(yt, yp) for yt, yp in zip(y, p)]
+            iou_scores = [compute_iou_score(yt, yp) for yt, yp in zip(y, p)]
+            available = {
+                "dice": float(np.mean(dice_scores)) if dice_scores else 0.0,
+                "iou": float(np.mean(iou_scores)) if iou_scores else 0.0,
+            }
+        elif st.task_type in {
+            "speech_recognition",
+            "asr",
+            "transcription",
+            "text_generation",
+            "generation",
+            "seq2seq",
+            "summarization",
+            "translation",
+        }:
+            y_str = [str(x) for x in y]
+            p_str = [str(x) for x in p]
+            available = {
+                "wer": compute_wer(y_str, p_str),
+                "cer": compute_cer(y_str, p_str),
+                "bleu": compute_bleu(y_str, p_str),
+                "exact_match": compute_exact_match(y_str, p_str),
+            }
+        elif st.task_type in {"object_detection", "detection"}:
+            box_ious = [compute_box_iou(b1, b2) for b1, b2 in zip(y, p)]
+            available = {
+                "bbox_iou": float(np.mean(box_ious)) if box_ious else 0.0,
+                "map_50": float(np.mean([1.0 if iou >= 0.5 else 0.0 for iou in box_ious])) if box_ious else 0.0,
+            }
+        elif st.task_type in {"token_classification", "ner"}:
+            try:
+                flat_y = np.concatenate(y) if hasattr(y[0], "__iter__") and not isinstance(y[0], str) else y
+                flat_p = np.concatenate(p) if hasattr(p[0], "__iter__") and not isinstance(p[0], str) else p
+                available = {
+                    "token_accuracy": float(metrics.accuracy_score(flat_y, flat_p)),
+                    "token_f1": float(metrics.f1_score(flat_y, flat_p, average="macro", zero_division=0)),
+                }
+            except Exception:
+                available = {
+                    "token_accuracy": float(metrics.accuracy_score(y, p)),
+                    "token_f1": float(metrics.f1_score(y, p, average="macro", zero_division=0)),
+                }
         else:
             raise ValueError(f"Unsupported task type {st.task_type}")
         if name not in available:

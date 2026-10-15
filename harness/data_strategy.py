@@ -35,6 +35,8 @@ class SplitMode(str, Enum):
     ZERO_SHOT_DOMAIN = "zero_shot_domain"
     TIME_SERIES = "time_series"
     TEMPORAL = "temporal"
+    PURGED_GROUP_TIME_SERIES = "purged_group_time_series"
+    MULTILABEL_STRATIFIED_KFOLD = "multilabel_stratified_kfold"
 
 
 class DataLeakageError(RuntimeError):
@@ -105,6 +107,7 @@ class DataStrategyEngine:
         n_splits: int = 5,
         group_col: Optional[str] = None,
         stratify_col: Optional[str] = None,
+        target_cols: Optional[List[str]] = None,
         holdout_ratio: float = 0.15,
         seed: int = 42,
     ) -> List[Tuple[np.ndarray, np.ndarray]]:
@@ -115,6 +118,10 @@ class DataStrategyEngine:
                 mode_val = SplitMode.TIME_SERIES
             elif clean_mode == "temporal":
                 mode_val = SplitMode.TEMPORAL
+            elif clean_mode in ("purged_group_time_series", "purged_time_series", "purged_kfold", "financial_time_series"):
+                mode_val = SplitMode.PURGED_GROUP_TIME_SERIES
+            elif clean_mode in ("multilabel_stratified", "multilabel_stratified_kfold", "multilabel_kfold"):
+                mode_val = SplitMode.MULTILABEL_STRATIFIED_KFOLD
             else:
                 mode_val = SplitMode(mode)
         else:
@@ -148,8 +155,56 @@ class DataStrategyEngine:
             tss = TimeSeriesSplit(n_splits=n_splits)
             return list(tss.split(df))
 
+        elif mode_val == SplitMode.PURGED_GROUP_TIME_SERIES:
+            if not group_col or group_col not in df.columns:
+                raise ValueError(f"group_col (time group identifier) required for PurgedGroupTimeSeriesSplit")
+            unique_groups = np.sort(df[group_col].dropna().unique())
+            n_groups = len(unique_groups)
+            if n_groups < n_splits + 1:
+                raise ValueError(f"Not enough unique time groups ({n_groups}) for {n_splits} splits")
+            embargo_groups = max(1, int(n_groups * holdout_ratio)) if holdout_ratio > 0 else 0
+            splits = []
+            group_split_size = max(1, n_groups // (n_splits + 1))
+            for i in range(n_splits):
+                train_group_end = (i + 1) * group_split_size
+                val_group_start = train_group_end + embargo_groups
+                val_group_end = min(val_group_start + group_split_size, n_groups)
+                if val_group_start >= n_groups or val_group_start >= val_group_end:
+                    break
+                tr_groups = set(unique_groups[:train_group_end])
+                vl_groups = set(unique_groups[val_group_start:val_group_end])
+                tr_idx = indices[df[group_col].isin(tr_groups).to_numpy()]
+                vl_idx = indices[df[group_col].isin(vl_groups).to_numpy()]
+                if len(tr_idx) > 0 and len(vl_idx) > 0:
+                    splits.append((tr_idx, vl_idx))
+            if not splits:
+                raise ValueError("PurgedGroupTimeSeriesSplit produced no valid non-empty partitions")
+            return splits
+
+        elif mode_val == SplitMode.MULTILABEL_STRATIFIED_KFOLD:
+            target_cols_to_use = target_cols or ([stratify_col] if stratify_col else [])
+            valid_targets = [c for c in target_cols_to_use if c in df.columns]
+            if not valid_targets:
+                raise ValueError("target_cols or stratify_col required for MultilabelStratifiedKFold")
+            Y = df[valid_targets].to_numpy()
+            n_samples = len(df)
+            fold_indices = [[] for _ in range(n_splits)]
+            label_counts = np.maximum(Y.sum(axis=0), 1)
+            sample_scores = Y @ (1.0 / label_counts)
+            rng = np.random.RandomState(seed)
+            order = np.lexsort((rng.rand(n_samples), -sample_scores))
+            for idx in order:
+                fold_sizes = [len(f) for f in fold_indices]
+                min_fold = int(np.argmin(fold_sizes))
+                fold_indices[min_fold].append(idx)
+            splits = []
+            for f in range(n_splits):
+                val_idx = np.array(fold_indices[f], dtype=int)
+                train_idx = np.setdiff1d(indices, val_idx)
+                splits.append((train_idx, val_idx))
+            return splits
+
         elif mode_val == SplitMode.HOLDOUT_TEST:
-            # Create a single train / holdout test split respecting group_col if present
             rng = np.random.RandomState(seed)
             if group_col and group_col in df.columns:
                 unique_groups = df[group_col].unique()
