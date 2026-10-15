@@ -31,6 +31,29 @@ def predictions(frame):
     return result
 
 
+def _candidate_recipe_fingerprint(mode, ids, source_map):
+    """Hash the candidate recipe so a re-synthesis of the same sources+mode+weights
+    is detectable regardless of the display name the agent gives it."""
+    import hashlib
+    import json
+
+    normalized = {
+        "mode": mode,
+        "source_ids": sorted(ids),
+        "weights": sorted([float(w) for w in source_map.get("weights", [])])
+        if source_map.get("weights")
+        else None,
+        "routing": (
+            {k: sorted(v) if isinstance(v, list) else v
+             for k, v in sorted((source_map.get("routing") or source_map.get("target_routing") or {}).items())}
+            if (source_map.get("routing") or source_map.get("target_routing"))
+            else None
+        ),
+    }
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def build_candidate(project, name, mode, source_map):
     spec = load_active_task_spec(project.task_config_path)
     context = TaskPluginContext(
@@ -286,6 +309,11 @@ def build_candidate(project, name, mode, source_map):
         "verified": True,
         "eligible": True,
         "source_ids": ids,
+        # Deterministic identity of the candidate *recipe*: which sources, in which
+        # mode, with which weights/routing. This is what lets the bridge reject a
+        # duplicate that an agent might re-submit under a new name to "preserve"
+        # a submission or pad the candidate pool.
+        "recipe_fingerprint": _candidate_recipe_fingerprint(mode, ids, source_map),
         "source_hashes": {
             exp: sha256(project.artifacts_dir / exp / "artifact_manifest.json")
             for exp in ids

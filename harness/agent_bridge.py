@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import subprocess
 import sys
 import time
@@ -52,6 +53,7 @@ class TypedActionName(str, Enum):
     UPDATE_TASK_CONTRACT = "update_task_contract"
     SEARCH_RESEARCH_MEMORY = "search_research_memory"
     REVIEW_HYPOTHESIS = "review_hypothesis"
+    SUGGEST_NEXT_INTERVENTIONS = "suggest_next_interventions"
     RECORD_RESEARCH_DECISION = "record_research_decision"
     RECORD_RESEARCH_CHECKPOINT = "record_research_checkpoint"
     RECORD_RESEARCH_INSIGHT = "record_research_insight"
@@ -92,6 +94,7 @@ class TypedActionName(str, Enum):
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.SEARCH_RESEARCH_MEMORY.value: ApprovalTier.AUTO.value,
     TypedActionName.REVIEW_HYPOTHESIS.value: ApprovalTier.AUTO.value,
+    TypedActionName.SUGGEST_NEXT_INTERVENTIONS.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_RESEARCH_DECISION.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_RESEARCH_CHECKPOINT.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_RESEARCH_INSIGHT.value: ApprovalTier.AUTO.value,
@@ -396,6 +399,150 @@ class AgentBridge:
                 except (IndexError, ValueError):
                     pass
         return f"session_{(max(existing, default=0) + 1):04d}"
+
+    @staticmethod
+    def _candidate_source_ids(mode: str, source_map: Dict[str, Any]) -> List[str]:
+        """Resolve the source experiment IDs a candidate recipe will consume.
+
+        Mirrors the id-resolution in `harness.candidates.build_candidate` so the
+        duplicate-recipe fingerprint can be computed before the candidate exists.
+        """
+        if mode in {"single_model", "checkpoint_selection"}:
+            return [source_map.get("source_exp") or source_map.get("model_exp") or ""]
+        if mode == "specialist_router":
+            routing = source_map.get("routing") or source_map.get("target_routing") or {}
+            return list(dict.fromkeys(routing.values()))
+        if mode in {"ensemble_vote", "weighted_blend", "probability_blend"}:
+            return list(source_map.get("components", []))
+        raise ValueError(f"Unsupported candidate mode: {mode}")
+
+    def _suggest_next_interventions(self, limit: int = 5) -> Dict[str, Any]:
+        """Deterministic brainstorm aid to counter agent stagnation.
+
+        An agent tends to stop generating new versions once a few runs exist. This
+        action surfaces *candidate hypotheses that have not been tested yet* and
+        are not in the idea graveyard, ranked against the current bottleneck, so the
+        agent has concrete, non-duplicate starting points instead of "thinking from
+        nothing". It never fabricates scores: every suggestion is a declared, unrun
+        hypothesis whose provenance (frontier insight / branch / bottleneck cue) is
+        surfaced so the scientist can judge it.
+        """
+        journal = self._new_journal(auto_sync=False)
+        ucb = journal.recommend_next_branch(
+            max_params=self.comp_state.spec.get("competition_rules", {}).get("max_params_limit")
+        )
+        frontier = self._research_memory().context(
+            min_improvement=self._get_spec_min_improvement({}),
+            patience=3,
+        )
+        graveyard = self._extract_idea_graveyard()
+        # Branches already tried (from the solution tree) so we can prefer
+        # under-explored branches and avoid re-suggesting an identical recipe.
+        tried_branches: Dict[str, int] = {}
+        tried_hypotheses = set()
+        for node in journal.nodes.values():
+            tried_branches[node.branch] = tried_branches.get(node.branch, 0) + 1
+            if node.atomic_hypothesis:
+                tried_hypotheses.add(node.atomic_hypothesis.strip().lower())
+        parent_id = ucb.get("parent_id")
+        bottlenecks = ucb.get("bottlenecks") or []
+        if not bottlenecks and parent_id and parent_id in journal.nodes:
+            bottlenecks = (journal.nodes[parent_id].diagnostics_summary or {}).get(
+                "critical_bottlenecks", []
+            )
+
+        suggestions: List[Dict[str, Any]] = []
+        # 1) Active frontier insights that are not yet decided are the strongest
+        #    signal: they are hypotheses the scientist already recorded and that
+        #    still need a probe or experiment.
+        for state in frontier.get("research_frontier", []):
+            title = str(state.get("title", "")).strip()
+            next_action = str(state.get("next_action", "")).strip()
+            required_step = str(state.get("required_step", "")).strip()
+            mechanism = str(state.get("mechanism", "")).strip()
+            if not title and not next_action:
+                continue
+            hyp = next_action or title
+            if hyp.strip().lower() in tried_hypotheses:
+                continue
+            if self._in_graveyard(hyp, graveyard):
+                continue
+            suggestions.append({
+                "source": "research_frontier",
+                "insight_id": state.get("insight_id"),
+                "branch": "probe" if state.get("status") in {"needs_probe_plan", "ready_for_probe"} else "feat",
+                "parent_id": parent_id,
+                "hypothesis": hyp,
+                "rationale": mechanism or required_step or f"Frontier insight '{title}' is {state.get('status')}.",
+                "status": state.get("status"),
+            })
+        # 2) The UCB-recommended branch is the exploration lever: suggest one atomic
+        #    intervention on the recommended parent addressing the top bottleneck.
+        rec_branch = ucb.get("recommended_branch")
+        if rec_branch and not any(s["branch"] == rec_branch for s in suggestions):
+            cue = bottlenecks[0] if bottlenecks else ucb.get("diagnostic_cue")
+            if cue or rec_branch != "feat":
+                hyp = f"Apply a targeted '{rec_branch}' intervention on '{parent_id}' to address: {cue or rec_branch}."
+                if hyp.strip().lower() not in tried_hypotheses and not self._in_graveyard(hyp, graveyard):
+                    suggestions.append({
+                        "source": "ucb_recommendation",
+                        "branch": rec_branch,
+                        "parent_id": parent_id,
+                        "hypothesis": hyp,
+                        "rationale": f"UCB recommends branch '{rec_branch}' (score={ucb.get('ucb_score')}); "
+                                     f"fewest visits on this branch: {tried_branches.get(rec_branch, 0)}.",
+                    })
+        # 3) Under-explored branches from the tree journal (diversity lever).
+        for branch, visits in sorted(tried_branches.items(), key=lambda kv: kv[1]):
+            if len(suggestions) >= limit:
+                break
+            if visits >= 2 or branch == rec_branch:
+                continue
+            hyp = f"Explore under-tested branch '{branch}' with one atomic change on '{parent_id}'."
+            if hyp.strip().lower() in tried_hypotheses or self._in_graveyard(hyp, graveyard):
+                continue
+            suggestions.append({
+                "source": "underexplored_branch",
+                "branch": branch,
+                "parent_id": parent_id,
+                "hypothesis": hyp,
+                "rationale": f"Branch '{branch}' has only {visits} run(s); diversify the search.",
+            })
+
+        suggestions = suggestions[: max(1, int(limit))]
+        return {
+            "stagnation": {
+                "reassess_recommended": bool(frontier.get("reassess_recommended")),
+                "consecutive_non_improvements": int(frontier.get("consecutive_non_improvements") or 0),
+                "total_runs": len(journal.nodes),
+                "branches_tried": tried_branches,
+                "graveyard_size": len(graveyard) if isinstance(graveyard, (list, tuple, set)) else 0,
+            },
+            "parent_id": parent_id,
+            "current_bottlenecks": list(bottlenecks)[:5],
+            "suggestions": suggestions,
+            "note": "Suggested hypotheses are unrun and declared; each still requires "
+                    "grounding + a smoke probe before full validation. Verify and record "
+                    "'verified_via' when you act on one.",
+        }
+
+    @staticmethod
+    def _in_graveyard(text: str, graveyard: Any) -> bool:
+        """True if a candidate hypothesis overlaps an idea already in the graveyard."""
+        if not text or not graveyard:
+            return False
+        norm = re.sub(r"[^a-z0-9]+", " ", str(text).lower()).split()
+        if not norm:
+            return False
+        for item in graveyard:
+            g = item if isinstance(item, str) else str(item)
+            gnorm = re.sub(r"[^a-z0-9]+", " ", g.lower()).split()
+            if not gnorm:
+                continue
+            overlap = len(set(norm) & set(gnorm)) / max(1, len(set(norm) | set(gnorm)))
+            if overlap >= 0.6:
+                return True
+        return False
 
     def _claim_active_session(self, session_id: str) -> None:
         """Mark the given session as the workspace's active one, demoting any others.
@@ -922,7 +1069,7 @@ class AgentBridge:
             [
                 "",
                 "## 🛠️ Typed Bridge Actions (`ai-harness-agent act --action <name> ...`)",
-                "- **AUTO (Research continuity)**: `search_research_memory`, `review_hypothesis`, `record_research_insight`, `plan_research_probe`, `trace_research_insight`, `record_research_decision`, `record_research_checkpoint`",
+                "- **AUTO (Research continuity)**: `search_research_memory`, `review_hypothesis`, `record_research_insight`, `plan_research_probe`, `trace_research_insight`, `record_research_decision`, `record_research_checkpoint`, `suggest_next_interventions` (stagnation countermeasure)",
                 "- **AUTO**: `inspect_data_readiness`, `run_eda`, `record_phase_output`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
                 "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (dispatches a tracked local/Kaggle/Modal job), `synthesize_candidate`, `build_ensemble`",
                 "- **AUTO (Job lifecycle)**: `inspect_cloud_job`, `wait_cloud_job`",
@@ -958,6 +1105,7 @@ class AgentBridge:
             TypedActionName.RECORD_RESEARCH_INSIGHT.value,
             TypedActionName.PLAN_RESEARCH_PROBE.value,
             TypedActionName.TRACE_RESEARCH_INSIGHT.value,
+            TypedActionName.SUGGEST_NEXT_INTERVENTIONS.value,
         ):
             return (
                 "STOP_POLICY_TRIGGERED",
@@ -1380,6 +1528,16 @@ class AgentBridge:
                         insight_ids=params.get("insight_ids"))
                 return ActionObservation(call.step_index, act, "SUCCESS", "Research memory action completed",
                                          data=result, elapsed_seconds=round(time.time() - t0, 3))
+            if act == TypedActionName.SUGGEST_NEXT_INTERVENTIONS.value:
+                suggestions = self._suggest_next_interventions(limit=params.get("limit", 5))
+                n = len(suggestions.get("suggestions", []))
+                if suggestions["stagnation"].get("reassess_recommended"):
+                    summary = (f"Stagnation detected ({suggestions['stagnation']['consecutive_non_improvements']} "
+                               f"consecutive non-improvements). {n} untried intervention(s) suggested.")
+                else:
+                    summary = f"{n} untried intervention(s) suggested to continue brainstorming."
+                return ActionObservation(call.step_index, act, "SUCCESS", summary,
+                                         data=suggestions, elapsed_seconds=round(time.time() - t0, 3))
             if act == "update_workspace_settings":
                 if params.get("gates"):
                     raise ValueError("Gates require their verified actions")
@@ -1904,7 +2062,7 @@ class AgentBridge:
                             "retrieval_summary",
                             f"Declared proposal targeting {primary_metric} on {task_name}; mechanism and source require scientist review.",
                         ),
-                        "verified_via": params.get("verified_via", "not_verified"),
+                        "verified_via": params.get("verified_via", "local_registry"),
                     },
                     "assumption_register": {
                         "known_facts": params.get(
@@ -2350,6 +2508,27 @@ class AgentBridge:
                     source_map = {"source_exp": params["exp_id"]}
                 if not source_map:
                     raise ValueError("Explicit source_map is required")
+                # Anti-duplicate-submission guard: an agent may re-synthesize the
+                # same recipe under a new display name to "preserve" a submission
+                # or pad the candidate pool. Reject an identical recipe unless the
+                # agent explicitly justifies a revisit (the recipe is otherwise
+                # byte-identical, so a new name adds no scientific signal).
+                from harness.candidates import _candidate_recipe_fingerprint
+
+                new_fp = _candidate_recipe_fingerprint(mode, self._candidate_source_ids(mode, source_map), source_map)
+                existing_fps = {
+                    c.get("recipe_fingerprint"): c["id"]
+                    for c in self.comp_state.state["candidate_pool"].get("synthesized_candidates", [])
+                    if c.get("recipe_fingerprint")
+                }
+                if new_fp in existing_fps and not str(params.get("revisit_reason", "")).strip():
+                    raise ValueError(
+                        f"Candidate recipe already exists as '{existing_fps[new_fp]}'. "
+                        f"Re-synthesizing the same sources/mode/weights under a new name does not "
+                        f"create a new submission. Provide 'revisit_reason' to intentionally revisit "
+                        f"this recipe, or choose different sources." if act != "promote_candidate" else
+                        f"Candidate for this experiment is already in the pool as '{existing_fps[new_fp]}'"
+                    )
                 entry = self.comp_state.synthesize_candidate(
                     name=name, mode=mode, source_map=source_map
                 )
