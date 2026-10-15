@@ -1166,8 +1166,11 @@ class UniversalRunner:
         return result
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    """CLI entrypoint for universal training runner."""
+Runner = UniversalRunner
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build and return CLI argument parser for universal training runner."""
     parser = argparse.ArgumentParser(
         description="Universal Competition Experiment Runner"
     )
@@ -1206,6 +1209,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Force overwrite existing experiment artifacts",
     )
     parser.add_argument(
+        "--force-import",
+        action="store_true",
+        help="Force import Kaggle artifacts even if non-critical identity mismatches occur",
+    )
+    parser.add_argument(
         "--probe-samples", type=int, default=None, help="Probe sample count limit"
     )
     parser.add_argument(
@@ -1220,6 +1228,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Do not write the project leaderboard",
     )
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entrypoint for universal training runner."""
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.unbuffered:
         for stream in (sys.stdout, sys.stderr):
@@ -1256,6 +1270,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         run_via_kaggle(
             config_path=str(config_path),
             project_root=project.root,
+            force_import=getattr(args, "force_import", False),
         )
         return 0
 

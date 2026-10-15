@@ -244,6 +244,7 @@ def run_via_kaggle(
     job_id: Optional[str] = None,
     poll_interval: float = 10.0,
     timeout_seconds: float = 24 * 60 * 60,
+    force_import: bool = False,
 ) -> Dict[str, Any]:
     """Push, poll through a terminal Kaggle state, pull identity-checked artifacts, and sync the journal."""
     print(f"===========================================================")
@@ -326,7 +327,11 @@ def run_via_kaggle(
         status_callback=persist_kaggle_status if managed_job_id else None,
     )
     if status.get("status") != "COMPLETED":
-        raise RuntimeError(f"Kaggle kernel ended with status {status.get('status')}: {status.get('raw_output', '')}")
+        err_log = KaggleKernelManager.get_kernel_error_log(kernel_slug)
+        err_msg = f"Kaggle kernel ended with status {status.get('status')}: {status.get('raw_output', '')}"
+        if err_log:
+            err_msg += f"\n\n--- Kaggle Remote Kernel Error Log ---\n{err_log}\n--------------------------------------"
+        raise RuntimeError(err_msg)
     expected_identity = {
         "job_id": job_id,
         "task_id": context["task_id"],
@@ -340,6 +345,7 @@ def run_via_kaggle(
         artifact_dir=project.artifacts_dir / exp_id,
         expected_identity=expected_identity,
         project_root=project.root,
+        force_import=force_import,
     )
     if not pulled.get("success"):
         raise RuntimeError(f"Kaggle output import failed: {pulled.get('raw_output') or pulled.get('identity_mismatches')}")

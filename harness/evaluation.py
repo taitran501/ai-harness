@@ -143,6 +143,33 @@ def resolve_evaluation(spec: Any, result: dict, n_samples: int) -> dict:
         ).to_dict(),
     }
 
+def _normalize_class_value(val: Any) -> str:
+    """Normalize a class label so integer-like floats (e.g. 0.0, 1.0) match integer classes."""
+    if isinstance(val, (int, np.integer)):
+        return str(val)
+    if isinstance(val, (float, np.floating)):
+        if np.isnan(val):
+            return "nan"
+        if val.is_integer():
+            return str(int(val))
+        return str(val)
+    s = str(val).strip()
+    if re.match(r"^-?\d+\.0+$", s):
+        try:
+            return str(int(float(s)))
+        except (ValueError, OverflowError):
+            pass
+    return s
+
+
+def _normalize_class_array(arr: Any) -> np.ndarray:
+    """Normalize array of class labels element-wise into strings."""
+    flat = np.asarray(arr)
+    if np.issubdtype(flat.dtype, np.integer):
+        return flat.astype(str)
+    normalized = [_normalize_class_value(x) for x in flat.ravel()]
+    return np.array(normalized, dtype=str).reshape(flat.shape)
+
 
 def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
     if truth.empty or not spec.subtasks:
@@ -238,12 +265,13 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
             "multilabel_classification",
         }:
             if st.task_type != "multilabel_classification":
-                y, p = y.astype(str), p.astype(str)
-                classes = [str(c) for c in st.classes] or sorted(set(y))
+                y = _normalize_class_array(y)
+                p = _normalize_class_array(p)
+                classes = [_normalize_class_value(c) for c in (st.classes or [])] or sorted(set(y))
                 if not set(y).issubset(classes):
-                    raise ValueError("Ground truth outside declared classes")
+                    raise ValueError(f"Ground truth outside declared classes for {key}: found {set(y) - set(classes)} not in {classes}")
                 if not set(p).issubset(classes):
-                    raise ValueError(f"Invalid predicted class for {key}")
+                    raise ValueError(f"Invalid predicted class for {key}: found {set(p) - set(classes)} not in {classes}")
             else:
                 if (
                     p.shape != y.shape
@@ -305,9 +333,9 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
                 prob = np.asarray(raw, float)[mask]
                 if not np.isfinite(prob).all() or (prob < 0).any() or (prob > 1).any():
                     raise ValueError("Invalid probabilities")
-                order = [str(c) for c in order]
+                order = [_normalize_class_value(c) for c in order]
                 expected_classes = (
-                    [str(c) for c in (st.labels or [])]
+                    [_normalize_class_value(c) for c in (st.labels or [])]
                     if st.task_type == "multilabel_classification"
                     else classes
                 )
@@ -426,8 +454,26 @@ def validate_prediction_contract(spec, truth, predictions):
             width = len(st.labels or st.classes)
             if array.shape != (len(truth), width) or not np.isin(array, [0, 1]).all():
                 raise ValueError("Invalid multilabel predictions")
-        elif st.classes and not set(array.astype(str)).issubset(
-            set(map(str, st.classes))
-        ):
-            raise ValueError("Predictions outside target domain")
+        elif st.classes:
+            normalized_classes = set(_normalize_class_value(c) for c in st.classes)
+            normalized_array = _normalize_class_array(array)
+            if not set(normalized_array).issubset(normalized_classes):
+                if (
+                    st.task_type == "binary_classification"
+                    and np.issubdtype(array.dtype, np.floating)
+                    and len(array) > 0
+                    and (array >= 0.0).all()
+                    and (array <= 1.0).all()
+                ):
+                    raise ValueError(
+                        f"Predictions for target '{key}' contain continuous probabilities "
+                        f"(range [{array.min():.4f}, {array.max():.4f}]) instead of discrete class labels {st.classes}. "
+                        f"For probabilistic evaluation (roc_auc, logloss), provide probabilities as 'proba_{key}' "
+                        f"or threshold predictions into discrete class labels."
+                    )
+                raise ValueError(
+                    f"Predictions outside target domain for '{key}': "
+                    f"found {set(normalized_array) - normalized_classes} not in {normalized_classes}"
+                )
     return batch
+

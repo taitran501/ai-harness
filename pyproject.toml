@@ -33,7 +33,7 @@ ml-harness-run = "harness.runner:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["harness*", "tools*"]
+include = ["harness*", "tools*", "ai_harness*", "ml_harness*"]
 
 [tool.setuptools.package-data]
 tools = ["web/index.html", "web/assets/*"]

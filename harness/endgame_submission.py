@@ -336,3 +336,8 @@ class MicroDoseProbeGenerator:
             "mean_absolute_diff": mean_diff,
             "rows": len(out_df),
         }
+
+
+# Backwards compatibility alias
+SubmissionValidator = SubmissionPreflightValidator
+

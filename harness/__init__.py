@@ -13,11 +13,13 @@ from .stacking import L2LogitStacker, RankAverager, align_prediction_frames, to_
 from .foundation_models import TeacherLogitPrior, MultiScaleBinner, HierarchicalDiscretizer
 from .endgame_submission import (
     SubmissionPreflightValidator,
+    SubmissionPreflightValidator as SubmissionValidator,
     KaggleLeaderboardTracker,
     ThresholdOptimizer,
     QuantileMatcher,
     MicroDoseProbeGenerator,
 )
+from .templates.kaggle_template import KaggleKernelManager, KaggleKernelManager as kaggle_manager
 from .io_utils import (
     atomic_write_json,
     atomic_write_text,
@@ -42,6 +44,9 @@ __all__ = [
     "MultiScaleBinner",
     "HierarchicalDiscretizer",
     "SubmissionPreflightValidator",
+    "SubmissionValidator",
+    "KaggleKernelManager",
+    "kaggle_manager",
     "KaggleLeaderboardTracker",
     "ThresholdOptimizer",
     "QuantileMatcher",
