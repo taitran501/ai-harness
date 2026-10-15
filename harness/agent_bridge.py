@@ -201,6 +201,7 @@ class BridgeSession:
     status: str  # "ACTIVE" | "PAUSED_FOR_APPROVAL" | "BUDGET_REACHED" | "STOPPED" | "COMPLETED"
     created_at: str
     updated_at: str
+    active: bool = True
     starting_state: Dict[str, Any] = field(default_factory=dict)
     final_state: Optional[Dict[str, Any]] = None
     experiments_run: List[str] = field(default_factory=list)
@@ -396,6 +397,32 @@ class AgentBridge:
                     pass
         return f"session_{(max(existing, default=0) + 1):04d}"
 
+    def _claim_active_session(self, session_id: str) -> None:
+        """Mark the given session as the workspace's active one, demoting any others.
+
+        Writes are best-effort and idempotent so a crash mid-claim never corrupts
+        session files; the winner is whoever wins the per-file transaction.
+        """
+        from harness.state_store import transaction
+
+        self._session_snapshots = getattr(self, "_session_snapshots", {})
+        for path in self.sessions_dir.glob("session_*.json"):
+            if path.stem == session_id:
+                continue
+            try:
+                with transaction(path, {"sessions": []}) as current:
+                    if current.get("active"):
+                        current["active"] = False
+            except Exception:
+                pass
+
+    def get_active_session_id(self) -> Optional[str]:
+        """Return the session_id currently marked active, or None."""
+        for item in self.list_sessions(limit=20):
+            if item.get("active") and item.get("session_id"):
+                return item["session_id"]
+        return None
+
     def save_session(self, session: BridgeSession) -> None:
         if (
             Path(session.session_id).name != session.session_id
@@ -406,6 +433,13 @@ class AgentBridge:
         session.updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         payload = asdict(session)
         path = self.sessions_dir / f"{session.session_id}.json"
+
+        # Enforce a single active session per workspace. When the session being
+        # saved is active, demote any other previously-active sessions so that
+        # `get_active_or_create_session` has a stable target to resume.
+        if payload.get("active"):
+            self._claim_active_session(session.session_id)
+            payload["active"] = True
         from harness.io_utils import atomic_write_json
         import copy
         from harness.state_store import save_snapshot
@@ -497,18 +531,26 @@ class AgentBridge:
         ]
         if not rows:
             return
+        # Terminal statuses only — a RESERVED row whose job never reached a
+        # terminal state (e.g. the process crashed) should not count as used
+        # budget, and a FAILED run that the agent is allowed to retry should not
+        # consume the experiment budget forever.
+        terminal_statuses = {"COMPLETED", "FAILED", "CANCELLED"}
+        terminal_rows = [r for r in rows if r.get("status") in terminal_statuses]
+        gpu_hours = []
+        for r in terminal_rows:
+            if r.get("gpu_hours") is not None:
+                gpu_hours.append(r["gpu_hours"])
         session.compute_usage.update(
-            experiments_used=sum(r["category"] == "training" for r in rows),
-            smoke_runs=sum(r["category"] == "probe" for r in rows),
-            cloud_runs=sum(r["backend"] != "local" for r in rows),
-            candidate_operations=sum(r["category"] == "candidate" for r in rows),
+            experiments_used=sum(r["category"] == "training" for r in terminal_rows),
+            smoke_runs=sum(r["category"] == "probe" for r in terminal_rows),
+            cloud_runs=sum(r["backend"] != "local" for r in terminal_rows),
+            candidate_operations=sum(r["category"] == "candidate" for r in terminal_rows),
             wall_seconds_used=round(
-                sum(float(r.get("wall_seconds") or 0) for r in rows), 3
+                sum(float(r.get("wall_seconds") or 0) for r in terminal_rows), 3
             ),
             gpu_hours_used=(
-                None
-                if any(r.get("gpu_hours") is None for r in rows)
-                else sum(r["gpu_hours"] for r in rows)
+                sum(gpu_hours) if gpu_hours else (0.0 if not terminal_rows else None)
             ),
         )
 
@@ -530,7 +572,24 @@ class AgentBridge:
             except FileNotFoundError:
                 pass
 
-        recent = self.list_sessions(limit=5)
+        recent = self.list_sessions(limit=20)
+        for item in recent:
+            if item.get("active") and item.get("status") in ("ACTIVE", "PAUSED_FOR_APPROVAL"):
+                sess = self.load_session(item["session_id"])
+                if (
+                    goal
+                    and goal != "Iterative competition optimization via Antigravity IDE"
+                ):
+                    sess.goal = goal
+                if budget:
+                    sess.budget.update(
+                        {k: v for k, v in budget.items() if v is not None}
+                    )
+                sess.active = True
+                self.save_session(sess)
+                return sess
+        # Fallback: legacy sessions without an `active` flag — pick the most recent
+        # one in an open state so old workspaces keep working.
         for item in recent:
             if item.get("status") in ("ACTIVE", "PAUSED_FOR_APPROVAL"):
                 sess = self.load_session(item["session_id"])
@@ -543,6 +602,7 @@ class AgentBridge:
                     sess.budget.update(
                         {k: v for k, v in budget.items() if v is not None}
                     )
+                sess.active = True
                 self.save_session(sess)
                 return sess
 
@@ -579,6 +639,7 @@ class AgentBridge:
             updated_at=now_iso,
             starting_state=snap.get("hud", {}),
             budget=sess_budget,
+            active=True,
         )
         self.save_session(session)
         return session
@@ -592,7 +653,11 @@ class AgentBridge:
         out: List[Dict[str, Any]] = []
         for f in files:
             try:
-                out.append(json.loads(f.read_text(encoding="utf-8")))
+                data = json.loads(f.read_text(encoding="utf-8"))
+                # Normalize: legacy sessions may not have an `active` flag.
+                if "active" not in data:
+                    data["active"] = False
+                out.append(data)
             except Exception:
                 pass
         return out
@@ -1076,9 +1141,12 @@ class AgentBridge:
         guard_violation = self._check_budget_and_stop_guards(session, action, params)
         if guard_violation is not None:
             v_status, v_msg = guard_violation
-            session.status = (
-                "BUDGET_REACHED" if v_status == "BLOCKED_BY_BUDGET" else "STOPPED"
-            )
+            # Do NOT mutate session.status here: a budget block is a per-action
+            # observation, not a terminal session state. The session stays in its
+            # current state (ACTIVE / PAUSED_FOR_APPROVAL) so the agent can
+            # continue with other actions and the budget block is recorded in
+            # `stop_reason` only as a transient note. We do record the observation
+            # so the agent sees the block in the action history.
             session.stop_reason = f"{v_status}: {v_msg}"
             obs = ActionObservation(
                 step_index=step_idx,
@@ -1087,7 +1155,9 @@ class AgentBridge:
                 summary=v_msg,
                 new_blockers=[v_msg],
             )
-            session.actions.append(asdict(call))
+            # Do NOT append the blocked call to session.actions — the action was
+            # not executed. Recording it in actions would inflate step_index for
+            # subsequent real actions and confuse the approve flow (C2).
             session.observations.append(asdict(obs))
             self.save_session(session)
             return session, obs
@@ -1113,9 +1183,19 @@ class AgentBridge:
             self.save_session(session)
             return session, obs
 
-        # Clear pending approval if executing an approved action
-        session.pending_approval_action = None
-        session.status = "ACTIVE"
+        # Clear pending approval ONLY if the action being executed IS the pending
+        # one (i.e. user just approved it). Otherwise a different action is being
+        # run while a USER_APPROVAL action is still waiting — leave the pending
+        # action and PAUSED_FOR_APPROVAL status intact so the approval is not
+        # silently dropped (C1).
+        if (
+            session.pending_approval_action
+            and session.pending_approval_action.get("action") == action
+            and user_approved
+        ):
+            session.pending_approval_action = None
+        if session.status == "PAUSED_FOR_APPROVAL" and session.pending_approval_action is None:
+            session.status = "ACTIVE"
         session.actions.append(asdict(call))
 
         resource_actions = {
@@ -1236,6 +1316,10 @@ class AgentBridge:
             and session.observations[-1].get("status") == "PAUSED_FOR_APPROVAL"
         ):
             session.observations.pop()
+        # Remove the pending action from session.actions so the re-executed
+        # action does not appear twice in the action history (C2).
+        if session.actions and session.actions[-1].get("action") == pending.get("action"):
+            session.actions.pop()
         session.pending_approval_action = None
         session.status = "ACTIVE"
         self.save_session(session)
@@ -2269,8 +2353,8 @@ class AgentBridge:
                 entry = self.comp_state.synthesize_candidate(
                     name=name, mode=mode, source_map=source_map
                 )
-                session.compute_usage["candidate_operations_used"] = (
-                    int(session.compute_usage.get("candidate_operations_used", 0)) + 1
+                session.compute_usage["candidate_operations"] = (
+                    int(session.compute_usage.get("candidate_operations", 0)) + 1
                 )
 
                 oof_abs = self.project_root / entry["oof_path"]
@@ -2332,8 +2416,8 @@ class AgentBridge:
                     source=params.get("source", "external_import"),
                     notes=params.get("notes", ""),
                 )
-                session.compute_usage["candidate_operations_used"] = (
-                    int(session.compute_usage.get("candidate_operations_used", 0)) + 1
+                session.compute_usage["candidate_operations"] = (
+                    int(session.compute_usage.get("candidate_operations", 0)) + 1
                 )
                 cand_score = float(res.get("primary_score", 0.0))
                 base_score = float(
@@ -2389,8 +2473,8 @@ class AgentBridge:
                             "weights": opt_res["optimal_weights"],
                         },
                     )
-                    session.compute_usage["candidate_operations_used"] = (
-                        int(session.compute_usage.get("candidate_operations_used", 0)) + 1
+                    session.compute_usage["candidate_operations"] = (
+                        int(session.compute_usage.get("candidate_operations", 0)) + 1
                     )
 
                 if cand_entry:
