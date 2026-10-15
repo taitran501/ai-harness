@@ -134,4 +134,16 @@ history from guesses.
 - Lesson: Providing friendly defaults on core orchestration dataclasses and forgiving alias resolution on data splits and inputs dramatically reduces syntax friction for AI agents without compromising contract rigor.
 - Next action: Create feature branch `feat/catboost-and-diagnostics`, push, open PR, and squash-merge into `main`.
 
+## 2026-10-15 — Agent Usability Phase 6: Built-in RandomForest, Extended Linear Aliases, TreeJournal Load Flexibility & Cross-Environment Dataset Fallback
+
+- Request: Continuous audit across 292 transcript files in `~/.gemini/antigravity/brain`, identify remaining friction points, implement features/fixes, test thoroughly, and merge into `main`.
+- Completed:
+  - **Built-in RandomForestModel Wrapper**: Implemented `RandomForestModel` in `harness/models.py` (registered under `random_forest`, `randomforest`, `rf`, `rf_classifier`, `rf_regressor`) providing out-of-the-box multi-threaded (`n_jobs=-1`) Random Forest classification, regression, probability outputs (`proba_<target>`), and parameter counting on tabular and vectorized text features.
+  - **Extended Baseline Model Aliases & Lasso Regression**: Expanded `GenericBaselineModel.NAMES` to recognize `logreg`, `logistic`, `linear`, `linear_regression`, `linear_model`, `lasso`, and `lasso_regression`. Added native `Lasso` estimator support for regression with proper parameter filtering.
+  - **TreeJournal Load Flexibility**: Updated `TreeJournal.load` in `harness/tree_journal.py` to seamlessly handle both instance invocations (`journal.load()`) and direct class calls (`TreeJournal.load(path_str)`), eliminating `AttributeError: 'str' object has no attribute 'storage_path'`. Added `TreeJournal.load_from_file(path)` classmethod.
+  - **Cross-Environment / Portable Dataset Path Fallback**: In `UniversalTaskSpec.load_dataset_split` (`harness/task_spec.py`), added automatic basename fallback resolution in `root / p.name` and `root / "dataset" / p.name` when an absolute path from a foreign container or host (such as `/kaggle/working/dataset/train.csv` or a foreign Windows/Linux path) does not exist on the current machine.
+- Evidence: 435/435 unit tests passed in 92.509s across the full repository test suite (`python -m unittest discover -s tests -p "test_*.py"`). Verified with 4 dedicated test cases in `tests/test_agent_usability_p6.py`.
+- Lesson: Providing flexible invocation signatures on persistence classes and portable fallback resolution on file paths ensures experiments transfer seamlessly across cloud and local runner boundaries.
+- Next action: Create feature branch `feat/rf-and-portability`, push, open PR, and squash-merge into `main`.
+
 

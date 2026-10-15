@@ -10,7 +10,8 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import Ridge, LogisticRegression
+from sklearn.linear_model import Ridge, LogisticRegression, Lasso
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 import warnings
 
 try:
@@ -122,17 +123,25 @@ class GenericBaselineModel:
         "baseline",
         "ridge",
         "ridge_regression",
+        "lasso",
+        "lasso_regression",
+        "linear",
+        "linear_regression",
+        "linear_model",
         "tfidf_ridge",
+        "logistic",
+        "logreg",
         "logistic_regression",
         "tfidf_logistic_regression",
     }
 
     def __init__(self, task_spec, model_name="baseline", **kwargs):
-        if model_name not in self.NAMES:
+        clean_name = str(model_name).lower()
+        if clean_name not in self.NAMES:
             raise ValueError(
                 f"Unsupported built-in model {model_name}; configure a plugin/factory"
             )
-        self.task_spec, self.model_name, self.kwargs = task_spec, model_name, kwargs
+        self.task_spec, self.model_name, self.kwargs = task_spec, clean_name, kwargs
         self.fitted_models, self.estimator_metadata = {}, {}
         self.seed = task_spec.resolve_seed()
 
@@ -167,9 +176,13 @@ class GenericBaselineModel:
                 )
             col = st.column or key
             reg = st.task_type in ("regression", "ranking")
-            if self.model_name != "baseline" and (reg != ("ridge" in self.model_name)):
+            is_reg_name = any(k in self.model_name for k in ("ridge", "lasso", "linear"))
+            if self.model_name != "baseline" and (reg != is_reg_name):
                 raise ValueError("Requested model does not match target task type")
-            cls = Ridge if reg else LogisticRegression
+            if reg:
+                cls = Lasso if "lasso" in self.model_name else Ridge
+            else:
+                cls = LogisticRegression
             valid = inspect.signature(cls).parameters
             model_kwargs = dict(self.kwargs)
             feat_transform = model_kwargs.pop("feature_transformer", None) or model_kwargs.pop("transform", None)
@@ -177,14 +190,14 @@ class GenericBaselineModel:
                 raise ValueError(
                     f"Unsupported estimator parameters: {sorted(set(model_kwargs)-set(valid))}"
                 )
-            params = (
-                {"solver": "lsqr"}
-                if reg
-                else {"max_iter": 500, "class_weight": "balanced"}
-            )
+            if reg:
+                params = {"max_iter": 1000} if "lasso" in self.model_name else {"solver": "lsqr"}
+            else:
+                params = {"max_iter": 500, "class_weight": "balanced"}
             params.update(model_kwargs)
             if "random_state" in valid:
                 params["random_state"] = self.seed
+            params = {k: v for k, v in params.items() if k in valid}
             estimator = cls(**params)
             if inp.type in {"text", "text_template"}:
                 transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
@@ -688,6 +701,144 @@ class CatBoostModel:
         return max(total, 1)
 
 
+class RandomForestModel:
+    """Built-in Random Forest wrapper for classification and regression on tabular/vectorized features."""
+
+    NAMES = {
+        "random_forest",
+        "randomforest",
+        "rf",
+        "rf_classifier",
+        "rf_regressor",
+    }
+
+    def __init__(self, task_spec, model_name="random_forest", **kwargs):
+        clean_name = str(model_name).lower()
+        if clean_name not in self.NAMES:
+            raise ValueError(f"Unsupported Random Forest model name: {model_name}")
+        self.task_spec = task_spec
+        self.model_name = clean_name
+        self.kwargs = kwargs
+        self.fitted_models = {}
+        self.label_encoders = {}
+        self.estimator_metadata = {}
+        self.seed = task_spec.resolve_seed()
+
+    def fit(self, df, variant=None):
+        from sklearn.preprocessing import LabelEncoder
+
+        if variant not in self.task_spec.inputs_dict:
+            raise ValueError("Random Forest requires an explicitly declared input variant")
+        inp = self.task_spec.inputs_dict[variant]
+        targets = {s.column or s.id for s in self.task_spec.subtasks.values()}
+        targets.update(
+            c
+            for s in self.task_spec.subtasks.values()
+            if s.column_prefix
+            for c in df
+            if c.startswith(s.column_prefix)
+        )
+        forbidden = targets | {
+            self.task_spec.id_column,
+            self.task_spec.group_column,
+            "fold",
+            "split",
+            "input_variant",
+            "partition",
+            self.task_spec.data_config.get("partition_column"),
+            self.task_spec.validation.split_column,
+        }
+        features = list(inp.source_columns)
+        validate_model_features(features, df, forbidden, variant)
+
+        for key, st in self.task_spec.subtasks.items():
+            if st.task_type == "multilabel_classification":
+                raise ValueError(
+                    "Built-in multilabel training requires a task model plugin"
+                )
+            col = st.column or key
+            reg = st.task_type in ("regression", "ranking")
+            cls = RandomForestRegressor if reg else RandomForestClassifier
+            valid = inspect.signature(cls).parameters
+            model_kwargs = dict(self.kwargs)
+            feat_transform = model_kwargs.pop("feature_transformer", None) or model_kwargs.pop("transform", None)
+            if set(model_kwargs) - set(valid):
+                raise ValueError(
+                    f"Unsupported estimator parameters: {sorted(set(model_kwargs)-set(valid))}"
+                )
+            params = {"n_estimators": 100, "random_state": self.seed, "n_jobs": -1}
+            params.update(model_kwargs)
+            estimator = cls(**params)
+
+            if inp.type in {"text", "text_template"}:
+                transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
+                x = inp.compose_text(df)
+            elif inp.type in {"tabular", "features", "passthrough", "multimodal", "categorical"}:
+                if feat_transform == "passthrough":
+                    transform = "passthrough"
+                elif feat_transform is not None:
+                    transform = feat_transform
+                else:
+                    transform = NativeCategoricalTransformer()
+                x = df[features]
+            else:
+                transform = StandardScaler()
+                x = df[features]
+
+            y = df[col].values
+            if not reg and st.classes:
+                le = LabelEncoder()
+                le.fit(st.classes)
+                y = le.transform(y)
+                self.label_encoders[key] = le
+
+            pipe = Pipeline([("transform", transform), ("clf", estimator)])
+            pipe.fit(x, y)
+            self.fitted_models[key] = (pipe, inp, features)
+            self.estimator_metadata[key] = {
+                "class": cls.__name__,
+                "params": params,
+                "features": features,
+            }
+        return self
+
+    def predict(self, df, variant=None):
+        result = {}
+        for key, (pipe, inp, features) in self.fitted_models.items():
+            x = (
+                inp.compose_text(df)
+                if inp.type in {"text", "text_template"}
+                else df[features]
+            )
+            raw_pred = pipe.predict(x)
+            if key in self.label_encoders:
+                pred_labels = np.asarray(raw_pred).ravel()
+                try:
+                    result[key] = self.label_encoders[key].inverse_transform(pred_labels.astype(int))
+                except Exception:
+                    result[key] = pred_labels
+                if hasattr(pipe, "predict_proba"):
+                    result[f"proba_{key}"] = pipe.predict_proba(x)
+                    result[f"classes_{key}"] = list(self.label_encoders[key].classes_)
+            else:
+                result[key] = np.asarray(raw_pred).ravel()
+                if hasattr(pipe, "predict_proba"):
+                    result[f"proba_{key}"] = pipe.predict_proba(x)
+                    clf = pipe.named_steps.get("clf")
+                    if hasattr(clf, "classes_"):
+                        result[f"classes_{key}"] = list(clf.classes_)
+        return result
+
+    def num_parameters(self):
+        total = 0
+        for key, (pipe, _, _) in self.fitted_models.items():
+            clf = pipe.named_steps["clf"]
+            n_trees = getattr(clf, "n_estimators", 100)
+            max_depth = getattr(clf, "max_depth", None) or 10
+            total += int(n_trees * (2 ** int(min(max_depth, 16))))
+        return max(total, 1)
+
+
 class DummyBaselineModel:
     """Fast, zero-overhead dummy estimator for testing, debugging, and rapid orchestration prototyping."""
 
@@ -998,6 +1149,8 @@ def create_model(task_spec, model_name="baseline", **kwargs):
         return XGBoostModel(task_spec, model_name, **kwargs)
     if name_clean in CatBoostModel.NAMES:
         return CatBoostModel(task_spec, model_name, **kwargs)
+    if name_clean in RandomForestModel.NAMES:
+        return RandomForestModel(task_spec, model_name, **kwargs)
     if name_clean in DecomposedMappingEquityModel.NAMES:
         return DecomposedMappingEquityModel(task_spec, model_name, **kwargs)
     raise ValueError(
