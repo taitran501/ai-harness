@@ -20,6 +20,11 @@ from .endgame_submission import (
     MicroDoseProbeGenerator,
 )
 from .templates.kaggle_template import KaggleKernelManager, KaggleKernelManager as kaggle_manager
+from .models import (
+    RobustTabularTransformer,
+    NativeCategoricalTransformer,
+    RandomForestModel,
+)
 from .io_utils import (
     atomic_write_json,
     atomic_write_text,
@@ -51,6 +56,9 @@ __all__ = [
     "ThresholdOptimizer",
     "QuantileMatcher",
     "MicroDoseProbeGenerator",
+    "RobustTabularTransformer",
+    "NativeCategoricalTransformer",
+    "RandomForestModel",
     "atomic_write_json",
     "atomic_write_text",
     "json_default_serializer",

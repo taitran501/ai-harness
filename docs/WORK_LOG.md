@@ -146,4 +146,17 @@ history from guesses.
 - Lesson: Providing flexible invocation signatures on persistence classes and portable fallback resolution on file paths ensures experiments transfer seamlessly across cloud and local runner boundaries.
 - Next action: Create feature branch `feat/rf-and-portability`, push, open PR, and squash-merge into `main`.
 
+## 2026-10-15 — Agent Usability Phase 7: Non-NLP Modalities (Tabular Robustness, Time-Series CV, Media Path Resolution)
+
+- Request: Expand support for non-NLP problem modalities (Tabular, Time-Series / Sequential, Computer Vision, Audio, Multimodal) and address real-world failure patterns encountered by autonomous coding agents.
+- Completed:
+  - **RobustTabularTransformer**: Implemented `RobustTabularTransformer` in `harness/models.py` (and exported in `harness/__init__.py`), which median-imputes missing numeric features and ordinally encodes categorical strings with missing/unseen values safely mapped to `-1.0`. Defaulted `RandomForestModel` to `RobustTabularTransformer`, permanently fixing `ValueError: could not convert string to float` when fitting tabular datasets with mixed string and numeric columns.
+  - **Native TimeSeriesSplit Cross-Validation**: Added `TIME_SERIES = "time_series"` and `TEMPORAL = "temporal"` to `SplitMode` in `harness/data_strategy.py`, along with parsing for aliases (`time_series`, `time_series_split`, `timeseries`, `temporal`). Added `strategy: "time_series"` branch in `UniversalRunner._resolve_validation_splits` (`harness/runner.py`), enabling leakage-free temporal forward validation splits for financial, forecasting, and sequential tabular problems.
+  - **Runner Model Family Auto-Detection**: Added `random_forest` / `rf` detection to `UniversalRunner` so that `metrics.json` records `"model_family": "random_forest"`.
+  - **Media & File Path Resolution**: Added `InputVariantSpec.resolve_media_paths(df, project_root, column, extensions)` in `harness/task_spec.py` with `media_dir` configuration support. Proactively resolves relative filenames in image/audio CSVs across `project_root`, `dataset/`, `images/`, `audio/`, and `/kaggle/input/` subdirectories with extension completion (`.jpg`, `.png`, etc.), ensuring CV and Audio pipelines resolve files seamlessly in local, Docker, and Kaggle environments.
+- Evidence: Full test suite passes 100% (440/440 tests) in 106.103s (`python -m unittest discover -s tests -p "test_*.py"`). Verified with 5 dedicated test cases in `tests/test_agent_usability_p7.py`.
+- Lesson: For non-GBDT tabular estimators, tree-safe numeric encoding with `-1.0` unseen-category sentinel values prevents catastrophic string conversion failures while preserving tree partition boundaries; time-series cross-validation requires expanding-window splits where validation samples strictly succeed training partitions.
+- Next action: Commit, push to `feat/non-nlp-modalities`, create PR #33, and squash-merge into `main`.
+
+
 

@@ -21,6 +21,7 @@ from sklearn.model_selection import (
     KFold,
     StratifiedGroupKFold,
     StratifiedKFold,
+    TimeSeriesSplit,
 )
 
 
@@ -32,6 +33,8 @@ class SplitMode(str, Enum):
     KFOLD = "kfold"
     HOLDOUT_TEST = "holdout_test"
     ZERO_SHOT_DOMAIN = "zero_shot_domain"
+    TIME_SERIES = "time_series"
+    TEMPORAL = "temporal"
 
 
 class DataLeakageError(RuntimeError):
@@ -106,7 +109,16 @@ class DataStrategyEngine:
         seed: int = 42,
     ) -> List[Tuple[np.ndarray, np.ndarray]]:
         """Generate (train_indices, val_indices) pairs for the given strategy."""
-        mode_val = SplitMode(mode) if isinstance(mode, str) else mode
+        if isinstance(mode, str):
+            clean_mode = mode.lower().replace("-", "_").strip()
+            if clean_mode in ("timeseries", "timeseries_split", "time_series", "time_series_split"):
+                mode_val = SplitMode.TIME_SERIES
+            elif clean_mode == "temporal":
+                mode_val = SplitMode.TEMPORAL
+            else:
+                mode_val = SplitMode(mode)
+        else:
+            mode_val = mode
         n_samples = len(df)
         indices = np.arange(n_samples)
 
@@ -131,6 +143,10 @@ class DataStrategyEngine:
         elif mode_val == SplitMode.KFOLD:
             kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed)
             return list(kf.split(df))
+
+        elif mode_val in (SplitMode.TIME_SERIES, SplitMode.TEMPORAL):
+            tss = TimeSeriesSplit(n_splits=n_splits)
+            return list(tss.split(df))
 
         elif mode_val == SplitMode.HOLDOUT_TEST:
             # Create a single train / holdout test split respecting group_col if present
