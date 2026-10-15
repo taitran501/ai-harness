@@ -86,6 +86,7 @@ class TypedActionName(str, Enum):
     FREEZE_CANDIDATE = "freeze_candidate"
     EMERGENCY_UNFREEZE = "emergency_unfreeze"
     FINALIZE_COMPETITION = "finalize_competition"
+    GET_NEXT_EXPERIMENT_ID = "get_next_experiment_id"
 
 
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
@@ -103,6 +104,7 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.INSPECT_EXPERIMENT.value: ApprovalTier.AUTO.value,
     TypedActionName.INSPECT_DIAGNOSTICS.value: ApprovalTier.AUTO.value,
     TypedActionName.CREATE_EXPERIMENT.value: ApprovalTier.AUTO.value,
+    TypedActionName.GET_NEXT_EXPERIMENT_ID.value: ApprovalTier.AUTO.value,
     TypedActionName.RUN_EDA.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_PHASE_OUTPUT.value: ApprovalTier.AUTO.value,
     TypedActionName.INSPECT_CLOUD_JOB.value: ApprovalTier.AUTO.value,
@@ -594,6 +596,50 @@ class AgentBridge:
             except Exception:
                 pass
         return out
+
+    def get_next_experiment_num(self) -> int:
+        """Scan configs, tree journal, and immutable artifact directories to return next available experiment integer."""
+        existing_nums: List[int] = []
+        configs_dir = self.project_root / "configs"
+        if configs_dir.exists():
+            for p in configs_dir.glob("exp*.yaml"):
+                try:
+                    num = int(p.stem.split("_")[0].replace("exp", ""))
+                    existing_nums.append(num)
+                except Exception:
+                    pass
+
+        # Scan artifact directories (.ai-harness and legacy .ml-harness)
+        for hidden in [".ai-harness", ".ml-harness"]:
+            art_root = self.project_root / hidden / "artifacts"
+            if art_root.exists():
+                for cand_dir in art_root.iterdir():
+                    if cand_dir.is_dir():
+                        for exp_folder in cand_dir.iterdir():
+                            if exp_folder.is_dir() and exp_folder.name.startswith("exp"):
+                                try:
+                                    num = int(exp_folder.name.split("_")[0].replace("exp", ""))
+                                    existing_nums.append(num)
+                                except Exception:
+                                    pass
+
+        # Scan tree journal
+        try:
+            journal = self._load_journal()
+            if hasattr(journal, "nodes") and journal.nodes:
+                for n_id in journal.nodes.keys():
+                    if str(n_id).startswith("exp"):
+                        try:
+                            num = int(str(n_id).split("_")[0].replace("exp", ""))
+                            existing_nums.append(num)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        if not existing_nums:
+            return 1
+        return max(existing_nums) + 1
 
     def _sync_to_dashboard_state(self, session: BridgeSession) -> None:
         """Synchronize live BridgeSession telemetry into competition_state.json for the Dashboard UI."""
@@ -1596,15 +1642,27 @@ class AgentBridge:
 
                 exp_id = params.get("exp_id")
                 if not exp_id:
-                    existing_nums = []
-                    for p in configs_dir.glob("exp*.yaml"):
-                        try:
-                            num = int(p.stem.split("_")[0].replace("exp", ""))
-                            existing_nums.append(num)
-                        except Exception:
-                            pass
-                    next_num = max(existing_nums, default=1) + 1
+                    next_num = self.get_next_experiment_num()
                     exp_id = f"exp{next_num:03d}_{branch}_{descriptor}"
+                else:
+                    # Check if exp_id collides with existing immutable artifacts
+                    for hidden in [".ai-harness", ".ml-harness"]:
+                        art_root = self.project_root / hidden / "artifacts"
+                        if art_root.exists():
+                            for cand_dir in art_root.iterdir():
+                                if cand_dir.is_dir() and (cand_dir / exp_id).exists():
+                                    next_num = self.get_next_experiment_num()
+                                    return ActionObservation(
+                                        step_index=call.step_index,
+                                        action=act,
+                                        status="FAILED",
+                                        summary=(
+                                            f"Experiment artifacts for '{exp_id}' already exist at '{cand_dir / exp_id}'. "
+                                            f"Completed runs are immutable under the Correctness Contract. "
+                                            f"Use next available ID: exp{next_num:03d}_{branch}_{descriptor}"
+                                        ),
+                                        elapsed_seconds=round(time.time() - t0, 3),
+                                    )
 
                 cfg_path = configs_dir / f"{exp_id}.yaml"
                 uncertainty = str(params.get("uncertainty_level", "low")).lower()
@@ -2646,6 +2704,24 @@ class AgentBridge:
                     summary=f"Generated Competition Closure & Reproducibility Report at '{res['report_path']}'.",
                     artifact_path=res["report_path"],
                     data=res,
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+
+            elif act == TypedActionName.GET_NEXT_EXPERIMENT_ID.value:
+                next_num = self.get_next_experiment_num()
+                branch = params.get("branch", "feat")
+                descriptor = params.get("descriptor", "iteration")
+                suggested_id = f"exp{next_num:03d}_{branch}_{descriptor}"
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status="SUCCESS",
+                    summary=f"Next available experiment number is {next_num} (suggested ID: '{suggested_id}').",
+                    data={
+                        "next_num": next_num,
+                        "next_id_prefix": f"exp{next_num:03d}",
+                        "suggested_exp_id": suggested_id,
+                    },
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
 

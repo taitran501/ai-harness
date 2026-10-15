@@ -94,3 +94,18 @@ history from guesses.
 - Evidence: 392/392 tests passed (100%) across the full test suite.
 - Lesson: Windows file paths when manipulated by third-party CLI tools (like Kaggle's flattened upload token files) require proactive defensive length budgeting; custom licenses for Kaggle datasets must conform to Kaggle's recognized license taxonomy (`other`).
 - Next action: Commit and push changes to remote `origin/dev`.
+
+## 2026-10-15 — Agent Usability, Experiment ID Resilience, OOF Serialization & Kaggle Exporter
+
+- Request: analyze multi-agent friction across ~35 historical transcripts and active repositories (`aimo`, `airline_prediction`, `zindi`, `rsna-knee`), identify pain points, and enhance framework usability and resilience for AI coding assistants.
+- Completed:
+  - **CLI Shell Resilience**: Supported flexible JSON/YAML/single-quote parsing in `tools/agent_bridge_cli.py` to prevent PowerShell `ScriptBlock` syntax errors; promoted flat dynamic arguments (`--branch feat --descriptor v1`).
+  - **Experiment ID Allocation & Collision Prevention**: Updated `AgentBridge.create_experiment` and added `AgentBridge.get_next_experiment_num` and `TypedActionName.GET_NEXT_EXPERIMENT_ID` action. Scans both `configs/` and `.ai-harness/artifacts/<task_id>/` (and legacy `.ml-harness`), guaranteeing auto-increment IDs (`exp002`, `exp003`) and guarding against accidental overwrites.
+  - **OOF & Test Prediction Serialization**: Decomposed multiclass/binary probability predictions into native float columns (`proba_<target>_<class>` and `proba_<target>_1`) alongside legacy JSON strings; exported optional `oof_predictions.parquet` for instant vectorized downstream blending/stacking.
+  - **Kaggle Private Dataset Resilience**: Defaulted `data_config.license` to `"CC0-1.0"` with notice log instead of failing with hard `RuntimeError`.
+  - **Standalone Kaggle Notebook Exporter**: Implemented `harness/kaggle_notebook_builder.py` and CLI subcommand `ai-harness export-kaggle-notebook` to automatically bundle offline wheels installer, model weights loading, and submission validation into a standalone `.ipynb`.
+  - **Compatibility Aliases & Documentation**: Added `ml-harness` and `ml-harness-agent` entrypoint aliases in `pyproject.toml`; updated `AGENTS.md` with PowerShell-safe CLI usage guidelines.
+- Evidence: All 419 unit tests passed in 105.345s (`python -m unittest discover -s tests -p "test_*.py"`). Verified flat CLI flags and export commands manually and via `tests/test_agent_usability_p3.py`.
+- Lesson: AI agents working through diverse command-line shells require forgiving input parsers (handling single vs double quotes) and defensive uniqueness checks against runtime artifacts rather than just configuration files.
+- Next action: Open PR into `main` via `gh pr create`.
+

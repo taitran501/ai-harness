@@ -50,13 +50,17 @@ Assistant / Engineer (Layer 1)  ──>  Agent Bridge (Layer 2)  ──>  Harnes
 ai-harness attach --project-root . --task-config configs/task.yaml
 ai-harness-agent --project-root . context
 
-# Start session & run experiments
+# Start session & run experiments (flat CLI flags avoid PowerShell JSON escaping errors)
 ai-harness-agent --project-root . start-session --goal "Improve metric" --max-experiments 3
-ai-harness-agent --project-root . act --action create_experiment --params '{"branch": "feat", "descriptor": "v1"}'
+ai-harness-agent --project-root . act --action create_experiment --branch feat --descriptor v1
+ai-harness-agent --project-root . act --action get_next_experiment_id
 
 # Execute smoke test & full cross-validation
 ai-harness-run --project-root . --config configs/<exp_config>.yaml --debug --fold 0
 ai-harness-run --project-root . --config configs/<exp_config>.yaml
+
+# Export Kaggle Code Competition offline submission notebook
+ai-harness export-kaggle-notebook --exp-dir .ai-harness/artifacts/<task>/<exp_id> --output submission.ipynb
 
 # Web dashboard
 ai-harness-dashboard --project-root .

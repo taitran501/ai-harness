@@ -70,6 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
     cloud_consent.add_argument("--confirm-upload", action="store_true", required=True, help="Explicitly authorize this provider to receive the current task dataset")
     cloud_status = cloud_commands.add_parser("status", help="Show account and task-scoped upload-consent status")
     cloud_status.add_argument("--project-root", default=".", help="Attached task workspace root")
+
+    nb_export = subparsers.add_parser("export-kaggle-notebook", help="Export standalone offline Kaggle submission notebook (.ipynb)")
+    nb_export.add_argument("--exp-dir", required=True, help="Experiment artifact directory")
+    nb_export.add_argument("--output", default="submission_notebook.ipynb", help="Target output .ipynb path")
+    nb_export.add_argument("--id-column", default="id", help="Dataset identifier column name")
+    nb_export.add_argument("--target-column", default="target", help="Dataset prediction target column name")
     return parser
 
 
@@ -183,6 +189,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 2
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
+
+    if args.command == "export-kaggle-notebook":
+        from harness.kaggle_notebook_builder import build_kaggle_submission_notebook
+        try:
+            res = build_kaggle_submission_notebook(
+                exp_dir=args.exp_dir,
+                output_path=args.output,
+                id_column=args.id_column,
+                target_column=args.target_column,
+            )
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+            return 0
+        except Exception as exc:
+            print(f"Export notebook failed: {exc}")
+            return 2
 
     return 2
 
