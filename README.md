@@ -90,6 +90,30 @@ Launch the local web dashboard:
 ai-harness-dashboard
 ```
 
+### Diagnose before you dispatch (recommended first step for agents)
+
+Run one command to get install + workspace + cloud health as JSON:
+
+```bash
+ai-harness status              # JSON (default)
+ai-harness status --markdown   # human-readable summary
+ai-harness status --no-cloud   # skip cloud checks (offline-friendly)
+```
+
+If a Kaggle kernel fails, inspect its state **without re-dispatching** (no new push, no quota burned):
+
+```bash
+ai-harness kaggle status <owner/kernel-slug>   # current state
+ai-harness kaggle log    <owner/kernel-slug>   # failure traceback/stderr
+ai-harness kaggle output <owner/kernel-slug>   # list output files
+```
+
+Preview a cloud dispatch without pushing anything:
+
+```bash
+ai-harness-run --config configs/exp001.yaml --backend kaggle --dry-run
+```
+
 ## Features
 
 | Component | Description |

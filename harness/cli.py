@@ -26,6 +26,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("plugins", help="List installed task plugins")
 
+    status = subparsers.add_parser("status", help="Single-command install + workspace health report (default JSON)")
+    status.add_argument("--project-root", default=None, help="Task workspace root (default: current dir / HARNESS_PROJECT_ROOT)")
+    status.add_argument("--markdown", action="store_true", help="Print short human-readable summary instead of JSON")
+    status.add_argument("--no-cloud", action="store_true", help="Skip cloud/provider checks (faster, offline-friendly)")
+
+    kaggle = subparsers.add_parser("kaggle", help="Inspect Kaggle kernel state (status/log/output) without re-dispatching")
+    kaggle.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|log|output + flags")
+
     phase = subparsers.add_parser("phase", help="Manage the workspace-owned 8-phase prompt workflow")
     phase_commands = phase.add_subparsers(dest="phase_command", required=True)
     phase_init = phase_commands.add_parser("init", help="Create editable starter prompts under prompts/ai-harness")
@@ -89,6 +97,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "plugins":
         print(json.dumps(list_task_plugins(), indent=2, ensure_ascii=False))
         return 0
+
+    if args.command == "status":
+        from harness.status_report import collect_status, render_markdown
+
+        status = collect_status(project_root=args.project_root, include_cloud=not args.no_cloud)
+        if args.markdown:
+            print(render_markdown(status))
+        else:
+            print(json.dumps(status, indent=2, ensure_ascii=False))
+        ok = bool(status.get("install", {}).get("found")) and bool(status.get("project", {}).get("attached"))
+        return 0 if ok else 2
+
+    if args.command == "kaggle":
+        from harness.kaggle_inspect import main as kaggle_main
+        return kaggle_main(list(args.args))
 
     if args.command == "phase":
         root = Path(args.project_root or ".").expanduser().resolve()
