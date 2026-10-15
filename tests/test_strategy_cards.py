@@ -10,8 +10,9 @@ from tools.dashboard_server import DEFAULT_STRATEGY_CARDS, DashboardHandler, get
 class TestStrategyCardsAndSpawner(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.port = 8789
+        cls.port = 0  # dynamic: avoid fixed-port conflicts (e.g. under pytest-xdist)
         cls.server = socketserver.TCPServer(("127.0.0.1", cls.port), DashboardHandler)
+        cls.port = cls.server.server_address[1]
         cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.server_thread.start()
         time.sleep(0.2)
