@@ -233,7 +233,11 @@ class ResearchContinuity(unittest.TestCase):
                       "target": [0, 1] * 6, "fold": [0] * 6 + [1] * 6}).to_csv(
                           self.root / "dataset/train.csv", index=False)
         bridge = AgentBridge(self.root)
-        _, obs = bridge.execute_action("create_experiment", params={"exp_id": "nlp"})
+        _, obs = bridge.execute_action("create_experiment", params={"exp_id": "nlp",
+            "source_type": "verified_baseline",
+            "source_id": "sklearn_tfidf_logreg_canonical",
+            "retrieval_summary": "Canonical baseline for the NLP classification task; anchors downstream iteration.",
+            "verified_via": "local_registry"})
         self.assertEqual(obs.status, "SUCCESS")
         cfg = yaml.safe_load((self.root / "configs/nlp.yaml").read_text())
         args = SimpleNamespace(project_root=str(self.root), task_config=str(self.root / "configs/task.yaml"),

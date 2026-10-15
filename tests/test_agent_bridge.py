@@ -37,6 +37,11 @@ class TestAgentBridge(unittest.TestCase):
         self.assertIn("Typed Bridge Actions", md)
 
     def test_create_experiment_passes_grounding_gate(self) -> None:
+        # B1-a regression: an agent that *declares* a verified grounding source
+        # (real source_id + verified_via) creates a config that passes the gate
+        # and is runnable. The anti-hallucination guarantee is that a *missing*
+        # grounding is flagged UNVERIFIED (see test below) and the runner refuses
+        # it, so this path must actually verify the source.
         sess = self.bridge.start_session(goal="Test GroundingGate schema compliance")
         sess, obs = self.bridge.execute_action(
             action=TypedActionName.CREATE_EXPERIMENT.value,
@@ -45,10 +50,15 @@ class TestAgentBridge(unittest.TestCase):
                 "parent_id": "baseline_v1_comment",
                 "branch": "feat",
                 "descriptor": "bridge_test",
+                "source_type": "verified_baseline",
+                "source_id": "sklearn_tfidf_logreg_canonical",
+                "retrieval_summary": "Canonical TFIDF/logreg baseline; parent diagnostics show rare-slice underfitting.",
+                "verified_via": "local_registry",
             },
             session_id=sess.session_id,
         )
         self.assertEqual(obs.status, "SUCCESS")
+        self.assertEqual(obs.data["grounding_status"], "PASSED")
         cfg_file = self.project_root / "configs" / "exp999_feat_bridge_test.yaml"
         self.assertTrue(cfg_file.exists())
 
@@ -58,6 +68,36 @@ class TestAgentBridge(unittest.TestCase):
                 cfg_data, raise_on_error=False
             )
             self.assertTrue(passed, f"GroundingGate failed with errors: {errors}")
+        finally:
+            if cfg_file.exists():
+                cfg_file.unlink()
+
+    def test_create_experiment_unverified_grounding_flagged(self) -> None:
+        # B1-a anti-hallucination regression: an agent that omits grounding must
+        # NOT get a fabricated 'verified_via'. The config is still written (workflow
+        # intact) but is flagged UNVERIFIED so the runner refuses to train it.
+        sess = self.bridge.start_session(goal="Test unverified grounding is flagged")
+        sess, obs = self.bridge.execute_action(
+            action=TypedActionName.CREATE_EXPERIMENT.value,
+            params={
+                "exp_id": "exp997_unverified_grounding",
+                "parent_id": "baseline_v1_comment",
+                "branch": "feat",
+                "descriptor": "no_source",
+            },
+            session_id=sess.session_id,
+        )
+        self.assertEqual(obs.status, "SUCCESS")
+        self.assertEqual(obs.data["grounding_status"], "UNVERIFIED")
+        self.assertEqual(obs.data["grounding_verification"], "unverified_placeholder")
+        self.assertTrue(obs.data["grounding_errors"])
+        cfg_file = self.project_root / "configs" / "exp997_unverified_grounding.yaml"
+        try:
+            cfg_data = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+            self.assertEqual(cfg_data["grounding"]["verified_via"], "not_verified")
+            # The grounding gate must reject this non-baseline proposal.
+            passed, errors, _ = GroundingGate.verify_config(cfg_data, raise_on_error=False)
+            self.assertFalse(passed)
         finally:
             if cfg_file.exists():
                 cfg_file.unlink()
