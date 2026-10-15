@@ -1357,6 +1357,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not write the project leaderboard",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="(cloud backends only) Build and print the dispatch plan without pushing or consuming cloud quota",
+    )
     return parser
 
 
@@ -1400,6 +1405,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             config_path=str(config_path),
             project_root=project.root,
             force_import=getattr(args, "force_import", False),
+            dry_run=getattr(args, "dry_run", False),
         )
         return 0
 

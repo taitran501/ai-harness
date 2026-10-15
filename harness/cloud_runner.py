@@ -235,6 +235,45 @@ def run_via_modal(
     return result
 
 
+def _kaggle_dry_run_plan(
+    context: Dict[str, Any],
+    project,
+    exp_id: str,
+    dataset_slug: Optional[str],
+    stage_dir: Path,
+    runtime: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Summarize what a Kaggle dispatch would push, without contacting the cloud."""
+    metadata_path = stage_dir / "kernel-metadata.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception:
+        metadata = {}
+    bundle_files = []
+    for sub in ("code", "configs", "src"):
+        d = stage_dir / sub
+        if d.is_dir():
+            bundle_files.extend(sorted(str(p.relative_to(stage_dir)).replace("\\", "/") for p in d.rglob("*") if p.is_file()))
+    return {
+        "exp_id": exp_id,
+        "task_id": context.get("task_id"),
+        "dataset_slug": dataset_slug,
+        "config_rel": context.get("config_rel"),
+        "config_sha256": context.get("config_sha256"),
+        "runtime": runtime,
+        "enable_internet": bool((context.get("task", {}).get("runtime") or {}).get("enable_internet", False)),
+        "bundle_mode": (context.get("task", {}).get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
+        "kernel_metadata": metadata,
+        "bundle_files": bundle_files[:50],
+        "stage_dir": str(stage_dir),
+        "would_run": [
+            "kaggle kernels push -p <stage_dir>",
+            "kaggle kernels status <slug> (poll until terminal)",
+            "kaggle kernels output <slug> (identity-checked import)",
+        ],
+    }
+
+
 def run_via_kaggle(
     config_path: str,
     auto_submit: bool = False,
@@ -245,8 +284,14 @@ def run_via_kaggle(
     poll_interval: float = 10.0,
     timeout_seconds: float = 24 * 60 * 60,
     force_import: bool = False,
+    dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Push, poll through a terminal Kaggle state, pull identity-checked artifacts, and sync the journal."""
+    """Push, poll through a terminal Kaggle state, pull identity-checked artifacts, and sync the journal.
+
+    With dry_run=True, build the full dispatch plan (pre-flight, dataset slug,
+    bundle contents, dependency plan, kernel metadata) and return it without
+    pushing anything to Kaggle or consuming cloud quota.
+    """
     print(f"===========================================================")
     print(f"🚀 KAGGLE KERNELS API DISPATCH: {config_path}")
     print(f"===========================================================")
@@ -296,6 +341,11 @@ def run_via_kaggle(
     )
 
     print("Preparing private Kaggle code bundle input...")
+    if dry_run:
+        plan = _kaggle_dry_run_plan(context, project, exp_id, dataset_slug, stage_dir, runtime)
+        print(json.dumps(plan, indent=2, ensure_ascii=False))
+        print("\n\u2705 --dry-run: dispatch plan built. Nothing was pushed to Kaggle; no cloud quota consumed.")
+        return {"dry_run": True, "plan": plan}
     KaggleKernelManager.push_code_bundle(stage_dir)
 
     # 3. Push to Kaggle
