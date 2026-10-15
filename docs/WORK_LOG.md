@@ -6,6 +6,59 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-07-23 — Anti-Bypass Agent-Integration Hardening (Submission Guards) (PR #37)
+
+**Task:** Follow-up to the anti-bypass audit. The agent drives submission through
+the `prepare_submission` bridge action; the standalone audit gate CLI
+(`tools/audit_gate.py`) is *not* on that path, so its three deterministic checks
+were being skipped entirely. Added the same guards to the bridge path so an
+agent cannot ship a non-improvement.
+
+**Findings**
+
+- `prepare_submission` ran only a *provenance* check (`validate_test_prediction`
+  — SHA-256 matches the run manifest, OOF ≠ test). It did **not** run the audit
+  gate's improvement checks, so an agent could:
+  1. jitter a model's predictions on ≥ `min_diff_pct` of rows → pass a naive diff,
+  2. skip the significance test (it is only run when `--ground-truth` is passed),
+  3. re-submit the same bytes (no duplicate-submission dedup on the bridge path).
+
+**Fix**
+
+- `harness/agent_bridge.py`
+  - New `_guard_submission(cand_path, exp_id, sub_mgr)` runs before
+    `register_plugin_submission` and enforces three deterministic checks:
+    1. **Duplicate-submission dedup** — the candidate file's SHA-256 must not
+       match any already-registered submission (content-based, not path-based).
+    2. **MMES** — the candidate OOF must differ from the baseline anchor's OOF on
+       ≥ `min_diff_pct` of rows (or `min_diff` rows); a below-floor change is
+       rejected as seed noise / trivial tweak.
+    3. **Significance** — when `evaluation_truth.csv` is available, a paired
+       error test (regression) or McNemar's test (classification) must reach
+       p < 0.05 **and** the candidate must be the better side (a significant
+       *worse* result is also rejected).
+  - `prepare_submission` returns the guard evidence in the observation `data`
+    (`submission_guards`), so the agent/human can inspect each check's result.
+- `tests/test_submission_guards.py` — new regression tests: dedup blocks
+  identical bytes, MMES blocks below-floor and passes above-floor, significance
+  rejects a significant-worse candidate and accepts a significant-better one.
+
+**Validation**
+
+- `python -m pytest tests/ -q` → 454/454 pass. No pre-existing test relied on the
+  old no-guard submission path; the existing `prepare_submission` tests use a
+  baseline exp with no baseline OOF, so MMES/significance skip cleanly.
+
+**Notes**
+
+- The significance direction check was added after the first implementation
+  returned `PASS` for a candidate that was significantly *worse* than the
+  baseline (McNemar p ≈ 0 but all discordant pairs favored the baseline).
+- MMES and significance are skipped (not failed) when the baseline OOF or ground
+  truth is absent, so the guard does not block a legitimate first submission.
+
+### 2026-07-23 — Anti-Bypass Agent-Integration Hardening (Grounding, Duplicate Candidates, Stagnation) (PR #36)
+
 Each entry records: request/observation, completed work, evidence, lesson,
 remaining uncertainty, and next action. Record failures and abandoned directions
 when they affect the next decision. Keep notes concise; do not copy transcripts,
