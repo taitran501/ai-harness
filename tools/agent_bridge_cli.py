@@ -40,6 +40,24 @@ from harness.agent_bridge import AgentBridge
 from harness.project import HarnessProject
 
 
+def _json_serial(obj: Any) -> Any:
+    """Safe fallback serializer for datetime, Path, dataclass, numpy, and custom objects."""
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if isinstance(obj, Path):
+        return str(obj)
+    if hasattr(obj, "tolist"):
+        return obj.tolist()
+    if hasattr(obj, "item"):
+        try:
+            return obj.item()
+        except Exception:
+            pass
+    if hasattr(obj, "__dict__"):
+        return obj.__dict__
+    return str(obj)
+
+
 def _coerce_value(val: str) -> Any:
     """Coerce string into int, float, bool, or json dict/list if applicable."""
     val_lower = val.lower()
@@ -208,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "context":
         if args.format == "json":
             pkt = bridge.get_context_packet(session_id=args.session_id)
-            print(json.dumps(pkt, indent=2, ensure_ascii=False))
+            print(json.dumps(pkt, indent=2, ensure_ascii=False, default=_json_serial))
         else:
             print(bridge.render_context_markdown(session_id=args.session_id))
 
@@ -220,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
             "max_consecutive_rejections": args.max_consecutive_rejections,
         }
         sess = bridge.start_session(goal=args.goal, budget=budget, session_id=args.session_id)
-        print(json.dumps(asdict(sess), indent=2, ensure_ascii=False))
+        print(json.dumps(asdict(sess), indent=2, ensure_ascii=False, default=_json_serial))
 
     elif args.command == "act":
         raw = args.params
@@ -253,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
             "consecutive_rejections": sess.consecutive_rejections,
             "observation": asdict(obs),
         }
-        print(json.dumps(output, indent=2, ensure_ascii=False))
+        print(json.dumps(output, indent=2, ensure_ascii=False, default=_json_serial))
 
     elif args.command == "approve":
         sess, obs = bridge.approve_pending_action(args.session_id)
@@ -262,18 +280,18 @@ def main(argv: list[str] | None = None) -> int:
             "session_status": sess.status,
             "observation": asdict(obs) if obs else None,
         }
-        print(json.dumps(output, indent=2, ensure_ascii=False))
+        print(json.dumps(output, indent=2, ensure_ascii=False, default=_json_serial))
 
     elif args.command == "status":
         if args.session_id:
             sess = bridge.load_session(args.session_id)
-            print(json.dumps(asdict(sess), indent=2, ensure_ascii=False))
+            print(json.dumps(asdict(sess), indent=2, ensure_ascii=False, default=_json_serial))
         else:
             sessions = bridge.list_sessions(limit=1)
             if not sessions:
                 print("No BridgeSessions recorded yet.")
             else:
-                print(json.dumps(sessions[0], indent=2, ensure_ascii=False))
+                print(json.dumps(sessions[0], indent=2, ensure_ascii=False, default=_json_serial))
 
     elif args.command == "list":
         sessions = bridge.list_sessions()

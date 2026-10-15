@@ -46,12 +46,67 @@ def resolve_project_root(root: Optional[Path | str] = None) -> Path:
 class HarnessProject:
     """Resolved task workspace settings shared by the CLI, runner, and agents."""
 
-    root: Path
-    manifest_path: Path
-    task_config_path: Path
-    plugin_id: Optional[str]
-    artifacts_dir: Path
-    manifest: Dict[str, Any]
+    root: Path = Path(".")
+    manifest_path: Optional[Path] = None
+    task_config_path: Optional[Path] = None
+    plugin_id: Optional[str] = None
+    artifacts_dir: Optional[Path] = None
+    manifest: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self) -> None:
+        project_root = resolve_project_root(self.root)
+        object.__setattr__(self, "root", project_root)
+
+        if self.manifest_path is None or self.manifest is None:
+            m_path = self.manifest_path
+            if m_path is None:
+                m_path = project_root / MANIFEST_RELATIVE_PATH
+                if not m_path.is_file() and (project_root / LEGACY_MANIFEST_RELATIVE_PATH).is_file():
+                    m_path = project_root / LEGACY_MANIFEST_RELATIVE_PATH
+            m_data = self.manifest if self.manifest is not None else _read_yaml(m_path)
+            object.__setattr__(self, "manifest_path", m_path)
+            object.__setattr__(self, "manifest", m_data)
+
+        if self.task_config_path is None:
+            config_val = (self.manifest or {}).get("task_config") or str(DEFAULT_TASK_CONFIG)
+            cfg_path = Path(config_val).expanduser()
+            if not cfg_path.is_absolute():
+                cfg_path = (project_root / cfg_path).resolve()
+            object.__setattr__(self, "task_config_path", cfg_path)
+        else:
+            cfg_path = Path(self.task_config_path).expanduser()
+            if not cfg_path.is_absolute():
+                cfg_path = (project_root / cfg_path).resolve()
+            object.__setattr__(self, "task_config_path", cfg_path)
+
+        if self.plugin_id is None:
+            task_document = _read_yaml(self.task_config_path) if self.task_config_path.is_file() else {}
+            task = task_document.get("task", task_document)
+            configured_plugin = (
+                (self.manifest or {}).get("plugin_id")
+                or task.get("plugin_id")
+                or task.get("plugin")
+            )
+            if isinstance(configured_plugin, dict):
+                configured_plugin = configured_plugin.get("id") or configured_plugin.get("name")
+            object.__setattr__(
+                self, "plugin_id", str(configured_plugin) if configured_plugin else None
+            )
+
+        if self.artifacts_dir is None:
+            default_artifacts = ".ai-harness/artifacts"
+            artifacts_value = (self.manifest or {}).get(
+                "artifacts_dir", default_artifacts if self.manifest else "artifacts"
+            )
+            art_dir = Path(artifacts_value).expanduser()
+            if not art_dir.is_absolute():
+                art_dir = (project_root / art_dir).resolve()
+            object.__setattr__(self, "artifacts_dir", art_dir)
+        else:
+            art_dir = Path(self.artifacts_dir).expanduser()
+            if not art_dir.is_absolute():
+                art_dir = (project_root / art_dir).resolve()
+            object.__setattr__(self, "artifacts_dir", art_dir)
 
     @classmethod
     def discover(

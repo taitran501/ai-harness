@@ -246,39 +246,7 @@ class UniversalRunner:
         (self.exp_dir / "run_config.yaml").write_text(
             yaml.safe_dump(self.cfg, sort_keys=False), encoding="utf-8"
         )
-        frame = self.task_plugin.load_training_data(self.plugin_context)
-        if isinstance(frame, tuple):
-            frame = frame[0]
-        if frame is None:
-            frame = self.task_spec.load_dataset_split(
-                "train", project_root=self.project_root
-            )
-        self.task_plugin.validate_training_data(self.plugin_context, frame)
-        id_col = self.task_spec.id_column
-        if (
-            id_col not in frame
-            or frame[id_col].isna().any()
-            or frame[id_col].duplicated().any()
-        ):
-            raise ValueError("Training requires declared unique, non-null IDs")
-        group = self.task_spec.group_column
-        if group and (group not in frame or frame[group].isna().any()):
-            raise ValueError("Declared group column must exist and contain no nulls")
-        split_value = (
-            self.cfg.get("paths", {}).get("split_path")
-            or self.task_spec.validation.split_file
-            or self.task_spec.data_config.get("split_path")
-        )
-        if split_value and "fold" not in frame:
-            path = self.project_root / split_value
-            splits = pd.read_csv(path, sep="\t" if path.suffix == ".tsv" else ",")
-            if id_col not in splits or "fold" not in splits:
-                raise ValueError("Split file requires ID and fold")
-            frame = frame.merge(
-                splits[[id_col, "fold"]], on=id_col, how="left", validate="one_to_one"
-            )
-            if frame["fold"].isna().any():
-                raise ValueError("Split file does not cover training IDs")
+        frame = self._load_training_data()
         approach = self.cfg.get("experiment", {}).get("approach", "ml_classical")
         execution_mode = self.cfg.get("execution", {}).get("mode") or ("script" if approach in {"script", "custom_script"} else "built_in")
         if execution_mode != "script" and approach not in {"ml_classical", "ml", "dl", "llm_peft", "llm_prompt"}:
@@ -303,6 +271,91 @@ class UniversalRunner:
             if approach == "llm_prompt"
             else self._run_model_training(frame, strategy, git_hash)
         )
+
+    def _load_training_data(self) -> pd.DataFrame:
+        frame = self.task_plugin.load_training_data(self.plugin_context)
+        if isinstance(frame, tuple):
+            frame = frame[0]
+        if frame is None:
+            train_path_override = self.cfg.get("paths", {}).get("train_path")
+            if train_path_override:
+                from harness.task_spec import load_dataframe_file
+
+                p = Path(train_path_override)
+                if not p.is_absolute():
+                    p = self.project_root / p
+                if p.is_file():
+                    frame = load_dataframe_file(p)
+            if frame is None:
+                frame = self.task_spec.load_dataset_split(
+                    "train", project_root=self.project_root
+                )
+        self.task_plugin.validate_training_data(self.plugin_context, frame)
+        id_col = self.task_spec.id_column
+        if (
+            id_col not in frame
+            or frame[id_col].isna().any()
+            or frame[id_col].duplicated().any()
+        ):
+            raise ValueError("Training requires declared unique, non-null IDs")
+        group = self.task_spec.group_column
+        if group and (group not in frame or frame[group].isna().any()):
+            raise ValueError("Declared group column must exist and contain no nulls")
+        split_value = (
+            self.cfg.get("paths", {}).get("split_path")
+            or self.task_spec.validation.split_file
+            or self.task_spec.data_config.get("split_path")
+        )
+        if split_value and "fold" not in frame:
+            path = self.project_root / split_value
+            if not path.is_file():
+                raise FileNotFoundError(f"Split file does not exist: {path}")
+            splits = pd.read_csv(path, sep="\t" if path.suffix == ".tsv" else ",")
+            fold_aliases = ["fold", "kfold", "split", "fold_id", "cv_fold", "Fold", "Split"]
+            actual_fold_col = None
+            for alias in fold_aliases:
+                if alias in splits.columns:
+                    actual_fold_col = alias
+                    break
+
+            actual_id_col = None
+            if id_col in splits.columns:
+                actual_id_col = id_col
+            else:
+                for col in splits.columns:
+                    if str(col).strip().lower() == str(id_col).strip().lower():
+                        actual_id_col = col
+                        break
+
+            if not actual_id_col or not actual_fold_col:
+                missing = []
+                if not actual_id_col:
+                    missing.append(f"id column '{id_col}'")
+                if not actual_fold_col:
+                    missing.append(f"fold column (checked aliases: {fold_aliases})")
+                raise ValueError(
+                    f"Split file '{path.name}' is missing required columns: {', '.join(missing)}. "
+                    f"Found columns: {list(splits.columns)}"
+                )
+
+            split_df = splits[[actual_id_col, actual_fold_col]].copy()
+            if actual_id_col != id_col:
+                split_df = split_df.rename(columns={actual_id_col: id_col})
+            if actual_fold_col != "fold":
+                split_df = split_df.rename(columns={actual_fold_col: "fold"})
+
+            frame = frame.merge(
+                split_df[[id_col, "fold"]], on=id_col, how="left", validate="one_to_one"
+            )
+            if frame["fold"].isna().any():
+                missing_mask = frame["fold"].isna()
+                missing_cnt = int(missing_mask.sum())
+                sample_missing = frame.loc[missing_mask, id_col].head(5).tolist()
+                raise ValueError(
+                    f"Split file does not cover {missing_cnt}/{len(frame)} training IDs. "
+                    f"Sample uncovered IDs: {sample_missing}"
+                )
+        return frame
 
     def _resolve_validation_splits(self, df, strategy):
         config = {

@@ -35,6 +35,7 @@ artifacts/agent_runs/
 artifacts/agent_sessions/
 artifacts/cand_*/
 artifacts/base/
+catboost_info/
 
 # Local task state does not belong to the installable runtime distribution
 /.agents/

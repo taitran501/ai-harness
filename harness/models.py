@@ -27,7 +27,34 @@ try:
     HAS_XGBOOST = True
 except (ImportError, Exception):
     XGBClassifier = XGBRegressor = None
-    HAS_XGBOOST = False
+try:
+    import catboost as cb
+    from catboost import CatBoostClassifier, CatBoostRegressor
+    HAS_CATBOOST = True
+except (ImportError, Exception):
+    CatBoostClassifier = CatBoostRegressor = None
+    HAS_CATBOOST = False
+
+
+def validate_model_features(features: list, df: pd.DataFrame, forbidden: set, variant: str) -> None:
+    """Validate that declared source_columns exist in the DataFrame and contain no forbidden metadata."""
+    if not features:
+        raise ValueError(
+            f"Input variant '{variant}' has no declared source_columns. "
+            f"Specify source_columns under data_config / inputs in task.yaml."
+        )
+    missing = [c for c in features if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Declared source_columns for input variant '{variant}' are missing in DataFrame: {missing[:10]} "
+            f"(total {len(missing)} missing). Available columns: {list(df.columns[:10])}..."
+        )
+    overlap = set(features) & forbidden
+    if overlap:
+        raise ValueError(
+            f"Features for input variant '{variant}' contain forbidden columns (targets, IDs, groups, splits): {sorted(overlap)}. "
+            f"Remove these from source_columns in task.yaml."
+        )
 
 
 class NativeCategoricalTransformer(BaseEstimator, TransformerMixin):
@@ -132,14 +159,7 @@ class GenericBaselineModel:
             self.task_spec.validation.split_column,
         }
         features = list(inp.source_columns)
-        if (
-            not features
-            or set(features) & forbidden
-            or not all(c in df for c in features)
-        ):
-            raise ValueError(
-                "Input features must exist and exclude targets, IDs, groups and split metadata"
-            )
+        validate_model_features(features, df, forbidden, variant)
         for key, st in self.task_spec.subtasks.items():
             if st.task_type == "multilabel_classification":
                 raise ValueError(
@@ -292,14 +312,7 @@ class LightGBMModel:
             self.task_spec.validation.split_column,
         }
         features = list(inp.source_columns)
-        if (
-            not features
-            or set(features) & forbidden
-            or not all(c in df for c in features)
-        ):
-            raise ValueError(
-                "Input features must exist and exclude targets, IDs, groups and split metadata"
-            )
+        validate_model_features(features, df, forbidden, variant)
         for key, st in self.task_spec.subtasks.items():
             if st.task_type == "multilabel_classification":
                 raise ValueError(
@@ -429,14 +442,7 @@ class XGBoostModel:
             self.task_spec.validation.split_column,
         }
         features = list(inp.source_columns)
-        if (
-            not features
-            or set(features) & forbidden
-            or not all(c in df for c in features)
-        ):
-            raise ValueError(
-                "Input features must exist and exclude targets, IDs, groups and split metadata"
-            )
+        validate_model_features(features, df, forbidden, variant)
         for key, st in self.task_spec.subtasks.items():
             if st.task_type == "multilabel_classification":
                 raise ValueError(
@@ -524,6 +530,161 @@ class XGBoostModel:
             except Exception:
                 pass
             total += int(n_trees * (2 ** depth))
+        return max(total, 1)
+
+
+class CatBoostModel:
+    """Built-in CatBoost gradient boosting wrapper for classification and regression."""
+
+    NAMES = {
+        "catboost",
+        "cb",
+        "catboost_classifier",
+        "catboost_regressor",
+        "cb_classifier",
+        "cb_regressor",
+    }
+
+    def __init__(self, task_spec, model_name="catboost", **kwargs):
+        if not HAS_CATBOOST:
+            raise ImportError(
+                "CatBoost is not installed. Run `pip install catboost` to use this model family."
+            )
+        clean_name = str(model_name).lower()
+        if clean_name not in self.NAMES:
+            raise ValueError(f"Unsupported CatBoost model name: {model_name}")
+        self.task_spec = task_spec
+        self.model_name = clean_name
+        self.kwargs = kwargs
+        self.fitted_models = {}
+        self.label_encoders = {}
+        self.estimator_metadata = {}
+        self.seed = task_spec.resolve_seed()
+
+    def fit(self, df, variant=None):
+        from sklearn.preprocessing import LabelEncoder
+
+        if variant not in self.task_spec.inputs_dict:
+            raise ValueError("CatBoost requires an explicitly declared input variant")
+        inp = self.task_spec.inputs_dict[variant]
+        targets = {s.column or s.id for s in self.task_spec.subtasks.values()}
+        targets.update(
+            c
+            for s in self.task_spec.subtasks.values()
+            if s.column_prefix
+            for c in df
+            if c.startswith(s.column_prefix)
+        )
+        forbidden = targets | {
+            self.task_spec.id_column,
+            self.task_spec.group_column,
+            "fold",
+            "split",
+            "input_variant",
+            "partition",
+            self.task_spec.data_config.get("partition_column"),
+            self.task_spec.validation.split_column,
+        }
+        features = list(inp.source_columns)
+        validate_model_features(features, df, forbidden, variant)
+
+        for key, st in self.task_spec.subtasks.items():
+            if st.task_type == "multilabel_classification":
+                raise ValueError(
+                    "Built-in multilabel training requires a task model plugin"
+                )
+            col = st.column or key
+            reg = st.task_type in ("regression", "ranking")
+            cls = CatBoostRegressor if reg else CatBoostClassifier
+            valid = inspect.signature(cls).parameters
+            has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in valid.values())
+            model_kwargs = dict(self.kwargs)
+            feat_transform = model_kwargs.pop("feature_transformer", None) or model_kwargs.pop("transform", None)
+            if not has_var_kw and (set(model_kwargs) - set(valid)):
+                raise ValueError(
+                    f"Unsupported estimator parameters: {sorted(set(model_kwargs)-set(valid))}"
+                )
+            params = {
+                "verbose": 0,
+                "random_seed": self.seed,
+                "allow_writing_files": False,
+            }
+            params.update(model_kwargs)
+            estimator = cls(**params)
+
+            if inp.type in {"text", "text_template"}:
+                transform = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
+                x = inp.compose_text(df)
+            elif inp.type in {"tabular", "features", "passthrough", "multimodal", "categorical"}:
+                if feat_transform == "passthrough":
+                    transform = "passthrough"
+                elif feat_transform is not None:
+                    transform = feat_transform
+                else:
+                    transform = NativeCategoricalTransformer()
+                x = df[features]
+            else:
+                transform = StandardScaler()
+                x = df[features]
+
+            y = df[col].values
+            if not reg and st.classes:
+                le = LabelEncoder()
+                le.fit(st.classes)
+                y = le.transform(y)
+                self.label_encoders[key] = le
+
+            pipe = Pipeline([("transform", transform), ("clf", estimator)])
+            pipe.fit(x, y)
+            self.fitted_models[key] = (pipe, inp, features)
+            self.estimator_metadata[key] = {
+                "class": cls.__name__,
+                "params": params,
+                "features": features,
+            }
+        return self
+
+    def predict(self, df, variant=None):
+        result = {}
+        for key, (pipe, inp, features) in self.fitted_models.items():
+            x = (
+                inp.compose_text(df)
+                if inp.type in {"text", "text_template"}
+                else df[features]
+            )
+            raw_pred = pipe.predict(x)
+            if key in self.label_encoders:
+                pred_labels = np.asarray(raw_pred).ravel()
+                try:
+                    result[key] = self.label_encoders[key].inverse_transform(pred_labels.astype(int))
+                except Exception:
+                    result[key] = pred_labels
+                if hasattr(pipe, "predict_proba"):
+                    result[f"proba_{key}"] = pipe.predict_proba(x)
+                    result[f"classes_{key}"] = list(self.label_encoders[key].classes_)
+            else:
+                result[key] = np.asarray(raw_pred).ravel()
+                if hasattr(pipe, "predict_proba"):
+                    result[f"proba_{key}"] = pipe.predict_proba(x)
+                    clf = pipe.named_steps.get("clf")
+                    if hasattr(clf, "classes_"):
+                        result[f"classes_{key}"] = list(clf.classes_)
+        return result
+
+    def num_parameters(self):
+        total = 0
+        for key, (pipe, _, _) in self.fitted_models.items():
+            clf = pipe.named_steps["clf"]
+            n_trees = 0
+            if hasattr(clf, "tree_count_"):
+                n_trees = int(clf.tree_count_)
+            elif hasattr(clf, "get_tree_count"):
+                try:
+                    n_trees = int(clf.get_tree_count())
+                except Exception:
+                    pass
+            depth = getattr(clf, "get_param", lambda p, d=6: d)("depth") or 6
+            total += int(n_trees * (2 ** int(depth)))
         return max(total, 1)
 
 
@@ -835,6 +996,8 @@ def create_model(task_spec, model_name="baseline", **kwargs):
         return LightGBMModel(task_spec, model_name, **kwargs)
     if name_clean in XGBoostModel.NAMES:
         return XGBoostModel(task_spec, model_name, **kwargs)
+    if name_clean in CatBoostModel.NAMES:
+        return CatBoostModel(task_spec, model_name, **kwargs)
     if name_clean in DecomposedMappingEquityModel.NAMES:
         return DecomposedMappingEquityModel(task_spec, model_name, **kwargs)
     raise ValueError(

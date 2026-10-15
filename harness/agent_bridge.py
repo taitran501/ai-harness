@@ -2741,3 +2741,18 @@ class AgentBridge:
                 summary=f"Action '{act}' raised exception: {err}",
                 elapsed_seconds=round(time.time() - t0, 3),
             )
+
+    # Alias for execute_action matching CLI 'act' command
+    act = execute_action
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """Forwarder to tools.agent_bridge_cli.main for module execution."""
+    from tools.agent_bridge_cli import main as cli_main
+
+    return cli_main(argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
