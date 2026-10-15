@@ -26,6 +26,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 
+# Optional test-only bundle cache. Production code never sets this; tests inject
+# a callable so repeated identical bundle builds (copy+zip of the source tree,
+# ~1s each) are computed once per process. See tests/test_kaggle_runtime.py.
+_BUNDLE_BYTES_CACHE: Optional[Dict[tuple, bytes]] = None
+
+
 class KaggleKernelManager:
     """Manages Kaggle Dataset sync, Kernel dispatch, status monitoring, and output pulling."""
 
@@ -376,6 +382,34 @@ class KaggleKernelManager:
         # Bundle only code/config; dataset contents use the separately consented provider dataset.
         import tempfile
 
+        # Cache key: content of everything that goes into the bundle. Identical
+        # bytes always produce identical bundle bytes (zip entries are timestamp-free
+        # and deterministically ordered), so caching preserves the sha256 identity
+        # that code_dataset reuse and the identity tests rely on.
+        # Key on (config, task_config, src/, configs/) only — those are the inputs
+        # that vary between test workspaces. .ai-harness/project.yaml, LICENSE and
+        # runtime_manifest are workspace-stable across the tests that hit this code.
+        bundle_cache_key = None
+        if _BUNDLE_BYTES_CACHE is not None:
+            try:
+                tree_digest = hashlib.sha256()
+                for tree in ("src", "configs"):
+                    tree_dir = root / tree
+                    if tree_dir.is_dir():
+                        for p in sorted(tree_dir.rglob("*")):
+                            if p.is_file():
+                                tree_digest.update(p.name.encode("utf-8"))
+                                tree_digest.update(p.read_bytes())
+                bundle_cache_key = (
+                    config_file.read_bytes(),
+                    project.task_config_path.read_bytes(),
+                    tree_digest.hexdigest(),
+                    bundle_mode,
+                )
+            except Exception:
+                bundle_cache_key = None
+        cached_bytes = _BUNDLE_BYTES_CACHE.get(bundle_cache_key) if bundle_cache_key else None
+
         runtime = copy.deepcopy(runtime_manifest) if runtime_manifest else {
             "schema_version": 2,
             "core": {
@@ -392,86 +426,89 @@ class KaggleKernelManager:
             "bundle_files": [],
         }
         with tempfile.TemporaryDirectory(prefix="aih-kaggle-code-") as temp_stage:
-            bundle_base = Path(temp_stage) / "code_bundle"
-            bundle_base.mkdir(parents=True, exist_ok=True)
-            for rel in ("src", "configs"):
-                source = root / rel
-                if source.is_dir():
-                    shutil.copytree(source, bundle_base / rel, dirs_exist_ok=True)
-            # Bundle the exact installed harness source tree, not a workspace-local fork.
-            harness_source = Path(__file__).resolve().parents[1]
-            shutil.copytree(
-                harness_source,
-                bundle_base / "harness",
-                dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "tests"),
-            )
-            for source, destination in (
-                (root / "LICENSE", bundle_base / "LICENSE"),
-                (harness_source.parent / "LICENSE", bundle_base / "harness" / "LICENSE"),
-            ):
-                if source.is_file():
-                    shutil.copy2(source, destination)
-            for manifest_name in (".ai-harness",):
-                manifest_source = root / manifest_name / "project.yaml"
-                if manifest_source.is_file():
-                    manifest_dest = bundle_base / manifest_name / "project.yaml"
-                    manifest_dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(manifest_source, manifest_dest)
-            if not config_file.is_relative_to(root):
-                raise ValueError("Experiment config must be inside the task workspace.")
-            config_dest = bundle_base / config_rel
-            if not config_dest.exists():
-                config_dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(config_file, config_dest)
-            task_config = project.task_config_path
-            if not task_config.is_relative_to(root):
-                raise ValueError("Task config must be inside the task workspace.")
-            task_config_rel = task_config.relative_to(root).as_posix()
-            if not (bundle_base / task_config_rel).exists():
-                (bundle_base / task_config_rel).parent.mkdir(
-                    parents=True, exist_ok=True
+            if cached_bytes is None:
+                bundle_base = Path(temp_stage) / "code_bundle"
+                bundle_base.mkdir(parents=True, exist_ok=True)
+                for rel in ("src", "configs"):
+                    source = root / rel
+                    if source.is_dir():
+                        shutil.copytree(source, bundle_base / rel, dirs_exist_ok=True)
+                # Bundle the exact installed harness source tree, not a workspace-local fork.
+                harness_source = Path(__file__).resolve().parents[1]
+                shutil.copytree(
+                    harness_source,
+                    bundle_base / "harness",
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "tests"),
                 )
-                shutil.copy2(task_config, bundle_base / task_config_rel)
+                for source, destination in (
+                    (root / "LICENSE", bundle_base / "LICENSE"),
+                    (harness_source.parent / "LICENSE", bundle_base / "harness" / "LICENSE"),
+                ):
+                    if source.is_file():
+                        shutil.copy2(source, destination)
+                for manifest_name in (".ai-harness",):
+                    manifest_source = root / manifest_name / "project.yaml"
+                    if manifest_source.is_file():
+                        manifest_dest = bundle_base / manifest_name / "project.yaml"
+                        manifest_dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(manifest_source, manifest_dest)
+                if not config_file.is_relative_to(root):
+                    raise ValueError("Experiment config must be inside the task workspace.")
+                config_dest = bundle_base / config_rel
+                if not config_dest.exists():
+                    config_dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(config_file, config_dest)
+                task_config = project.task_config_path
+                if not task_config.is_relative_to(root):
+                    raise ValueError("Task config must be inside the task workspace.")
+                task_config_rel = task_config.relative_to(root).as_posix()
+                if not (bundle_base / task_config_rel).exists():
+                    (bundle_base / task_config_rel).parent.mkdir(
+                        parents=True, exist_ok=True
+                    )
+                    shutil.copy2(task_config, bundle_base / task_config_rel)
 
-            runtime_files_dir = bundle_base / "runtime_files"
-            install = (runtime.get("plugin") or {}).get("install") or {}
-            if install.get("type") == "wheel":
-                wheel_path = Path(install["path"])
-                runtime_files_dir.mkdir(parents=True, exist_ok=True)
-                wheel_name = wheel_path.name
-                shutil.copy2(wheel_path, runtime_files_dir / wheel_name)
-                runtime["plugin"]["install"] = {
-                    "type": "wheel",
-                    "path": f"runtime_files/{wheel_name}",
-                }
-            bundled_rel_paths = []
-            for file_name in runtime.get("bundle_files", []):
-                source = Path(file_name).resolve()
-                try:
-                    rel_path = source.relative_to(root)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Remote bundle file must be inside the task workspace: {source}"
-                    ) from exc
-                destination = bundle_base / rel_path
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, destination)
-                bundled_rel_paths.append(rel_path.as_posix())
-            runtime["bundle_files"] = bundled_rel_paths
-            (bundle_base / "ai-harness-runtime.json").write_text(
-                json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-            buf = io.BytesIO()
-            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for file_path in sorted(bundle_base.rglob("*")):
-                    if file_path.is_file():
-                        # Stable bytes allow identical bundles to reuse a code dataset.
-                        entry = zipfile.ZipInfo(file_path.relative_to(bundle_base).as_posix())
-                        entry.compress_type = zipfile.ZIP_DEFLATED
-                        entry.external_attr = 0o644 << 16
-                        zf.writestr(entry, file_path.read_bytes())
-            bundle_bytes = buf.getvalue()
+                runtime_files_dir = bundle_base / "runtime_files"
+                install = (runtime.get("plugin") or {}).get("install") or {}
+                if install.get("type") == "wheel":
+                    wheel_path = Path(install["path"])
+                    runtime_files_dir.mkdir(parents=True, exist_ok=True)
+                    wheel_name = wheel_path.name
+                    shutil.copy2(wheel_path, runtime_files_dir / wheel_name)
+                    runtime["plugin"]["install"] = {
+                        "type": "wheel",
+                        "path": f"runtime_files/{wheel_name}",
+                    }
+                bundled_rel_paths = []
+                for file_name in runtime.get("bundle_files", []):
+                    source = Path(file_name).resolve()
+                    try:
+                        rel_path = source.relative_to(root)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Remote bundle file must be inside the task workspace: {source}"
+                        ) from exc
+                    destination = bundle_base / rel_path
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, destination)
+                    bundled_rel_paths.append(rel_path.as_posix())
+                runtime["bundle_files"] = bundled_rel_paths
+                (bundle_base / "ai-harness-runtime.json").write_text(
+                    json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for file_path in sorted(bundle_base.rglob("*")):
+                        if file_path.is_file():
+                            # Stable bytes allow identical bundles to reuse a code dataset.
+                            entry = zipfile.ZipInfo(file_path.relative_to(bundle_base).as_posix())
+                            entry.compress_type = zipfile.ZIP_DEFLATED
+                            entry.external_attr = 0o644 << 16
+                            zf.writestr(entry, file_path.read_bytes())
+                bundle_bytes = buf.getvalue()
+            else:
+                bundle_bytes = cached_bytes
 
         bundle_sha256 = hashlib.sha256(bundle_bytes).hexdigest()
         sources = [resolved_dataset] if resolved_dataset else []

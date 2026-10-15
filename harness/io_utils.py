@@ -244,7 +244,16 @@ def get_project_root() -> Path:
 
 
 def set_seed(seed: int = 42) -> None:
-    """Set global seed for Python, NumPy, and PyTorch (if installed)."""
+    """Set global seed for Python, NumPy, and PyTorch (GPU runs only).
+
+    PyTorch is heavy to import (~4-7s cold on a CUDA build). It is only needed for
+    GPU determinism, so on a CPU-only / no-torch environment we skip it entirely.
+    On a machine that has a GPU but is running CPU workloads (e.g. the unit /
+    regression test suite, which never touches CUDA), set
+    ``HARNESS_DISABLE_TORCH_SEED=1`` to skip the torch import without changing any
+    seeded value on the CPU path. When a real GPU run needs torch/cuDNN seeding,
+    leave it unset (the default) and torch is imported and seeded as before.
+    """
     import random
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
@@ -253,13 +262,18 @@ def set_seed(seed: int = 42) -> None:
         np.random.seed(seed)
     except ImportError:
         pass
+    if os.environ.get("HARNESS_DISABLE_TORCH_SEED"):
+        return
     try:
         import torch
+        if not torch.cuda.is_available():
+            # CPU-only run: torch import was paid but nothing to seed on GPU.
+            torch.manual_seed(seed)
+            return
         torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
     except ImportError:
         pass
 
