@@ -338,5 +338,80 @@ class TestHygieneTaskAllowlist(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
 
 
+class TestAuditGateOofIds(unittest.TestCase):
+    """The AIMO baseline's predictions.csv is an OOF table: one row per
+    (id, fold, input_variant), so `id` repeats by design. The audit gate
+    rejected it with 'IDs id must be non-null and unique' and left the
+    otherwise-verified run audit_passed=False."""
+
+    def _oof_df(self, rows_per_key: int = 3, duplicate_row: bool = False):
+        import pandas as pd
+
+        rows = []
+        for i in range(4):
+            for j in range(rows_per_key):
+                rows.append(
+                    {
+                        "id": f"case_{i:04d}",
+                        "fold": j,
+                        "input_variant": "problem_text",
+                        "pred_robustness_prediction": bool(i % 2),
+                    }
+                )
+        if duplicate_row:
+            rows.append(dict(rows[0]))
+        return pd.DataFrame(rows)
+
+    def test_multi_variant_oof_table_passes_integrity(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(REPO_ROOT / "tools"))
+        import audit_gate
+
+        df = self._oof_df()
+        self.assertTrue(df["id"].duplicated().any(), "test data must repeat ids")
+        self.assertEqual(audit_gate.audit_prediction_integrity(df, id_col="id"), [])
+
+    def test_true_duplicate_within_scope_still_fails(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(REPO_ROOT / "tools"))
+        import audit_gate
+
+        df = self._oof_df(duplicate_row=True)
+        errors = audit_gate.audit_prediction_integrity(df, id_col="id")
+        self.assertTrue(
+            any("unique within" in e for e in errors), f"expected scope error, got {errors}"
+        )
+
+    def test_plain_table_still_requires_unique_ids(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(REPO_ROOT / "tools"))
+        import audit_gate
+
+        df = self._oof_df().drop(columns=["fold", "input_variant"])
+        errors = audit_gate.audit_prediction_integrity(df, id_col="id")
+        self.assertTrue(
+            any("must be non-null and unique" in e for e in errors), f"got {errors}"
+        )
+
+    def test_diff_metrics_composite_identity(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(REPO_ROOT / "tools"))
+        import audit_gate
+
+        cand = self._oof_df()
+        base = cand.copy()
+        base["pred_robustness_prediction"] = base["pred_robustness_prediction"] ^ True
+        counts, _ = audit_gate.compute_diff_metrics(cand, base, id_col="id")
+        self.assertEqual(counts, len(cand))
+        # Changed rows must still be detectable inside the composite scope.
+        base2 = cand.copy()
+        counts2, _ = audit_gate.compute_diff_metrics(cand, base2, id_col="id")
+        self.assertEqual(counts2, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

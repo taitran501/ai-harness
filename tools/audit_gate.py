@@ -75,8 +75,19 @@ def audit_prediction_integrity(
         errors.append("Missing predictions")
     if key not in df:
         errors.append("Missing declared ID column")
-    elif df[key].isna().any() or df[key].duplicated().any():
-        errors.append(f"IDs {key} must be non-null and unique")
+    else:
+        if df[key].isna().any():
+            errors.append(f"IDs {key} must be non-null")
+        else:
+            # OOF / multi-variant tables legitimately repeat the same id
+            # across folds and input variants; uniqueness is then defined
+            # over the full row identity, not over id alone (a plain
+            # df[key].duplicated() rejects every multi-variant OOF run).
+            scope = [c for c in ("fold", "input_variant", "split") if c in df.columns]
+            if scope and df.duplicated(subset=[key] + scope).any():
+                errors.append(f"IDs {key} must be unique within {'/'.join(scope)}")
+            elif not scope and df[key].duplicated().any():
+                errors.append(f"IDs {key} must be non-null and unique")
     if df.empty:
         errors.append("Prediction coverage is empty")
     if spec and spec.subtasks:
@@ -130,13 +141,31 @@ def compute_diff_metrics(
         key = "id"
 
     for frame in (cand_df, base_df):
-        if key not in frame or frame[key].isna().any() or frame[key].duplicated().any():
+        if key not in frame or frame[key].isna().any():
             raise ValueError("Invalid comparison IDs")
     if set(cand_df[key]) != set(base_df[key]):
         raise ValueError("Prediction ID sets differ")
 
-    cand = cand_df.set_index(key)
-    base = base_df.set_index(key).reindex(cand.index)
+    # OOF / multi-variant tables repeat ids across folds and input variants;
+    # then row identity is the composite key, and both frames must carry the
+    # same scope columns to be comparable.
+    scope = [
+        c
+        for c in ("fold", "input_variant", "split")
+        if c in cand_df.columns and c in base_df.columns
+    ]
+    if scope:
+        identity = [key] + scope
+        for frame in (cand_df, base_df):
+            if frame[identity].isna().any().any() or frame.duplicated(subset=identity).any():
+                raise ValueError("Invalid comparison IDs")
+        cand = cand_df.set_index(identity)
+        base = base_df.set_index(identity).reindex(cand.index)
+    else:
+        if cand_df[key].duplicated().any() or base_df[key].duplicated().any():
+            raise ValueError("Invalid comparison IDs")
+        cand = cand_df.set_index(key)
+        base = base_df.set_index(key).reindex(cand.index)
     cols = [c for c in cand if c.startswith(("pred_", "proba_"))]
     if not cols:
         raise ValueError("No prediction columns to compare")
