@@ -29,6 +29,16 @@ from tests.test_research_continuity import config, task_document
 
 
 class KaggleRuntimeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Pre-warm the heavy harness import stack before per-test timing begins:
+        # the test file's module-level `from harness... import ...` already does
+        # this at collection time, but the first setup_kernel_package call in the
+        # class otherwise pays any residual cold-import + first-copytree cost
+        # inside a timed test. Importing the template here is cheap (module is
+        # already loaded) and moves one-time overhead out of individual tests.
+        import harness.templates.kaggle_template  # noqa: F401
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aih-kaggle-contract-")
         self.root = Path(self.temp.name)

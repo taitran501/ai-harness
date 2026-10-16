@@ -26,7 +26,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.stats import chi2, ttest_rel
+
+# NOTE: scipy.stats is imported lazily inside compute_*_significance() below.
+# It is the single most expensive import in this CLI (~1s); deferring it
+# keeps the common CLI path (argparse + diff metrics) fast.
 
 # Ensure project root in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -182,6 +185,7 @@ def compute_continuous_significance(
     base_pred: pd.Series | np.ndarray,
 ) -> Dict[str, Any]:
     """Compute paired error test (paired t-test on squared errors) between candidate and baseline."""
+    from scipy.stats import ttest_rel
     y = np.asarray(y_true, dtype=float)
     cand = np.asarray(cand_pred, dtype=float)
     base = np.asarray(base_pred, dtype=float)
@@ -225,6 +229,7 @@ def compute_mcnemar_significance(
     base_pred: pd.Series | np.ndarray,
 ) -> Dict[str, Any]:
     """Compute McNemar's test for paired classification accuracy between candidate and baseline."""
+    from scipy.stats import chi2
     y = pd.Series(y_true)
     cand = pd.Series(cand_pred)
     base = pd.Series(base_pred)

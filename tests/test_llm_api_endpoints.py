@@ -16,7 +16,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
     def setUpClass(cls):
         from unittest.mock import patch
         from harness.llm_engine import LLMEngine
-        cls.port = 8995
+        cls.port = 0  # dynamic: avoid fixed-port conflicts (e.g. under pytest-xdist)
         cls._class_patches = [
             patch("harness.llm_engine.LLMEngine.check_local_endpoint", return_value=False),
             patch("harness.llm_engine.LLMEngine.fetch_hf_models", return_value=LLMEngine.CURATED_HF_FALLBACK_MODELS[:5]),
@@ -29,6 +29,7 @@ class TestLLMAPIEndpoints(unittest.TestCase):
 
         socketserver.TCPServer.allow_reuse_address = True
         cls.httpd = socketserver.ThreadingTCPServer(("", cls.port), DashboardHandler)
+        cls.port = cls.httpd.server_address[1]
         cls.server_thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
         cls.server_thread.start()
         time.sleep(0.5)
