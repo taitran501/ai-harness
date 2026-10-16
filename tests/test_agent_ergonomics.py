@@ -55,12 +55,17 @@ class TestHygieneAllowListAndAggregation(unittest.TestCase):
             for name in names:
                 (root / name).mkdir()
                 (root / name / "a.txt").write_text("x", encoding="utf-8")
+            # one harness-sealed dir (artifact manifest present) stays in the
+            # stale group; the seven unsealed dirs become a bypass finding.
+            (root / "kaggle_sub_exp020_sealed").mkdir()
+            (root / "kaggle_sub_exp020_sealed" / "artifact_manifest.json").write_text("{}", encoding="utf-8")
             res = scan_workspace_hygiene(root)
-            self.assertEqual(len(res["findings"]), 1)
-            finding = res["findings"][0]
-            self.assertEqual(finding["kind"], "stale_run_output")
-            self.assertIn("7 dirs", finding["path"])
-            self.assertIn("kaggle_sub_exp010_apex", finding["detail"])
+            by_kind = {f["kind"]: f for f in res["findings"]}
+            self.assertEqual(set(by_kind), {"bypassed_run_output", "stale_run_output"})
+            self.assertIn("7 dirs", by_kind["bypassed_run_output"]["path"])
+            self.assertIn("artifact manifest", by_kind["bypassed_run_output"]["detail"])
+            self.assertIn("1 dirs", by_kind["stale_run_output"]["path"])
+            self.assertIn("kaggle_sub_exp020_sealed", by_kind["stale_run_output"]["detail"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

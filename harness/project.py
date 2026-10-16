@@ -159,6 +159,66 @@ class HarnessProject:
         )
 
 
+AGENTS_MD_MARKER_START = "<!-- ai-harness:managed:start -->"
+AGENTS_MD_MARKER_END = "<!-- ai-harness:managed:end -->"
+
+
+def render_agents_md_body() -> str:
+    """Universal entry point telling ANY coding agent about this harness.
+
+    Skills under ``.agents/skills/`` are only loaded by agent harnesses that
+    support them AND when the task matches; a plain "train a model" request
+    to a generic agent otherwise finds no instruction at all and silently
+    bypasses the framework (observed in the rsna-knee workspace: 22/22
+    manual kernel pushes, zero harness experiments, zero warnings).
+    """
+    parts = [
+        "## AI-Harness workspace (managed block - do not edit between markers)",
+        "",
+        "This workspace runs ML experiments through **ai-harness** (framework clone: `./ai-harness`). "
+        "All experiment work goes through the harness - there is no supported alternative.",
+        "",
+        "1. **Read the SOP first**: `.agents/skills/ai-harness/SKILL.md` (generated per task, always current).",
+        "2. **Current state** (~1k tokens): `ai-harness-agent --project-root . context`",
+        "3. **Experiment lifecycle**: declarative config in `configs/` -> smoke probe "
+        "(`ai-harness-run --config configs/<exp>.yaml --debug --fold 0`) -> full validation "
+        "(`ai-harness-run --config configs/<exp>.yaml`). Every run is journaled under `.ai-harness/artifacts/`.",
+        "",
+        "**Non-negotiable rules:**",
+        "- Cloud runs **only** via harness dispatch (`run_full_validation` / `ai-harness kaggle`). "
+        "Never push kernels manually (`kaggle kernels push`) - manual runs have no evidence trail "
+        "and the framework cannot see them.",
+        "- If harness dispatch fails, **report the error** - do not silently fall back to a manual run.",
+        "- Directories under `.ai-harness/artifacts/` are immutable: never mutate completed runs.",
+        "- After each iteration, record research continuity through the Bridge "
+        "(`record_research_insight` / `record_research_decision` / `record_research_checkpoint`; "
+        "contracts are documented in the skill).",
+        "- Framework upgrades: `ai-harness sync` (one command) - never hand-run git steps in `./ai-harness`.",
+    ]
+    return chr(10).join(parts)
+
+def update_agents_md(root: Path) -> Dict[str, Any]:
+    """Create or refresh the managed AGENTS.md block; never touch user content."""
+    agents_md = root / "AGENTS.md"
+    nl = chr(10)
+    body = AGENTS_MD_MARKER_START + nl + render_agents_md_body() + AGENTS_MD_MARKER_END
+    status = "created"
+    if agents_md.exists():
+        existing = agents_md.read_text(encoding="utf-8")
+        if AGENTS_MD_MARKER_START in existing and AGENTS_MD_MARKER_END in existing:
+            start, end = existing.index(AGENTS_MD_MARKER_START), existing.index(AGENTS_MD_MARKER_END)
+            agents_md.write_text(
+                existing[:start] + body + existing[end + len(AGENTS_MD_MARKER_END):],
+                encoding="utf-8",
+            )
+            status = "refreshed"
+        else:
+            return {"path": str(agents_md), "status": "skipped_user_owned"}
+    else:
+        agents_md.write_text(body + nl, encoding="utf-8")
+    return {"path": str(agents_md), "status": status}
+
+
 def attach_project(
     project_root: Path | str,
     task_config: Path | str = DEFAULT_TASK_CONFIG,
@@ -199,8 +259,10 @@ def attach_project(
         if same_attachment:
             from harness.phase_workflow import initialize_prompt_pack
             prompt_pack = initialize_prompt_pack(root, force=False)
+            agents_md = update_agents_md(root)
             return {
                 "status": "ALREADY_ATTACHED",
+                "agents_md": agents_md["status"],
                 "project_root": str(root),
                 "manifest": str(manifest_path),
                 "agent_skill": str(skill_path),
@@ -225,58 +287,34 @@ def attach_project(
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
 
-    skill_content = (
-        "---\n"
-        "name: ai-harness\n"
-        "description: Work with this competition through the installed AI-Harness task plugin and Agent Bridge.\n"
-        "---\n\n"
-        f"# AI-Harness for {task_name}\n\n"
-        "Use the task's declared plugin for data loading, validation, metrics, and submission checks. "
-        "Do not infer or replace the official scorer or submission contract.\n\n"
-        "## Agent workflow\n\n"
-        f"- Workspace: `{root}`\n"
-        f"- Task config: `{task_rel}`\n"
-        f"- Task plugin: `{resolved_plugin}`\n"
-        "- Read current state: `ai-harness-agent --project-root . context`\n"
-        "- After restart or context compaction, recover the latest research checkpoint before brainstorming.\n"
-        "- Search the full history with `act --action search_research_memory --params '{\"query\":\"mechanism keywords\"}'`.\n"
-        "- Before implementation, use `act --action review_hypothesis` with a config object or config_path.\n"
-        "- Explain differences from related approaches; exact repeats require an explicit revisit_reason.\n"
-        "- Record each insight with record_research_insight (title, observation, mechanism, next_action). "
-        "Use parent_insight_id when a new direction follows an older lesson.\n"
-        "- Before linked implementation, plan_research_probe: control, one intervention, expected_observation, "
-        "alternative_explanation, decision_rule, budget, stop_rule. Link config.research.insight_id.\n"
-        "- Use trace_research_insight to recover its plans, experiments, decisions and derived directions. "
-        "Interpret research_frontier and unreviewed_results before rebrainstorming.\n"
-        "- Read the generated RESEARCH_PROGRESS.md at context.research_memory.progress_path for a human-readable "
-        "journal. Record meaningful observations/decisions through the Bridge after each iteration, not every keystroke.\n"
-        "- After each result, use record_research_decision (outcome, conclusion, evidence run IDs, next_action) "
-        "with insight_id, lesson and revisit_when for rejected/deferred directions; "
-        "then record_research_checkpoint (summary, next_action, open_questions, insight_ids).\n"
-        "- On stagnation, inspect verified diagnostics and old lessons, compare alternative mechanisms, "
-        "then choose a bounded discriminating probe with a promotion/stop criterion. Plateau never authorizes freeze.\n"
-        "- Review the task contract: `ai-harness-agent --project-root . act --action confirm_task_spec --user-approved`\n"
-        "- Inspect data: `ai-harness-agent --project-root . act --action inspect_data_readiness`\n"
-        "- Confirm reviewed data risks: `ai-harness-agent --project-root . act --action confirm_data_risks --user-approved`\n"
-        "- Start a bounded session: `ai-harness-agent --project-root . start-session --goal \"...\" --max-experiments 3`\n"
-        "- Run a smoke test before a full validation run.\n"
-        "- Backend policy: if the task contract declares `execution.backend` (e.g. kaggle), `run_full_validation` uses it by default; with `execution.locked: true`, other backends are rejected — do not train locally.\n"
-        "- Render the next phase prompt: `ai-harness phase render`\n"
-        "- Validate the workspace prompt pack: `ai-harness phase validate`\n"
-        "- Record response, inspected source URLs, and artifact paths with `ai-harness phase record`.\n"
-        "- Run privacy-conscious EDA: `ai-harness eda run`\n"
-        "- Use the IDE agent's native web search and cite only sources actually inspected.\n"
-    )
-    skill_path.parent.mkdir(parents=True, exist_ok=True)
-    skill_path.write_text(skill_content, encoding="utf-8")
+    # Single source of truth for the task skill: skill_injector. The legacy
+    # inline block below it was a second, leaner generator that `ai-harness
+    # attach` wrote and `ai-harness sync` silently overwrote — agents
+    # attached directly (without sync) missed the param-file guidance,
+    # script adapter, cloud-monitoring and research-contract sections.
+    # Pin project discovery: the skill injector resolves the workspace from
+    # cwd/env, not from this function's arguments (same pinning as sync).
+    import os as _os
+    prev_root_env = _os.environ.get("HARNESS_PROJECT_ROOT")
+    _os.environ["HARNESS_PROJECT_ROOT"] = str(root)
+    try:
+        from harness.skill_injector import inject_skill_file
+        skill_path = inject_skill_file(config_path=task_path)
+    finally:
+        if prev_root_env is None:
+            _os.environ.pop("HARNESS_PROJECT_ROOT", None)
+        else:
+            _os.environ["HARNESS_PROJECT_ROOT"] = prev_root_env
 
     for legacy_name in ("ml-harness", "ml-experiment-harness"):
         legacy_dir = root / ".agents" / "skills" / legacy_name
         if legacy_dir.is_dir():
             shutil.rmtree(legacy_dir, ignore_errors=True)
 
+    agents_md = update_agents_md(root)
     return {
         "status": "ATTACHED",
+        "agents_md": agents_md["status"],
         "project_root": str(root),
         "manifest": str(manifest_path),
         "agent_skill": str(skill_path),

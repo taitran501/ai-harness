@@ -119,11 +119,20 @@ def scan_workspace_hygiene(
                 if name_low in ALLOWED_TOP_DIRS:
                     continue
                 if _is_run_output_dir(name_low):
-                    # Run-output dirs collapse into ONE aggregated advisory
+                    # Run-output dirs collapse into aggregated advisories
                     # later; count ALL of them (no file-count rglob needed)
                     # without being limited by max_findings.
+                    # Harness dispatch always seals output with
+                    # artifact_manifest.json; a dir without it was produced
+                    # by a manual kernel push that bypassed the harness.
+                    sealed = (entry / "artifact_manifest.json").is_file()
                     findings.append(
-                        {"kind": "unknown_dir", "path": entry.name, "detail": "run-output dir"}
+                        {
+                            "kind": "unknown_dir",
+                            "path": entry.name,
+                            "detail": "run-output dir",
+                            "sealed": sealed,
+                        }
                     )
                     continue
                 if non_run_output >= max_findings:
@@ -189,15 +198,30 @@ def _aggregate_run_output_dirs(findings: List[Dict[str, str]]) -> List[Dict[str,
     others = [f for f in findings if f not in run_output]
     if len(run_output) <= 2:
         return findings
-    names = [f["path"] for f in run_output]
-    examples = ", ".join(names[:3]) + (f", … +{len(names) - 3} more" if len(names) > 3 else "")
-    return [
-        {
+    manual = [f for f in run_output if not f.get("sealed")]
+    sealed = [f for f in run_output if f.get("sealed")]
+    aggregated: List[Dict[str, str]] = []
+    if manual:
+        names = [f["path"] for f in manual]
+        examples = ", ".join(names[:3]) + (f", … +{len(names) - 3} more" if len(names) > 3 else "")
+        aggregated.append({
+            "kind": "bypassed_run_output",
+            "path": f"{len(manual)} dirs",
+            "detail": (
+                f"run-output dirs at workspace root lack the harness artifact manifest "
+                f"(manual kernel pushes, no evidence trail) — run experiments through harness "
+                f"dispatch instead of manual kaggle pushes (e.g. {examples})"
+            ),
+        })
+    if sealed:
+        names = [f["path"] for f in sealed]
+        examples = ", ".join(names[:3]) + (f", … +{len(names) - 3} more" if len(names) > 3 else "")
+        aggregated.append({
             "kind": "stale_run_output",
-            "path": f"{len(run_output)} dirs",
+            "path": f"{len(sealed)} dirs",
             "detail": f"Kaggle/kernel run-output dirs at workspace root — move to artifacts/ or delete (e.g. {examples})",
-        }
-    ] + others
+        })
+    return aggregated + others
 
 
 def hygiene_hud_lines(hygiene: Optional[Dict[str, object]], limit: int = 6) -> List[str]:
