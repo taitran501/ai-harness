@@ -642,16 +642,6 @@ class UniversalTaskSpec:
         return evaluate(self, ground_truth_df, predictions)
 
     @property
-    def train_path(self) -> str:
-        """Resolve raw training dataset directory or file."""
-        return self.data_config.get("train_path", "dataset/")
-
-    @property
-    def test_path(self) -> str:
-        """Resolve raw test dataset directory or file."""
-        return self.data_config.get("test_path", "dataset/test/")
-
-    @property
     def primary_target(self) -> Optional[str]:
         """Resolve primary target column or subtask identifier."""
         if not self.subtasks:

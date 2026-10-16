@@ -6,6 +6,76 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — PR #A: Correctness / Silent-Wrong-Result Fixes (Module Review Findings)
+
+**Task:** Fix the highest-severity findings from the full read-only module
+review (9 lanes over `harness/` + templates, ~24.9k lines): silent wrong
+results, broken managed-cloud dispatch identity, and dead public-LB reads.
+
+**Changes**
+
+- P0 `harness/task_spec.py`: removed the second `train_path`/`test_path`
+  property pair that shadowed the `Optional[str]` versions — undeclared splits
+  now return `None` instead of always-truthy `"dataset/"` / `"dataset/test/"`
+  defaults (truthiness gates like `if spec.test_path:` were always true).
+- P0 `harness/templates/kaggle_template.py` + `modal_template.py`:
+  generated remote runners now bind the dispatched identity via
+  `--job-id <dispatch>`; `harness/runner.py main()` forwards `args.job_id` to
+  `run_via_kaggle`/`run_via_modal`. Previously the remote runner minted a
+  fresh `run_id`, the manager identity gate raised `Artifact identity
+  mismatch` 100% of managed dispatches, and retry was blocked on the
+  non-empty artifact dir. Runner worker-state updates are now gated on the
+  `JOB_ID_PATTERN` so dispatch identities (e.g. `kaggle_<exp>_<hex>`) bind the
+  manifest `run_id` without crashing `update_worker_state`.
+- P1 `harness/candidates.py register_external_prediction`: predictions are
+  now read from the truth-aligned frame (duplicate-ID guards added) instead
+  of the raw file order; a shuffled external OOF file previously
+  positionally mislabeled rows during evaluation.
+- P1 `harness/runner.py UniversalRunner._evaluate`: an official plugin scorer
+  failure behind a custom `metrics_evaluator` hook is no longer silently
+  swallowed — it is printed and recorded in the result as
+  `_evaluation_warnings` (visible in metrics.json).
+- P1 `harness/runner.py`: new `_probe_sample_limit()` helper with stable
+  precedence (`--probe-samples` > `--debug`→50 > `validation.sample_limit`),
+  used by both the ML and LLM paths — `sample_limit` was previously ignored
+  by the ML path and `--probe-samples` was a no-op on the LLM path.
+- P1 `harness/competition_state.py`: public-LB reads now use
+  `official_primary_value()` (probes spec metric name, `primary`, `score`)
+  instead of the `primary` key `record_official_score` never writes — best
+  public score/selector was always None/N-A before.
+- P1 `harness/phase_workflow.py`: baseline anchor gate now passes
+  `task_spec`/`plugin` to `validate_baseline_artifact`, so the anchored run
+  is re-verified against the current task/scorer contract hashes.
+
+**Validation**
+
+- New `tests/test_pr_a_correctness.py` (18 tests) covering every fix,
+  including the shuffled-vs-ordered external OOF equivalence and the stale-
+  contract baseline gate block.
+- Existing `tests/test_kaggle_runtime.py::test_generated_script_runs_full_
+  validation_and_exports_one_manifest` now exercises the `--job-id` binding
+  end-to-end (generated script runs the real runner with the bound id).
+- Full suite: 602 passed, 1 skipped (Windows symlink self-skip).
+
+**False positives ruled out during verification (do not "fix")**
+
+- XGBoost probability columns: `proba_*` columns follow sklearn's sorted
+  integer class order while `classes_*` holds the sorted original labels;
+  decoding via `class_order[argmax]` is correct. Recording
+  `pipe.classes_` (integers) would break decoding.
+- Baseline `primary_score` alias: `extract_primary_metric` already resolves
+  `primary_score` and direct metric keys.
+- Blend duplicate keys: per-frame `duplicated().any()` checks already reject
+  duplicate IDs before the reindex alignment.
+- External manifest `validate_run`: all four REQUIRED files are present in
+  the generated manifest.
+- Conditional subtask masks: truth-based `eval_condition_only` is the
+documented oracle semantics (e.g. `oracle_hate`), not a routing bug.
+
+**Next action:** merge PR #A (branch `fix/correctness-silent-results`), then
+`ai-harness sync` into the 5 active competition workspaces and re-verify the
+Kaggle-locked smoke/full-run behavior.
+
 ### 2026-10-16 — P2 Audit Items: Submissions HUD, Workspace Hygiene, Mechanism Anti-Duplicate
 
 **Task:** Close the three P2 friction items left open by the Oct 2026 agent
