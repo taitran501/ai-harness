@@ -301,8 +301,12 @@ class ResearchMemory:
     def _evidence(self, evidence):
         if evidence is None:
             return []
+        if isinstance(evidence, str):
+            # Agents often pass a single ID (or comma-separated IDs) instead of
+            # a list; accept that shape instead of forcing a retry.
+            evidence = [part.strip() for part in evidence.replace(";", ",").split(",") if part.strip()]
         if not isinstance(evidence, list) or any(not isinstance(exp, str) for exp in evidence):
-            raise ValueError("evidence must be a list of verified experiment IDs")
+            raise ValueError("evidence must be a list of verified experiment IDs (single or comma-separated IDs also accepted)")
         available = {run["exp_id"] for run in self.sync()}
         if any(exp not in available for exp in evidence):
             raise ValueError("Evidence references must identify verified full runs for the current task")
@@ -512,7 +516,12 @@ class ResearchMemory:
     def record_decision(self, *, outcome, conclusion, evidence=None, next_action="", session_id=None,
                         insight_id=None, lesson="", revisit_when=""):
         if outcome not in {"supported", "rejected", "inconclusive", "deferred"}:
-            raise ValueError("outcome must be supported, rejected, inconclusive, or deferred")
+            hint = (
+                " - that value looks like prose; put the narrative in 'conclusion' "
+                "and use one of the four outcomes here"
+                if len(str(outcome)) > 40 else ""
+            )
+            raise ValueError(f"outcome must be supported, rejected, inconclusive, or deferred{hint}")
         if not str(conclusion).strip():
             raise ValueError("A decision requires a conclusion")
         if insight_id:

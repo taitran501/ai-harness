@@ -2184,12 +2184,20 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
             result = memory.review(cfg, params.get("revisit_reason", ""))
         elif act == "record_research_decision":
+            # Agents frequently send JSON null for optional fields; null must
+            # behave exactly like an omitted field, otherwise None skips the
+            # revisit_when auto-default and fails _text validation.
             result = memory.record_decision(outcome=params["outcome"], conclusion=params["conclusion"],
-                evidence=params.get("evidence", []), next_action=params.get("next_action", ""),
-                insight_id=params.get("insight_id"), lesson=params.get("lesson", ""),
-                revisit_when=params.get("revisit_when", ""),
+                evidence=params.get("evidence"), next_action=params.get("next_action") or "",
+                insight_id=params.get("insight_id"), lesson=params.get("lesson") or "",
+                revisit_when=params.get("revisit_when") or "",
                 session_id=session.session_id)
         else:
+            if not str(params.get("summary") or "").strip() or not str(params.get("next_action") or "").strip():
+                raise ValueError(
+                    "record_research_checkpoint requires 'summary' and 'next_action' "
+                    "text fields (the checkpoint field is 'summary', not 'conclusion')"
+                )
             result = memory.checkpoint(summary=params["summary"], next_action=params["next_action"],
                 open_questions=params.get("open_questions", []), session_id=session.session_id,
                 insight_ids=params.get("insight_ids"))
