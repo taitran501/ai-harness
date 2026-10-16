@@ -645,8 +645,16 @@ def register_external_prediction(
     eval_resolved = resolve_evaluation(spec, evaluation, len(truth))
 
     # 4. Create artifact directory
+    # Immutable evidence: refuse to overwrite an existing run directory, the
+    # same contract the runner enforces (runner.py `exist_ok=False`). A second
+    # registration with the same name is a distinct name, not a re-run.
     exp_dir = project.artifacts_dir / name
-    exp_dir.mkdir(parents=True, exist_ok=True)
+    if exp_dir.exists():
+        raise ValueError(
+            f"Refusing to overwrite existing run directory `{exp_dir}`. "
+            "External predictions are immutable; use a different `name` for a new registration."
+        )
+    exp_dir.mkdir(parents=True, exist_ok=False)
 
     # 5. Write artifacts
     run_cfg = {
@@ -735,8 +743,9 @@ def register_external_prediction(
     }
     (exp_dir / "artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    # 6. Record into TreeJournal
-    journal = TreeJournal(project.artifacts_dir / "tree_journal.json")
+    # 6. Record into TreeJournal (canonical `journal.json` — every other
+    # consumer reads that path; a separate tree_journal.json was orphaned)
+    journal = TreeJournal(project.artifacts_dir / "journal.json")
     node = Node(
         id=name,
         branch="external",

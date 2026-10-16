@@ -6,6 +6,55 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — PR #B: Guardrails & State-Contract Fixes (Module Review Findings)
+
+**Task:** Fix the verified P1 guardrail / state-contract findings from the
+module review (second wave after PR #A).
+
+**Fixes (13 verified real + 2 bundled):**
+- `candidates.py`: `register_external_prediction` now refuses to overwrite an
+  existing run directory (immutability contract, matches `exist_ok=False` in
+  runner) and records into the canonical `journal.json` instead of orphaning
+  `tree_journal.json`.
+- `repair.py`: default mode keeps declared entries verbatim (missing file
+  stays a visible stale-hash validation failure, never a silent shrink);
+  `drop_missing` keeps only declared files still on disk (never adopts
+  undeclared files); manifest write is now atomic.
+- `runner.py`: new `is_local_only_run()` — probe detection now includes
+  `validation.sample_limit` from the experiment config, so sample probes can
+  never dispatch to a locked cloud backend.
+- `templates/kaggle_template.py`: `wait_for_kernel` tolerates transient
+  `ERROR` (status CLI failure) up to 10 consecutive; terminal states remain
+  provider-parsed.
+- `cloud_job_runner.py`: managed job accounts exactly 1 GPU (model name never
+  regex-parsed as a count — was inflating gpu_hours 4–100×); audit
+  `candidate-audit.zip` + `AUDIT_RECEIPT.json` now written to
+  `artifacts/audit/<job_id>` (outside the sealed run directory, per
+  CORRECTNESS_CONTRACT §3).
+- `competition_state.py`: `finalize_competition` requires `freeze_locked`
+  (terminal state is not display-only) and is idempotent; per-slot portfolio
+  attribution (each slot reports its own CV + public score, not the overall
+  best); ablation table is None-safe; single-fold `fold_std` NaN guarded.
+- `agent_bridge.py`: FINALIZED triggers the same stop set as FROZEN (with a
+  distinct message); `gpu_hours_used` is always a float, never None (budget
+  enforcement can't be silently disabled).
+- `llm_engine.py`: Gemini SDK path — only ImportError falls back to REST;
+  SDK errors are surfaced if REST also fails; empty SDK response (no
+  candidates) raises; REST path raises on error bodies instead of returning
+  `text=''`.
+
+**False positive (verified, not fixed):** the UCB diversification cap —
+standard UCB1: in any finite tree the deepest-level leaves have visits=0, so
+the explore term always dominates; a "saturated best parent" can never win
+the recommendation, the cap is unreachable dead code. Reverted; documented.
+
+**Tests:** new `tests/test_pr_b_guardrails.py` (23 tests); updated
+`test_artifact_dedup.py` re-registration test to the immutability contract.
+Full suite: **626 passed, 1 skipped**.
+
+**Next:** propagate to the 5 competition workspaces; PR #C (P2 friction
+wave) still pending user decision.
+
 ### 2026-10-16 — PR #A: Correctness / Silent-Wrong-Result Fixes (Module Review Findings)
 
 **Task:** Fix the highest-severity findings from the full read-only module

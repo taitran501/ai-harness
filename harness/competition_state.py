@@ -691,7 +691,16 @@ class CompetitionStateMachine:
                         or c in {"score", "primary_score"}
                     ]
                     if metric_cols:
-                        fold_std = round(float(sdf[metric_cols[0]].std()), 4)
+                        std_val = sdf[metric_cols[0]].std()
+                        # Single-fold std() is NaN (ddof=1); NaN would be
+                        # written verbatim into competition_state.json (invalid
+                        # for strict parsers) and break stable ranking.
+                        fold_std = (
+                            round(float(std_val), 4)
+                            if std_val is not None and std_val == std_val
+                            and len(sdf) > 1
+                            else 0.0
+                        )
                 except Exception:
                     pass
 
@@ -981,7 +990,20 @@ class CompetitionStateMachine:
     def finalize_competition(
         self, payload: Dict[str, Any], journal: TreeJournal, sub_mgr: SubmissionManager
     ) -> Dict[str, Any]:
-        """Record final evaluation outcomes and generate Closure & Reproducibility outputs."""
+        """Record final evaluation outcomes and generate Closure & Reproducibility outputs.
+
+        Requires the freeze gate: finalizing is the terminal act of a frozen
+        competition. A FINALIZED state that does not stop further work is
+        display-only and would let run_full_validation/synthesize_candidate
+        keep mutating a "closed" competition.
+        """
+        if self.state["gates"].get("finalized"):
+            return {"status": "already_finalized", "note": "Competition is already FINALIZED."}
+        if not self.state["gates"].get("freeze_locked"):
+            raise ValueError(
+                "Cannot finalize: competition is not frozen. Freeze the final "
+                "candidates (freeze_candidate) first, then finalize."
+            )
         fin = self.state["finalization"]
         for k in [
             "private_score_slot_1",
@@ -1011,12 +1033,50 @@ class CompetitionStateMachine:
         )
         slot2_id = self.state["freeze_selection"].get("slot_2_aggressive_lb") or "none"
 
-        public_scores = [
-            s.official_scores.get("primary")
+        # Per-slot attribution: each slot reports ITS OWN candidate's local
+        # validation and public-LB score (looking up the overall best for both
+        # slots misreports the safe row when slot_2 is the better ensemble).
+        pool_by_id = {
+            c.get("id"): c for c in pool.get("all_candidates", []) if c.get("id")
+        }
+        baseline_fallback = self.spec.get("primary_metric_baseline")
+
+        def _slot_cv(slot_id):
+            cand = pool_by_id.get(slot_id)
+            if cand is None and slot_id == "baseline":
+                return baseline_fallback
+            if cand is not None and cand.get("composite_score") is not None:
+                return cand["composite_score"]
+            return None
+
+        slot1_cv = _slot_cv(slot1_id) if slot1_id else None
+        slot2_cv = _slot_cv(slot2_id) if slot2_id and slot2_id != "none" else None
+
+        primary_metric = str(self.spec.get("primary_metric") or "score")
+        public_by_sub = {
+            s.id: official_primary_value(s, primary_metric)
             for s in sub_mgr.submissions.values()
-            if s.official_scores.get("primary") is not None
-        ]
+        }
+        public_scores = [v for v in public_by_sub.values() if v is not None]
         best_pub = max(public_scores) if public_scores else None
+        # slot -> best public score of that slot's submissions (exp_id match)
+        def _slot_pub(slot_id):
+            if not slot_id or slot_id == "none":
+                return None
+            vals = [
+                official_primary_value(s, primary_metric)
+                for s in sub_mgr.submissions.values()
+                if (s.exp_id or "") == slot_id
+            ]
+            vals = [v for v in vals if v is not None]
+            return max(vals) if vals else None
+
+        slot1_pub = _slot_pub(slot1_id)
+        slot2_pub = _slot_pub(slot2_id)
+
+        def _fmt(value, fmt="{:.4f}"):
+            return fmt.format(value) if value is not None else "N/A"
+
         cv_score = best_cand.get(
             "composite_score", self.spec.get("primary_metric_baseline")
         )
@@ -1037,8 +1097,8 @@ class CompetitionStateMachine:
             "",
             "| Portfolio Slot | Candidate ID | Local Validation | External / Public Score | Final / Private Score | Competition Rank |",
             "|---|---|---:|---:|---:|---|",
-            f"| **Slot 1 (Primary Safe)** | `{slot1_id}` | `{cv_score:.4f}` | `{best_pub if best_pub is not None else 'N/A'}` | `{priv_1 if priv_1 is not None else 'Pending'}` | **{rank_str}** |",
-            f"| **Slot 2 (Secondary)** | `{slot2_id}` | `{cv_score:.4f}` | `{best_pub if best_pub is not None else 'N/A'}` | `{priv_2 if priv_2 is not None else 'Pending'}` | **{rank_str}** |",
+            f"| **Slot 1 (Primary Safe)** | `{slot1_id}` | `{_fmt(slot1_cv)}` | `{_fmt(slot1_pub)}` | `{priv_1 if priv_1 is not None else 'Pending'}` | **{rank_str}** |",
+            f"| **Slot 2 (Secondary)** | `{slot2_id}` | `{_fmt(slot2_cv)}` | `{_fmt(slot2_pub)}` | `{priv_2 if priv_2 is not None else 'Pending'}` | **{rank_str}** |",
             "",
             "## 2. Full Experiment Ablation Study",
             "",
@@ -1047,7 +1107,10 @@ class CompetitionStateMachine:
         ]
         for c in pool.get("all_candidates", []):
             lines.append(
-                f"| `{c['id']}` | `{c['branch']}` | {c['model']} | **{c['composite_score']:.4f}** | `{c['delta_vs_baseline']:+.4f}` | `{c['verdict']}` |"
+                f"| `{c['id']}` | `{c['branch']}` | {c['model']} "
+                f"| **{_fmt(c.get('composite_score'))}** "
+                f"| `{_fmt(c.get('delta_vs_baseline'), '{:+.4f}')}` "
+                f"| `{c['verdict']}` |"
             )
 
         lines.extend(

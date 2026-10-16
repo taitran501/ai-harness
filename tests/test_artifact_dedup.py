@@ -343,32 +343,33 @@ class TestRegisterExternalDedup(unittest.TestCase):
         self.assertEqual(len(masters), 1)
         self.assertEqual(truth.stat().st_ino, masters[0].stat().st_ino)
 
-    def test_reregister_same_name_updates_links_consistently(self) -> None:
+    def test_reregister_same_name_rejected(self) -> None:
+        # Immutability contract (CORRECTNESS_CONTRACT §3 / runner.py
+        # exist_ok=False): re-registering the same name must be refused —
+        # a second registration is a different candidate, not a rewrite of
+        # completed evidence.
         from harness.candidates import register_external_prediction
 
         register_external_prediction(
             project=self.root, name="ext_gm_02", oof_path=self._ext_oof(0.1),
             author="GM", source="kaggle_kernel",
         )
+        with self.assertRaises(ValueError):
+            register_external_prediction(
+                project=self.root, name="ext_gm_02", oof_path=self._ext_oof(0.9),
+                author="GM", source="kaggle_kernel",
+            )
+        # the original run is untouched
         exp_dir = self.root / "artifacts" / "ext_gm_02"
-        oof_before = (exp_dir / "oof_predictions.csv").read_bytes()
-        # re-register the same name with different OOF content
-        register_external_prediction(
-            project=self.root, name="ext_gm_02", oof_path=self._ext_oof(0.9),
-            author="GM", source="kaggle_kernel",
-        )
-        oof_after = (exp_dir / "oof_predictions.csv").read_bytes()
-        pred_after = (exp_dir / "predictions.csv").read_bytes()
-        truth_after = (exp_dir / "evaluation_truth.csv").read_bytes()
-        self.assertNotEqual(oof_before, oof_after)
-        self.assertEqual(oof_after, pred_after)
-        # truth is identical content -> same canonical master, still linked
+        oof = exp_dir / "oof_predictions.csv"
+        pred = exp_dir / "predictions.csv"
+        self.assertEqual(oof.read_bytes(), pred.read_bytes())
         masters = [
             p for p in (self.root / "artifacts").iterdir()
             if p.name.startswith("canonical_evaluation_truth_")
         ]
         self.assertEqual(len(masters), 1)
-        self.assertEqual(truth_after, masters[0].read_bytes())
+        self.assertEqual((exp_dir / "evaluation_truth.csv").read_bytes(), masters[0].read_bytes())
 
 
 if __name__ == "__main__":

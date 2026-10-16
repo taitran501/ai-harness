@@ -722,13 +722,22 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
         timeout_seconds: float = 24 * 60 * 60,
         status_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
-        """Poll until Kaggle reports a terminal state; queued/running are never treated as complete."""
+        """Poll until Kaggle reports a terminal state; queued/running are never treated as complete.
+
+        ``ERROR`` means the *status CLI call* failed (network hiccup, rate
+        limit, bad auth burst) — not that the kernel failed (a real kernel
+        failure is ``FAILED``). Transient CLI errors are tolerated up to a
+        bounded consecutive count; only provider-parsed terminal states end
+        the loop (or the deadline does).
+        """
         deadline = time.monotonic() + timeout_seconds
         last: Dict[str, Any] = {
             "success": False,
             "status": "UNKNOWN",
             "kernel_slug": kernel_slug,
         }
+        consecutive_errors = 0
+        max_consecutive_errors = 10
         while time.monotonic() < deadline:
             last = cls.get_kernel_status(exp_id, kernel_slug)
             if status_callback:
@@ -737,7 +746,11 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
             if state in {"COMPLETED", "FAILED", "CANCELLED"}:
                 return last
             if state == "ERROR":
-                return last
+                consecutive_errors += 1
+                if consecutive_errors >= max_consecutive_errors:
+                    return last
+            else:
+                consecutive_errors = 0
             time.sleep(max(0.0, poll_interval))
         return {**last, "success": False, "status": "TIMEOUT", "timed_out": True}
 

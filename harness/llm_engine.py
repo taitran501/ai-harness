@@ -959,7 +959,11 @@ class LLMEngine:
         if not api_key:
             raise ValueError("GEMINI_API_KEY is not configured. Please set it in Environment Settings.")
 
-        # Try google-genai SDK if available
+        # Try google-genai SDK if available. Only a missing SDK (ImportError)
+        # justifies the REST fallback: auth/rate-limit/model errors from the
+        # SDK must not be masked by a second call that returns the same
+        # failure silently.
+        sdk_error: Optional[BaseException] = None
         try:
             from google import genai
             client = genai.Client(api_key=api_key)
@@ -973,6 +977,12 @@ class LLMEngine:
                 config=config_dict,
             )
             raw_text = response.text or ""
+            sdk_candidates = getattr(response, "candidates", None) or []
+            if not raw_text and not sdk_candidates:
+                raise RuntimeError(
+                    "Gemini SDK returned an empty response with no candidates "
+                    "(provider error: rate limit, content filter, or invalid model)."
+                )
             latency_ms = int((time.time() - start_time) * 1000)
             return {
                 "text": raw_text,
@@ -984,8 +994,10 @@ class LLMEngine:
                     "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", None),
                 },
             }
-        except Exception:
-            pass
+        except ImportError:
+            pass  # SDK not installed → REST fallback below
+        except Exception as exc:  # noqa: BLE001
+            sdk_error = exc  # surface it if the REST fallback also fails
 
         # Fallback to direct REST API
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
@@ -1007,10 +1019,18 @@ class LLMEngine:
 
         raw_text = ""
         candidates = data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if parts:
-                raw_text = parts[0].get("text", "")
+        if not candidates:
+            # An error body (rate limit, content filter, bad model) must be
+            # surfaced — an empty string looks like a valid empty completion
+            # and silently poisons downstream metric extraction.
+            err = data.get("error") or {"code": data.get("promptFeedback", {}).get("code", "unknown"), "message": "Gemini returned no candidates"}
+            msg = f"Gemini REST fallback failed: {err}"
+            if sdk_error is not None:
+                raise RuntimeError(f"{msg} (SDK also failed: {sdk_error!r})") from sdk_error
+            raise RuntimeError(msg)
+        parts = candidates[0].get("content", {}).get("parts", [])
+        if parts:
+            raw_text = parts[0].get("text", "")
 
         latency_ms = int((time.time() - start_time) * 1000)
         usage = data.get("usageMetadata", {})
