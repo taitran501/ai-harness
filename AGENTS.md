@@ -78,6 +78,7 @@ Run before pushing changes to this repository:
 ```bash
 python tools/run_tests.py                # Full suite (all modules must pass 100%)
 python tools/run_tests.py --fast         # Fast tier during iteration (skips 4 slow pipeline modules)
+ruff check harness/ tools/ --select F,E7 # Static gate: undefined names (F821) & pyflakes
 ```
 
 The suite is tiered: `tools/run_tests.py --fast` runs everything except the four

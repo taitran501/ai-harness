@@ -2547,13 +2547,13 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
         params,
         t0,
     ) -> ActionObservation:
+        pool = self.comp_state.compute_candidate_pool(journal)
         default_exp_id = (
             (pool.get("overall_best") or {}).get("id")
             or self.comp_state.state["gates"].get("baseline_exp_id")
             or "baseline"
         )
         exp_id = params.get("exp_id", default_exp_id)
-        pool = self.comp_state.compute_candidate_pool(journal)
         cand = next(
             (c for c in pool["all_candidates"] if c["id"] == exp_id), None
         ) or (pool["overall_best"] if pool["overall_best"] else {})

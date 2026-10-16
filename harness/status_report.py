@@ -17,7 +17,7 @@ import json
 import platform
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 HARNESS_PACKAGE_CANDIDATES = ("harness", "ai_harness", "ml_harness")

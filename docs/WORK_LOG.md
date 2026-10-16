@@ -6,6 +6,45 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — Fix 4 latent F821 (undefined name) bugs + regression tests
+
+**Task:** After Wave 1+2, answer "còn cần improve gì không?" with a broader
+ruff pass (`--select F,E7`) beyond the cleanup's F401/F841/F811 scope.
+
+**Findings (all pre-existing, verified present at fcc7749):**
+- `agent_bridge._handle_inspect_experiment`: `pool` referenced BEFORE its
+  assignment → guaranteed NameError on every `inspect_experiment` action.
+  Silent because the typed-action dispatcher converts handler exceptions
+  into FAILED observations — the action never worked, without any crash.
+- `cloud_inspector.run_full_preflight_check`: `Optional` used in signature
+  but never imported; masked by `from __future__ import annotations` (PEP 563
+  defers evaluation).
+- `cloud_runner.run_via_modal`: `push_dataset_to_modal` called by bare name
+  but never imported (defined in `templates/modal_template.py`, only imported
+  by the dashboard) → NameError on the Modal dataset-upload path.
+- `status_report`: `List` used in a local annotation but never imported
+  (local annotations are never evaluated → no runtime error, static-only).
+
+**Work:**
+- Moved the `pool = compute_candidate_pool(journal)` assignment above its
+  first use in `_handle_inspect_experiment` (mirrors `_handle_inspect_diagnostics`).
+- Added the three missing names to their typing/template imports.
+- New `tests/test_f821_undefined_names.py` (5 tests): dispatch-level test that
+  `inspect_experiment` returns SUCCESS for explicit and default exp_id;
+  binding tests that `cloud_runner.push_dataset_to_modal` is the template
+  function, `get_type_hints` resolves the inspector signature, and
+  `List` is a module-level name in status_report.
+
+**Validation:** proved the regression tests bite — re-introducing the bugs
+made 2 tests fail with exactly `cannot access local variable 'pool'`;
+with fixes: 647 tests OK (1 skipped); ruff F821 clean on harness/ + tools/.
+
+**Lesson:** exception-swallowing dispatchers hide guaranteed-failure actions
+behind vague "raised exception" summaries — an F821 inside a handler means
+the action *never works*, not that it fails sometimes. Static analysis scope
+matters: cleanup runs that select only F401/F841 miss latent NameErrors.
+Going forward, pre-push static gate = `ruff check harness/ tools/ --select F,E7`.
+
 ### 2026-10-17 — Wave 1+2: Codebase Cleanup & Test Re-architecture
 
 **Task:** Address the user's three concerns measured against the live tree:
