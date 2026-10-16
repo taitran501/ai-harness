@@ -67,7 +67,7 @@ def remove_functions(source: str, names: list[str]) -> tuple[str, list[str], lis
         # absorb the single blank line directly after the block, if any
         if end < len(lines) and not lines[end].strip():
             delete.add(end)
-    new_source = "".join(l for i, l in enumerate(lines) if i not in delete)
+    new_source = "".join(ln for i, ln in enumerate(lines) if i not in delete)
     try:
         ast.parse(new_source)
     except SyntaxError as e:

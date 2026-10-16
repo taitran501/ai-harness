@@ -66,9 +66,9 @@ def main() -> None:
     mgr = SubmissionManager()
 
     if args.action == "register":
-        print(f"===========================================================")
+        print("===========================================================")
         print(f"📦 REGISTERING SUBMISSION FOR EXPERIMENT: {args.exp_id}")
-        print(f"===========================================================")
+        print("===========================================================")
         try:
             entry = mgr.register_submission(
                 exp_id=args.exp_id,
@@ -83,9 +83,9 @@ def main() -> None:
             print(f"✔ Archive Package   : {entry.archive_path}")
             print(f"✔ Audit Receipt     : {entry.receipt_path}")
             print(f"✔ Local CV Scores   : {entry.local_cv_scores}")
-            print(f"✔ Registered in     : submissions/SUBMISSIONS.md")
-            print(f"===========================================================")
-            print(f"🎉 SUCCESS: Submission package verified and ready for upload!")
+            print("✔ Registered in     : submissions/SUBMISSIONS.md")
+            print("===========================================================")
+            print("🎉 SUCCESS: Submission package verified and ready for upload!")
         except Exception as e:
             print(f"❌ REGISTRATION FAILED: {e}", file=sys.stderr)
             sys.exit(1)
@@ -115,16 +115,16 @@ def main() -> None:
                 split_type=args.split_type,
                 notes=args.notes,
             )
-            print(f"===========================================================")
+            print("===========================================================")
             print(f"🎯 RECORDED OFFICIAL SCORES FOR: {entry.id}")
-            print(f"===========================================================")
+            print("===========================================================")
             print(f"Status              : {entry.status}")
             print(f"Official Scores     : {entry.official_scores}")
             print(f"Score Deltas (LB-CV): {entry.score_deltas}")
             if entry.divergence_warning:
-                print(f"🚨 WARNING: CV vs LB Divergence detected! LB score dropped > 0.05 below Local CV.")
-            print(f"Updated in          : submissions/SUBMISSIONS.md")
-            print(f"===========================================================")
+                print("🚨 WARNING: CV vs LB Divergence detected! LB score dropped > 0.05 below Local CV.")
+            print("Updated in          : submissions/SUBMISSIONS.md")
+            print("===========================================================")
         except Exception as e:
             print(f"❌ FAILED TO RECORD SCORE: {e}", file=sys.stderr)
             sys.exit(1)
@@ -133,7 +133,7 @@ def main() -> None:
         try:
             entry = mgr.mark_submitted(sub_id=args.sub_id, portal_reference=args.ref)
             print(f"✔ Submission '{entry.id}' marked as SUBMITTED_PENDING.")
-            print(f"Updated in submissions/SUBMISSIONS.md")
+            print("Updated in submissions/SUBMISSIONS.md")
         except Exception as e:
             print(f"❌ ERROR: {e}", file=sys.stderr)
             sys.exit(1)

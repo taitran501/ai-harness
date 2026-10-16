@@ -263,12 +263,12 @@ class DiagnosticEngine:
                     "",
                     f"## {section_idx}. Target '{t_name}' Confusion Matrix",
                     "",
-                    f"| True Label \\ Predicted | " + " | ".join([f"`{l}`" for l in labels]) + " |",
+                    "| True Label \\ Predicted | " + " | ".join([f"`{lbl}`" for lbl in labels]) + " |",
                     "|---|" + ":---:|"*len(labels),
                 ])
                 for t_lbl in labels:
                     row = cm["matrix"].get(t_lbl, {})
-                    lines.append(f"| **{t_lbl}** | " + " | ".join([str(row.get(l, 0)) for l in labels]) + " |")
+                    lines.append(f"| **{t_lbl}** | " + " | ".join([str(row.get(lbl, 0)) for lbl in labels]) + " |")
                 section_idx += 1
 
         # 3. Minority / Rare Label Analysis

@@ -146,7 +146,7 @@ class DataStrategyEngine:
 
         elif mode_val == SplitMode.PURGED_GROUP_TIME_SERIES:
             if not group_col or group_col not in df.columns:
-                raise ValueError(f"group_col (time group identifier) required for PurgedGroupTimeSeriesSplit")
+                raise ValueError("group_col (time group identifier) required for PurgedGroupTimeSeriesSplit")
             unique_groups = np.sort(df[group_col].dropna().unique())
             n_groups = len(unique_groups)
             if n_groups < n_splits + 1:

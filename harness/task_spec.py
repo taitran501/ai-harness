@@ -549,7 +549,8 @@ class UniversalTaskSpec:
 
         subtasks_dict = {}
         st_configs = task_cfg.get("subtasks", task_cfg.get("metrics", []))
-        if isinstance(st_configs,dict): st_configs=[{"id":key,**value} for key,value in st_configs.items()]
+        if isinstance(st_configs, dict):
+            st_configs = [{"id": key, **value} for key, value in st_configs.items()]
         for st in st_configs:
             spec = SubtaskSpec.from_dict(st)
             subtasks_dict[spec.id] = spec

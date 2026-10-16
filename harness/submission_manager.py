@@ -457,7 +457,7 @@ class SubmissionManager:
             "> - 🎯 `SCORED`: Official scores recorded with CV vs LB delta analysis.",
             "> - ⚠️ `DIVERGENCE`: Local CV significantly over-estimated performance (LB - CV < -0.05).",
             "",
-            f"| Sub ID | Exp ID | Status | Local CV | Official LB | Delta (LB - CV) | Package | Notes |",
+            "| Sub ID | Exp ID | Status | Local CV | Official LB | Delta (LB - CV) | Package | Notes |",
             "|---|---|---|---|---|---|---|---|",
         ]
 

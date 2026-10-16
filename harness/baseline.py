@@ -64,7 +64,8 @@ def validate_baseline_artifact(
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Baseline metrics are unreadable at `{metrics_path}`: {exc}") from exc
     from harness.evaluation import metric_name
-    if metric_name(metrics.get("primary_metric",""))!=metric_name(primary_metric): raise ValueError("Baseline scorer metric differs from the task")
+    if metric_name(metrics.get("primary_metric", "")) != metric_name(primary_metric):
+        raise ValueError("Baseline scorer metric differs from the task")
     score, metric_key = extract_primary_metric(metrics, primary_metric, exp_id)
     if score is None:
         raise ValueError(

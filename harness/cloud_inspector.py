@@ -84,8 +84,16 @@ class CloudPreflightInspector:
         cls,
         config_path: Path | str,
         project_root: Optional[Path | str] = None,
+        full_data_check: bool = True,
     ) -> Tuple[bool, List[str], Dict[str, Any]]:
-        """Run all pre-flight checks and return consolidated verdict."""
+        """Run all pre-flight checks and return consolidated verdict.
+
+        ``full_data_check`` controls whether the training frame is loaded and
+        plugin-validated locally. The dispatch path uses ``False`` so that a
+        multi-GB frame is not re-loaded into local memory on every cloud
+        dispatch (the remote job re-validates its data as its first step);
+        explicit preflight commands keep the default ``True``.
+        """
         from harness.project import HarnessProject
         from harness.plugins import TaskPluginContext, load_task_plugin
         from harness.task_spec import load_active_task_spec
@@ -115,7 +123,11 @@ class CloudPreflightInspector:
                 plugin_id=project.plugin_id or "default",
             )
             plugin = load_task_plugin(project.plugin_id, plugin_context)
-            frame = plugin.load_training_data(plugin_context)
+            frame = (
+                plugin.load_training_data(plugin_context)
+                if full_data_check
+                else None
+            )
             if frame is not None:
                 plugin.validate_training_data(plugin_context, frame)
             else:
@@ -162,9 +174,9 @@ def main() -> None:
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
     args = parser.parse_args()
 
-    print(f"===========================================================")
+    print("===========================================================")
     print(f"🔍 CLOUD PRE-FLIGHT INSPECTION: {args.config}")
-    print(f"===========================================================")
+    print("===========================================================")
 
     passed, errors, cfg = CloudPreflightInspector.run_full_preflight_check(args.config)
     if passed:

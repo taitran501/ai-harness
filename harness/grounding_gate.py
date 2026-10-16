@@ -110,21 +110,21 @@ class GroundingGate:
         problem = exp_meta.get("problem_addressed", "")
         if not problem or len(str(problem).strip()) < 15:
             errors.append(
-                f"[EXPERIMENT SPECIFICATION ERROR] 'problem_addressed' must be substantive (>=15 chars), "
-                f"directly referencing a documented bottleneck from DIAGNOSTICS.md or past runs."
+                "[EXPERIMENT SPECIFICATION ERROR] 'problem_addressed' must be substantive (>=15 chars), "
+                "directly referencing a documented bottleneck from DIAGNOSTICS.md or past runs."
             )
 
         hypothesis = exp_meta.get("hypothesis", "")
         if not hypothesis or len(str(hypothesis).strip()) < 20:
             errors.append(
-                f"[EXPERIMENT SPECIFICATION ERROR] 'hypothesis' must clearly state expected mechanism "
-                f"and quantitative target delta (>=20 chars)."
+                "[EXPERIMENT SPECIFICATION ERROR] 'hypothesis' must clearly state expected mechanism "
+                "and quantitative target delta (>=20 chars)."
             )
 
         intervention = exp_meta.get("intervention", "")
         if not intervention or len(str(intervention).strip()) < 10:
             errors.append(
-                f"[EXPERIMENT SPECIFICATION ERROR] 'intervention' must clearly define Control vs Treatment."
+                "[EXPERIMENT SPECIFICATION ERROR] 'intervention' must clearly define Control vs Treatment."
             )
         else:
             lazy_err = cls.check_lazy_intervention(str(intervention))
@@ -170,13 +170,13 @@ class GroundingGate:
             sid = grounding.get("source_id", "")
             if not sid or len(str(sid).strip()) < 3:
                 errors.append(
-                    f"[GROUNDING SOURCE ERROR] 'source_id' must specify a valid model ID, paper ID, or benchmark key."
+                    "[GROUNDING SOURCE ERROR] 'source_id' must specify a valid model ID, paper ID, or benchmark key."
                 )
 
             summary = grounding.get("retrieval_summary", "")
             if not summary or len(str(summary).strip()) < 15:
                 errors.append(
-                    f"[GROUNDING RATIONALE ERROR] 'retrieval_summary' must explain empirical justification (>=15 chars)."
+                    "[GROUNDING RATIONALE ERROR] 'retrieval_summary' must explain empirical justification (>=15 chars)."
                 )
 
             # Anti-bypass: the grounding source must have been genuinely verified.
@@ -211,15 +211,15 @@ class GroundingGate:
                 }
             else:
                 errors.append(
-                    f"[ASSUMPTION REGISTER MISSING] Config must define 'assumption_register' to decouple known facts "
-                    f"from speculative hypotheses:\n"
-                    f"  assumption_register:\n"
-                    f"    known_facts:\n"
-                    f"      - '<fact 1 with metrics from parent_id>'\n"
-                    f"    assumptions:\n"
-                    f"      - '<explicit assumption 1>'\n"
-                    f"    uncertainty_level: 'low' | 'medium' | 'high'\n"
-                    f"    verification_probe: '<how assumption will be verified before heavy full-scale training>'"
+                    "[ASSUMPTION REGISTER MISSING] Config must define 'assumption_register' to decouple known facts "
+                    "from speculative hypotheses:\n"
+                    "  assumption_register:\n"
+                    "    known_facts:\n"
+                    "      - '<fact 1 with metrics from parent_id>'\n"
+                    "    assumptions:\n"
+                    "      - '<explicit assumption 1>'\n"
+                    "    uncertainty_level: 'low' | 'medium' | 'high'\n"
+                    "    verification_probe: '<how assumption will be verified before heavy full-scale training>'"
                 )
 
         if assumption_reg:
@@ -240,8 +240,8 @@ class GroundingGate:
                 probe = assumption_reg.get("verification_probe")
                 if not probe or len(str(probe).strip()) < 10:
                     errors.append(
-                        f"[HIGH UNCERTAINTY FLAGGED] Experiments with uncertainty_level='high' MUST declare a "
-                        f"'verification_probe' (e.g. '--debug --fold 0' smoke test or mini-probe)."
+                        "[HIGH UNCERTAINTY FLAGGED] Experiments with uncertainty_level='high' MUST declare a "
+                        "'verification_probe' (e.g. '--debug --fold 0' smoke test or mini-probe)."
                     )
 
         # 4. Anti-Pseudo-Ensemble Guard for 'ens' branch
@@ -249,8 +249,8 @@ class GroundingGate:
             ens_components = config.get("ensemble", {}).get("components", [])
             if len(ens_components) < 2:
                 errors.append(
-                    f"[ENSEMBLE POLICY VIOLATION] Branch 'ens' requires at least 2 distinct constituent model paths "
-                    f"under 'ensemble.components'."
+                    "[ENSEMBLE POLICY VIOLATION] Branch 'ens' requires at least 2 distinct constituent model paths "
+                    "under 'ensemble.components'."
                 )
 
         # Construct Audit Receipt

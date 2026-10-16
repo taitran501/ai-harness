@@ -77,7 +77,7 @@ class SubmissionPreflightValidator:
             errors.append(f"Missing required ID column '{id_column}'")
         else:
             if not (sub_df[id_column].values == ref_df[id_column].values).all():
-                errors.append(f"Candidate IDs do not strictly match reference test ID sequence")
+                errors.append("Candidate IDs do not strictly match reference test ID sequence")
 
         # 3. Detect target column
         if target_column is None:
