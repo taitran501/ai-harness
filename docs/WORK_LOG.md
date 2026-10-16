@@ -6,6 +6,75 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — Agent-ergonomics update: HUD token economy, hygiene signal, plugin/model discoverability, PowerShell-safe SOP
+
+**Task:** "còn gì để improve cho repo / update để agent thao tác thuận tiện" —
+audited the live agent surface (HUD output, hygiene block, `act` flags,
+`ai-harness status`, generated skills, docs) against 5 workspaces and fixed
+what agents actually trip over.
+
+**Findings (all measured on live workspaces):**
+- HUD research-continuity block was one raw `json.dumps` line: ~489 tokens
+  (34% of the whole HUD) in a nearly-empty aimo state, unbounded as research
+  history grows — directly against the framework's own context-protection rule.
+- Hygiene flagged `dataset`/`scratch`/`splits`/`__pycache__` (standard
+  structure in every workspace) and listed ~30 `kaggle_sub_*`/`kernel_output*`
+  run-output dirs individually (rsna-knee HUD: 12 issues, mostly noise).
+- The generated SOP skill, `docs/agent_workflow.md`, and the
+  `agent_bridge_cli.py` docstring all still taught inline `--params '{...}'`
+  JSON — the exact pattern that breaks under PowerShell quoting, while the
+  PowerShell-friendly `--param-file` (already implemented) was not mentioned.
+- Post-B16, valid `model.name` values depend on the workspace plugin, but
+  nothing listed them (agents discovered names by trial and error);
+  `ai-harness status` had no plugin section.
+- aimo task.yaml declared `platform: codabench` despite
+  `execution.backend: kaggle, locked: true` — skills rendered the wrong
+  platform (semeval checked: no counter-evidence, left as-is).
+
+**Changes:**
+- `harness/agent_bridge.py`: new `_research_continuity_hud_lines()` — the
+  research block renders as bounded Markdown (counts, latest checkpoint
+  conclusion/next action with insight ids, recent decisions with lessons,
+  unreviewed count, frontier, progress path). Full payload stays in
+  `context --format json`. aimo HUD: 1441 → 1142 tokens (~21%), and the old
+  blob grew unbounded with history while this rendering stays bounded.
+- `harness/hygiene.py`: `dataset`, `scratch`, `splits`, `plugin`,
+  `__pycache__`, research/external-kernel dirs added to the allow-list;
+  Kaggle/kernel run-output dirs (`kaggle_sub*`, `kernel_output*`,
+  `kaggle_results`, `kaggle_err_log`) are counted in full (exempt from
+  max_findings) and collapsed into ONE `stale_run_output` advisory with
+  examples + count. rsna-knee HUD: 12 noise issues → 2 real advisories
+  (38 run-output dirs aggregated + 1 stray submission.csv).
+- `harness/status_report.py` + `harness/models.py`: `ai-harness status`
+  now reports installed plugins, the active plugin, and the union of valid
+  model names (`available_model_names()` + the active plugin's
+  `model_names`). Zindi shows its 8 plugin names on top of the 41 built-ins.
+- `harness/skill_injector.py` + `docs/agent_workflow.md` +
+  `tools/agent_bridge_cli.py` docstring: SOP examples now use flat flags
+  (`--config-path`, `--branch`, …) and `--param-file` with an explicit
+  "never inline JSON on PowerShell" note (param names verified against the
+  action handlers).
+- `docs/architecture.md` §3: execution backends expanded to the live design
+  (resolution order + locking, dispatch preflight fast mode, job lifecycle
+  with byte-offset log resume, kaggle inspect/export, `ai-harness sync`).
+- aimo `configs/task.yaml`: `platform: kaggle` (was `codabench`).
+- zindi plugin: `model_names` class attribute for status discoverability.
+
+**Tests:** `tests/test_agent_ergonomics.py` (8 tests: allow-list,
+aggregation incl. the <=2-dirs no-aggregate case, HUD rendering compactness
++ truncation + empty-memory, status plugins section, built-in name
+exclusivity). Bite-checked the aggregation by disabling it. One legacy test
+(`test_research_trace`) asserted the old raw-JSON format; updated to assert
+the compact frontier rendering (information preserved, not lost).
+Full suite 661 OK; ruff gate clean.
+
+**Lesson:** HUD is a token budget, not a debug dump — any block that embeds
+raw JSON must render bounded Markdown and keep the full payload one flag
+away. Advisory systems (hygiene) need an allow-list matched to the real
+workspace shape plus aggregation for per-run artifacts, or they become
+noise the agents learn to ignore. SOP docs must teach the pattern that works
+on the operator's shell (PowerShell), not the cleanest-looking one.
+
 ### 2026-10-17 — Ruff zero-noise gate + B10–B16 cloud/ops & architecture fixes
 
 **Task:** "Làm ruff errors + B10–B16" — clean every remaining ruff finding

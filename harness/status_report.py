@@ -84,6 +84,56 @@ def _project_section(project_root: Optional[str]) -> Dict[str, Any]:
     }
 
 
+def _plugins_section(project_root: Optional[str]) -> Dict[str, Any]:
+    """Installed task plugins, the active plugin, and the union of model names.
+
+    After the B16 refactor, which model names a workspace accepts depends on
+    its active plugin; this section makes that discoverable from one health
+    command instead of trial-and-error.
+    """
+    from harness.models import available_model_names
+    from harness.plugins import list_task_plugins, load_task_plugin
+    from harness.project import HarnessProject
+
+    plugins = list_task_plugins()
+    built_in = available_model_names()
+    plugin_names: Dict[str, List[str]] = {}
+    active_plugin_id = None
+    project: Optional[HarnessProject] = None
+    try:
+        project = HarnessProject.discover(project_root or ".")
+        active_plugin_id = project.plugin_id
+    except Exception:  # noqa: BLE001 - not attached: report install only
+        project = None
+    active_names = built_in
+    if project is not None and active_plugin_id and active_plugin_id != "default":
+        try:
+            from harness.plugins import TaskPluginContext
+            from harness.task_spec import load_active_task_spec
+
+            spec = load_active_task_spec(project.task_config_path)
+            ctx = TaskPluginContext(
+                project.root, project.task_config_path, spec, active_plugin_id
+            )
+            plugin = load_task_plugin(active_plugin_id, ctx)
+            names = getattr(plugin, "model_names", None) or getattr(
+                type(plugin), "model_names", None
+            )
+            if names:
+                plugin_names[active_plugin_id] = sorted(str(n) for n in names)
+                active_names = sorted(set(built_in) | set(plugin_names[active_plugin_id]))
+        except Exception:  # noqa: BLE001 - plugin broken: surface the error
+            plugin_names[active_plugin_id] = {
+                "error": "active plugin failed to load; run `ai-harness plugins`"
+            }
+    return {
+        "installed": plugins,
+        "active_plugin_id": active_plugin_id,
+        "model_names": active_names,
+        "plugin_model_names": plugin_names,
+    }
+
+
 def _session_section(project_root: Optional[str]) -> Dict[str, Any]:
     """Latest agent-bridge session, if any. Cheap: only reads session JSON files."""
     from harness.project import HarnessProject, MANIFEST_RELATIVE_PATH, LEGACY_MANIFEST_RELATIVE_PATH
@@ -211,6 +261,7 @@ def collect_status(project_root: Optional[str] = None, include_cloud: bool = Tru
         },
         "install": _section(_installed_info),
         "project": _section(_project_section, project_root),
+        "plugins": _section(_plugins_section, project_root),
         "session": _section(_session_section, project_root),
         "artifacts": _section(_artifact_health_section, project_root),
     }

@@ -11,12 +11,14 @@ BridgeSession tracking, optional budget enforcement, and USER_APPROVAL governanc
   # 2. Start or configure a BridgeSession with optional budget limits:
   ai-harness-agent start-session --goal "Improve the primary metric" --max-experiments 3
 
-  # 3. Invoke a Typed Harness Action (returns structured ActionObservation JSON):
-  ai-harness-agent act --action inspect_diagnostics --params '{"exp_id": "exp001_baseline"}'
-  ai-harness-agent act --action create_experiment --params '{"branch": "feat", "descriptor": "feature_v1"}'
-  ai-harness-agent act --action run_smoke_test --params '{"config_path": "configs/exp002_feat_feature_v1.yaml"}'
-  ai-harness-agent act --action run_full_validation --params '{"config_path": "configs/exp002_feat_feature_v1.yaml", "backend": "local"}'
-  ai-harness-agent act --action synthesize_candidate --params '{"name": "ensemble_v1", "mode": "ensemble_vote"}'
+  # 3. Invoke a Typed Harness Action (returns structured ActionObservation JSON).
+  # Prefer flat flags; for complex params on PowerShell use --param-file with a
+  # UTF-8 JSON file (inline --params JSON breaks under PowerShell quoting):
+  ai-harness-agent act --action inspect_diagnostics --exp-id exp001_baseline
+  ai-harness-agent act --action create_experiment --branch feat --descriptor feature_v1
+  ai-harness-agent act --action run_smoke_test --config-path configs/exp002_feat_feature_v1.yaml
+  ai-harness-agent act --action run_full_validation --config-path configs/exp002_feat_feature_v1.yaml --backend local
+  ai-harness-agent act --action synthesize_candidate --param-file synthesize.json
 
   # 4. Approve a paused USER_APPROVAL action (submit, freeze, unfreeze, finalize):
   ai-harness-agent approve --session-id session_0001
