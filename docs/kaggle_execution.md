@@ -165,6 +165,16 @@ ID would exclude those files. If the SDK is absent or fails, partial files are
 discarded and the CLI retries with a bounded subprocess timeout. Unit tests mock
 both paths, so API authentication cannot run while testing imports.
 
+**SDK compatibility & retry (PR #51):** `harness/kaggle_compat.py` exposes a
+unified `KaggleClient` facade over whichever Kaggle SDK is installed
+(`kagglesdk` preferred, `kaggle` legacy fallback). It normalises attribute
+names (legacy camelCase → canonical snake_case) so agents don't need to know
+which SDK is in use. `retry_with_backoff(fn, max_attempts=5, base_delay=1.0,
+max_delay=60.0)` wraps transient-error-prone calls (429 rate limits, 5xx,
+timeouts) with exponential backoff; `kernels_output` and `kaggle kernels
+status` CLI polling are both wrapped so a single 429 doesn't abort the whole
+download or status poll.
+
 Import requires exactly one manifest v2, matching job/task/experiment/config
 identity, completed full validation, required evidence files and valid hashes.
 Failed downloads, partial output, multiple manifests and identity mismatches
