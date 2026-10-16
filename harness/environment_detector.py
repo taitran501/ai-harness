@@ -15,6 +15,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -22,6 +23,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from harness.env_cache import cached_probe
 from harness.io_utils import get_project_root
 PROJECT_ROOT = get_project_root()
 
@@ -49,7 +51,7 @@ class EnvironmentDetector:
     """Detects and manages environments and accounts across Modal, Kaggle, Docker, and GPU."""
 
     @staticmethod
-    def detect_modal() -> Dict[str, Any]:
+    def _probe_modal() -> Dict[str, Any]:
         """Detect Modal CLI installation, configured profiles, and active workspace."""
         modal_path = shutil.which("modal")
         result: Dict[str, Any] = {
@@ -192,7 +194,7 @@ class EnvironmentDetector:
             }
 
     @staticmethod
-    def detect_kaggle() -> Dict[str, Any]:
+    def _probe_kaggle() -> Dict[str, Any]:
         """Detect Kaggle CLI installation, credentials, and active username."""
         kaggle_path = shutil.which("kaggle")
         result: Dict[str, Any] = {
@@ -298,7 +300,7 @@ class EnvironmentDetector:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    def detect_docker() -> Dict[str, Any]:
+    def _probe_docker() -> Dict[str, Any]:
         """Detect Docker installation and daemon status."""
         docker_path = shutil.which("docker")
         result: Dict[str, Any] = {
@@ -342,7 +344,7 @@ class EnvironmentDetector:
         return result
 
     @staticmethod
-    def detect_gpu() -> Dict[str, Any]:
+    def _probe_gpu() -> Dict[str, Any]:
         """Detect NVIDIA GPU hardware, VRAM, and driver."""
         result: Dict[str, Any] = {
             "detected": False,
@@ -382,26 +384,75 @@ class EnvironmentDetector:
             except Exception:
                 pass
 
-        # Also test torch cuda or mps if available
-        try:
-            import torch
-            result["cuda_available"] = torch.cuda.is_available()
-            if result["cuda_available"] and not result["gpu_name"]:
-                result["detected"] = True
-                result["gpu_name"] = torch.cuda.get_device_name(0)
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                result["mps_available"] = True
-                if not result["gpu_name"]:
+        # Fallback: torch cuda or mps — but ONLY when nvidia-smi did not
+        # already report a GPU. Importing torch costs ~6s on machines that
+        # have it installed, so it must not run on the common path. When
+        # torch is already in sys.modules (agent imported it) it is free to
+        # use. When skipped, cuda_available is None = "unknown, not probed"
+        # (never a false negative that would hide a working GPU).
+        smi_reported = result["detected"]
+        torch_mod = sys.modules.get("torch")
+        if smi_reported and torch_mod is None:
+            result["cuda_available"] = None
+            result["cuda_probe"] = "skipped (nvidia-smi reported GPU; torch not imported)"
+        else:
+            try:
+                if torch_mod is None:
+                    import torch as torch_mod
+                result["cuda_available"] = torch_mod.cuda.is_available()
+                result["cuda_probe"] = "torch"
+                if result["cuda_available"] and not result["gpu_name"]:
                     result["detected"] = True
-                    result["gpu_name"] = "Apple Silicon GPU (MPS)"
-        except Exception:
-            pass
+                    result["gpu_name"] = torch_mod.cuda.get_device_name(0)
+                elif hasattr(torch_mod.backends, "mps") and torch_mod.backends.mps.is_available():
+                    result["mps_available"] = True
+                    if not result["gpu_name"]:
+                        result["detected"] = True
+                        result["gpu_name"] = "Apple Silicon GPU (MPS)"
+            except Exception:
+                pass
 
         return result
 
     @classmethod
+    def detect_modal(cls) -> Dict[str, Any]:
+        """Detect Modal CLI installation, profiles, and active workspace (TTL-cached).
+
+        The ``modal profile list`` subprocess can take several seconds on a
+        cold start, so repeated calls within the TTL window are served from
+        the process cache.
+        """
+        return cached_probe("modal", lambda: cls._probe_modal())
+
+    @classmethod
+    def detect_kaggle(cls) -> Dict[str, Any]:
+        """Detect Kaggle CLI installation and authentication (TTL-cached)."""
+        return cached_probe("kaggle", lambda: cls._probe_kaggle())
+
+    @classmethod
+    def detect_docker(cls) -> Dict[str, Any]:
+        """Detect Docker CLI installation and daemon status (TTL-cached)."""
+        return cached_probe("docker", lambda: cls._probe_docker())
+
+    @classmethod
+    def detect_gpu(cls) -> Dict[str, Any]:
+        """Detect NVIDIA GPU hardware, VRAM, and driver (TTL-cached, default 600 s).
+
+        See :meth:`_probe_gpu` for the torch-import policy.
+        """
+        return cached_probe("gpu", lambda: cls._probe_gpu())
+
+    @classmethod
     def detect_llm_status(cls) -> Dict[str, Any]:
-        """Detect LLM API keys, configured providers, and local inference endpoints."""
+        """Detect LLM API keys, configured providers, and local inference endpoints.
+
+        Cached (TTL default 120 s): the local-endpoint port probes cost
+        seconds each on hosts where the ports are closed.
+        """
+        return cached_probe("llm", lambda: cls._probe_llm_status())
+
+    @classmethod
+    def _probe_llm_status(cls) -> Dict[str, Any]:
         env_dict: Dict[str, str] = {}
         env_file = PROJECT_ROOT / ".env"
         if env_file.exists():
@@ -662,14 +713,34 @@ class EnvironmentDetector:
         return {"success": True, "key_name": key_name, "preview": preview}
 
     @classmethod
-    def get_full_status(cls) -> Dict[str, Any]:
-        """Aggregate full environment and hardware status."""
+    def get_full_status(cls, force: bool = False) -> Dict[str, Any]:
+        """Aggregate full environment and hardware status.
+
+        Probes run in parallel (they are subprocess/network-bound and
+        independent) and each is TTL-cached, so a repeated call within a
+        process is nearly free. ``force=True`` bypasses the cache.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        if force:
+            from harness import env_cache
+
+            env_cache.invalidate()
+
+        # Call the public cached wrappers (not the raw _probe_* methods)
+        # so tests can patch the public API and caching stays composed.
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = {
+                name: pool.submit(getattr(cls, "detect_" + name))
+                for name in ("modal", "kaggle", "docker", "gpu", "llm_status")
+            }
+        result = {name: fut.result() for name, fut in futures.items()}
         return {
-            "modal": cls.detect_modal(),
-            "kaggle": cls.detect_kaggle(),
-            "docker": cls.detect_docker(),
-            "gpu": cls.detect_gpu(),
-            "llm": cls.detect_llm_status(),
+            "modal": result["modal"],
+            "kaggle": result["kaggle"],
+            "docker": result["docker"],
+            "gpu": result["gpu"],
+            "llm": result["llm_status"],
         }
 
     # ------------------------------------------------------------------

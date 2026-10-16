@@ -186,11 +186,19 @@ class LLMEngine:
 
     @staticmethod
     def check_local_endpoint(url: str, timeout: float = 1.0) -> bool:
-        """Check if local Ollama / vLLM HTTP port is responding."""
+        """Check if local Ollama / vLLM HTTP port is responding.
+
+        ``localhost`` is normalized to ``127.0.0.1``: on Windows it
+        resolves to BOTH ``::1`` and ``127.0.0.1``, and ``create_connection``
+        applies the timeout per address — a dead port then costs 2x the
+        timeout instead of one (measured: 2.02 s per probe with a 1.0 s
+        timeout). IPv6-only hosts are rare for these endpoints.
+        """
         if not url:
             return False
         try:
-            req = urllib.request.Request(url.replace("/v1", ""), headers={"User-Agent": "AI-Harness"})
+            normalized = url.replace("://localhost", "://127.0.0.1")
+            req = urllib.request.Request(normalized.replace("/v1", ""), headers={"User-Agent": "AI-Harness"})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.status < 500
         except Exception:

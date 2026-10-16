@@ -8,6 +8,13 @@ from unittest.mock import Mock, patch
 from harness.environment_detector import EnvironmentDetector
 from harness.cloud_job_runner import CloudJobManager
 from harness.project import HarnessProject
+
+# Pre-import the heavy sklearn/scipy chain OUTSIDE any test so that
+# first-time import side effects (scipy runs subprocess.run on some
+# platforms at import time) never land inside the Popen patch window of
+# test_cloud_job_manager_lifecycle. This made that test order-dependent:
+# green in the full suite, red when the file ran alone.
+import harness.evaluation  # noqa: F401
 from tools.dashboard_server import (
     get_next_experiment_id,
     list_available_tasks,
@@ -23,6 +30,10 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
     def setUp(self):
         self.root = prepare_dashboard_workspace(self, "test_cloud_jobs_")
         project = HarnessProject.discover(self.root)
+        # isolate the process-wide env cache between tests
+        from harness import env_cache
+
+        env_cache.invalidate()
         self._module_patches = [
             patch("harness.cloud_job_runner.PROJECT_ROOT", self.root),
             patch("harness.cloud_job_runner.HARNESS_PROJECT", project),
@@ -33,6 +44,9 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
             module_patch.start()
 
     def tearDown(self):
+        from harness import env_cache
+
+        env_cache.invalidate()
         for module_patch in reversed(self._module_patches):
             module_patch.stop()
         cleanup_dashboard_workspace(self)
@@ -48,10 +62,67 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
             self.assertIn("kaggle", status)
             self.assertIn("docker", status)
             self.assertIn("gpu", status)
+            self.assertIn("llm", status)
             self.assertTrue(status["modal"]["installed"])
             self.assertTrue(status["kaggle"]["installed"])
             self.assertTrue(status["docker"]["installed"])
             self.assertTrue(status["gpu"]["detected"])
+            # patched values must flow through get_full_status (cache included)
+            self.assertEqual(status["gpu"], {"detected": True, "count": 1})
+
+    def test_get_full_status_uses_cache_on_second_call(self):
+        # Patch the PROBE (not the cached wrapper) so the wrapper's caching
+        # is what is under test.
+        calls = {"n": 0}
+
+        def fake_probe_gpu():
+            calls["n"] += 1
+            return {"detected": True, "gpu_name": "cached-gpu"}
+
+        with patch.object(EnvironmentDetector, "_probe_gpu", side_effect=fake_probe_gpu):
+            first = EnvironmentDetector.get_full_status()
+            second = EnvironmentDetector.get_full_status()
+        self.assertEqual(first["gpu"], {"detected": True, "gpu_name": "cached-gpu"})
+        self.assertEqual(second["gpu"], first["gpu"])
+        self.assertEqual(calls["n"], 1, "second call must be served from the TTL cache")
+
+    def test_get_full_status_force_bypasses_cache(self):
+        calls = {"n": 0}
+
+        def fake_probe_gpu():
+            calls["n"] += 1
+            return {"detected": True, "gpu_name": f"gpu-{calls['n']}"}
+
+        with patch.object(EnvironmentDetector, "_probe_gpu", side_effect=fake_probe_gpu):
+            first = EnvironmentDetector.get_full_status()
+            second = EnvironmentDetector.get_full_status(force=True)
+        self.assertNotEqual(first["gpu"], second["gpu"])
+        self.assertEqual(calls["n"], 2)
+
+    def test_gpu_probe_skips_torch_when_smi_reports(self):
+        # nvidia-smi found a GPU and torch is NOT imported -> no torch import,
+        # cuda_available is None ("not probed"), never a false negative.
+        import sys as _sys
+
+        saved_torch = _sys.modules.get("torch")
+        _sys.modules.pop("torch", None)
+        try:
+            with patch("shutil.which", side_effect=lambda n: "/fake/nvidia-smi" if n == "nvidia-smi" else None), \
+                 patch("subprocess.run") as run:
+                run.return_value = Mock(
+                    returncode=0,
+                    stdout="FAKE-GPU, 4096, 2048, 550.54\n",
+                )
+                result = EnvironmentDetector._probe_gpu()
+        finally:
+            if saved_torch is not None:
+                _sys.modules["torch"] = saved_torch
+        self.assertTrue(result["detected"])
+        self.assertEqual(result["gpu_name"], "FAKE-GPU")
+        self.assertIsNone(result["cuda_available"])
+        self.assertIn("skipped", result.get("cuda_probe", ""))
+        # the probe must not import torch itself: presence is unchanged
+        self.assertIs(_sys.modules.get("torch"), saved_torch)
 
     def test_get_next_experiment_id(self):
         res = get_next_experiment_id(branch="feat", descriptor="test_cleaning")
