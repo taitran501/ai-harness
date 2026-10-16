@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 import unittest
 from unittest.mock import patch
 

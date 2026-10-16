@@ -7,7 +7,6 @@ parameterizing task modalities, metrics, subtasks, grounding backbones, and audi
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
@@ -106,7 +105,6 @@ def generate_skill_content(
     target_score = task.get("primary_metric_target")
     metrics = task.get("metrics") or task.get("subtasks") or []
     languages = task.get("languages") or []
-    description = task.get("description") or "Iterative ML/DL model development and cross-validation benchmarking."
 
     # Modality knowledge
     mod_info = MODALITY_GROUNDING_SUGGESTIONS.get(modality, MODALITY_GROUNDING_SUGGESTIONS["generic"])

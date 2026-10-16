@@ -20,13 +20,10 @@ from harness.data_strategy import (
 )
 from harness.feature_pipeline import (
     SparseNgramFeaturizer,
-    TabularMetadataExtractor,
     TextTemplateComposer,
-    UniversalFeaturePipeline,
 )
 from harness.task_spec import (
     ConditionalRoutingRule,
-    InputVariantSpec,
     SubtaskSpec,
     UniversalTaskSpec,
 )

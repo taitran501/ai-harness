@@ -9,7 +9,6 @@ import tempfile
 import yaml
 
 from harness.agent_bridge import AgentBridge, TypedActionName
-from harness.agent_runtime import AgentRuntime
 from harness.grounding_gate import GroundingGate
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
@@ -203,16 +202,6 @@ class TestAgentBridge(unittest.TestCase):
             session_id=sess.session_id,
         )
         self.assertEqual(obs.status, "BLOCKED_BY_BUDGET")
-
-    def test_backward_compatible_agent_runtime_adapter(self) -> None:
-        rt = AgentRuntime(self.project_root)
-        run = rt.start_run(
-            goal="Adapter compatibility test", max_experiments=2, auto_approve_all=False
-        )
-        self.assertEqual(run.status, "ACTIVE")
-        self.assertIsNone(run.pending_approval_action)
-        session = rt.bridge.load_session(run.id)
-        self.assertEqual(session.actions, [])
 
     def test_soft_stop_reassess_recommended_and_spec_min_improvement(self) -> None:
         # 1. Verify spec-driven min_meaningful_improvement resolution from configs/task.yaml

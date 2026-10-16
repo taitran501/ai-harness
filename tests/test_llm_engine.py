@@ -2,7 +2,7 @@
 
 import unittest
 import unittest.mock
-from harness.llm_engine import LLMEngine, LLMConfig
+from harness.llm_engine import LLMEngine
 
 
 class TestLLMEngine(unittest.TestCase):

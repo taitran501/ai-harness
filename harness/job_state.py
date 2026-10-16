@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from harness.io_utils import atomic_write_json
 from harness.project import HarnessProject
 
 

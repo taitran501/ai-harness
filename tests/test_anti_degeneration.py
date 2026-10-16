@@ -1,6 +1,5 @@
 """Unit tests for the Anti-Degeneration System (Ensemble Guard, Diagnostics, Statistical Audit Gate)."""
 
-import json
 import subprocess
 import sys
 import tempfile

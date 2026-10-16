@@ -16,7 +16,6 @@ import pandas as pd
 
 from harness.io_utils import (
     atomic_write_json,
-    atomic_write_text,
     json_default_serializer,
     sanitize_for_json,
 )

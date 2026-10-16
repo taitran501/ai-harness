@@ -168,8 +168,7 @@ def _repair_one(run_dir: Path, drop_missing: bool = False) -> Dict[str, Any]:
                 new_files[name] = on_disk[name]
             else:
                 new_files[name] = value
-        # surface (but do not add) undeclared files so the caller can decide
-        extra = sorted(name for name in on_disk if name not in declared)
+        # undeclared files on disk are surfaced to the caller, never adopted
 
     manifest["files"] = new_files
     from harness.io_utils import atomic_write_json

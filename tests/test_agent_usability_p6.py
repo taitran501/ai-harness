@@ -16,7 +16,7 @@ import pandas as pd
 
 from harness.models import create_model, RandomForestModel, GenericBaselineModel
 from harness.task_spec import UniversalTaskSpec
-from harness.tree_journal import TreeJournal, Node
+from harness.tree_journal import TreeJournal
 
 
 class TestAgentUsabilityP6(unittest.TestCase):

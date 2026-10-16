@@ -168,7 +168,6 @@ class TestUniversalPlugin(unittest.TestCase):
         spec = UniversalTaskSpec.from_yaml(self.task_yaml)
         dev_df = spec.load_dataset_split(str(self.dev_csv))
 
-        import pandas as pd
         preds_df = dev_df.copy()
         # 80% accuracy simulation: flip every 5th prediction
         preds_df["pred_sentiment"] = [

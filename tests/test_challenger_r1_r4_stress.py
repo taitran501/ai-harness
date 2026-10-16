@@ -22,7 +22,6 @@ import unittest
 import urllib.request
 import urllib.error
 from pathlib import Path
-from unittest.mock import patch
 
 from tools.dashboard_server import DashboardHandler
 from tests.workspace_fixtures import (

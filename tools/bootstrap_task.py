@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 import re
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -28,12 +28,10 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from harness.io_utils import atomic_write_text, atomic_write_json
 from harness.skill_injector import inject_skill_file
 from harness.task_spec import (
     extract_archives_in_directory,
     load_dataframe_file,
-    UniversalTaskSpec,
 )
 
 
@@ -477,7 +475,7 @@ def bootstrap_competition_task(
         except Exception:
             rel_train = f"dataset/{train_file.name}"
 
-    task_yaml_data = generate_task_yaml(
+    generate_task_yaml(
         task_name=task_name,
         platform=platform,
         schema=schema,

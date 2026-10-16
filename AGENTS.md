@@ -76,8 +76,16 @@ ai-harness-dashboard --project-root .
 
 Run before pushing changes to this repository:
 ```bash
-python -m unittest discover -s tests -p "test_*.py"   # Full test suite (390+ tests must pass 100%)
+python tools/run_tests.py                # Full suite (all modules must pass 100%)
+python tools/run_tests.py --fast         # Fast tier during iteration (skips 4 slow pipeline modules)
 ```
+
+The suite is tiered: `tools/run_tests.py --fast` runs everything except the four
+slow full-pipeline modules (`test_kaggle_runtime`, `test_dashboard`, `test_audit_gate`,
+`test_harness`). Always run the **full** suite before pushing; use `--fast` while
+iterating. Shared workspace fixtures live in `tests/fixtures.py` — reuse
+`make_workspace()` / `workspace_with_repo_configs()` / `copy_repo_configs()`
+instead of copy-pasting workspace setup into new test files.
 
 In a competition workspace with attached data:
 ```bash

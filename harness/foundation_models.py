@@ -10,7 +10,6 @@ Provides high-leverage adapters for non-tree tabular learning paradigms:
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np

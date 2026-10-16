@@ -22,7 +22,7 @@ PROJECT_ROOT = get_project_root()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from harness.tree_journal import Node, TreeJournal
+from harness.tree_journal import TreeJournal
 
 
 def main() -> None:

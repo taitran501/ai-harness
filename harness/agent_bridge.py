@@ -571,7 +571,6 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
 
         Returns a small dict of guard evidence; raises ValueError on any hard fail.
         """
-        import hashlib
         import pandas as pd
 
         from harness.artifacts import sha256
@@ -909,13 +908,6 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                         current["active"] = False
             except Exception:
                 pass
-
-    def get_active_session_id(self) -> Optional[str]:
-        """Return the session_id currently marked active, or None."""
-        for item in self.list_sessions(limit=20):
-            if item.get("active") and item.get("session_id"):
-                return item["session_id"]
-        return None
 
     def save_session(self, session: BridgeSession) -> None:
         if (
@@ -2737,10 +2729,8 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             )
 
         spec_name = None
-        spec_params = {}
         if isinstance(spec_model_cfg, dict):
             spec_name = spec_model_cfg.get("name")
-            spec_params = spec_model_cfg.get("params", {})
         elif isinstance(spec_model_cfg, str):
             spec_name = spec_model_cfg
 

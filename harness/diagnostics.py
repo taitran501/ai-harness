@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -82,38 +82,6 @@ class DiagnosticEngine:
                 "is_zero_recall": support > 0 and tp == 0,
             }
         return results
-
-    @classmethod
-    def analyze_minority_label_matrix(
-        cls,
-        df_target: pd.DataFrame,
-        pred_matrix: np.ndarray,
-        labels: Optional[List[str]] = None,
-        column_prefix: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Analyze support, recall, false positives, and false negatives by label."""
-        prefix = column_prefix or "label_"
-        if labels:
-            target_labels = labels
-        elif any(c.startswith(prefix) for c in df_target.columns):
-            target_labels = [c[len(prefix) :] for c in df_target.columns if c.startswith(prefix)]
-        else:
-            try:
-                from harness.task_spec import load_active_task_spec
-                spec = load_active_task_spec()
-                target_labels = [
-                    label
-                    for subtask in spec.subtasks.values()
-                    for label in subtask.labels
-                ]
-            except Exception:
-                target_labels = []
-        return cls.analyze_minority_labels(
-            df_target=df_target,
-            pred_labels=pred_matrix,
-            label_names=target_labels,
-            column_prefix=prefix,
-        )
 
     @classmethod
     def generate_diagnostics(

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr
-from sklearn.metrics import cohen_kappa_score, f1_score
+from sklearn.metrics import cohen_kappa_score
 
 
 class EnsembleGuard:

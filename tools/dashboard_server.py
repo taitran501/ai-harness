@@ -41,14 +41,14 @@ os.environ["HARNESS_TASK_CONFIG"] = str(HARNESS_PROJECT.task_config_path)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from harness.tree_journal import Node, TreeJournal
+from harness.tree_journal import TreeJournal
 from harness.submission_manager import SubmissionManager
 from harness.cloud_inspector import CloudPreflightInspector
 from harness.templates.kaggle_template import KaggleKernelManager
 from harness.templates.modal_template import generate_modal_script, push_dataset_to_modal
 from harness.environment_detector import EnvironmentDetector
-from harness.cloud_job_runner import CloudJobManager, CloudJob
-from harness.llm_engine import LLMEngine, LLMConfig
+from harness.cloud_job_runner import CloudJobManager
+from harness.llm_engine import LLMEngine
 from harness.skill_injector import inject_skill_file
 from harness.competition_state import CompetitionStateMachine
 from harness.agent_bridge import AgentBridge
@@ -301,14 +301,6 @@ def switch_task(task_id: str) -> Dict[str, Any]:
     return {
         "success": False,
         "error": "Each task needs its own workspace. Attach the harness from the task workspace you want to use.",
-    }
-
-
-def create_and_activate_task(task_spec: Dict[str, Any]) -> Dict[str, Any]:
-    """A new task must be bootstrapped and attached in its own workspace."""
-    return {
-        "success": False,
-        "error": "Create or bootstrap the task in its own workspace, then run `ai-harness attach`.",
     }
 
 
@@ -826,11 +818,6 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     }
 
 
-def generate_priming_prompt(journal: TreeJournal) -> str:
-    """Backward-compatible wrapper for generating Antigravity priming prompt."""
-    return generate_prompt_by_template(journal, "antigravity")["prompt"]
-
-
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP Request Handler serving REST API and dashboard frontend."""
 
@@ -1256,7 +1243,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
                 data = json.loads(body or "{}")
-                from harness.phase_workflow import PhaseWorkflow
                 _,obs=AgentBridge(PROJECT_ROOT).execute_action("record_phase_output",params=data)
                 self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs)},status=200 if obs.status=="SUCCESS" else 400)
             except Exception as exc:
@@ -1265,7 +1251,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8")
                 data = json.loads(body or "{}")
-                from harness.eda import run_eda
                 _,obs=AgentBridge(PROJECT_ROOT).execute_action("run_eda",params=data)
                 self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs)},status=200 if obs.status=="SUCCESS" else 400)
             except Exception as exc:
@@ -2164,16 +2149,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json(res)
 
     def handle_api_cloud_run(self, data: Dict[str, Any]) -> None:
-        backend = data.get("backend", "modal")
         config_path = data.get("config_path")
         if not config_path:
             self.send_json({"error": "config_path is required."}, status=400)
             return
-
-        gpu = data.get("gpu", "A10")
-        auto_audit = bool(data.get("auto_audit", True))
-        auto_sync = bool(data.get("auto_sync", True))
-        baseline_csv = data.get("baseline_csv")
 
         sess,obs=AgentBridge(PROJECT_ROOT).execute_action("run_full_validation",params=data,session_id=data.get("session_id"),budget=data.get("budget"))
         self.send_json({"success":obs.status=="SUCCESS","observation":asdict(obs),"session":asdict(sess),"job":obs.data})

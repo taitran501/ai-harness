@@ -15,13 +15,12 @@ import re
 import shutil
 import ssl
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from harness.io_utils import get_project_root
 PROJECT_ROOT = get_project_root()
@@ -111,26 +110,6 @@ class EnvironmentDetector:
         return result
 
     @staticmethod
-    def activate_modal_profile(profile_name: str) -> Dict[str, Any]:
-        """Activate a specific Modal profile."""
-        try:
-            proc = subprocess.run(
-                ["modal", "profile", "activate", profile_name],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=False,
-            )
-            success = proc.returncode == 0
-            return {
-                "success": success,
-                "profile": profile_name,
-                "output": proc.stdout.strip() or proc.stderr.strip(),
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    @staticmethod
     def parse_modal_token_input(raw_text: str) -> Tuple[Optional[str], Optional[str]]:
         """Parse raw user input or copy-pasted CLI command to extract token_id and token_secret."""
         if not raw_text:
@@ -147,39 +126,6 @@ class EnvironmentDetector:
             token_secret = m_sec.group(1)
 
         return token_id, token_secret
-
-    @classmethod
-    def set_modal_token(
-        cls,
-        token_id: str,
-        token_secret: Optional[str] = None,
-        profile_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Set or update Modal credentials with smart parsing."""
-        try:
-            # If user pasted combined string into token_id or secret is empty
-            if not token_secret or "ak-" in token_id and "as-" in token_id:
-                extracted_id, extracted_sec = cls.parse_modal_token_input(f"{token_id} {token_secret or ''}")
-                if extracted_id and extracted_sec:
-                    token_id = extracted_id
-                    token_secret = extracted_sec
-
-            if not token_id or not token_secret:
-                return {
-                    "success": False,
-                    "error": "Could not identify valid ak-... token ID and as-... token secret.",
-                }
-
-            cmd = ["modal", "token", "set", "--token-id", token_id, "--token-secret", token_secret]
-            if profile_name:
-                cmd.extend(["--profile", profile_name])
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=False)
-            return {
-                "success": proc.returncode == 0,
-                "output": proc.stdout.strip() or proc.stderr.strip(),
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
 
     @staticmethod
     def launch_modal_auth() -> Dict[str, Any]:

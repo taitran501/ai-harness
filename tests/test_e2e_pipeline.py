@@ -13,9 +13,8 @@ import pandas as pd
 import yaml
 
 from harness.agent_bridge import AgentBridge
-from harness.io_utils import atomic_write_json, json_default_serializer, sanitize_for_json
+from harness.io_utils import atomic_write_json
 from harness.models import (
-    GenericBaselineModel,
     LightGBMModel,
     XGBoostModel,
     create_model,

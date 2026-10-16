@@ -15,7 +15,7 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 import warnings
 
 try:
-    import lightgbm as lgb
+    import lightgbm as lgb  # noqa: F401  (import presence is the availability check)
     from lightgbm import LGBMClassifier, LGBMRegressor
     HAS_LIGHTGBM = True
 except (ImportError, Exception):
@@ -23,13 +23,13 @@ except (ImportError, Exception):
     HAS_LIGHTGBM = False
 
 try:
-    import xgboost as xgb
+    import xgboost as xgb  # noqa: F401  (import presence is the availability check)
     from xgboost import XGBClassifier, XGBRegressor
     HAS_XGBOOST = True
 except (ImportError, Exception):
     XGBClassifier = XGBRegressor = None
 try:
-    import catboost as cb
+    import catboost as cb  # noqa: F401  (import presence is the availability check)
     from catboost import CatBoostClassifier, CatBoostRegressor
     HAS_CATBOOST = True
 except (ImportError, Exception):

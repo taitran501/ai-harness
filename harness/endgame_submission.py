@@ -9,10 +9,6 @@ Guarantees 100% submission integrity before dispatching to Kaggle/Remote:
 
 from __future__ import annotations
 
-import json
-import os
-import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -139,59 +135,6 @@ class SubmissionPreflightValidator:
 
 class KaggleLeaderboardTracker:
     """Manages Kaggle CLI submission dispatch and programmatic status polling."""
-
-    @staticmethod
-    def submit_and_track(
-        competition: str,
-        file_path: Union[str, Path],
-        message: str,
-        poll_interval_sec: int = 5,
-        max_wait_sec: int = 120,
-    ) -> Dict[str, Any]:
-        """Dispatches submission to Kaggle and polls until status is COMPLETE.
-
-        Args:
-            competition: Kaggle competition slug.
-            file_path: Path to submission file.
-            message: Submission commit/audit message.
-            poll_interval_sec: Seconds between status polls.
-            max_wait_sec: Maximum timeout in seconds.
-
-        Returns:
-            Dict containing final submission record with publicScore.
-        """
-        cmd_submit = [
-            "kaggle", "competitions", "submit",
-            "-c", competition,
-            "-f", str(file_path),
-            "-m", message,
-        ]
-        res = subprocess.run(cmd_submit, capture_output=True, text=True)
-        if res.returncode != 0:
-            raise RuntimeError(f"Kaggle submit failed: {res.stderr or res.stdout}")
-
-        # Poll status
-        start_time = time.time()
-        while time.time() - start_time < max_wait_sec:
-            time.sleep(poll_interval_sec)
-            cmd_list = ["kaggle", "competitions", "submissions", "-c", competition, "--csv"]
-            res_list = subprocess.run(cmd_list, capture_output=True, text=True)
-            if res_list.returncode == 0 and res_list.stdout:
-                try:
-                    import io
-                    df = pd.read_csv(io.StringIO(res_list.stdout))
-                    if not df.empty:
-                        latest = df.iloc[0].to_dict()
-                        status = str(latest.get("status", "")).upper()
-                        if "COMPLETE" in status:
-                            return latest
-                        if "FAILED" in status or "ERROR" in status:
-                            raise RuntimeError(f"Kaggle scoring failed: {latest}")
-                except Exception:
-                    pass
-
-        return {"status": "TIMEOUT", "message": f"Scoring exceeded {max_wait_sec}s timeout"}
-
 
 class ThresholdOptimizer:
     """Optimizes classification decision thresholds on Out-Of-Fold probabilities."""

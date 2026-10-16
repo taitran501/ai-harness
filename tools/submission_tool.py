@@ -46,7 +46,7 @@ def main() -> None:
     )
 
     # 2. List Action
-    list_parser = subparsers.add_parser("list", help="List all registered submissions and score comparison")
+    subparsers.add_parser("list", help="List all registered submissions and score comparison")
 
     # 3. Record Score Action
     score_parser = subparsers.add_parser("record-score", help="Record official scores from competition leaderboard")

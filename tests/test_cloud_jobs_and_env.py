@@ -1,14 +1,12 @@
 """Tests for environment detection, cloud jobs, and per-task workspace isolation."""
 
-import json
 import threading
 import time
 import unittest
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from harness.environment_detector import EnvironmentDetector
-from harness.cloud_job_runner import CloudJobManager, CloudJob
+from harness.cloud_job_runner import CloudJobManager
 from harness.project import HarnessProject
 from tools.dashboard_server import (
     get_next_experiment_id,

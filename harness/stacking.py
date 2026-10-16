@@ -12,8 +12,7 @@ competition performance:
 
 from __future__ import annotations
 
-import warnings
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -69,7 +68,6 @@ def align_prediction_frames(
         raise ValueError(f"id_column '{id_column}' missing from reference DataFrame")
 
     target_ids = reference_df[id_column].values
-    n_samples = len(target_ids)
     aligned_matrix = []
     model_names = []
 

@@ -11,7 +11,6 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 import yaml
 
@@ -166,7 +165,7 @@ class TestRepair(unittest.TestCase):
         # an undeclared file appears on disk; repair must NOT add it to files
         (folder / "stray_file.txt").write_text("noise")
         _drift_metrics(folder, self.spec, 0.85)
-        res = repair_run_dir(folder)
+        repair_run_dir(folder)
         manifest = json.loads((folder / "artifact_manifest.json").read_text(encoding="utf-8"))
         self.assertNotIn("stray_file.txt", manifest["files"])
         self.assertIn("metrics.json", manifest["files"])
@@ -203,7 +202,7 @@ class TestScanAndCli(unittest.TestCase):
         return _seal_into(self.artifacts / exp_id, self.spec, 0.8)
 
     def test_scan_counts_states(self):
-        ok = self._seal("good")
+        self._seal("good")
         bad = self._seal("bad")
         _drift_metrics(bad, self.spec, 0.99)
         scan = scan_artifacts(self.artifacts)

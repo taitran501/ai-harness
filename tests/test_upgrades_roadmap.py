@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-import json
-import shutil
 import tempfile
 import types
 import unittest
@@ -19,12 +17,12 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from harness.evaluation import metric_name, evaluate, resolve_evaluation
+from harness.evaluation import metric_name, evaluate
 from harness.task_spec import UniversalTaskSpec
-from harness.remote_runtime import CORE_RUNTIME_DISTRIBUTIONS, resolve_remote_runtime
+from harness.remote_runtime import CORE_RUNTIME_DISTRIBUTIONS
 from harness.templates.modal_template import generate_modal_script
-from harness.models import GenericBaselineModel, LightGBMModel, XGBoostModel
-from harness.project import attach_project, HarnessProject
+from harness.models import GenericBaselineModel
+from harness.project import attach_project
 from harness.agent_bridge import AgentBridge, TypedActionName
 from tools.bootstrap_task import bootstrap_competition_task
 

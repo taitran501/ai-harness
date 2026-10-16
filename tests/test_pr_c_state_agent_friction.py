@@ -30,53 +30,12 @@ re-verified against the live source before implementation:
 from __future__ import annotations
 
 import json
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import yaml
-
-from harness.project import attach_project
-
-
-def _make_workspace(
-    with_train_file: bool = True,
-    train_path: str = "dataset/train.csv",
-) -> tuple[Path, Path]:
-    root = Path(tempfile.mkdtemp(prefix="prc_ws_"))
-    (root / "configs").mkdir()
-    (root / "dataset").mkdir()
-    if with_train_file:
-        (root / "dataset" / "train.csv").write_text(
-            "id,text,label\n0,nice dog,0\n1,kind dog,0\n2,awful cat,1\n3,mean cat,1\n",
-            encoding="utf-8",
-        )
-    task_config = root / "configs" / "task.yaml"
-    task_config.write_text(
-        yaml.safe_dump(
-            {
-                "task": {
-                    "id": "prc-fixture-task",
-                    "name": "PRC Fixture",
-                    "task_type": "classification",
-                    "type": "classification",
-                    "primary_metric": "accuracy",
-                    "direction": "maximize",
-                    "data_config": {
-                        "train_path": train_path,
-                        "target_column": "label",
-                    },
-                    "validation": {"strategy": "kfold", "num_folds": 2},
-                }
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
-    attach_project(root, task_config)
-    return root, task_config
+from tests.fixtures import make_workspace as _make_workspace
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +251,6 @@ class TestPhaseHeadingMatching(unittest.TestCase):
         from harness.phase_workflow import PhaseWorkflow
 
         root, _ = _make_workspace()
-        attach_project(root, root / "configs" / "task.yaml")
         flow = PhaseWorkflow(root)
         response = (
             "# setup\n\n"
@@ -311,7 +269,6 @@ class TestPhaseHeadingMatching(unittest.TestCase):
 
 class TestKaggleInspectKernelOutput(unittest.TestCase):
     def test_nonzero_returncode_reports_error(self):
-        import subprocess
         from harness.kaggle_inspect import kernel_output
 
         with (
@@ -330,7 +287,6 @@ class TestKaggleInspectKernelOutput(unittest.TestCase):
         self.assertIn("quota exceeded", result["error"])
 
     def test_zero_returncode_has_no_error(self):
-        import subprocess
         from harness.kaggle_inspect import kernel_output
 
         with (

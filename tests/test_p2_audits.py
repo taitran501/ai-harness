@@ -20,15 +20,14 @@ from harness.agent_bridge import AgentBridge
 from harness.research_memory import ResearchMemory
 from harness.submission_manager import SubmissionEntry
 from harness.task_spec import UniversalTaskSpec
-
-SOURCE_ROOT = Path(__file__).resolve().parent.parent
+from tests.fixtures import copy_repo_configs
 
 PLAIN_TASK = "task:\n  name: P2AuditTest\n  primary_metric: macro_f1\n"
 
 
 def _make_bridge() -> tuple[AgentBridge, Path]:
     ws = Path(tempfile.mkdtemp(prefix="test_p2_"))
-    shutil.copytree(SOURCE_ROOT / "configs", ws / "configs")
+    copy_repo_configs(ws)
     (ws / "configs" / "task.yaml").write_text(PLAIN_TASK, encoding="utf-8")
     return AgentBridge(ws), ws
 

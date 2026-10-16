@@ -20,8 +20,6 @@ Empirically tests and challenges:
 
 from __future__ import annotations
 
-import json
-import os
 import re
 import unittest
 from pathlib import Path

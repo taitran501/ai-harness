@@ -15,21 +15,18 @@ Covers:
 from __future__ import annotations
 
 import json
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from harness.agent_bridge import AgentBridge, TypedActionName
+from harness.agent_bridge import AgentBridge
+from tests.fixtures import copy_repo_configs, workspace_with_repo_configs
 
-SOURCE_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _make_workspace() -> Path:
-    workspace = Path(tempfile.mkdtemp(prefix="test_p0p1_"))
-    shutil.copytree(SOURCE_ROOT / "configs", workspace / "configs")
-    return workspace
+    return workspace_with_repo_configs(prefix="test_p0p1_")
 
 
 class TestBudgetBlockDoesNotTerminateSession(unittest.TestCase):
@@ -38,7 +35,7 @@ class TestBudgetBlockDoesNotTerminateSession(unittest.TestCase):
     def setUp(self) -> None:
         self._ws = tempfile.TemporaryDirectory(prefix="test_a3_")
         self.root = Path(self._ws.name)
-        shutil.copytree(SOURCE_ROOT / "configs", self.root / "configs")
+        copy_repo_configs(self.root)
         self.bridge = AgentBridge(self.root)
 
     def tearDown(self) -> None:
@@ -98,7 +95,7 @@ class TestPendingApprovalNotDroppedByOtherAction(unittest.TestCase):
     def setUp(self) -> None:
         self._ws = tempfile.TemporaryDirectory(prefix="test_c1_")
         self.root = Path(self._ws.name)
-        shutil.copytree(SOURCE_ROOT / "configs", self.root / "configs")
+        copy_repo_configs(self.root)
         self.bridge = AgentBridge(self.root)
 
     def tearDown(self) -> None:
@@ -162,7 +159,7 @@ class TestFailedFullValidationDoesNotConsumeBudget(unittest.TestCase):
     def setUp(self) -> None:
         self._ws = tempfile.TemporaryDirectory(prefix="test_a4_")
         self.root = Path(self._ws.name)
-        shutil.copytree(SOURCE_ROOT / "configs", self.root / "configs")
+        copy_repo_configs(self.root)
         self.bridge = AgentBridge(self.root)
 
     def tearDown(self) -> None:
@@ -206,14 +203,13 @@ class TestCloudJobGpuHoursAccounting(unittest.TestCase):
     def setUp(self) -> None:
         self._ws = tempfile.TemporaryDirectory(prefix="test_b4_")
         self.root = Path(self._ws.name)
-        shutil.copytree(SOURCE_ROOT / "configs", self.root / "configs")
+        copy_repo_configs(self.root)
         self.bridge = AgentBridge(self.root)
 
     def tearDown(self) -> None:
         self._ws.cleanup()
 
     def test_terminal_row_carries_gpu_hours_for_modal(self) -> None:
-        from harness.cloud_job_runner import CloudJob, CloudJobManager
         from harness.resource_ledger import terminal
 
         # Simulate a modal job row in the ledger.
@@ -272,7 +268,7 @@ class TestActiveSessionSelectionStable(unittest.TestCase):
     def setUp(self) -> None:
         self._ws = tempfile.TemporaryDirectory(prefix="test_a1_")
         self.root = Path(self._ws.name)
-        shutil.copytree(SOURCE_ROOT / "configs", self.root / "configs")
+        copy_repo_configs(self.root)
         self.bridge = AgentBridge(self.root)
 
     def tearDown(self) -> None:
@@ -312,7 +308,7 @@ class TestApproveDoesNotDuplicateAction(unittest.TestCase):
     def setUp(self) -> None:
         self._ws = tempfile.TemporaryDirectory(prefix="test_c2_")
         self.root = Path(self._ws.name)
-        shutil.copytree(SOURCE_ROOT / "configs", self.root / "configs")
+        copy_repo_configs(self.root)
         self.bridge = AgentBridge(self.root)
 
     def tearDown(self) -> None:
@@ -342,7 +338,7 @@ class TestFreezeCheckNotStale(unittest.TestCase):
     def setUp(self) -> None:
         self._ws = tempfile.TemporaryDirectory(prefix="test_b1_")
         self.root = Path(self._ws.name)
-        shutil.copytree(SOURCE_ROOT / "configs", self.root / "configs")
+        copy_repo_configs(self.root)
         self.bridge = AgentBridge(self.root)
 
     def tearDown(self) -> None:

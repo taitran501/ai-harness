@@ -26,8 +26,6 @@ from typing import Any, Dict, Generator, List, Optional
 HARNESS_DIR = Path(__file__).resolve().parent.parent
 from harness.io_utils import get_project_root
 from harness.project import HarnessProject
-from harness.io_utils import atomic_write_json
-from harness.baseline import extract_primary_metric
 
 PROJECT_ROOT = get_project_root()
 HARNESS_PROJECT = HarnessProject.discover(PROJECT_ROOT)
@@ -637,7 +635,7 @@ class CloudJobManager:
         """Background thread monitoring process termination and running post-processing."""
         try:
             retcode = proc.wait()
-        except Exception as e:
+        except Exception:
             retcode = -1
         finally:
             try:
@@ -888,7 +886,7 @@ class CloudJobManager:
                     )
                 else:
                     os.killpg(int(pid), signal.SIGTERM)
-            except Exception as e:
+            except Exception:
                 pass
             from harness.job_state import update_worker_state
 

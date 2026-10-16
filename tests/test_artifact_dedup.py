@@ -15,7 +15,6 @@ from argparse import Namespace
 from pathlib import Path
 from unittest import mock
 
-import numpy as np
 import pandas as pd
 import yaml
 
@@ -101,7 +100,6 @@ class TestWriteCsvDedup(unittest.TestCase):
     def test_fallback_unlinks_stale_hardlink_before_write(self) -> None:
         """The fallback must never write in place over a shared inode."""
         src = self.tmp / "src.csv"
-        other = self.tmp / "other.csv"
         tgt = self.tmp / "tgt.csv"
         original = _df(1)
         original.to_csv(src, index=False)

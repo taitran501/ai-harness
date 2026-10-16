@@ -29,7 +29,7 @@ class TestAgentUsabilityAudit(unittest.TestCase):
         import ai_harness
         import ml_harness
         from ai_harness.task_spec import UniversalTaskSpec as SpecAlias
-        from ml_harness.runner import Runner as RunnerAlias, build_parser
+        from ml_harness.runner import build_parser
         from harness.agent import AgentBridge
         from harness.endgame_submission import SubmissionValidator, SubmissionPreflightValidator
         from harness import kaggle_manager, KaggleKernelManager as KKM

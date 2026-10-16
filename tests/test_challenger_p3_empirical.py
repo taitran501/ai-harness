@@ -14,7 +14,6 @@ Verifies:
    - Validates that zero raw English strings remain for all 9 flagged items
 """
 
-import math
 import re
 import unittest
 from pathlib import Path

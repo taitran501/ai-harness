@@ -9,7 +9,6 @@ Performs deterministic local checks before dispatching jobs to Cloud GPUs (Modal
 
 from __future__ import annotations
 
-import os
 import py_compile
 import sys
 from pathlib import Path
@@ -66,16 +65,6 @@ class CloudPreflightInspector:
         return len(errors) == 0, errors
 
     @staticmethod
-    def inspect_splits(split_path: Path | str = "splits/fold_assignments.tsv") -> Tuple[bool, List[str]]:
-        """Verify presence and validity of canonical video-grouped splits."""
-        sp = Path(split_path)
-        errors = []
-        if not sp.exists():
-            return False, [f"Canonical split file missing: {sp}"]
-        if sp.stat().st_size == 0:
-            return False, [f"Canonical split file is empty: {sp}"]
-        return True, []
-
     @staticmethod
     def inspect_python_syntax(files_to_check: List[str | Path]) -> Tuple[bool, List[str]]:
         """Verify python syntax via py_compile to catch syntax errors before cloud dispatch."""

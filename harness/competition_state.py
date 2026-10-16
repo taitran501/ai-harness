@@ -15,21 +15,17 @@ Decouples the universal 8-Phase Competition Journey from benchmark-specific rule
 from __future__ import annotations
 
 import datetime
-import hashlib
 import json
-import re
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 import yaml
 
-from harness.ensemble_guard import EnsembleGuard
 from harness.submission_manager import SubmissionManager
-from harness.tree_journal import Node, TreeJournal
+from harness.tree_journal import TreeJournal
 
 
 def official_primary_value(entry, primary_metric: str):
@@ -1110,12 +1106,6 @@ class CompetitionStateMachine:
         slot2_cv = _slot_cv(slot2_id) if slot2_id and slot2_id != "none" else None
 
         primary_metric = str(self.spec.get("primary_metric") or "score")
-        public_by_sub = {
-            s.id: official_primary_value(s, primary_metric)
-            for s in sub_mgr.submissions.values()
-        }
-        public_scores = [v for v in public_by_sub.values() if v is not None]
-        best_pub = max(public_scores) if public_scores else None
         # slot -> best public score of that slot's submissions (exp_id match)
         def _slot_pub(slot_id):
             if not slot_id or slot_id == "none":
@@ -1134,9 +1124,6 @@ class CompetitionStateMachine:
         def _fmt(value, fmt="{:.4f}"):
             return fmt.format(value) if value is not None else "N/A"
 
-        cv_score = best_cand.get(
-            "composite_score", self.spec.get("primary_metric_baseline")
-        )
         priv_1 = fin.get("private_score_slot_1")
         priv_2 = fin.get("private_score_slot_2")
         rank_str = (

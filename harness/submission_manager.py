@@ -10,14 +10,12 @@ Manages all competition submissions across local validation and remote leaderboa
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 
 @dataclass

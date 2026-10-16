@@ -14,13 +14,11 @@ import json
 import os
 import re
 import ssl
-import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from harness.io_utils import get_project_root
@@ -509,10 +507,6 @@ class LLMEngine:
         return results[:limit]
 
     @classmethod
-    def _get_fallback_unsloth_models(cls, limit: int = 40) -> List[Dict[str, Any]]:
-        """Retrieve curated fallback Unsloth models."""
-        return list(cls.CURATED_UNSLOTH_MODELS)[:limit]
-
     @staticmethod
     def _extract_model_attributes(m_id: str, raw_obj: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Extract family, parameter size, and quantization format from model ID and metadata."""
