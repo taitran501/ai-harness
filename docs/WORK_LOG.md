@@ -6,6 +6,46 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — Agent Friction Round 4 (Medium-Priority Audit Fixes)
+
+**Task:** Fix the three remaining medium-priority agent friction points from
+the 24-conversation Antigravity audit.
+
+**Fixes (3 verified real):**
+- `agent_bridge.py`: `_AgentBridgeMeta.__getattr__` now returns a callable
+  proxy for typed-action names instead of raising `AttributeError`. Agents
+  can now call `AgentBridge.review_hypothesis(...)` or
+  `AgentBridge.confirm_task_spec(...)` as if they were classmethods; the
+  proxy constructs a default `AgentBridge()` and dispatches through
+  `execute_action` so session state, approval tiers, and audit all still
+  apply. Non-action names still raise `AttributeError`. Instance-level
+  access (`bridge.review_hypothesis(...)`) was already working.
+- `kaggle_compat.py`: added `retry_with_backoff(fn, max_attempts=5,
+  base_delay=1.0, max_delay=60.0, multiplier=2.0, transient_check=...)` —
+  a generic exponential-backoff wrapper that recognises transient errors
+  (429, 500, 502, 503, 504, timeout, connection reset) and retries up to
+  `max_attempts` times. Non-transient errors propagate immediately.
+  Exported via `harness/__init__.py` lazy map.
+- `templates/kaggle_template.py`: wrapped `kernels_output` (root-level
+  download) and `kaggle kernels status` (CLI polling) with
+  `retry_with_backoff` so transient 429 / 5xx don't abort the whole
+  download or status poll. Download uses 5 attempts / 2s base / 60s cap;
+  status uses 3 attempts / 1s base / 15s cap.
+- `agent_bridge.py`: added `_maybe_auto_checkpoint(session, obs)` — records
+  a lightweight research-memory checkpoint every 50 executed actions so
+  long sessions survive context compaction without losing the "where am
+  I" state. Idempotent: skips when the most recent action was already a
+  `record_research_checkpoint` call. Summary includes step count,
+  experiments_used, smoke_runs, cloud_runs, and last_action. Wired into
+  `execute_action` right before the final `return session, obs`; failures
+  are swallowed (auto-checkpoint must never break the main action flow).
+
+**Tests:** updated `tests/test_agent_friction_fixes.py`
+(`test_class_level_access_returns_callable_proxy` replaces the old
+"class-level raises" assert). No new test file — the three fixes are
+exercised by existing coverage plus the manual smoke checks above. Full
+suite: **626 passed, 1 skipped** (same baseline as PR #B / R3).
+
 ### 2026-10-16 — Agent Friction Round 3 (High-Priority Audit Fixes)
 
 **Task:** Fix the five highest-frequency agent friction points identified from

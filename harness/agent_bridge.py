@@ -228,16 +228,38 @@ _TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName)
 
 
 class _AgentBridgeMeta(type):
-    """Metaclass that routes class-level typed-action lookups to actionable guidance."""
+    """Metaclass that routes class-level typed-action lookups to actionable guidance.
+
+    Agents sometimes reach for ``AgentBridge.review_hypothesis`` or
+    ``AgentBridge.confirm_task_spec`` as if they were classmethods (mirroring
+    the pattern in other harness classes). Instead of a bare ``AttributeError``
+    we return a small callable that, when invoked, constructs an
+    ``AgentBridge`` and dispatches through the standard instance path so
+    session state, approval tiers, and audit all still apply.
+    """
 
     def __getattr__(cls, name: str):
         if name in _TYPED_ACTION_NAMES:
-            raise AttributeError(
-                f"AgentBridge.{name} is a typed action; call it on an instance: "
-                f"bridge = AgentBridge(project_root); bridge.{name}(**params) "
-                f"(or bridge.execute_action('{name}', {{...}}))."
+            def _invoke_class(*args, **kwargs):
+                params: Dict[str, Any] = {}
+                if args and isinstance(args[0], dict):
+                    params = dict(args[0])
+                params.update(kwargs)
+                # A bare class-level call has no project_root; the bridge
+                # resolves the active task from CWD or the active attach.
+                bridge = AgentBridge()
+                return bridge.execute_action(name, params)
+
+            _invoke_class.__name__ = name
+            _invoke_class.__doc__ = (
+                f"Class-level proxy for the typed action '{name}'. "
+                "Equivalent to AgentBridge().execute_action('" + name + "', params). "
+                "Prefer an instance (bridge = AgentBridge(project_root)) for explicit scoping."
             )
-        raise AttributeError(name)
+            return _invoke_class
+        raise AttributeError(
+            f"type object 'AgentBridge' has no attribute '{name}'"
+        )
 
 
 class AgentBridge(metaclass=_AgentBridgeMeta):
@@ -1017,6 +1039,52 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             gpu_hours_used=(
                 round(sum(gpu_hours), 6) if gpu_hours else 0.0
             ),
+        )
+
+    # Auto-checkpoint interval: every N executed actions we record a
+    # lightweight checkpoint into research memory so that long sessions
+    # survive context compaction without losing the "where am I" state.
+    _AUTO_CHECKPOINT_INTERVAL = 50
+
+    def _maybe_auto_checkpoint(self, session, obs) -> None:
+        """Record a research-memory checkpoint every N steps.
+
+        Idempotent: only fires when ``step_index`` is a positive multiple of
+        :data:`_AUTO_CHECKPOINT_INTERVAL` and the most recent action was not
+        already a checkpoint (avoids double-recording when the agent
+        explicitly called ``record_research_checkpoint`` at the same step).
+        """
+        step = int(getattr(obs, "step_index", 0) or 0)
+        if step <= 0 or step % self._AUTO_CHECKPOINT_INTERVAL != 0:
+            return
+        # Skip if the agent just recorded a checkpoint manually.
+        recent_actions = [a.get("action") for a in session.actions[-3:]]
+        if "record_research_checkpoint" in recent_actions:
+            return
+        # Build a compact summary from the session state.
+        usage = session.compute_usage
+        actions_run = len(session.actions)
+        last_action = session.actions[-1].get("action") if session.actions else None
+        stop_reason = session.stop_reason or ""
+        summary = (
+            f"Auto-checkpoint at step {step}: "
+            f"{actions_run} actions executed, "
+            f"experiments_used={usage.experiments_used}, "
+            f"smoke_runs={usage.smoke_runs}, "
+            f"cloud_runs={usage.cloud_runs}, "
+            f"last_action={last_action}"
+        )
+        if stop_reason:
+            summary += f", stop_reason={stop_reason[:120]}"
+        next_action = (
+            f"Continue from step {step}; review research_frontier for the "
+            "latest insight and unreviewed results before the next intervention."
+        )
+        memory = self._research_memory()
+        memory.checkpoint(
+            summary=summary,
+            next_action=next_action,
+            session_id=session.session_id,
         )
 
     def get_active_or_create_session(
@@ -1883,6 +1951,17 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
         session.observations.append(asdict(obs))
 
         self._reconcile_session_usage(session)
+
+        # Auto-checkpoint every N steps so long sessions don't lose research
+        # continuity across compaction. The checkpoint is recorded in the
+        # research memory (not the session journal) and is idempotent: it
+        # only fires when the step count is a multiple of the interval AND
+        # the most recent observation was not already a checkpoint.
+        try:
+            self._maybe_auto_checkpoint(session, obs)
+        except Exception:
+            # Auto-checkpoint must never break the main action flow.
+            pass
 
         # Update final snapshot HUD
         snap_after = self.comp_state.evaluate_journey_snapshot(

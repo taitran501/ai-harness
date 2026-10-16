@@ -29,7 +29,10 @@ Usage::
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Callable, Dict, List, Optional, TypeVar
+
+T = TypeVar("T")
 
 
 # Attribute-name mapping: legacy (kaggle) name -> canonical name.
@@ -277,8 +280,69 @@ class KaggleClient:
 KaggleApi = KaggleClient
 
 
+# ----------------------------------------------------------------------
+# Retry with exponential backoff for transient Kaggle HTTP 429 / 5xx
+# ----------------------------------------------------------------------
+
+_TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Heuristic: treat 429 / 5xx / timeout / connection errors as transient."""
+    name = type(exc).__name__
+    if name in ("Timeout", "TimeoutError", "ConnectionError", "ConnectionResetError",
+                "ConnectionAbortedError", "ChunkedEncodingError", "RemoteDisconnected",
+                "ProxyError", "SSLError", "CertificateError"):
+        return True
+    msg = str(exc).lower()
+    if any(token in msg for token in ("429", "too many requests", "rate limit",
+                                      "500", "502", "503", "504",
+                                      "timeout", "timed out", "connection reset",
+                                      "temporarily unavailable", "server error")):
+        return True
+    return False
+
+
+def retry_with_backoff(
+    fn: Callable[[], T],
+    *,
+    max_attempts: int = 5,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    multiplier: float = 2.0,
+    transient_check: Callable[[BaseException], bool] = _is_transient_error,
+) -> T:
+    """Call ``fn`` with exponential backoff on transient errors.
+
+    Defaults are tuned for the Kaggle API's public rate limits (~429 on
+    burst, 5xx on upstream hiccups). Callers can override ``max_attempts``
+    or supply a custom ``transient_check`` for provider-specific heuristics.
+
+    Raises the last exception if all attempts are exhausted.
+    """
+    attempt = 0
+    delay = base_delay
+    last_exc: Optional[BaseException] = None
+    while attempt < max_attempts:
+        attempt += 1
+        try:
+            return fn()
+        except BaseException as exc:
+            last_exc = exc
+            if attempt >= max_attempts or not transient_check(exc):
+                raise
+            sleep = min(delay, max_delay)
+            time.sleep(sleep)
+            delay *= multiplier
+    # Unreachable, but satisfies type checkers.
+    assert last_exc is not None
+    raise last_exc
+
+
 __all__ = [
     "KaggleClient",
     "KaggleApi",
     "detect_sdk",
+    "retry_with_backoff",
+    "_is_transient_error",
 ]
