@@ -6,6 +6,70 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — Agent-bypass audit: why agents skip the harness (and now can't silently)
+
+**Task:** "check lại repo với vị trí một normal user đưa agent work" — audit
+adoption: what happens when an agent is lazy or simply has no intention of
+using the harness?
+
+**Findings (all empirically verified in the rsna-knee workspace):**
+- The agent had bypassed the harness 100% for cloud runs: **22/22**
+  `kaggle_sub_*` dirs were manual kernel pushes (no
+  `artifact_manifest.json`), zero harness experiments, zero agent sessions,
+  zero warnings from the framework. Dated 10-13..10-16 — recent, not legacy.
+- Root cause 1 (a real bug): `ai-harness status` reported kaggle/modal as
+  *unavailable* even with an installed + authenticated CLI —
+  `status_report._cloud_section` looked for `available`/`detected` keys while
+  `EnvironmentDetector` reports `installed`/`authenticated`/
+  `has_credentials`. An agent reading the status concluded dispatch was
+  impossible and pushed manually.
+- Root cause 2 (structural): no workspace had a universal agent entry point.
+  Skills under `.agents/skills/` only load for harnesses that support them
+  and when the task matches — a generic agent given "train a model" never
+  learned the harness exists.
+- Root cause 3 (maintenance trap): **two** SKILL.md generators — an inline
+  block in `project.attach_project` (lean, no contracts) and
+  `skill_injector` (rich). `attach` wrote v1, `sync` silently overwrote with
+  v2; neither contained the other's content.
+- Dispatch itself was fully functional (`provider_preflight`:
+  installed+authenticated+version_supported) — only the *reporting* was
+  wrong, which is what steered the agent to the manual path.
+
+**Changes:**
+- `harness/status_report.py`: per-provider availability mapping
+  (modal: installed+has_credentials; kaggle: installed+authenticated;
+  docker: installed+running; gpu: detected; llm: total_configured).
+- `harness/project.py`: `attach` now generates a managed `AGENTS.md` block
+  at the workspace root (universal entry point for any coding agent):
+  points to the skill SOP, the context command, the experiment lifecycle,
+  and non-negotiable no-bypass rules (no manual kernel pushes, report
+  dispatch failures, immutable artifacts). User-owned AGENTS.md without the
+  marker is never touched; managed blocks refresh in place.
+- `harness/project.py` + `harness/skill_injector.py`: consolidated skill
+  generation — `attach_project` now calls `inject_skill_file` (single source
+  of truth) with `HARNESS_PROJECT_ROOT` pinning; the lean inline block's
+  unique content (gates, research protocol, phase workflow, EDA) was ported
+  into the skill_injector SOP.
+- `harness/hygiene.py`: run-output dirs are now classified — dirs lacking the
+  harness `artifact_manifest.json` aggregate into a
+  `bypassed_run_output` finding ("manual kernel pushes, no evidence trail");
+  sealed dirs keep the existing `stale_run_output` advisory. rsna-knee HUD
+  now shows: 35 bypassed, 3 stale, 1 stray file.
+
+**Tests:** new `tests/test_agent_bypass_audit.py` (8 tests: availability
+mapping with mocked detector, bypass vs sealed hygiene aggregation,
+AGENTS.md create/user-owned/refresh semantics, attached-skill ==
+sync-skill content). Updated the pre-existing ergonomics aggregation test to
+the new contract. Fixes A (status) and B (AGENTS.md) bite-checked by
+reverting. Full suite 697 OK; ruff gate clean.
+
+**Lesson:** the adoption failure was invisible because the framework only
+measures what flows through it — bypassed runs leave no trace *by design*.
+Three cheap signals close that blind spot: report your own capabilities
+truthfully (a wrong status is an adoption bug, not a cosmetic one), give
+every agent a universal entry point (AGENTS.md), and make the bypass
+detectable (the artifact manifest is a free, reliable seal).
+
 ### 2026-10-17 — Research-action contract friction fixed (from a real agent session)
 
 **Task:** "xem các conversation mới để kiểm tra" — inspected the most recent

@@ -239,11 +239,25 @@ def _cloud_section(project_root: Optional[str]) -> Dict[str, Any]:
     from harness.project import HarnessProject
 
     env = EnvironmentDetector.get_full_status()
-    # keep only presence flags, not credentials
-    accounts = {
-        k: {"available": bool(v.get("available", v.get("detected", False))) if isinstance(v, dict) else bool(v)}
-        for k, v in env.items()
+    # keep only presence flags, not credentials.
+    # Each provider reports readiness under different key names; using the
+    # wrong key made an authenticated kaggle CLI report as unavailable,
+    # which silently pushed agents to manual `kaggle kernels push`
+    # (observed in the rsna-knee workspace: 22/22 manual run-output dirs).
+    availability_keys = {
+        "modal": ("installed", "has_credentials"),
+        "kaggle": ("installed", "authenticated"),
+        "docker": ("installed", "running"),
+        "gpu": ("detected",),
+        "llm": ("total_configured",),
     }
+    accounts = {}
+    for k, v in env.items():
+        if isinstance(v, dict):
+            keys = availability_keys.get(k, ("available", "detected"))
+            accounts[k] = {"available": all(bool(v.get(key)) for key in keys)}
+        else:
+            accounts[k] = {"available": bool(v)}
     try:
         project = HarnessProject.discover(project_root)
         consent = UploadConsentStore(project).status()
