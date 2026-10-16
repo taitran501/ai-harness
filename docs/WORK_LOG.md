@@ -63,9 +63,18 @@ all touched modules.
 **Lesson:** the "too many tests" pain was a feedback-loop problem, not a
 count problem — tiering gives a ~35s faster iteration signal without losing
 coverage. Dead-code scan must include docs/skills/dashboard as reference
-corpus, and functions with multi-line signatures need paren-counted ranges,
-not indent-based ones (first deletion attempt corrupted 5 files; recovered
-via git restore).
+corpus.
+
+**Incident + fix:** the first dead-function deletion pass used a regex/
+indent heuristic ("block ends at the next line at def-level indent"), which
+cannot represent multi-line signatures — the closing `) -> ...:` line sits
+at the def's indent, so 5 files (diagnostics, validator, tuning_engine,
+endgame_submission, environment_detector) were truncated. Recovered via
+git restore, re-ran with paren-counting, and verified: def-count deltas
+match intent exactly, all removed names have 0 refs, full suite green.
+Prevention: `tools/remove_dead_functions.py` (AST-based, decorator-aware,
+refuses ambiguous/missing names, post-removal parse gate) is now the only
+approved way to delete functions by name; import cleanup stays with ruff.
 
 **Next:** none blocking. Optional Wave 3 (not approved): split
 `agent_bridge.py` god module — high risk, low agent-ROI per the audit evidence.
