@@ -396,9 +396,9 @@ def main() -> None:
         print(f"[AUDIT FAILED] Candidate file does not exist: {cand_path}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"===========================================================")
+    print("===========================================================")
     print(f"🔒 DETERMINISTIC & STATISTICAL AUDIT GATE: {cand_path.name}")
-    print(f"===========================================================")
+    print("===========================================================")
 
     cand_sha256 = compute_sha256(cand_path)
     cand_df = pd.read_csv(cand_path)
@@ -438,7 +438,7 @@ def main() -> None:
             rel_epsilon=args.rel_epsilon,
         )
         if not passed_a:
-            print(f"\n❌ [REJECTED: PSEUDO-ENSEMBLE DETECTED]", file=sys.stderr)
+            print("\n❌ [REJECTED: PSEUDO-ENSEMBLE DETECTED]", file=sys.stderr)
             for err in errs_a:
                 print(f"   - {err}", file=sys.stderr)
             print("The agent is attempting to blend non-diverse/correlated models from the same family.", file=sys.stderr)
@@ -578,7 +578,7 @@ def main() -> None:
     else:
         if not args.allow_initial:
             print(
-                f"⚠ Warning: No baseline provided. Specify --baseline or use --allow-initial for root baseline.",
+                "⚠ Warning: No baseline provided. Specify --baseline or use --allow-initial for root baseline.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -625,9 +625,9 @@ def main() -> None:
     atomic_write_json(receipt_path, receipt_data, indent=2)
 
     print(f"✔ Audit Receipt     : {receipt_path}")
-    print(f"===========================================================")
-    print(f"🎉 STATISTICAL AUDIT VERDICT: PASSED! Ready for human submission.")
-    print(f"===========================================================")
+    print("===========================================================")
+    print("🎉 STATISTICAL AUDIT VERDICT: PASSED! Ready for human submission.")
+    print("===========================================================")
 
 
 if __name__ == "__main__":

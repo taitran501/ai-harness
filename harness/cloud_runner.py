@@ -49,7 +49,7 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
         config.relative_to(project.root)
     except ValueError as exc:
         raise ValueError("Experiment config must be inside the attached task workspace.") from exc
-    passed, errors, cfg = CloudPreflightInspector.run_full_preflight_check(config, project_root=project.root)
+    passed, errors, cfg = CloudPreflightInspector.run_full_preflight_check(config, project_root=project.root, full_data_check=False)
     if not passed:
         raise ValueError("Preflight failed: " + "; ".join(errors))
     from harness.cloud_policy import provider_preflight
@@ -153,9 +153,9 @@ def run_via_modal(
     job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Upload consented task data, dispatch Modal, verify returned artifact identity, and sync the journal."""
-    print(f"===========================================================")
+    print("===========================================================")
     print(f"🚀 MODAL.COM CLOUD DISPATCH: {config_path}")
-    print(f"===========================================================")
+    print("===========================================================")
 
     context = _prepare_remote_run(config_path, "modal", project_root)
     project = context["project"]
@@ -211,7 +211,7 @@ def run_via_modal(
     if ret.returncode != 0:
         raise RuntimeError(f"Modal execution failed with code {ret.returncode}")
 
-    print(f"\n✔ Modal remote execution finished successfully.")
+    print("\n✔ Modal remote execution finished successfully.")
     artifact_dir = project.artifacts_dir / exp_id
     manifest_path = artifact_dir / "artifact_manifest.json"
     if not manifest_path.is_file():
@@ -290,9 +290,9 @@ def run_via_kaggle(
     bundle contents, dependency plan, kernel metadata) and return it without
     pushing anything to Kaggle or consuming cloud quota.
     """
-    print(f"===========================================================")
+    print("===========================================================")
     print(f"🚀 KAGGLE KERNELS API DISPATCH: {config_path}")
-    print(f"===========================================================")
+    print("===========================================================")
 
     context = _prepare_remote_run(config_path, "kaggle", project_root)
     project = context["project"]

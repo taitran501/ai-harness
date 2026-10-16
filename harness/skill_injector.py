@@ -136,7 +136,7 @@ def generate_skill_content(
         ]
     lines += [
         "",
-        f"Use this skill whenever planning model architectures, engineering features, formulating hypotheses,",
+        "Use this skill whenever planning model architectures, engineering features, formulating hypotheses,",
         f"auditing predictions, or registering verified submissions for **{task_name}**.",
         "",
         "---",
@@ -267,7 +267,7 @@ def generate_skill_content(
         "",
         "### 3.3 Epistemic Grounding & Assumption Register Protocol (Anti-Hallucination)",
         f"- **MANDATORY RETRIEVAL**: Before formulating a new model configuration for {mod_info['title']}:",
-        f"  1. Inspect `docs/KNOWLEDGE_BASE.md` for reference backbones (Note: Only NLP is verified; non-NLP modalities are experimental WIP):",
+        "  1. Inspect `docs/KNOWLEDGE_BASE.md` for reference backbones (Note: Only NLP is verified; non-NLP modalities are experimental WIP):",
     ])
 
     for b in mod_info["backbones"][:4]:
@@ -310,7 +310,7 @@ def generate_skill_content(
         "2. **Start / Configure Session (Optional Budgets)**: Run `ai-harness-agent start-session --goal \"...\" --max-experiments 3`.",
         "3. **Create Grounded Experiment**: Run `ai-harness-agent act --action create_experiment --branch <branch> --descriptor <descriptor>` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
         "4. **Execute Smoke Test** (always runs locally — fast single-fold config validation): Run `ai-harness-agent act --action run_smoke_test --config-path configs/<exp>.yaml`.",
-        f"5. **Execute Task-Declared Validation**: Run `ai-harness-agent act --action run_full_validation --config-path configs/<exp>.yaml`.",
+        "5. **Execute Task-Declared Validation**: Run `ai-harness-agent act --action run_full_validation --config-path configs/<exp>.yaml`.",
         f"   (Backend defaults to `{exec_backend}` from the task contract's `execution.backend`."
         + (" **Locked** — do not pass `--backend` and never train locally." if exec_locked else " Pass `--backend <local|kaggle|modal>` only to override.") + ")",
         "6. **Observe & Decide Next Step**: Antigravity analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",

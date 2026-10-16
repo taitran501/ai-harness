@@ -768,7 +768,7 @@ class CloudJobManager:
                     "Solution Tree sync will proceed using summary metrics if available.\n"
                 )
             elif job.auto_audit:
-                f.write(f"🛡️ Running SWE-Agent Deterministic Audit Gate...\n")
+                f.write("🛡️ Running SWE-Agent Deterministic Audit Gate...\n")
                 try:
                     # Audit outputs live OUTSIDE the sealed run directory —
                     # CORRECTNESS_CONTRACT §3: completed run evidence folders
@@ -937,7 +937,10 @@ class CloudJobManager:
             yield f"event: error\ndata: {json.dumps({'error': 'Log file not created'})}\n\n"
             return
 
-        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+        # Binary mode is required: f.seek() with a non-zero offset is only
+        # defined for binary streams (text-mode seek is undefined behaviour
+        # on CPython and corrupts resume positions).
+        with open(log_path, "rb") as f:
             if start_byte > 0:
                 f.seek(start_byte)
 
@@ -947,7 +950,7 @@ class CloudJobManager:
                     event_data = {
                         "job_id": job_id,
                         "status": job.status,
-                        "text": line,
+                        "text": line.decode("utf-8", errors="replace"),
                     }
                     yield f"data: {json.dumps(event_data)}\n\n"
                 else:
@@ -956,11 +959,11 @@ class CloudJobManager:
                         # Read any final trailing lines
                         trailing = f.read()
                         if trailing:
-                            for l in trailing.splitlines(keepends=True):
+                            for line in trailing.splitlines(keepends=True):
                                 event_data = {
                                     "job_id": job_id,
                                     "status": job.status,
-                                    "text": l,
+                                    "text": line,
                                 }
                                 yield f"data: {json.dumps(event_data)}\n\n"
                         # Send completion event

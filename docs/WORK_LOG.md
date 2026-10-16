@@ -6,6 +6,70 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — Ruff zero-noise gate + B10–B16 cloud/ops & architecture fixes
+
+**Task:** "Làm ruff errors + B10–B16" — clean every remaining ruff finding
+in the pre-push gate scope, then re-verify each B10–B16 module-review item
+against live code and fix the real ones.
+
+**Ruff (gate scope `--select F,E7` → 0 errors):**
+- 63 × F541 (f-string without placeholder) — auto-fixed.
+- 10 × E701 + 5 × E702 (multiple statements on one line) — split in
+  `baseline.py`, `task_spec.py`, `tree_journal.py`, `dashboard_server.py`.
+- 4 × E741 (ambiguous `l`) — renamed in `cloud_job_runner.py`,
+  `diagnostics.py`, `tools/remove_dead_functions.py`.
+
+**B-items (verified against current code first):**
+- B10 — mostly false positive: the full `lock_payload` is already persisted
+  in the `COMPETITION_FROZEN` audit event. Enhancement kept: the
+  `EMERGENCY_UNFREEZE` event now records `released_slots`,
+  `lock_receipt_path` and `frozen_at_git_commit`, so the unfreeze entry is
+  self-contained.
+- B11 — false positive in practice: measured `validate_run` per node at
+  ~1 ms in the aimo workspace; the ~1.5 s journal load is dominated by
+  project/spec/plugin discovery, not hashing. No change.
+- B12 — real latent bug: `CloudJobManager.stream_logs` opened the log in
+  TEXT mode then `f.seek(start_byte)` (undefined behaviour on CPython for
+  non-zero offsets). Now binary mode + byte seek + per-line decode. The
+  dashboard `/api/cloud/logs/stream` endpoint now parses/validates a
+  `start_byte` query param (backward compatible: clients that omit it
+  resume from 0).
+- B13 — false positive: empirically verified on this platform that
+  `os.kill(pid, 0)` does not signal child processes and raises OSError for
+  dead PIDs (Python 3.11 on Windows). No change.
+- B14 — already resolved in Wave 1 (`handle_auto_submit` removed; the
+  `--auto-submit` CLI flag is now explicitly rejected with `parser.error`
+  pointing at the human-approved `prepare_submission` flow). No change.
+- B15 — real per-dispatch cost: `run_full_preflight_check` loaded the
+  ENTIRE training frame locally before every cloud dispatch (CLI and
+  dashboard). Added `full_data_check` (default True): explicit preflight
+  commands keep the full load; the dispatch path
+  (`cloud_runner._prepare_remote_run`) passes `full_data_check=False` and
+  only checks dataset/split file presence — the remote job re-validates its
+  data as its first step.
+- B16 — real architecture pollution: `DecomposedMappingEquityModel`
+  (~195 lines, Zindi-specific literals incl. `maricopa-az` region offsets)
+  lived in the generic `harness/models.py` registry. Moved to the zindi
+  workspace as its own task-plugin package (`zindi/plugin/`, entry point
+  `zindi_bias_bounty`, installed editable). `zindi/configs/task.yaml` +
+  manifest now declare `plugin_id: zindi_bias_bounty`; the runner's
+  `build_model` plugin hook serves all 8 model names there, and
+  `create_model` rejects them everywhere else. (zindi is not a git repo —
+  the move lives in the workspace, verified end-to-end.)
+
+**Tests:** `tests/test_ruff_b10_b16.py` — 6 regression tests (B10 audit
+self-containment, B12 byte-offset resume + past-EOF safety, B15 frame-load
+flag, B16 factory agnosticism + zindi plugin serving). B15/B16 bite-checked
+by re-introducing the bug and confirming failure. Full suite 653 OK;
+ruff gate clean.
+
+**Lesson:** Text-mode `seek()` is UB on CPython — any byte-offset resume
+must go through a binary stream. Competition-specific models with
+hardcoded literals must live in the competition workspace via the
+`build_model` plugin hook, not the generic factory. One-liner ruff noise
+(E7xx) in exception paths hides real structure — splitting them costs
+nothing and makes review easier.
+
 ### 2026-10-17 — Fix 4 latent F821 (undefined name) bugs + regression tests
 
 **Task:** After Wave 1+2, answer "còn cần improve gì không?" with a broader

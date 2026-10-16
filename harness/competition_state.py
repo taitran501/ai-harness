@@ -964,6 +964,12 @@ class CompetitionStateMachine:
             {
                 "reason": reason,
                 "previous_freeze": self.state["freeze_selection"].get("frozen_at"),
+                # Self-contained receipt: the released slots and the lock
+                # receipt are recorded here, not only in the FROZEN event,
+                # so the unfreeze entry stands on its own in the audit trail.
+                "released_slots": self.state["freeze_selection"].get("selected_slots"),
+                "lock_receipt_path": self.state["freeze_selection"].get("lock_receipt_path"),
+                "frozen_at_git_commit": self.state["freeze_selection"].get("git_commit"),
             },
         )
         self.save()

@@ -333,8 +333,9 @@ def load_task_config() -> Dict[str, Any]:
 
 def save_task_config(task_data: Dict[str, Any]) -> None:
     """Save updated task specification to configs/task.yaml."""
-    _,obs=AgentBridge(PROJECT_ROOT).execute_action("update_task_contract",params={"task":task_data})
-    if obs.status!="SUCCESS": raise ValueError(obs.summary)
+    _, obs = AgentBridge(PROJECT_ROOT).execute_action("update_task_contract", params={"task": task_data})
+    if obs.status != "SUCCESS":
+        raise ValueError(obs.summary)
 
 
 TASK_PRESETS: List[Dict[str, Any]] = [
@@ -663,7 +664,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
 
     if tid == "antigravity_attach":
         prompt_lines = [
-            f"# SYSTEM DIRECTIVE: ANTIGRAVITY INITIAL TASK SETUP & ATTACH",
+            "# SYSTEM DIRECTIVE: ANTIGRAVITY INITIAL TASK SETUP & ATTACH",
             "",
             "> [!IMPORTANT]",
             f"> Benchmark Task: **{task_name}** | Type: **{task_type}** ({task_modality}) | Target Metric: **{primary_metric} ({direction})**",
@@ -672,13 +673,13 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
             "## 1. REPOSITORY ORIENTATION & CONTRACTS",
             f"- **Dataset Path**: `{train_path}`",
             f"- **Validation Scheme**: `{split_strategy}` on `{group_col}` (Zero data leakage tolerated).",
-            f"- **Task Specification**: Inspect `configs/task.yaml` and `harness/task_spec.py` for target columns, subtasks, and conditional if-else routing.",
+            "- **Task Specification**: Inspect `configs/task.yaml` and `harness/task_spec.py` for target columns, subtasks, and conditional if-else routing.",
             f"- **Scientific Protocol**: Strictly adhere to `AGENTS.md`. Completed runs under `{artifact_rel}/` are permanent records.",
             "",
             "## 2. ACTIVE TASK METRICS & CONSTRAINTS",
             f"- **Primary Metric**: `{primary_metric}` ({direction})",
             f"- **Target Score Goal**: `{task.get('primary_metric_target', 'not configured')}`",
-            f"- **Rule Invariants**: Use the task-declared seed and split files; completed experiments are immutable.",
+            "- **Rule Invariants**: Use the task-declared seed and split files; completed experiments are immutable.",
             "",
             "## 3. MANDATORY INITIAL SETUP SEQUENCE",
             "Follow these sequential steps to initialize the competition harness:",
@@ -699,7 +700,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
         ]
     elif tid == "codex_attach":
         prompt_lines = [
-            f"# SYSTEM DIRECTIVE: OPENAI CODEX INITIAL PIPELINE SETUP & ATTACH",
+            "# SYSTEM DIRECTIVE: OPENAI CODEX INITIAL PIPELINE SETUP & ATTACH",
             "",
             "> [!IMPORTANT]",
             f"> Target Benchmark: **{task_name}** | Type: **{task_type}** | Primary Target: **{primary_metric} ({direction})**",
@@ -719,7 +720,7 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
         ]
     elif tid == "codex_iterate":
         prompt_lines = [
-            f"# SYSTEM DIRECTIVE: OPENAI CODEX / AUTONOMOUS ML ENGINEER",
+            "# SYSTEM DIRECTIVE: OPENAI CODEX / AUTONOMOUS ML ENGINEER",
             "",
             "> [!IMPORTANT]",
             f"> Repository Task: **{task_name}** | Type: **{task_type}** ({task_modality}) | Target: **{primary_metric} ({direction})**",
@@ -1084,16 +1085,20 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 if action == "gate":
                     for key in data.get("gates",{}):
                         if key not in {"spec_confirmed","data_risks_confirmed"}:
-                            self.send_json({"error":f"Gate {key} requires its verified action"},status=409); return
+                            self.send_json({"error": f"Gate {key} requires its verified action"}, status=409)
+                            return
                     bridge=AgentBridge(PROJECT_ROOT)
                     for key,value in data.get("gates",{}).items():
-                        if not value: raise ValueError("Review evidence cannot be cleared through the legacy endpoint")
+                        if not value:
+                            raise ValueError("Review evidence cannot be cleared through the legacy endpoint")
                         _,obs=bridge.execute_action("confirm_task_spec" if key=="spec_confirmed" else "confirm_data_risks",user_approved=bool(data.get("user_approved",False)))
                         if obs.status!="SUCCESS":
-                            self.send_json({"success":False,"observation":asdict(obs)},status=409); return
+                            self.send_json({"success": False, "observation": asdict(obs)}, status=409)
+                            return
                     settings={k:v for k,v in data.items() if k!="gates"}
-                    _,obs=bridge.execute_action("update_workspace_settings",params=settings)
-                    if obs.status!="SUCCESS": raise ValueError(obs.summary)
+                    _, obs = bridge.execute_action("update_workspace_settings", params=settings)
+                    if obs.status != "SUCCESS":
+                        raise ValueError(obs.summary)
                     comp=bridge.comp_state
                 elif action == "data-audit":
                     comp.run_data_readiness_audit(data.get("config"))
@@ -1798,9 +1803,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         dest.parent.mkdir(parents=True, exist_ok=True)
-        _,obs=AgentBridge(PROJECT_ROOT).execute_action("write_experiment_config",params={"path":raw_path,"content":content})
-        if obs.status!="SUCCESS":
-            self.send_json({"error":obs.summary},status=400); return
+        _, obs = AgentBridge(PROJECT_ROOT).execute_action("write_experiment_config", params={"path": raw_path, "content": content})
+        if obs.status != "SUCCESS":
+            self.send_json({"error": obs.summary}, status=400)
+            return
 
         self.send_json({
             "success": True,
@@ -1910,9 +1916,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         yaml_content = yaml.dump(new_cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        _,obs=AgentBridge(PROJECT_ROOT).execute_action("write_experiment_config",params={"path":str(dest.relative_to(PROJECT_ROOT)),"content":yaml_content})
-        if obs.status!="SUCCESS":
-            self.send_json({"error":obs.summary},status=400); return
+        _, obs = AgentBridge(PROJECT_ROOT).execute_action("write_experiment_config", params={"path": str(dest.relative_to(PROJECT_ROOT)), "content": yaml_content})
+        if obs.status != "SUCCESS":
+            self.send_json({"error": obs.summary}, status=400)
+            return
 
         self.send_json({
             "success": True,
@@ -2046,7 +2053,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "code": code_content,
                 "metadata": meta_json,
                 "commands": {
-                    "dataset_cmd": f"ai-harness cloud consent --provider kaggle --confirm-upload\n# private by default; declare data_config.license before uploading a new dataset",
+                    "dataset_cmd": "ai-harness cloud consent --provider kaggle --confirm-upload\n# private by default; declare data_config.license before uploading a new dataset",
                     "push_cmd": f"python -m harness.cloud_runner --backend kaggle --project-root . --config {config_path}",
                     "kernel_cmd": f'python -m harness.templates.kaggle_template push-package --path "{stage_dir}"',
                     "status_cmd": f"kaggle kernels status {meta_json.get('id', 'antigravity/' + exp_id)}",
@@ -2064,7 +2071,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         fingerprint = dataset_fingerprint(HARNESS_PROJECT)
         if not UploadConsentStore(HARNESS_PROJECT).is_granted(platform, fingerprint["fingerprint"]):
             self.send_json({
-                "error": f"Upload consent is required for this task, provider, and dataset fingerprint.",
+                "error": "Upload consent is required for this task, provider, and dataset fingerprint.",
                 "fingerprint": fingerprint["fingerprint"],
                 "consent_endpoint": "/api/cloud/consent",
             }, status=409)
@@ -2185,6 +2192,15 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"error": "Missing job_id parameter"}, status=400)
             return
 
+        start_byte = 0
+        raw_start = query.get("start_byte", [None])[0]
+        if raw_start is not None:
+            try:
+                start_byte = max(0, int(raw_start))
+            except ValueError:
+                self.send_json({"error": "start_byte must be an integer"}, status=400)
+                return
+
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -2192,7 +2208,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
         manager = CloudJobManager()
-        for chunk in manager.stream_logs(job_id):
+        for chunk in manager.stream_logs(job_id, start_byte=start_byte):
             try:
                 self.wfile.write(chunk.encode("utf-8"))
                 self.wfile.flush()
@@ -2538,12 +2554,12 @@ def run_server(port: int = 8080) -> None:
     for attempt in range(max_retries):
         try:
             with socketserver.ThreadingTCPServer(("127.0.0.1", current_port), handler) as httpd:
-                print(f"=" * 65)
-                print(f"🚀 ML/DL Experiment Dashboard & Priming Server Active")
+                print("=" * 65)
+                print("🚀 ML/DL Experiment Dashboard & Priming Server Active")
                 print(f"📡 Web URL:  http://localhost:{current_port}")
                 print(f"📋 API Root: http://localhost:{current_port}/api/tree")
                 print(f"🎯 Priming:  http://localhost:{current_port}/api/priming_prompt")
-                print(f"=" * 65)
+                print("=" * 65)
                 httpd.serve_forever()
                 break
         except OSError as e:

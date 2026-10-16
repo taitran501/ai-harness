@@ -116,7 +116,8 @@ class TreeJournal:
         from harness.artifacts import validate_run
         for node in self.nodes.values():
             if node.artifact_dir:
-                try: validate_run(node.artifact_dir,task_spec=self.task_spec,plugin=self.task_plugin)
+                try:
+                    validate_run(node.artifact_dir, task_spec=self.task_spec, plugin=self.task_plugin)
                 except (ValueError,OSError,KeyError):
                     node.verified=node.eligible=False
                     node.status="LEGACY_UNVERIFIED"
@@ -191,9 +192,11 @@ class TreeJournal:
         import yaml
         art_path = Path(artifacts_dir) if artifacts_dir is not None else self.artifacts_dir
         count = 0
-        if not art_path.exists(): return 0
+        if not art_path.exists():
+            return 0
         for directory in art_path.iterdir():
-            if not directory.is_dir() or not (directory/"metrics.json").is_file(): continue
+            if not directory.is_dir() or not (directory / "metrics.json").is_file():
+                continue
             metrics = json.loads((directory/"metrics.json").read_text(encoding="utf-8"))
             cfg = yaml.safe_load((directory/"run_config.yaml").read_text(encoding="utf-8")) if (directory/"run_config.yaml").is_file() else {}
             try:
@@ -233,8 +236,10 @@ class TreeJournal:
                 intervention=exp.get("intervention", ""), diagnostics_summary=diagnostics,
                 timestamp=(directory / "artifact_manifest.json").stat().st_mtime
                     if (directory / "artifact_manifest.json").exists() else directory.stat().st_mtime)
-            self.nodes[node.id]=node; count+=1
-        if count: self.save()
+            self.nodes[node.id] = node
+            count += 1
+        if count:
+            self.save()
         return count
 
     def save(self) -> None:
@@ -476,7 +481,8 @@ class TreeJournal:
             scored_candidates.append((ucb_score, n))
 
         scored_candidates.sort(key=lambda x: x[0], reverse=True)
-        if not scored_candidates: return {"recommendation":"INITIAL_BASELINE","parent_id":None,"branch":"baseline"}
+        if not scored_candidates:
+            return {"recommendation": "INITIAL_BASELINE", "parent_id": None, "branch": "baseline"}
         top_ucb, top_node = scored_candidates[0]
 
         # Check diagnostic bottlenecks in top_node
