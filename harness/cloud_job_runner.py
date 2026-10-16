@@ -164,8 +164,38 @@ class CloudJobManager:
     def _pid_running(pid: Optional[int]) -> bool:
         if not pid:
             return False
+        pid = int(pid)
+        if sys.platform == "win32":
+            # CRITICAL: on Windows `os.kill(pid, 0)` is NOT a no-op liveness
+            # probe — CPython maps every signal to TerminateProcess(handle,
+            # sig), so even signal 0 KILLS the process (verified empirically:
+            # a live sleep process died with exit 3221225794 after
+            # os.kill(pid, 0)). Status polling would silently terminate the
+            # worker under inspection. Use OpenProcess + GetExitCodeProcess.
+            import ctypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            handle = kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+            )
+            if not handle:
+                return False
+            try:
+                code = ctypes.c_ulong()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return False
+                return code.value == STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
         try:
-            os.kill(int(pid), 0)
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # Exists but owned by another user; treat as running.
             return True
         except (OSError, ValueError):
             return False
@@ -274,7 +304,12 @@ class CloudJobManager:
                 job.error_message = f"Could not recover local run artifacts: {exc}"
         else:
             job.status = "FAILED"
-            job.error_message = "The dashboard restarted after the worker exited without a verified result manifest."
+            job.error_message = (
+                "Worker process is no longer running and no terminal state or "
+                "verified artifacts were recorded "
+                f"(pid {job.pid or 'unknown'} died before completion). "
+                "Check the job log, then re-dispatch the run."
+            )
         self._persist_job(job)
         return job
 

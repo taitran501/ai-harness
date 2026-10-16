@@ -426,11 +426,29 @@ class UniversalRunner:
                     ]
                 else:
                     if df["fold"].isna().any():
-                        raise ValueError("Null validation folds")
+                        raise ValueError(
+                            "Null validation folds: the dataset carries a 'fold' "
+                            "column with missing values. Remove it so the "
+                            "harness can generate splits, or fill every fold index."
+                        )
+                    if df.fold.nunique() <= 1:
+                        raise ValueError(
+                            f"Dataset carries a constant 'fold' column (value "
+                            f"{df.fold.iloc[0]!r}) which cannot define validation "
+                            "splits. Remove the column so the harness generates "
+                            "its CV splits (e.g. GroupKFold on the task "
+                            "group_column), or provide distinct fold indices."
+                        )
                     if df.fold.nunique() != int(
                         config.get("num_folds", self.task_spec.validation.num_folds)
                     ):
-                        raise ValueError("Declared fold count differs from split file")
+                        raise ValueError(
+                            "Declared fold count differs from split file: the "
+                            "'fold' column defines "
+                            f"{df.fold.nunique()} splits but the config/task "
+                            f"declares {config.get('num_folds', self.task_spec.validation.num_folds)}. "
+                            "Align num_folds or fix the split file."
+                        )
                     result = [
                         (
                             int(f) if isinstance(f, (int, np.integer)) else f,
@@ -1515,6 +1533,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     except Exception:
         cfg_doc = None  # config errors surface in UniversalRunner with context
     is_smoke_run = is_local_only_run(args, cfg_doc)
+    # Re-entrancy guard: when this process was started by a dispatched remote
+    # kernel (Kaggle/Modal template sets AI_HARNESS_REMOTE_KERNEL=1), we ARE
+    # the training environment. The task contract's cloud backend must not be
+    # re-applied here — it would dispatch a nested kernel from inside the
+    # kernel (and fail the upload-consent check, which only exists locally).
+    inside_remote_kernel = os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1"
+    if inside_remote_kernel:
+        requested_backend = None
+        contract_backend = None
+        backend_locked = False
+        print(
+            "[ai-harness] inside a dispatched remote kernel "
+            "(AI_HARNESS_REMOTE_KERNEL=1); executing locally instead of "
+            "re-dispatching to the contract backend."
+        )
     try:
         args.backend = resolve_cli_backend(
             requested_backend, contract_backend, backend_locked, is_smoke_run

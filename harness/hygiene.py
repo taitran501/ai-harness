@@ -22,6 +22,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import yaml
+
 # Top-level directories considered legitimate workspace structure.
 ALLOWED_TOP_DIRS = {
     "configs",
@@ -92,6 +94,47 @@ def _human_size(num: float) -> str:
     return f"{num:.1f}GB"
 
 
+_TASK_DIR_CACHE: Dict[tuple, frozenset] = {}
+
+
+def task_allowed_dirs(project_root: Path) -> frozenset:
+    """Per-workspace hygiene allow-list from the active task spec.
+
+    Competition workspaces legitimately vendor directories the generic
+    allow-list does not know (official repo dirs like ``getting-started``,
+    model caches like ``hf_local``, prior solutions, etc.). The task spec may
+    declare them under::
+
+        task:
+          hygiene:
+            allowed_top_dirs: [baselines, solutions, getting-started, hf_local]
+
+    Cached per (config path, mtime); returns an empty frozenset whenever the
+    lookup is unavailable so the scanner never fails because of this.
+    """
+    try:
+        from harness.project import HarnessProject
+
+        project = HarnessProject.discover(Path(project_root))
+        cfg = project.task_config_path
+        if not cfg.is_file():
+            return frozenset()
+        key = (str(cfg), cfg.stat().st_mtime)
+        hit = _TASK_DIR_CACHE.get(key)
+        if hit is not None:
+            return hit
+        doc = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+        task = doc.get("task", doc) if isinstance(doc, dict) else {}
+        raw = (task.get("hygiene") or {}).get("allowed_top_dirs") or []
+        dirs = frozenset(str(x).strip().lower() for x in raw if str(x).strip())
+        if len(_TASK_DIR_CACHE) > 8:
+            _TASK_DIR_CACHE.clear()
+        _TASK_DIR_CACHE[key] = dirs
+        return dirs
+    except Exception:
+        return frozenset()
+
+
 def scan_workspace_hygiene(
     project_root: Path,
     max_findings: int = 12,
@@ -116,7 +159,7 @@ def scan_workspace_hygiene(
         try:
             if entry.is_dir():
                 name_low = entry.name.lower()
-                if name_low in ALLOWED_TOP_DIRS:
+                if name_low in ALLOWED_TOP_DIRS or name_low in task_allowed_dirs(project_root):
                     continue
                 if _is_run_output_dir(name_low):
                     # Run-output dirs collapse into aggregated advisories
