@@ -59,6 +59,35 @@ label*, not invisibility.
 machine (hardware/kernel-hook suspected); consider auto-scan
 import-artifacts in `sync`'s post-attach step.
 
+### 2026-10-17 — recovery tracking (PRs #69, #70)
+
+**Task:** after applying #68 to rsna-knee (exp000/exp003/exp004
+quarantined), the adoption verdict stayed `bypass_detected` with
+0 experiments — the recovered evidence was invisible and the recovered
+source dirs were still counted as bypass violations.
+
+**Fix:**
+- `import_verified_local_run` records recovered source dirs in
+  `artifacts/<task>/imported_sources.json` (dedup-safe).
+- hygiene marks matching dirs `recovered`; aggregation emits a separate
+  `recovered_run_output` finding ("safe to delete") while un-recovered
+  manual pushes keep the `bypassed_run_output` verdict.
+- `status._adoption_section`: counts `quarantined_experiments` and
+  `recovered_run_output_dirs`; markdown render shows both.
+- scan marks a source dir `already_imported` when its run exists in
+  EITHER the live tree or the quarantine (#70 — a recovered source
+  stays on disk and must not be re-listed as importable).
+
+**Verification:** 5 new regression tests; fast tier 684 tests OK; ruff
+clean. Live rsna-knee state: 3 quarantined experiments, 3 recovered
+dirs, 36 genuinely unverified manual dirs still honestly flagged
+(bypass_detected is the *correct* verdict — the agent did bypass 36
+times with zero evidence trail).
+
+**Lesson:** an honest status must distinguish recovered-but-drifted
+evidence from genuine violations; the fix is to make both visible with
+their own labels, not to suppress either.
+
 
 This journal tracks development of AI-Harness. Read the latest entry after a
 restart and append an entry after a meaningful implementation/validation step
