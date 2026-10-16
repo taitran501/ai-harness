@@ -233,6 +233,7 @@ def import_verified_local_run(
         raise ValueError(f"Post-copy verification failed: {post_error}")
 
     _append_journal(project, target, quarantine)
+    _record_imported_source(project, source, target.name, quarantine)
     return {
         "status": "ok",
         "exp_id": exp_id,
@@ -267,4 +268,32 @@ def _append_journal(project, target: Path, quarantine: bool) -> None:
         journal_path.parent.mkdir(parents=True, exist_ok=True)
         journal_path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
     except Exception:  # noqa: BLE001 - journal is advisory; import already verified
+        pass
+
+
+def _record_imported_source(project, source: Path, exp_id: str, quarantine: bool) -> None:
+    """Track which workspace source dirs were recovered into the artifact tree.
+
+    Hygiene consults this file so recovered dirs stop being reported as
+    bypass violations — they stay visible, labelled as recovered, while the
+    un-recovered manual pushes remain flagged."""
+    try:
+        path = project.artifacts_dir / "imported_sources.json"
+        records: List[Dict[str, Any]] = []
+        if path.is_file():
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                records = [r for r in loaded if isinstance(r, dict)]
+        if not any(r.get("source_dir") == source.name for r in records):
+            records.append(
+                {
+                    "source_dir": source.name,
+                    "source_path": str(source),
+                    "exp_id": exp_id,
+                    "quarantined": quarantine,
+                    "imported_at": _utc_now(),
+                }
+            )
+        path.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
+    except Exception:  # noqa: BLE001 - advisory bookkeeping; import already verified
         pass

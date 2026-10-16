@@ -34,16 +34,19 @@ def _spec_for(root: Path):
     return load_active_task_spec(HarnessProject.discover(root).task_config_path)
 
 
-def _make_run(root: Path, name: str, *, stale_task: bool = False) -> Path:
+def _make_run(root: Path, name: str, *, stale_task: bool = False, stale_scorer: bool = False) -> Path:
     """Create a verified local run dir (fresh identity unless stale)."""
     folder = root / name
     spec = _spec_for(root)
     seal_fixture(folder, spec)
-    if stale_task:
+    if stale_task or stale_scorer:
         manifest_path = folder / "artifact_manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["task_sha256"] = "0" * 64
-        manifest["scorer_sha256"] = "1" * 64
+        if stale_task:
+            manifest["task_sha256"] = "0" * 64
+            manifest["scorer_sha256"] = "1" * 64
+        else:
+            manifest["scorer_sha256"] = "1" * 64
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     return folder
 
@@ -190,6 +193,43 @@ class AdoptionScanTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["no_activity"], 2)
         finally:
             shutil.rmtree(str(parent), ignore_errors=True)
+
+    def test_imported_source_record_written(self):
+        root, _ = make_workspace()
+        source = _make_run(root, "kernel_output_exp001", stale_task=True)
+        import_verified_local_run(root, source)
+        task_root = root / ".ai-harness" / "artifacts" / "fixture-task"
+        payload = json.loads((task_root / "imported_sources.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["source_dir"], "kernel_output_exp001")
+        self.assertTrue(payload[0]["quarantined"])
+        # duplicate import of a different source adds, same source does not duplicate
+        import_verified_local_run(root, _make_run(root, "kaggle_results", stale_scorer=True))
+        payload = json.loads((task_root / "imported_sources.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(payload), 2)
+
+    def test_recovered_dir_not_flagged_as_bypass(self):
+        from harness.hygiene import scan_workspace_hygiene
+
+        root, _ = make_workspace()
+        source = _make_run(root, "kernel_output_exp001", stale_task=True)
+        # a second manual unsealed push (recovered finding needs >2 run dirs to aggregate)
+        (root / "kaggle_sub_exp002_apex").mkdir()
+        # a third manual unsealed push that was NOT recovered
+        (root / "kaggle_sub_exp999_apex").mkdir()
+        (root / "kaggle_sub_exp999_apex" / "out.csv").write_text("x\n")
+        import_verified_local_run(root, source)
+
+        findings = scan_workspace_hygiene(root)["findings"]
+        kinds = [f["kind"] for f in findings]
+        self.assertIn("recovered_run_output", kinds)
+        self.assertIn("bypassed_run_output", kinds)
+        # recovered dir must NOT appear in the bypass finding
+        for f in findings:
+            if f["kind"] == "bypassed_run_output":
+                self.assertNotIn("kernel_output_exp001", f["detail"])
+                self.assertIn("kaggle_sub_exp002_apex", f["detail"])
+                self.assertIn("kaggle_sub_exp999_apex", f["detail"])
 
 
 if __name__ == "__main__":
