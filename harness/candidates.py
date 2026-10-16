@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from harness.artifacts import validate_run, sha256, digest
+from harness.artifacts import validate_run, sha256, digest, ensure_canonical_truth, mirror_csv
 from harness.evaluation import resolve_evaluation
 from harness.plugins import TaskPluginContext, load_task_plugin
 from harness.task_spec import load_active_task_spec
@@ -667,9 +667,16 @@ def register_external_prediction(
     }
     (exp_dir / "metrics.json").write_text(json.dumps(metrics_data, indent=2), encoding="utf-8")
 
-    aligned.to_csv(exp_dir / "oof_predictions.csv", index=False)
-    aligned.to_csv(exp_dir / "predictions.csv", index=False)
-    truth.to_csv(exp_dir / "evaluation_truth.csv", index=False)
+    # predictions.csv mirrors the OOF frame (hardlink, 0 extra bytes); the
+    # evaluation truth mirrors a content-addressed canonical master shared by
+    # every run. Plain writes remain the fallback when hardlinks are unavailable.
+    oof_path = exp_dir / "oof_predictions.csv"
+    aligned.to_csv(oof_path, index=False)
+    if not mirror_csv(oof_path, exp_dir / "predictions.csv"):
+        aligned.to_csv(exp_dir / "predictions.csv", index=False)
+    canonical_truth = ensure_canonical_truth(project.artifacts_dir, truth)
+    if not mirror_csv(canonical_truth, exp_dir / "evaluation_truth.csv"):
+        truth.to_csv(exp_dir / "evaluation_truth.csv", index=False)
 
     summary_df = pd.DataFrame([{
         "input_variant": "external",
