@@ -31,6 +31,14 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--markdown", action="store_true", help="Print short human-readable summary instead of JSON")
     status.add_argument("--no-cloud", action="store_true", help="Skip cloud/provider checks (faster, offline-friendly)")
 
+    sync = subparsers.add_parser("sync", help="Update the workspace's ai-harness clone, reinstall, and re-attach (one-command framework upgrade)")
+    sync.add_argument("--project-root", default=".", help="Competition workspace root (default: current dir)")
+    sync.add_argument("--framework-dir", default=None, help="Path to the ai-harness git clone (default: auto-detect <workspace>/ai-harness or HARNESS_FRAMEWORK_DIR)")
+    sync.add_argument("--no-pull", action="store_true", help="Skip git update of the framework clone")
+    sync.add_argument("--no-install", action="store_true", help="Skip pip reinstall of the framework package")
+    sync.add_argument("--no-attach", action="store_true", help="Skip manifest re-attach and skill regeneration")
+    sync.add_argument("--json", action="store_true", help="Emit machine-readable result")
+
     kaggle = subparsers.add_parser("kaggle", help="Inspect Kaggle kernel state (status/log/output) without re-dispatching")
     kaggle.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|log|output + flags")
 
@@ -116,6 +124,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(json.dumps(status, indent=2, ensure_ascii=False))
         ok = bool(status.get("install", {}).get("found")) and bool(status.get("project", {}).get("attached"))
         return 0 if ok else 2
+
+    if args.command == "sync":
+        from harness.sync import run_sync
+
+        return run_sync(
+            project_root=args.project_root,
+            framework_dir=args.framework_dir,
+            no_pull=args.no_pull,
+            no_install=args.no_install,
+            no_attach=args.no_attach,
+            as_json=args.json,
+        )
 
     if args.command == "kaggle":
         from harness.kaggle_inspect import main as kaggle_main

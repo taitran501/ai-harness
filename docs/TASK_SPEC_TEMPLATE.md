@@ -125,6 +125,30 @@ subtasks:
 
 ---
 
+### 2.6 Section 6: Execution Backend Policy (Optional)
+
+Declares **where** `run_full_validation` executes by default and whether other backends are rejected. This is the fix for the recurring failure mode where an agent silently falls back to local training on a Kaggle-locked workspace (weak local machine → OOM/hang → wasted compute).
+
+```yaml
+task:
+  # ... name, primary_metric, data_config ...
+  execution:
+    backend: kaggle   # local | kaggle | modal
+    locked: true      # reject any other backend
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `execution.backend` | `string` | No | `local` | Default execution backend for `run_full_validation`: `local`, `kaggle`, or `modal`. An explicit `--backend` param still overrides unless locked. |
+| `execution.locked` | `bool` | No | `false` | When `true`, `run_full_validation` (and the session budget guards) reject any backend other than `execution.backend` with a `Backend lock violation` error. The Context Packet HUD surfaces `Execution Backend: <BACKEND> LOCKED`. |
+
+Notes:
+- `run_smoke_test` / `run_probe` **always run locally** (single fold, fast config validation) even when the backend is locked to `kaggle`.
+- The AgentBridge resolves the backend in order: explicit `--backend` param > `execution.backend` > `local`.
+- With no `execution` block, behavior is unchanged (per-call param, default `local`).
+
+---
+
 ## 3. Reference Implementation Configurations
 
 ### 3.1 Scenario A: Tabular Binary Classification with Group Invariant *(Schema Reference Only — Tabular is WIP)*
