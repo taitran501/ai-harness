@@ -6,6 +6,63 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — Artifact CSV Deduplication (Hardlink Mirrors + Canonical Truth)
+
+**Task:** Port the `local-hacks` experiment from `airline_prediction`
+(hardlink-dedup of oof/predictions/truth CSVs) into the framework as a clean,
+reviewed implementation. The workspace hack had grown on top of a stale main;
+only the write-section idea was portable.
+
+**Deep review findings (manual, before porting)**
+
+- `predictions.csv` is a byte-identical copy of `oof_predictions.csv` in both
+  writers (`UniversalRunner._save_and_finalize`,
+  `register_external_prediction`) -> a hardlink mirror is safe; every consumer
+  (`validate_run`, repair, research_memory, cloud import, notebook export,
+  `iterdir()` scans) is content-based, so links are transparent.
+- A fixed-name canonical `evaluation_truth.csv` master (the raw hack) is a
+  **correctness risk**: the runner writes the *split* truth while
+  `register_external_prediction` writes the *full* training truth, and a split
+  change silently links stale content. -> replaced with a **content-addressed**
+  master (`canonical_evaluation_truth_<sha16>.csv`).
+- Fallback writes must never happen in place over an existing (potentially
+  shared-inode) file, or a stale link would truncate its master. ->
+  unlink-before-write in the fallback path.
+- Concurrent creation of the canonical master is race-free because creation is
+  atomic (temp + `os.replace`) and the name is derived from the content hash
+  (identical content -> identical path -> idempotent overwrite).
+
+**Changes**
+
+- `harness/artifacts.py`: new `mirror_csv`, `write_csv_dedup`,
+  `canonical_truth_path`, `ensure_canonical_truth` helpers (with docs on the
+  dedup contract).
+- `harness/runner.py`: `predictions.csv` and `evaluation_truth.csv` are now
+  hardlink mirrors (plain-write fallback when hardlinks are unavailable).
+- `harness/candidates.py`: same treatment in `register_external_prediction`.
+- `tests/test_artifact_dedup.py`: unit coverage for mirror/fallback/stale-link
+  semantics + end-to-end runner and external-registration runs verifying inode
+  identity, content identity, canonical sharing across runs, and manifest hash
+  integrity.
+
+**Evidence**
+
+- New tests: 14 (13 pass, 1 skip on machines without symlink privilege).
+- Full suite: 547 tests, 100% pass.
+
+**Lesson**
+
+- Workspace-local hacks can encode real insights, but must be re-derived and
+  reviewed on current main before porting: the raw version's fixed-name
+  canonical master would have introduced a subtle stale-truth bug.
+
+**Next action**
+
+- After merge, re-sync the competition workspaces (`aimo`,
+  `airline_prediction`, `zindi`, `rsna-knee`) via `ai-harness sync` so they
+  inherit the dedup. The `airline_prediction` `local-hacks` branch then becomes
+  redundant (keep as reference).
+
 ### 2026-07-23 — P2 Defense-in-Depth Fixes (Config Path Guard, Per-Subtask Direction) (PR #38)
 
 **Task:** After the full codebase audit (runner, dashboard_server, skill_injector,

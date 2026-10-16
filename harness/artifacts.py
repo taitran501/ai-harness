@@ -136,6 +136,95 @@ def frame_hash(frame):
     return hashlib.sha256(frame.to_csv(index=False).encode()).hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# CSV deduplication (hardlink mirrors + content-addressed canonical truth)
+#
+# Full runs write ``oof_predictions.csv`` and ``predictions.csv`` as byte-identical
+# copies of the same frame, and every run re-writes the same evaluation truth.
+# On disk those copies waste space (tens of MB x 3 per experiment on large
+# tabular tasks). The helpers below store them once:
+#
+# - ``predictions.csv`` becomes a hardlink mirror of ``oof_predictions.csv``.
+# - ``evaluation_truth.csv`` becomes a hardlink mirror of a content-addressed
+#   canonical master (``canonical_evaluation_truth_<sha16>.csv``) shared by all
+#   runs. Content addressing matters: the runner writes the *split* truth while
+#   ``register_external_prediction`` writes the *full* training truth, so a fixed
+#   filename would silently link stale content after a split change.
+#
+# Every consumer (validate_run, repair, research_memory, cloud import, notebook
+# export) is content-based, so hardlinks are transparent. All fallbacks avoid
+# writing in place over an existing (potentially shared-inode) file.
+# ---------------------------------------------------------------------------
+
+
+def mirror_csv(source: Path | str, target: Path | str) -> bool:
+    """Make ``target`` a hardlink to ``source`` (zero extra bytes).
+
+    An existing ``target`` is removed first so re-runs refresh the mirror.
+    Returns ``True`` when the mirror was (re)created; ``False`` when hardlinks
+    are unavailable (cross-device, filesystem without support) and the caller
+    should fall back to a regular write.
+    """
+    import os
+
+    source, target = Path(source), Path(target)
+    try:
+        if target.exists() or target.is_symlink():
+            target.unlink()
+        os.link(source, target)
+        return True
+    except OSError:
+        return False
+
+
+def write_csv_dedup(frame, target: Path | str, mirror_from: Path | str | None = None):
+    """Write ``frame`` to ``target``, preferring a hardlink mirror when possible.
+
+    The fallback never writes in place over an existing file: a stale file may
+    be a hardlink to another artifact, and an in-place ``to_csv`` would
+    truncate the shared inode. The stale file is unlinked first.
+    """
+    if mirror_from is not None and mirror_csv(mirror_from, target):
+        return
+    target = Path(target)
+    try:
+        if target.exists() or target.is_symlink():
+            target.unlink()
+    except OSError:
+        pass
+    frame.to_csv(target, index=False)
+
+
+def canonical_truth_path(artifacts_dir: Path | str, frame) -> Path:
+    """Content-addressed canonical location for an evaluation truth frame."""
+    return Path(artifacts_dir) / f"canonical_evaluation_truth_{frame_hash(frame)[:16]}.csv"
+
+
+def ensure_canonical_truth(artifacts_dir: Path | str, frame) -> Path:
+    """Create the canonical truth master if missing; return its path.
+
+    Creation is atomic (temp file + ``os.replace``) so concurrent runs never
+    expose a half-written master. The content-addressed name makes concurrent
+    writers idempotent: identical content maps to the same path.
+    """
+    import os
+
+    path = canonical_truth_path(artifacts_dir, frame)
+    if path.exists():
+        return path
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        frame.to_csv(tmp, index=False)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+    return path
+
+
 def validate_test_prediction(path, *, task_spec, plugin=None):
     path = Path(path).resolve()
     cand_manifest_path = path.parent / "candidate_manifest.json"

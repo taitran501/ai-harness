@@ -59,7 +59,14 @@ import json
 import importlib
 import inspect
 import uuid
-from harness.artifacts import contract_identity, digest, frame_hash, sha256
+from harness.artifacts import (
+    contract_identity,
+    digest,
+    ensure_canonical_truth,
+    frame_hash,
+    mirror_csv,
+    sha256,
+)
 
 
 class UniversalRunner:
@@ -1156,9 +1163,18 @@ class UniversalRunner:
             ]
         )
         summary.to_csv(self.exp_dir / "summary.csv", index=False)
-        oof.to_csv(self.exp_dir / "oof_predictions.csv", index=False)
-        oof.to_csv(self.exp_dir / "predictions.csv", index=False)
-        truth.to_csv(self.exp_dir / "evaluation_truth.csv", index=False)
+        # predictions.csv is a byte-identical copy of the OOF frame: store it as
+        # a hardlink mirror (0 extra bytes), falling back to a plain write when
+        # hardlinks are unavailable.
+        oof_path = self.exp_dir / "oof_predictions.csv"
+        oof.to_csv(oof_path, index=False)
+        if not mirror_csv(oof_path, self.exp_dir / "predictions.csv"):
+            oof.to_csv(self.exp_dir / "predictions.csv", index=False)
+        # evaluation_truth.csv is shared by every run: mirror a content-addressed
+        # canonical master so the truth bytes are stored once per truth content.
+        canonical_truth = ensure_canonical_truth(self.artifacts_dir, truth)
+        if not mirror_csv(canonical_truth, self.exp_dir / "evaluation_truth.csv"):
+            truth.to_csv(self.exp_dir / "evaluation_truth.csv", index=False)
         try:
             oof.to_parquet(self.exp_dir / "oof_predictions.parquet", index=False)
         except Exception:
