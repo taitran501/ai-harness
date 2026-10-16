@@ -46,12 +46,22 @@ def kernel_output(kernel_slug: Optional[str] = None, exp_id: Optional[str] = Non
         return {"kernel_slug": slug, "status": status.get("status"), "files": [], "error": "no kernel slug provided"}
     try:
         with tempfile.TemporaryDirectory(prefix="aih-inspect-") as temp_dir:
-            subprocess.run(
+            result = subprocess.run(
                 ["kaggle", "kernels", "output", slug, "-p", temp_dir],
                 capture_output=True, text=True, timeout=120,
             )
             files = sorted(p.name for p in Path(temp_dir).rglob("*") if p.is_file())
-        return {"kernel_slug": slug, "status": status.get("status"), "files": files}
+            if result.returncode != 0:
+                stderr_tail = (result.stderr or "").strip()[-500:]
+                return {
+                    "kernel_slug": slug,
+                    "status": status.get("status"),
+                    "files": files,
+                    "error": (
+                        f"kaggle CLI failed (rc={result.returncode}): {stderr_tail}"
+                    ),
+                }
+            return {"kernel_slug": slug, "status": status.get("status"), "files": files}
     except Exception as exc:  # noqa: BLE001
         return {"kernel_slug": slug, "status": status.get("status"), "files": [], "error": str(exc)}
 

@@ -985,7 +985,6 @@ class CompetitionStateMachine:
         """Compatibility entrypoint: all mutations use the canonical action layer."""
         from harness.agent_bridge import AgentBridge
 
-        bridge = AgentBridge(self.project_root)
         snapshot = self.evaluate_journey_snapshot(journal, sub_mgr, task_info)
         recommendation = snapshot["hud"]["what_should_i_do_next"]
         action_id = recommendation.get("action_id")
@@ -1027,6 +1026,7 @@ class CompetitionStateMachine:
                 "action_id": action_id,
                 "observation": obs.__dict__,
             }
+        bridge = AgentBridge(self.project_root)
         params = {}
         if action == "establish_baseline_anchor":
             params["exp_id"] = self.state["gates"].get("baseline_exp_id") or (

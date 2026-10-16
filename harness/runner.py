@@ -1376,7 +1376,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Force overwrite existing experiment artifacts",
+        help=(
+            "Accepted for backwards compatibility; sealed experiment "
+            "artifacts are NEVER overwritten. Use a new experiment ID "
+            "(see --force-import for the separate import-mismatch override)."
+        ),
     )
     parser.add_argument(
         "--force-import",

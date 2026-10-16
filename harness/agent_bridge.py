@@ -92,6 +92,13 @@ class TypedActionName(str, Enum):
     GET_NEXT_EXPERIMENT_ID = "get_next_experiment_id"
 
 
+# Session history caps: keep `sessions_dir/*.json` bounded for long
+# competition runs. Oldest entries are dropped (the most recent context is
+# what the agent re-primes from; full history remains in the journal).
+MAX_SESSION_ACTIONS = 200
+MAX_SESSION_OBSERVATIONS = 200
+
+
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.SEARCH_RESEARCH_MEMORY.value: ApprovalTier.AUTO.value,
     TypedActionName.REVIEW_HYPOTHESIS.value: ApprovalTier.AUTO.value,
@@ -918,6 +925,14 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
         ):
             raise ValueError("Invalid session ID")
         session.updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        # Cap unbounded history: long sessions (50+ experiments) otherwise
+        # re-serialize MB-scale JSON on every save_session call.
+        if len(session.actions) > MAX_SESSION_ACTIONS:
+            session.actions = session.actions[-MAX_SESSION_ACTIONS:]
+        if len(session.observations) > MAX_SESSION_OBSERVATIONS:
+            session.observations = (
+                session.observations[-MAX_SESSION_OBSERVATIONS:]
+            )
         payload = asdict(session)
         path = self.sessions_dir / f"{session.session_id}.json"
 
@@ -2165,7 +2180,21 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             raise ValueError("Gates require their verified actions")
         for key in ("mode", "manual_phase_override", "agent_context_config"):
             if key in params:
-                self.comp_state.state[key] = params[key]
+                if key == "agent_context_config":
+                    # Persist only known AgentContextConfig fields; arbitrary
+                    # agent-supplied keys would later crash priming render.
+                    from harness.competition_state import AgentContextConfig
+
+                    stored = dict(
+                        self.comp_state.state.get("agent_context_config")
+                        or {}
+                    )
+                    for field_name in AgentContextConfig.__dataclass_fields__:
+                        if field_name in params[key]:
+                            stored[field_name] = params[key][field_name]
+                    self.comp_state.state[key] = stored
+                else:
+                    self.comp_state.state[key] = params[key]
         cid = params.get("toggle_pin_candidate")
         if cid:
             pinned = self.comp_state.state["candidate_pool"][
@@ -2929,6 +2958,9 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 if available
                 else "configs/baseline.yaml"
             )
+        # Defense-in-depth (same as run_full_validation): reject config paths
+        # that resolve outside the project root.
+        cfg_path = str(self._validate_config_path(cfg_path))
         fold = str(params.get("fold", 0))
         cmd = [
             sys.executable,
@@ -2948,9 +2980,13 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
         passed, retcode, out_text, elapsed = self._run_subprocess_safe(
             cmd, timeout=min(180.0, float(params.get("_deadline_seconds", 180)))
         )
-        session.compute_usage["smoke_runs"] = (
-            int(session.compute_usage.get("smoke_runs", 0)) + 1
-        )
+        # Only count successful smoke runs toward the budget: a FAILED smoke
+        # test is a diagnostic signal, and counting it inflated smoke_runs
+        # while also consuming the budget meant to bound real probe cycles.
+        if passed:
+            session.compute_usage["smoke_runs"] = (
+                int(session.compute_usage.get("smoke_runs", 0)) + 1
+            )
         return ActionObservation(
             step_index=call.step_index,
             action=act,
@@ -2983,6 +3019,9 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 if available
                 else "configs/baseline.yaml"
             )
+        # Defense-in-depth (same as run_full_validation): reject config paths
+        # that resolve outside the project root.
+        cfg_path = str(self._validate_config_path(cfg_path))
         probe_samples = str(params.get("probe_samples", 100))
         fold = str(params.get("fold", 0))
         cmd = [
