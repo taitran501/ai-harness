@@ -260,6 +260,7 @@ def attach_project(
         "- Confirm reviewed data risks: `ai-harness-agent --project-root . act --action confirm_data_risks --user-approved`\n"
         "- Start a bounded session: `ai-harness-agent --project-root . start-session --goal \"...\" --max-experiments 3`\n"
         "- Run a smoke test before a full validation run.\n"
+        "- Backend policy: if the task contract declares `execution.backend` (e.g. kaggle), `run_full_validation` uses it by default; with `execution.locked: true`, other backends are rejected — do not train locally.\n"
         "- Render the next phase prompt: `ai-harness phase render`\n"
         "- Validate the workspace prompt pack: `ai-harness phase validate`\n"
         "- Record response, inspected source URLs, and artifact paths with `ai-harness phase record`.\n"

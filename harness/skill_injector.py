@@ -111,6 +111,11 @@ def generate_skill_content(
     # Modality knowledge
     mod_info = MODALITY_GROUNDING_SUGGESTIONS.get(modality, MODALITY_GROUNDING_SUGGESTIONS["generic"])
 
+    # Execution backend policy from the task contract (execution.backend / execution.locked)
+    exec_cfg = task.get("execution") or {}
+    exec_backend = str(exec_cfg.get("backend") or "local").strip().lower() or "local"
+    exec_locked = bool(exec_cfg.get("locked", False))
+
     lines: List[str] = [
         "---",
         f"name: {skill_name}",
@@ -124,6 +129,14 @@ def generate_skill_content(
         ">",
         "> [!IMPORTANT]",
         "> **Scope Notice**: AI-Harness is currently validated and working well ONLY on Natural Language Processing (NLP / Text) tasks. Other modalities (Tabular, Vision, Audio, Multimodal) are experimental works-in-progress (WIP / Roadmap) and NOT yet validated in practice.",
+    ]
+    if exec_locked:
+        lines += [
+            ">",
+            "> [!IMPORTANT]",
+            f"> **Execution Backend LOCKED to `{exec_backend.upper()}`**: this task locks the execution backend to `{exec_backend}` (`execution.locked: true` in the task contract). Do not run training locally — dispatch full validation with `run_full_validation` (the backend defaults to the contract, so no `--backend` flag is needed). Local smoke tests (single fold, `run_smoke_test`) remain allowed for fast config validation.",
+        ]
+    lines += [
         "",
         f"Use this skill whenever planning model architectures, engineering features, formulating hypotheses,",
         f"auditing predictions, or registering verified submissions for **{task_name}**.",
@@ -298,11 +311,58 @@ def generate_skill_content(
         "1. **Read Bridge Context Packet**: Run `ai-harness-agent context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
         "2. **Start / Configure Session (Optional Budgets)**: Run `ai-harness-agent start-session --goal \"...\" --max-experiments 3`.",
         "3. **Create Grounded Experiment**: Run `ai-harness-agent act --action create_experiment --branch <branch> --descriptor <descriptor>` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
-        "4. **Execute Smoke Test**: Run `ai-harness-agent act --action run_smoke_test --config-path configs/<exp>.yaml`.",
-        "5. **Execute Task-Declared Validation**: Run `ai-harness-agent act --action run_full_validation --config-path configs/<exp>.yaml --backend local`.",
+        "4. **Execute Smoke Test** (always runs locally — fast single-fold config validation): Run `ai-harness-agent act --action run_smoke_test --config-path configs/<exp>.yaml`.",
+        f"5. **Execute Task-Declared Validation**: Run `ai-harness-agent act --action run_full_validation --config-path configs/<exp>.yaml`.",
+        f"   (Backend defaults to `{exec_backend}` from the task contract's `execution.backend`."
+        + (" **Locked** — do not pass `--backend` and never train locally." if exec_locked else " Pass `--backend <local|kaggle|modal>` only to override.") + ")",
         "6. **Observe & Decide Next Step**: Antigravity analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
         "7. **Endgame Blending & Post-Processing**: Run `ai-harness-agent act --action optimize_blend --components \"exp001,exp002\"` or `optimize_threshold --exp-id <exp> --metric f1`.",
         "8. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
+        "",
+        "---",
+        "",
+        "## 5. Execution Backends & Ad-hoc Scripts (Kaggle)",
+        "",
+        "The backend policy lives in the task contract (`configs/task.yaml`):",
+        "",
+        "```yaml",
+        "task:",
+        "  # ... name, primary_metric, data ...",
+        "  execution:",
+        "    backend: kaggle   # local | kaggle | modal (default execution backend)",
+        "    locked: true      # reject other backends (stops accidental local OOM runs)",
+        "```",
+        "",
+        "- `run_full_validation` resolves the backend in order: explicit `--backend` param > `execution.backend` > `local`. With `locked: true`, a conflicting `--backend` is rejected.",
+        "- `run_smoke_test` / `run_probe` always run **locally** (single fold, fast) even on a Kaggle-locked workspace.",
+        "",
+        "**Ad-hoc / research scripts** (code that is not one of the built-in models — e.g. a scratch training script, custom CV loop, representation probe) run through the *script adapter*:",
+        "",
+        "```yaml",
+        "# configs/expNNN_my_script.yaml",
+        "experiment:",
+        "  id: expNNN_my_script",
+        "execution:",
+        "  mode: script",
+        "  entrypoint: scratch/my_train.py   # resolved relative to the project root",
+        "```",
+        "",
+        f"The harness invokes `python scratch/my_train.py --exp-dir <artifact_dir> --config configs/expNNN_my_script.yaml`; the script must write `metrics.json` (primary metric key) and `oof_predictions.csv` / `predictions.csv` into `--exp-dir`. Dispatch it exactly like a built-in experiment (backend `{exec_backend}` from the contract):",
+        "",
+        "```bash",
+        "ai-harness-agent act --action run_full_validation --config-path configs/expNNN_my_script.yaml",
+        "```",
+        "",
+        "**Monitoring cloud jobs — do NOT hand-poll `kaggle kernels status` in a shell loop:**",
+        "",
+        "```bash",
+        "ai-harness kaggle status --exp <exp_id>        # derived kernel slug <owner>/<task-slug>-<exp_id>",
+        "ai-harness kaggle log --exp <exp_id>           # tail provider error log",
+        "ai-harness-agent act --action wait_cloud_job --job-id <job_id> --timeout-seconds 1800",
+        "ai-harness-agent act --action inspect_cloud_job --job-id <job_id>",
+        "```",
+        "",
+        "The kernel slug is derived as `<owner>/<task_slug>-<exp_id>` (same rule as dispatch) — pass `--exp <exp_id>` or an explicit `--kernel-slug owner/title` instead of guessing.",
         "",
     ])
 

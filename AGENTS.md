@@ -40,6 +40,7 @@ Assistant / Engineer (Layer 1)  ──>  Agent Bridge (Layer 2)  ──>  Harnes
 5. **Immutable Evidence**: Full runs under `.ai-harness/artifacts/<task-id>/<exp_id>` are strictly immutable. Never mutate completed evidence folders.
 6. **Research Continuity**: After restart/compaction, read `context`, the latest checkpoint, and pending results in `research_frontier`. Before brainstorming/implementation, use `search_research_memory` and `review_hypothesis`. Record an insight with `record_research_insight`, plan its bounded discriminating probe with `plan_research_probe`, and link `research.insight_id` in the experiment config. Use `trace_research_insight` to recover its history. Record a decision with lesson/next action and checkpoint after each iteration; link derived insights to their parent. An intentional repeated configuration requires `revisit_reason`; related approaches need a mechanism comparison. Plateau calls for diagnostics and reassessment, never automatic freeze.
 7. **Written Progress**: Record research notes after meaningful observations/results and before stopping. The harness generates task-level `RESEARCH_PROGRESS.md`; its path is in the context HUD. Read its resume section after restart, then retrieve only the relevant insight history. For repository code changes, append a concise entry to `docs/WORK_LOG.md` with work, evidence, lesson, and next action.
+8. **Execution Backend Policy**: A task contract may declare `execution: {backend: kaggle, locked: true}`. `run_full_validation` resolves the backend as explicit `--backend` param > `execution.backend` > `local`; when locked, other backends are rejected (`Backend lock violation`). Smoke tests/probes always run locally. When updating a competition workspace after a framework release, use `ai-harness sync` instead of hand-written multi-step sync prompts.
 
 ---
 
@@ -49,6 +50,9 @@ Assistant / Engineer (Layer 1)  ──>  Agent Bridge (Layer 2)  ──>  Harnes
 # Attach task & view compressed context HUD
 ai-harness attach --project-root . --task-config configs/task.yaml
 ai-harness-agent --project-root . context
+
+# Update a competition workspace's framework clone (git ff-only + reinstall + re-attach/skill regen)
+ai-harness sync --project-root .
 
 # Start session & run experiments (flat CLI flags avoid PowerShell JSON escaping errors)
 ai-harness-agent --project-root . start-session --goal "Improve metric" --max-experiments 3

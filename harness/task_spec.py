@@ -447,6 +447,32 @@ class UniversalTaskSpec:
         return self.metadata.get("submission_spec")
 
     @property
+    def execution_config(self) -> Dict[str, Any]:
+        """Execution policy declared in the task contract.
+
+        Recognized keys:
+            backend (str): "local" | "kaggle" | "modal" - default execution
+                backend for `run_full_validation`. Overrides the per-call
+                "local" default so a Kaggle-locked workspace does not depend
+                on every agent remembering to pass `--backend kaggle`.
+            locked (bool): when true, execution actions must use `backend`
+                and requests for any other backend are rejected.
+        """
+        exec_cfg = self.metadata.get("execution")
+        return exec_cfg if isinstance(exec_cfg, dict) else {}
+
+    @property
+    def execution_backend(self) -> Optional[str]:
+        """Contract default execution backend, or None when undeclared."""
+        backend = self.execution_config.get("backend")
+        return str(backend).strip().lower() if backend else None
+
+    @property
+    def execution_locked(self) -> bool:
+        """True when the contract locks the execution backend."""
+        return bool(self.execution_config.get("locked", False))
+
+    @property
     def test_path(self) -> Optional[str]:
         """Resolved test set path from data config or metadata."""
         return self.data_config.get("test_path") or self.metadata.get("test_path")

@@ -314,6 +314,33 @@ class AgentBridge:
             )
         return resolved
 
+    def _resolve_execution_backend(self, params: Dict[str, Any]) -> Tuple[str, bool]:
+        """Resolve the execution backend for `run_full_validation`.
+
+        Precedence: explicit `backend` param > task contract `execution.backend`
+        > "local". When the contract declares `execution.locked: true`, any
+        explicit backend different from the locked one is rejected — this is
+        what stops agents from silently falling back to local runs on a
+        Kaggle-locked workspace (recurring failure mode: weak local machine,
+        OOM, wasted compute).
+
+        Returns ``(backend, locked)"""
+        contract_backend = getattr(self.task_spec, "execution_backend", None)
+        locked = bool(getattr(self.task_spec, "execution_locked", False))
+        requested = str(params.get("backend") or "").strip().lower()
+        effective = requested or contract_backend or "local"
+        if locked and contract_backend and requested and requested != contract_backend:
+            raise ValueError(
+                f"Backend lock violation: the task contract locks the execution "
+                f"backend to '{contract_backend}' (execution.locked: true) but "
+                f"'{requested}' was requested. Drop the 'backend' param (the "
+                f"contract default applies) or change the contract via "
+                f"update_task_contract."
+            )
+        if effective not in {"local", "kaggle", "modal"}:
+            raise ValueError(f"Unsupported execution backend: {effective!r}")
+        return effective, locked
+
     def _refresh_task_context(self) -> None:
         """Reload task config and plugin state after an onboarding action rewrites it."""
         from harness.plugins import TaskPluginContext, load_task_plugin
@@ -1218,6 +1245,8 @@ class AgentBridge:
         baseline_label = "N/A" if baseline_score is None else f"{baseline_score:.4f}"
         current_label = "N/A" if current_score is None else f"{current_score:.4f}"
         delta_label = "N/A" if current_delta is None else f"{current_delta:+.4f}"
+        exec_cfg = getattr(self.task_spec, "execution_config", {}) or {}
+        contract_backend = str(exec_cfg.get("backend") or "").strip().lower()
         lines = [
             "# 🌉 ANTIGRAVITY <-> HARNESS CONTEXT PACKET",
             f"> *{pkt['architecture_motto']}*",
@@ -1229,6 +1258,14 @@ class AgentBridge:
             f"- **Baseline Anchor**: `{best['baseline']['id']}` (`{baseline_label}`)",
             f"- **Current Best CV**: `{best['cv_best']['id']}` (`{current_label}`, Δ `{delta_label}`)",
         ]
+        if contract_backend:
+            suffix = (
+                " **LOCKED** (never run training locally; dispatch with "
+                "`run_full_validation`, backend defaults to the contract)"
+                if exec_cfg.get("locked")
+                else " (default; explicit `--backend` overrides)"
+            )
+            lines.append(f"- **Execution Backend**: `{contract_backend.upper()}`{suffix}")
 
         if sess:
             cu = sess.get("compute_usage", {})
@@ -1322,6 +1359,13 @@ class AgentBridge:
 
         Note: `consecutive_rejections` defaults to a SOFT advisory (`REASSESS_RECOMMENDED`)
         rather than a hard block unless `hard_stop_on_consecutive_rejections=True` is set.
+
+        ``run_full_validation`` is also subject to the execution-backend guard:
+        the backend is resolved (explicit param > task-contract
+        ``execution.backend`` > ``local``) and canonicalized on ``params``; a
+        contract with ``execution.locked: true`` rejects other backends by
+        raising ``ValueError`` (``execute_action`` converts it into a FAILED
+        observation).
         """
         # 1. Hard Stop: Freeze lock guard
         if self.comp_state.state["gates"].get("freeze_locked") and action not in (
@@ -1370,7 +1414,15 @@ class AgentBridge:
                 )
 
         # 4. Hard Stop: Cloud runs budget
-        backend = str(params.get("backend", "local")).lower()
+        # run_full_validation defaults to the task contract's execution backend
+        # (see _resolve_execution_backend), so the guard must resolve the same
+        # way the handler will. Smoke tests and probes always run locally, so
+        # for those actions the explicit param (default "local") is authoritative.
+        if action == TypedActionName.RUN_FULL_VALIDATION.value:
+            backend, _locked = self._resolve_execution_backend(params)
+            params["backend"] = backend
+        else:
+            backend = str(params.get("backend", "local")).lower()
         max_cloud = budget.get("max_cloud_runs")
         if (
             max_cloud is not None
@@ -1517,7 +1569,19 @@ class AgentBridge:
         )
 
         # 1. Check Budget & Stop Guardrails
-        guard_violation = self._check_budget_and_stop_guards(session, action, params)
+        try:
+            guard_violation = self._check_budget_and_stop_guards(session, action, params)
+        except ValueError as guard_error:
+            # Contract-level rejection (e.g. execution backend lock violation):
+            # record a failed observation instead of raising so the agent loop
+            # keeps working and the session history shows the violation.
+            obs = ActionObservation(
+                step_idx, action, "FAILED", f"Guard rejected the action: {guard_error}"
+            )
+            session.stop_reason = f"GUARD_REJECTED: {guard_error}"
+            session.observations.append(asdict(obs))
+            self.save_session(session)
+            return session, obs
         if guard_violation is not None:
             v_status, v_msg = guard_violation
             # Do NOT mutate session.status here: a budget block is a per-action
