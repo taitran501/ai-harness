@@ -6,6 +6,8 @@ clone with no remote, so nothing touches the real environment.
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import subprocess
 import sys
@@ -19,12 +21,16 @@ from harness.sync import find_framework_repo, run_sync
 
 
 def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -> Path:
+    """Throwaway competition workspace whose ai-harness dir is a REAL (local,
+    hardlinked) git clone of this repository. sync's attach step runs in a
+    subprocess pinned to the clone, so a stub package cannot stand in for
+    the framework code."""
+    import harness as _harness_pkg
+
+    tmp = Path(tmp)
     ws = tmp / "competition"
     fw = ws / "ai-harness"
     (ws / "configs").mkdir(parents=True)
-    (fw / "harness").mkdir(parents=True)
-    (fw / "harness" / "__init__.py").write_text("VERSION = 'test'\n", encoding="utf-8")
-    (fw / "pyproject.toml").write_text('[project]\nname = "ai-harness"\n', encoding="utf-8")
     env = {
         **os.environ,
         "GIT_AUTHOR_NAME": "t",
@@ -32,15 +38,12 @@ def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@t",
     }
-
-    def git(*args: str, cwd: Path = fw) -> None:
-        subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True, env=env)
-
-    git("init", "-b", "main")
-    git("add", "-A")
-    git("commit", "-m", "init")
+    subprocess.run(
+        ["git", "clone", "--quiet", str(Path(_harness_pkg.__file__).resolve().parents[1]), str(fw)],
+        capture_output=True, text=True, check=True, env=env,
+    )
     if dirty:
-        (fw / "stray.txt").write_text("local change\n", encoding="utf-8")
+        (fw / "stray.txt").write_text("local change" + chr(10), encoding="utf-8")
     if with_remote:
         # A second bare repo acts as the origin so pull --ff-only can succeed.
         origin = tmp / "origin.git"
@@ -48,11 +51,11 @@ def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -
         subprocess.run(
             ["git", "init", "--bare", str(origin)], capture_output=True, text=True, check=True, env=env
         )
-        subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=fw, capture_output=True, text=True, check=True, env=env)
-        subprocess.run(["git", "push", "-u", "origin", "main"], cwd=fw, capture_output=True, text=True, check=True, env=env)
+        subprocess.run(["git", "remote", "set-url", "origin", str(origin)], cwd=fw, capture_output=True, text=True, check=True)
+        subprocess.run(["git", "push", "-u", "origin", "main"], cwd=fw, capture_output=True, text=True, check=True)
     (ws / "configs" / "task.yaml").write_text(
-        "task:\n  name: SyncTask\n  primary_metric: rmsle\n"
-        "  execution:\n    backend: kaggle\n    locked: true\n",
+        "task:" + chr(10) + "  name: SyncTask" + chr(10) + "  primary_metric: rmsle" + chr(10) +
+        "  execution:" + chr(10) + "    backend: kaggle" + chr(10) + "    locked: true" + chr(10),
         encoding="utf-8",
     )
     return ws
@@ -80,13 +83,50 @@ class TestFindFrameworkRepo(unittest.TestCase):
             self.assertIsNone(find_framework_repo(ws))
 
 
+class TestAttachPinning(unittest.TestCase):
+    """Regression: attach must run with the workspace clone's code, not the
+    code this process happened to import (global editable install drift)."""
+
+    def test_attach_uses_workspace_clone_code(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test_sync_pin_") as tmp:
+            ws = _make_workspace(Path(tmp))
+            with mock.patch.dict(os.environ, {"HARNESS_PROJECT_ROOT": str(ws)}), mock.patch.object(
+                sys, "stdout", new=io.StringIO()
+            ) as out:
+                rc = run_sync(project_root=ws, no_pull=True, no_install=True, as_json=True)
+            report = json.loads(out.getvalue())
+            self.assertEqual(rc, 0)
+            attach = report["steps"]["attach"]
+            self.assertEqual(attach["rc"], 0)
+            origin = attach.get("harness_origin", "")
+            self.assertIn(
+                (ws / "ai-harness" / "harness").as_posix(),
+                origin.replace("\\", "/"),
+                "attach must execute the workspace clone, got: " + origin,
+            )
+            # new workspace-level features exist end to end
+            self.assertTrue((ws / "AGENTS.md").is_file())
+            self.assertTrue((ws / ".ai-harness" / "hooks" / "block_manual_kaggle.py").is_file())
+
+    def test_toolchain_report_present(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test_sync_pin2_") as tmp:
+            ws = _make_workspace(Path(tmp))
+            with mock.patch.dict(os.environ, {"HARNESS_PROJECT_ROOT": str(ws)}), mock.patch.object(
+                sys, "stdout", new=io.StringIO()
+            ) as out:
+                run_sync(project_root=ws, no_pull=True, no_install=True, no_attach=True, as_json=True)
+            report = json.loads(out.getvalue())
+            self.assertTrue(report.get("toolchain", {}).get("pinned_subprocess"))
+
+
 class TestRunSync(unittest.TestCase):
-    def test_full_sync_no_remote_reports_problem_but_attaches(self) -> None:
+    def test_full_sync_clean_local_origin_reports_ok(self) -> None:
         with tempfile.TemporaryDirectory(prefix="test_sync_run_") as tmp:
             ws = _make_workspace(Path(tmp))
             with mock.patch.dict(os.environ, {"HARNESS_PROJECT_ROOT": str(ws)}):
                 rc = run_sync(project_root=ws, no_install=True)
-            self.assertEqual(rc, 2)  # no remote -> update impossible -> problem flagged
+            # clone source acts as a reachable origin -> pull is a no-op -> ok
+            self.assertEqual(rc, 0)
             manifest = ws / ".ai-harness" / "project.yaml"
             self.assertTrue(manifest.is_file())
             skill = ws / ".agents" / "skills" / "ai-harness" / "SKILL.md"

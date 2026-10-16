@@ -6,6 +6,35 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — sync toolchain drift: attach must run the clone's code, not the process's
+
+**Task:** during propagation of the adoption stack, 2/5 workspaces silently
+missed new workspace-level files on sync (aimo: AGENTS.md one round, hooks
+the next).
+
+**Root cause (verified):** the `ai-harness` console script is a single
+global editable install whose target changes per workspace; `sync`'s
+attach step ran **in-process**, i.e. with whichever harness code the
+process had imported at startup — potentially ANOTHER workspace's clone.
+pip's "already satisfied" skips make the drift persist across syncs.
+Class of bug: the toolchain itself was unverified — the exact anti-pattern
+the project's verification doctrine targets.
+
+**Fix (`harness/sync.py`):**
+- attach now runs in a subprocess with `PYTHONPATH` pinned to the just
+  pulled clone AND `cwd` = workspace root (so `sys.path[0]=''` cannot
+  shadow it with the caller's directory)
+- attach report gains `harness_origin` (which harness code actually
+  executed) — auditable drift
+- sync report gains `toolchain` (console-script origin vs expected) —
+  informational drift visibility
+
+**Tests:** fixture upgraded from a stub package to a real local git clone
+(`tests/test_sync_command.py`); new `TestAttachPinning` asserts
+`harness_origin` is inside the workspace clone + new files appear
+end-to-end; bite-checked (reverting to in-process attach fails the
+pinning test). Full suite 718 OK; ruff gate clean.
+
 ### 2026-10-17 — Adoption stack T3-T5 (external-repo research-backed enforcement)
 
 **Task:** "đưa ra giải pháp, check các repo bên ngoài xem họ thường làm gì khi
