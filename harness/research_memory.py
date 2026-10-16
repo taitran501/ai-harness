@@ -63,25 +63,73 @@ class ResearchMemory:
         self.spec = task_spec
         self.plugin = plugin
         self.identity = contract_identity(task_spec, plugin)
-        self.scope = digest(self.identity)
+        # Scope key: stable across benign task.yaml edits (data paths,
+        # runtime, hygiene allow-lists) because it uses only the task's
+        # declared identity and the scorer implementation. Hashing the full
+        # task metadata (the legacy behavior) orphaned every recorded
+        # insight/decision/checkpoint whenever the task config was touched.
+        meta = getattr(task_spec, "metadata", None)
+        task_id = ""
+        if isinstance(meta, dict):
+            task_id = str(meta.get("id") or meta.get("task_name") or "").strip()
+        self._task_key = task_id or self.identity["task_sha256"]
+        if task_id:
+            self.scope = digest(
+                {"task_id": task_id, "scorer_sha256": self.identity["scorer_sha256"]}
+            )
+        else:
+            self.scope = digest(self.identity)
 
     def _read(self):
         if not self.path.exists():
             return {"entries": []}
         return json.loads(self.path.read_text(encoding="utf-8"))
 
+    def _valid_scopes(self, data) -> set:
+        """Current scope plus scopes this task's memory file has known.
+
+        The file is already task-scoped by path; the scope field distinguishes
+        scope-key versions over time. Research continuity must survive
+        scope-key migrations and benign contract edits, so entries from
+        previously-known scopes stay addressable instead of being silently
+        orphaned (the scope value remains on each entry for provenance).
+
+        Legacy files (written before scope_history existed) get one-time
+        adoption when the task writing them next appends an entry: the scopes
+        already present are attributed to that task's bucket (a workspace's
+        artifacts directory belongs to one task lineage), so pre-migration
+        entries stay addressable while different tasks sharing one artifacts
+        directory remain isolated. The scope value stays on each entry for
+        provenance.
+        """
+        valid = {self.scope}
+        history = data.get("scope_history")
+        if history is None:
+            for entry in data.get("entries", []):
+                if entry.get("scope"):
+                    valid.add(entry["scope"])
+        elif isinstance(history, dict):
+            valid.update(history.get(self._task_key) or [])
+        else:
+            # Defensive: a flat list cannot be attributed to a task, so it is
+            # only honored for the task currently writing the file.
+            valid.update(history)
+        return valid
+
     @property
     def entries(self) -> _EntryList:
-        """All entries for this scope, newest last.
+        """All entries for this task, newest last.
 
         Works as a property (``memory.entries[-3:]``) and as the legacy callable
         (``memory.entries()``). Each element supports both attribute access
         (``entry.kind``) and dict access (``entry["kind"]``).
         """
+        data = self._read()
+        valid = self._valid_scopes(data)
         return _EntryList(
             _EntryRecord(e)
-            for e in self._read().get("entries", [])
-            if e["scope"] == self.scope
+            for e in data.get("entries", [])
+            if e.get("scope") in valid
         )
 
     def _append(self, kind, **fields):
@@ -89,6 +137,22 @@ class ResearchMemory:
                  "timestamp": time.time(), **fields}
         with workspace_lock(self.path.parent):
             with transaction(self.path, {"schema_version": 1, "entries": []}) as state:
+                history = state.get("scope_history")
+                if history is None:
+                    # Migrate the legacy file: attribute every scope present
+                    # so far to the task writing it (workspace = one task
+                    # lineage) so pre-migration entries stay addressable.
+                    history = {
+                        self._task_key: [
+                            e["scope"] for e in state.get("entries", []) if e.get("scope")
+                        ]
+                    }
+                    state["scope_history"] = history
+                if not isinstance(history, dict):
+                    history = state["scope_history"] = {self._task_key: list(history)}
+                bucket = history.setdefault(self._task_key, [])
+                if self.scope not in bucket:
+                    bucket.append(self.scope)
                 state.setdefault("entries", []).append(entry)
             self._publish_progress(self.sync())
         return entry
