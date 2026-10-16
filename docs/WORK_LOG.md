@@ -88,12 +88,50 @@ times with zero evidence trail).
 evidence from genuine violations; the fix is to make both visible with
 their own labels, not to suppress either.
 
+### 2026-10-17 — environment detector performance (PR #71)
 
-This journal tracks development of AI-Harness. Read the latest entry after a
-restart and append an entry after a meaningful implementation/validation step
-or before handing off. Earlier entries are historical evidence, not a claim
-about the latest code. Task experiments have their own generated
-`RESEARCH_PROGRESS.md` in the resolved artifact root.
+**Task:** fresh-user performance review found `ai-harness status`
+taking **18.4 s** (full cloud check) on this machine — an agent calls
+status/context frequently, so this was a fixed tax on every session.
+
+**Root causes (measured, not estimated):**
+- `detect_gpu` unconditionally `import torch` as a CUDA fallback —
+  **6.5 s** for the import alone, even when `nvidia-smi` already
+  reported the GPU (the common path).
+- `modal profile list` subprocess: 2.6 s.
+- `check_local_endpoint` on dead `localhost` ports: **2.0 s each at
+  timeout=1.0** — Windows `localhost` resolves to `::1` AND
+  127.0.0.1 and `create_connection` applies the timeout per address.
+- All five probes ran sequentially inside one command.
+
+**Fix:**
+- `harness/env_cache.py` (new): process-wide TTL cache (gpu 600 s,
+  modal/kaggle/docker 300 s, llm 120 s; `AI_HARNESS_ENV_CACHE=off` and
+  `AI_HARNESS_ENV_TTL_<KEY>` overrides; probe executes outside the
+  cache lock).
+- `detect_gpu`: torch is imported **only** when nvidia-smi did not
+  report a GPU (or torch is already in `sys.modules`). On the smi path
+  `cuda_available=None` = "not probed" — an honest unknown, never a
+  false negative that hides a working GPU.
+- `get_full_status`: five probes now run in parallel
+  (`ThreadPoolExecutor`); `force=True` invalidates the cache first.
+- `LLMEngine.check_local_endpoint`: `localhost` normalized to
+  127.0.0.1 (dead-port probe 2.02 s → 1.0 s).
+- Latent test bug fixed (pre-existing, found by the new tests):
+  `test_cloud_job_manager_lifecycle` was order-dependent — first-time
+  scipy import runs `subprocess.run` inside the `Popen` patch window,
+  so the file failed when run alone. Module-level pre-import of
+  `harness.evaluation` in the test file.
+
+**Verification:** 13 new regression tests; full suite 773 OK; ruff
+clean. `ai-harness status` fresh process: **18.4 s → 4.7 s** (remaining
+wall time = modal CLI + one dead-port cycle, parallel); repeated call
+within TTL: **3 ms**.
+
+**Lesson:** measure before optimizing — the 18 s was not one slow
+thing, it was five moderate ones run sequentially, two of them
+platform-specific (torch import, dual-localhost resolution) that a
+"make it faster" intuition would not have found.
 
 ### 2026-10-17 — sync toolchain drift: attach must run the clone's code, not the process's
 
