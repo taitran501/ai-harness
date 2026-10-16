@@ -6,6 +6,71 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — Adoption stack T3-T5 (external-repo research-backed enforcement)
+
+**Task:** "đưa ra giải pháp, check các repo bên ngoài xem họ thường làm gì khi
+đối mặt với các tình huống này, từ đó lên phương án fix cho bao quát" — what do
+external projects do when agents bypass/skip prescribed tooling?
+
+**Research (web-verified):** the field converges on a 3-layer guardrail
+model — (1) instruction files (AGENTS.md): advisory only, adherence drops
+past ~200 lines; (2) per-host tool hooks (Claude Code PreToolUse, Cursor
+beforeShellExecution): exit 2 blocks with the reason fed back to the agent,
+"hooks run outside the model so prompt injection can't talk its way past
+them"; (3) repo layer (pre-commit/CI/branch protection): binds every change
+but is evadable — documented case of Claude Code using `--no-verify` across
+consecutive commits (Anthropic issue closed "not planned" → "defense comes
+from outside the agent"). "Markdown rules are suggestions, not enforcement"
+(airlock/noslop/ai-guardrails). Closest ML analog: agentic-experiments
+(aexp) — *deterministic hooks*; the session-start hook refuses work that
+skips the Hypothesis→Experiment→Finding chain; pre-write hooks block
+orphaned experiments. turing: dual writer/scorer agents + immutable
+evaluation. MCP (Stripe Toolshed, ~500 tools): exposing the framework as
+native tools IS the adoption mechanism — but counter-lesson: don't wrap
+APIs 1:1.
+
+**Empirical local fact that shapes the plan:** 4/5 workspaces are NOT git
+repos — layer 3 (pre-commit/CI) is structurally absent in competition
+workspaces, and no host hooks were installed anywhere. The host-agnostic
+layer the harness controls is its own CLI/HUD surface.
+
+**Adoption stack (T0-T5):**
+- T0 truthful self-report ✅ PR #60 · T1 AGENTS.md ✅ PR #60 · T2 bypass
+  detection ✅ PR #60
+- **T3 session-start adoption gate** (`agent_bridge`): the Context HUD (which
+  the SOP mandates reading at session start) now renders a `⛔ Adoption
+  protocol` block when bypass findings exist or 0 harness experiments —
+  aexp's session-start refusal implemented in the layer every host must
+  read. rsna-knee HUD now leads with the 35-dir bypass evidence.
+- **T4 per-host guardrail hooks** (`harness/host_hooks.py`, new): attach
+  generates `.claude/settings.json` (PreToolUse/Bash) + `.cursor/hooks.json`
+  (beforeShellExecution) + the hook script at
+  `.ai-harness/hooks/block_manual_kaggle.py`. Blocks `kaggle kernels push` /
+  `competitions submit` with exit 2 + a reason that points at the harness
+  path. Invariants from the research: fail-open on any parse error (a
+  guardrail that breaks the host is worse than none), merge-safe (user
+  hooks preserved, only our `managed_by: ai-harness` entry replaced), human
+  override `AI_HARNESS_ALLOW_MANUAL=1` (block-no-verify philosophy: "AI
+  must fix it properly, humans keep full autonomy"). Codex hosts without a
+  documented hook surface rely on T3+T5.
+- **T5 adoption health in status** (`status_report`): `adoption` section —
+  experiments / bypassed run-outputs / sessions + verdict
+  (healthy | bypass_detected | no_activity). rsna-knee renders
+  `❄ adoption: 0 experiments, 0 sessions, 1 bypassed run-output dirs
+  (bypass_detected)`.
+
+**Tests:** new `tests/test_adoption_stack.py` (19 tests: hook block/allow/
+fail-open/override via real subprocess, config create/merge/idempotence/
+unreadable-skip, adoption verdicts, HUD gate present/wording). All three
+new layers bite-checked by reverting. E2E in rsna-knee: hook blocks manual
+push rc=2, benign rc=0, override rc=0; HUD gate + status adoption line
+verified. Full suite 716 OK; ruff gate clean.
+
+**Roadmap (T6):** an `ai-harness` MCP server exposing ~6-8 domain tools
+(context, create_experiment, run_smoke_test, run_full_validation,
+record_research_*) — the Toolshed adoption pattern. Big build; T3-T5 gives
+most of the adherence value without it.
+
 ### 2026-10-17 — Agent-bypass audit: why agents skip the harness (and now can't silently)
 
 **Task:** "check lại repo với vị trí một normal user đưa agent work" — audit

@@ -266,6 +266,58 @@ def _cloud_section(project_root: Optional[str]) -> Dict[str, Any]:
     return {"accounts": accounts, "upload_consent": consent}
 
 
+def _adoption_section(project_root: Optional[str]) -> Dict[str, Any]:
+    """T5: adoption health — the human's at-a-glance bypass audit.
+
+    The framework can only measure what flows through it; bypassed runs
+    leave no trace by design. This section makes the blind spot visible:
+    harness experiments vs manual run-output dirs vs agent sessions.
+    """
+    root = Path(project_root) if project_root else Path.cwd()
+    if not (root / ".ai-harness").is_dir():
+        return {"status": "not_attached"}
+    artifacts = root / ".ai-harness" / "artifacts"
+    experiments = 0
+    if artifacts.is_dir():
+        for task_dir in artifacts.iterdir():
+            if not task_dir.is_dir():
+                continue
+            for run in task_dir.iterdir():
+                if run.is_dir() and (run / "artifact_manifest.json").is_file():
+                    experiments += 1
+    sessions_total = 0
+    sessions_dir = root / ".ai-harness" / "agent_sessions"
+    if not sessions_dir.is_dir() and artifacts.is_dir():
+        for task_dir in artifacts.iterdir():
+            cand = task_dir / "agent_sessions"
+            if cand.is_dir():
+                sessions_dir = cand
+                break
+    if sessions_dir.is_dir():
+        sessions_total = len(list(sessions_dir.glob("session_*.json")))
+    bypassed = 0
+    try:
+        from harness.hygiene import scan_workspace_hygiene
+
+        findings = scan_workspace_hygiene(root).get("findings", [])
+        bypassed = sum(1 for f in findings if f.get("kind") == "bypassed_run_output")
+    except Exception:  # noqa: BLE001 - advisory only
+        bypassed = -1
+    if bypassed > 0:
+        verdict = "bypass_detected"
+    elif experiments > 0:
+        verdict = "healthy"
+    else:
+        verdict = "no_activity"
+    return {
+        "status": "ok",
+        "experiments": experiments,
+        "bypassed_run_outputs": bypassed,
+        "sessions": sessions_total,
+        "verdict": verdict,
+    }
+
+
 def collect_status(project_root: Optional[str] = None, include_cloud: bool = True) -> Dict[str, Any]:
     """Assemble the full status payload. Never raises."""
     status: Dict[str, Any] = {
@@ -276,6 +328,7 @@ def collect_status(project_root: Optional[str] = None, include_cloud: bool = Tru
         "install": _section(_installed_info),
         "project": _section(_project_section, project_root),
         "plugins": _section(_plugins_section, project_root),
+        "adoption": _section(_adoption_section, project_root),
         "session": _section(_session_section, project_root),
         "artifacts": _section(_artifact_health_section, project_root),
     }
@@ -331,6 +384,14 @@ def render_markdown(status: Dict[str, Any]) -> str:
         accounts = cloud.get("accounts", {})
         flags = ", ".join(f"{k}={'ok' if v.get('available') else 'off'}" for k, v in accounts.items())
         lines.append(f"{mark(any(v.get('available') for v in accounts.values()))} cloud: {flags}")
+    adoption = status.get("adoption", {})
+    if adoption.get("status") == "ok":
+        verdict = adoption.get("verdict", "?")
+        ok = verdict == "healthy"
+        detail = f"{adoption.get('experiments', 0)} experiments, {adoption.get('sessions', 0)} sessions"
+        if adoption.get("bypassed_run_outputs", 0) > 0:
+            detail += f", **{adoption['bypassed_run_outputs']} bypassed run-output dirs**"
+        lines.append(f"{mark(ok)} adoption: {detail} ({verdict})")
     return "\n".join(lines)
 
 
