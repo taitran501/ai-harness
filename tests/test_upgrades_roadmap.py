@@ -399,6 +399,10 @@ class TestModalityAwareCreateExperiment(unittest.TestCase):
                 "parent_id": "baseline",
                 "branch": "feat",
                 "descriptor": "multi_variant_test",
+                "source_type": "verified_baseline",
+                "source_id": "lightgbm_tabular_baseline",
+                "retrieval_summary": "LightGBM tabular baseline for the multi-variant regression task.",
+                "verified_via": "local_registry",
             },
             session_id=sess.session_id,
         )

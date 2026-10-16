@@ -267,6 +267,7 @@ def generate_skill_content(
         f"  3. Technique requirements: {mod_info['tokenization']}",
         "  4. If proposing an unlisted technique, perform external retrieval (`search_web`, Hugging Face Hub, ArXiv) first.",
         "- **MANDATORY CONFIG SCHEMA**: Declare explicit `grounding:` and `assumption_register:` blocks in `configs/exp<NNN>.yaml`.",
+        "- **GROUNDING MUST BE REAL (anti-hallucination)**: `grounding.source_id` + `grounding.verified_via` must reference a source you actually verified. If you omit them, the harness writes `verified_via: not_verified` and `ai-harness-run` REFUSES to train until you supply a real source. Never fabricate a channel.",
         "- **PRE-FLIGHT VALIDATION GATE**: Validate config before launching training:",
         "  ```powershell",
         "  python harness/grounding_gate.py --config configs/<exp_config>.yaml",

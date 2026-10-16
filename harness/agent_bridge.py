@@ -2293,7 +2293,13 @@ class AgentBridge:
                             "retrieval_summary",
                             f"Declared proposal targeting {primary_metric} on {task_name}; mechanism and source require scientist review.",
                         ),
-                        "verified_via": params.get("verified_via", "local_registry"),
+                        # Anti-hallucination: do NOT fabricate a 'verified' channel.
+                        # If the agent did not supply a real verified_via, mark the
+                        # source as NOT verified so the GroundingGate / execution gate
+                        # can refuse to trust an ungrounded proposal. A fabricated
+                        # 'local_registry' here is exactly the bypass the gate exists
+                        # to stop (see GroundingGate.VERIFIED_VIA comment).
+                        "verified_via": params.get("verified_via", "not_verified"),
                     },
                     "assumption_register": {
                         "known_facts": params.get(
@@ -2324,9 +2330,16 @@ class AgentBridge:
                     "model": model_payload,
                 }
 
-                # Pre-verify with GroundingGate before writing to disk
-                GroundingGate.verify_config(
-                    cfg_payload, config_path=cfg_path, raise_on_error=True
+                # Pre-verify with GroundingGate. B1-a: do NOT raise here so the
+                # config is still written (keeping the create_experiment workflow
+                # intact); instead we surface the grounding state in the
+                # observation. The real circuit breaker is harness.runner.run(),
+                # which still calls GroundingGate.verify_config(raise_on_error=True)
+                # at the start of _execute_run() and refuses to train on an
+                # unverified non-baseline proposal. This way an agent cannot create
+                # a config with a fabricated 'verified_via' AND run it.
+                grounding_ok, grounding_errors, grounding_receipt = GroundingGate.verify_config(
+                    cfg_payload, config_path=cfg_path, raise_on_error=False
                 )
                 from harness.state_store import workspace_lock
                 from harness.io_utils import atomic_write_text
@@ -2348,17 +2361,34 @@ class AgentBridge:
                     "\\", "/"
                 )
 
+                if grounding_ok:
+                    grounding_status = "PASSED"
+                    grounding_verification = "declared_source"
+                    grounding_summary = (
+                        f"Created config '{rel_cfg}' with declared grounding (Parent: {parent_id})."
+                    )
+                else:
+                    grounding_status = "UNVERIFIED"
+                    grounding_verification = "unverified_placeholder"
+                    grounding_summary = (
+                        f"Created config '{rel_cfg}' (Parent: {parent_id}) but the grounding source is "
+                        f"NOT verified. The runner will REFUSE to train this until you supply a real "
+                        f"'grounding.source_id' + 'grounding.verified_via' (verify the source first). "
+                        f"Grounding issues: {grounding_errors}"
+                    )
+
                 return ActionObservation(
                     step_index=call.step_index,
                     action=act,
                     status="SUCCESS",
-                    summary=f"Created config '{rel_cfg}' with grounding schema validated (Parent: {parent_id}); source claims still require verification.",
+                    summary=grounding_summary,
                     artifact_path=rel_cfg,
                     data={
                         "exp_id": exp_id,
                         "config_path": rel_cfg,
-                        "grounding_status": "PASSED",
-                        "grounding_verification": "schema_only",
+                        "grounding_status": grounding_status,
+                        "grounding_verification": grounding_verification,
+                        "grounding_errors": grounding_errors,
                         "novelty_review": review,
                     },
                     elapsed_seconds=round(time.time() - t0, 3),
