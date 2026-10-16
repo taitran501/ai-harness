@@ -6,6 +6,57 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — Research-action contract friction fixed (from a real agent session)
+
+**Task:** "xem các conversation mới để kiểm tra" — inspected the most recent
+agent BridgeSession (aimo `session_e279045ca2484cc58ce27ff73bcf22fb`,
+2026-10-14..16, 33 actions) and extracted the real friction.
+
+**Findings (from the session record, not assumed):**
+- 5 of 33 actions FAILED on research-continuity validation, and one mistake
+  was repeated in a later step:
+  1. `record_research_decision` with `revisit_when: null` — `params.get(k, "")`
+     returns None for an explicit JSON null, which skipped the auto-default
+     and failed `_text` validation.
+  2. `record_research_decision` with prose in `outcome` (the agent put the
+     narrative in the enum field) — correct error, no self-correction hint.
+  3. `record_research_insight` with a single-ID string `evidence` instead of
+     a list.
+  4. `record_research_checkpoint` passed `conclusion` instead of `summary` →
+     raw `KeyError: 'summary'`.
+  5. Root cause: the generated SKILL.md documented NO parameter contracts
+     for the research actions (grep: zero matches) — the agent had to guess.
+- The two smoke failures in the same session were data config issues
+  (missing declared unique IDs), not framework bugs — no change needed.
+- Agent used flat params exclusively (0 inline-JSON values) — the existing
+  SOP guidance works.
+
+**Changes:**
+- `harness/agent_bridge.py`: decision handler now normalises `null` →
+  default for `next_action`/`lesson`/`revisit_when` (and passes `evidence`
+  through so `_evidence(None)` → []); checkpoint handler raises a friendly
+  error naming both required fields and the `summary`-vs-`conclusion`
+  confusion instead of a raw KeyError.
+- `harness/research_memory.py`: `_evidence` accepts a single ID or
+  comma-separated string (wrapped to a list); `outcome` validation appends a
+  "that looks like prose — use 'conclusion'" hint for long values.
+- `harness/skill_injector.py`: generated SKILL.md now includes a compact
+  "Research continuity action contracts" block (required fields + the
+  outcome enum + the summary/conclusion distinction).
+
+**Tests:** new `tests/test_research_action_contracts.py` (10 tests) — each
+reconstructs the exact failing call shape from the session. All three
+code fixes bite-checked by reverting each one (the checkpoint test was
+initially too weak: a raw KeyError also contains `'summary'`, so the
+assertion was strengthened to require the friendly wording).
+Full suite 689 OK; ruff gate clean.
+
+**Lesson:** session logs are the cheapest bug reports in the repo — one real
+conversation contained five distinct, fixable UX bugs that no unit test had
+ever exercised. Contract documentation belongs where the agent reads it
+(the generated skill), and "lenient parse, strict validate" is the right
+shape for agent-facing optional fields (null must mean omitted).
+
 ### 2026-10-17 — Coverage gap closed (kaggle_compat) + lint gate extended to tests/
 
 **Task:** third improvement audit — "còn gì để improve cho codebase" — after the
