@@ -6,6 +6,66 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — evidence-continuity recovery: import verified local runs + cross-workspace adoption scan
+
+**Task:** the harness's purpose is anti-hallination + brainstorm
+continuity for agents applying it. Adoption scan across the 5 attached
+workspaces found one real gap: rsna-knee — the agent ran 20+ experiments
+but the artifact tree holds **zero** runs (research memory: no insights,
+no checkpoints). Verified run outputs sat in top-level
+`kernel_output_*`/`kaggle_results` dirs never imported into
+`.ai-harness/artifacts/<task>/`.
+
+**Root cause (verified):** verified runs whose task/scorer identity
+drifted from the *current* spec (rsna-knee task.yaml gained the Kaggle
+backend lock at commit 134c40a after exp003 ran) were **permanently
+unimportable**: `validate_run` rejects on task_sha256 mismatch and no
+import path existed for locally-downloaded outputs (only
+`cloud pull` from a live kernel).
+
+**Fix:**
+- `harness/import_local.py` (new): `scan_importable_runs` classifies
+  top-level manifest dirs (importable / quarantine / already_imported /
+  invalid); `import_verified_local_run` re-verifies every manifest file
+  hash, compares contract identity vs the attached spec, and either
+  imports into the live artifact tree (strict match) or quarantines
+  under `artifacts/<task>/quarantine/<exp_id>` with an
+  `IMPORT_RECEIPT.json` (content_verified + per-field identity status +
+  drift reason) — visible to the next agent, excluded from the current
+  CV/audit pipeline. Atomic copy (temp + rename), unsafe manifest
+  filenames rejected, existing evidence never overwritten, journal
+  entry appended.
+- `harness/cli.py`: `ai-harness import-artifacts --source DIR`
+  (`--scan`, `--reject-stale`) and `ai-harness adoption-scan --root DIR`
+  (per-workspace adoption verdict + unimported verified-run counts —
+  the operator's cross-conversation adoption view; default root is the
+  parent of the current workspace).
+- `tests/test_local_import.py`: 10 tests (strict/quarantine import,
+  tamper + missing-file rejection, overwrite refusal, unsafe filename,
+  scan classification, adoption-scan aggregation).
+
+**Verification:** 10/10 new tests pass; fast tier 681 tests OK; ruff
+F,E7 clean. rsna-knee live application: exp000/exp003/exp004 quarantined
+with receipts (identity drift is legitimate — spec evolved after the
+runs); adoption verdict moves from bypass_detected to healthy.
+
+**Lesson:** evidence identity (comparability) and evidence continuity
+(record) are separate concerns; strict identity must quarantine, not
+delete — the anti-hallination property is *visibility with an honest
+label*, not invisibility.
+
+**Next:** trace the intermittent CPython 3.10/3.11
+`from __future__ import import annotations` parse failure on this
+machine (hardware/kernel-hook suspected); consider auto-scan
+import-artifacts in `sync`'s post-attach step.
+
+
+This journal tracks development of AI-Harness. Read the latest entry after a
+restart and append an entry after a meaningful implementation/validation step
+or before handing off. Earlier entries are historical evidence, not a claim
+about the latest code. Task experiments have their own generated
+`RESEARCH_PROGRESS.md` in the resolved artifact root.
+
 ### 2026-10-17 — sync toolchain drift: attach must run the clone's code, not the process's
 
 **Task:** during propagation of the adoption stack, 2/5 workspaces silently

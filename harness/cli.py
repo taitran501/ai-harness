@@ -51,6 +51,22 @@ def build_parser() -> argparse.ArgumentParser:
     repair.add_argument("--drop-missing", action="store_true", help="Also drop manifest file entries missing on disk")
     repair.add_argument("--json", action="store_true", help="Emit machine-readable result")
 
+    import_artifacts = subparsers.add_parser(
+        "import-artifacts",
+        help="Import verified local run outputs (kernel_output_*, kaggle_results, ...) into the artifact tree; --scan lists candidates",
+    )
+    import_artifacts.add_argument("--project-root", default=".", help="Attached task workspace root (default: current dir)")
+    import_artifacts.add_argument("--source", default=None, help="Run directory containing artifact_manifest.json to import")
+    import_artifacts.add_argument("--scan", action="store_true", help="List importable/quarantine candidates instead of importing")
+    import_artifacts.add_argument("--reject-stale", action="store_true", help="Refuse runs whose task/scorer identity drifts from the attached spec")
+
+    adoption_scan = subparsers.add_parser(
+        "adoption-scan",
+        help="Cross-workspace adoption overview: per-workspace adoption verdict + unimported verified runs",
+    )
+    adoption_scan.add_argument("--root", default=None, help="Parent directory containing workspaces (default: parent of current dir)")
+    adoption_scan.add_argument("--include", default=None, help="Comma-separated workspace dir names to include; default: every dir with .ai-harness")
+
     phase = subparsers.add_parser("phase", help="Manage the workspace-owned 8-phase prompt workflow")
     phase_commands = phase.add_subparsers(dest="phase_command", required=True)
     phase_init = phase_commands.add_parser("init", help="Create editable starter prompts under prompts/ai-harness")
@@ -109,6 +125,82 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_import_artifacts(args) -> int:
+    from harness.import_local import import_verified_local_run, scan_importable_runs
+
+    root = Path(args.project_root or ".").expanduser().resolve()
+    if args.scan:
+        try:
+            entries = scan_importable_runs(root)
+        except Exception as exc:  # noqa: BLE001
+            print(json.dumps({"status": "error", "error": str(exc)}))
+            return 2
+        print(json.dumps({"status": "ok", "root": str(root), "candidates": entries}, indent=2, ensure_ascii=False))
+        return 0
+    if not args.source:
+        print("import-artifacts: --source is required (or use --scan to list candidates)")
+        return 2
+    source = Path(args.source)
+    if not source.is_absolute():
+        source = root / source
+    try:
+        result = import_verified_local_run(root, source, reject_stale=args.reject_stale)
+    except ValueError as exc:
+        print(json.dumps({"status": "rejected", "source": str(source), "error": str(exc)}, indent=2, ensure_ascii=False))
+        return 2
+    print(json.dumps({"status": "ok", **result}, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _run_adoption_scan(args) -> int:
+    from harness.status_report import _adoption_section
+    from harness.import_local import scan_importable_runs
+
+    if args.root:
+        root = Path(args.root).expanduser().resolve()
+    else:
+        cwd = Path.cwd().resolve()
+        # Default: parent of the current workspace, so all siblings are visible.
+        root = cwd.parent if (cwd / ".ai-harness").is_dir() else cwd
+    if not root.is_dir():
+        print(json.dumps({"status": "error", "error": f"root not found: {root}"}))
+        return 2
+    workspaces = sorted(
+        d for d in root.iterdir() if d.is_dir() and (d / ".ai-harness").is_dir()
+    )
+    if args.include:
+        wanted = {w.strip() for w in args.include.split(",") if w.strip()}
+        workspaces = [d for d in workspaces if d.name in wanted]
+    rows = []
+    for ws in workspaces:
+        row: dict = {"workspace": ws.name}
+        try:
+            adoption = _adoption_section(str(ws))
+        except Exception as exc:  # noqa: BLE001
+            adoption = {"status": "error", "error": str(exc)}
+        row.update(adoption)
+        try:
+            unimported = [
+                e
+                for e in scan_importable_runs(ws)
+                if e.get("verdict") in ("importable", "quarantine")
+            ]
+        except Exception:  # noqa: BLE001 - scan is advisory
+            unimported = None
+        if unimported is not None:
+            row["unimported_runs"] = unimported
+            row["unimported_count"] = len(unimported)
+        rows.append(row)
+    summary = {
+        "ok": sum(1 for r in rows if r.get("verdict") == "healthy"),
+        "bypass": sum(1 for r in rows if r.get("verdict") == "bypass_detected"),
+        "no_activity": sum(1 for r in rows if r.get("verdict") == "no_activity"),
+        "other": sum(1 for r in rows if r.get("verdict") not in ("healthy", "bypass_detected", "no_activity")),
+    }
+    print(json.dumps({"status": "ok", "root": str(root), "workspaces": rows, "summary": summary}, indent=2, ensure_ascii=False))
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command != "plugins":
@@ -158,6 +250,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             drop_missing=args.drop_missing,
             as_json=args.json,
         )
+
+    if args.command == "import-artifacts":
+        return _run_import_artifacts(args)
+
+    if args.command == "adoption-scan":
+        return _run_adoption_scan(args)
 
     if args.command == "phase":
         root = Path(args.project_root or ".").expanduser().resolve()
