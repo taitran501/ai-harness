@@ -208,6 +208,14 @@ class AdoptionScanTests(unittest.TestCase):
         payload = json.loads((task_root / "imported_sources.json").read_text(encoding="utf-8"))
         self.assertEqual(len(payload), 2)
 
+    def test_quarantined_source_is_already_imported_in_scan(self):
+        root, _ = make_workspace()
+        source = _make_run(root, "kernel_output_exp001", stale_task=True)
+        import_verified_local_run(root, source)
+        entries = scan_importable_runs(root)
+        by_dir = {e["dir"]: e for e in entries}
+        self.assertEqual(by_dir["kernel_output_exp001"]["verdict"], "already_imported")
+
     def test_recovered_dir_not_flagged_as_bypass(self):
         from harness.hygiene import scan_workspace_hygiene
 
