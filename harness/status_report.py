@@ -121,29 +121,59 @@ def _session_section(project_root: Optional[str]) -> Dict[str, Any]:
 
 
 def _artifact_health_section(project_root: Optional[str]) -> Dict[str, Any]:
-    """Count verified vs broken runs under artifacts/. Broken runs list at most 5."""
-    from harness.artifacts import validate_run
+    """Count verified / drift-repairable / unverifiable runs under artifacts/.
+
+    Distinguishes the three states so an agent knows when `ai-harness repair`
+    will help (drift) versus when it won't (unverifiable)."""
     from harness.project import HarnessProject, MANIFEST_RELATIVE_PATH, LEGACY_MANIFEST_RELATIVE_PATH
+    from harness.repair import scan_artifacts
 
     root = Path(project_root or ".").expanduser().resolve()
     if not ((root / MANIFEST_RELATIVE_PATH).is_file() or (root / LEGACY_MANIFEST_RELATIVE_PATH).is_file()):
-        return {"runs_total": 0, "verified": 0, "broken": [], "error": "project not attached"}
+        return {
+            "runs_total": 0, "verified": 0, "drifted_repairable": 0, "unverifiable": 0,
+            "broken": [], "repair_hint": None, "error": "project not attached",
+        }
     project = HarnessProject.discover(project_root)
     root = Path(project.root if getattr(project, "root", None) else (project_root or "."))
     artifacts_dir = root / (project.artifacts_dir if hasattr(project, "artifacts_dir") else "artifacts")
     if not artifacts_dir.is_dir():
-        return {"runs_total": 0, "verified": 0, "broken": [], "error": "artifacts dir missing"}
-    broken, verified = [], 0
-    for folder in sorted(artifacts_dir.iterdir()):
-        if not folder.is_dir() or not (folder / "artifact_manifest.json").is_file():
-            continue
-        try:
-            validate_run(folder)
-            verified += 1
-        except Exception as exc:  # noqa: BLE001
-            if len(broken) < 5:
-                broken.append({"exp_dir": folder.name, "reason": str(exc)[:200]})
-    return {"runs_total": verified + len(broken) + _count_unverified(artifacts_dir), "verified": verified, "broken": broken}
+        return {
+            "runs_total": 0, "verified": 0, "drifted_repairable": 0, "unverifiable": 0,
+            "broken": [], "repair_hint": None, "error": "artifacts dir missing",
+        }
+
+    scan = scan_artifacts(artifacts_dir)
+    verified = len(scan["verified"])
+    drifted = scan["drifted"]
+    unverifiable = scan["unverifiable"]
+    unmanifested = _count_unverified(artifacts_dir)
+    runs_total = verified + len(drifted) + len(unverifiable) + unmanifested
+
+    # `broken` keeps the old shape (top-5) for backward compatibility, but now
+    # separates drift-repairable from genuinely unverifiable runs.
+    broken: List[Dict[str, Any]] = []
+    for item in drifted:
+        if len(broken) < 5:
+            broken.append({"exp_dir": item["exp_dir"], "kind": "drifted", "reason": item["reason"]})
+    for item in unverifiable:
+        if len(broken) < 5:
+            broken.append({"exp_dir": item["exp_dir"], "kind": "unverifiable", "reason": item.get("reason", "")})
+
+    repair_hint = None
+    if drifted:
+        repair_hint = (
+            f"{len(drifted)} run(s) have artifact hash drift — "
+            f"`ai-harness repair --check` previews the fix, `ai-harness repair --all` re-seals them."
+        )
+    return {
+        "runs_total": runs_total,
+        "verified": verified,
+        "drifted_repairable": len(drifted),
+        "unverifiable": len(unverifiable) + unmanifested,
+        "broken": broken,
+        "repair_hint": repair_hint,
+    }
 
 
 def _count_unverified(artifacts_dir: Path) -> int:
@@ -218,10 +248,17 @@ def render_markdown(status: Dict[str, Any]) -> str:
     art = status.get("artifacts", {})
     if art.get("error"):
         lines.append(f"{mark(False)} artifacts: {art['error']}")
-    elif art.get("broken"):
-        lines.append(f"{mark(False)} artifacts: {art.get('verified', 0)} verified, {len(art['broken'])} broken (of {art.get('runs_total')})")
-        for item in art["broken"][:3]:
-            lines.append(f"         - {item['exp_dir']}: {item['reason'][:80]}")
+    elif art.get("drifted_repairable") or art.get("unverifiable") or art.get("broken"):
+        lines.append(
+            f"{mark(False)} artifacts: {art.get('verified', 0)} verified, "
+            f"{art.get('drifted_repairable', 0)} drift-repairable, "
+            f"{art.get('unverifiable', 0)} unverifiable (of {art.get('runs_total')})"
+        )
+        for item in art.get("broken", [])[:3]:
+            kind = item.get("kind", "")
+            lines.append(f"         - {item['exp_dir']} ({kind}): {item['reason'][:80]}")
+        if art.get("repair_hint"):
+            lines.append(f"         → {art['repair_hint']}")
     else:
         lines.append(f"{mark(True)} artifacts: {art.get('verified', 0)} verified runs")
     cloud = status.get("cloud")
