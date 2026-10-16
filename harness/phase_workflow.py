@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -86,6 +87,23 @@ def initialize_prompt_pack(project_root: Path | str, force: bool = False) -> Dic
         encoding="utf-8",
     )
     return {"status": "CREATED", "pack": str(pack_path)}
+
+
+def _phase_heading_matches(line: str, section: str) -> bool:
+    """Loose Markdown heading match for a required phase section.
+
+    The exact-match check (``lstrip("# ") == section``) rejected perfectly
+    valid responses that numbered their sections (``## 1. Summary``) or used
+    bold pseudo-headings (``**Summary:**``). Normalise leading ``#``, bold
+    markers and numbering tokens (``1.`` / ``2)`` / ``i.``) before a
+    case-insensitive prefix match.
+    """
+    text = line.strip()
+    if text.startswith("#"):
+        text = text.lstrip("#").strip()
+    text = text.strip("*").strip()
+    text = re.sub(r"^(?:\d+|[ivx]+)\s*[.):]?\s+", "", text, flags=re.IGNORECASE)
+    return text.casefold().startswith(section.casefold())
 
 
 class PhaseWorkflow:
@@ -421,8 +439,12 @@ class PhaseWorkflow:
                 raise PromptPackError(f"Phase response is missing required JSON fields: {', '.join(missing)}")
         else:
             missing = [
-                section for section in contract.get("required_sections", [])
-                if not any(line.strip().lstrip("# ").casefold() == section.casefold() for line in response.splitlines())
+                section
+                for section in contract.get("required_sections", [])
+                if not any(
+                    _phase_heading_matches(line, section)
+                    for line in response.splitlines()
+                )
             ]
             if missing:
                 raise PromptPackError(f"Phase response is missing required Markdown sections: {', '.join(missing)}")

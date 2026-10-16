@@ -6,6 +6,53 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — PR #C: State & Agent-Friction Fixes (Narrow Scope, Part 2)
+
+**Task:** Implement the narrow 10-item PR #C scope from the 2026-10-16
+module review wave (items re-verified against live source before coding).
+Items B1, B2, B6 and the render side of B9 already landed in
+`ac38597` (PR #51 follow-up, same day); this entry covers the remaining
+six items plus the bridge-construction ordering follow-up.
+
+**Fixes (6 verified real + 1 follow-up):**
+- `agent_bridge.run_smoke_test` / `run_probe` now validate `config_path`
+  with `_validate_config_path`, the same defense-in-depth as
+  `run_full_validation` (previously a traversal such as
+  `../../etc/passwd.yaml` was passed straight to the runner subprocess).
+- `agent_bridge.save_session` caps `actions` / `observations` at
+  `MAX_SESSION_ACTIONS` / `MAX_SESSION_OBSERVATIONS` (200 each, tail kept)
+  so long sessions stop re-serializing MB-scale JSON on every save.
+- `agent_bridge.run_smoke_test` counts `smoke_runs` only when the smoke
+  test PASSED; a FAILED smoke run is a diagnostic signal and no longer
+  consumes the budget meant to bound real probe cycles.
+- `agent_bridge.update_workspace_settings` filters agent-supplied
+  `agent_context_config` dicts against `AgentContextConfig.__dataclass_fields__`
+  (write side of B9; the read side landed in `ac38597`).
+- `phase_workflow` section validation uses `_phase_heading_matches`, a loose
+  normalizer that accepts `## 1. Summary`, `### 2) Analysis`, Roman-numeral
+  numbering and bold pseudo-headings (`**Summary:**`); the previous exact
+  `lstrip("# ") ==` check rejected perfectly valid numbered responses and
+  forced agents to re-record phases.
+- `kaggle_inspect.kernel_output` now checks the kaggle CLI `returncode`;
+  a failed download reports `error: kaggle CLI failed (rc=...): <stderr>`
+  instead of silently returning an empty file list.
+- `runner --force` help no longer claims "Force overwrite existing
+  experiment artifacts"; sealed artifacts are NEVER overwritten (the
+  immutable contract), so the help now says so.
+- Follow-up: `execute_agent_copilot_action` constructs the AgentBridge only
+  after the composite-workflow early return (ESTABLISH_VERIFIED_BASELINE)
+  so the FAILED path does not pay for a bridge instance.
+
+**Tests:** `tests/test_pr_c_state_agent_friction.py` (17 tests, locks all 10
+scope items including the 4 already merged). Full suite **643 passed,
+1 skipped**.
+
+**False positives excluded after re-verification:** diagnostics merge key
+(code already merges on the resolved `id_col`), finalize format crash
+(already fixed by `_fmt()` in PR #B), UCB diversification cap (dead code,
+reverted in PR #B), `.env` API-key whitespace (mitigated by existing
+`.strip()`).
+
 ### 2026-10-16 — PR #51 Follow-up: Competition State Fixes
 
 **Task:** Four fixes to `competition_state.py` surfaced during PR #51
