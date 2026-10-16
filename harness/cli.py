@@ -34,6 +34,14 @@ def build_parser() -> argparse.ArgumentParser:
     kaggle = subparsers.add_parser("kaggle", help="Inspect Kaggle kernel state (status/log/output) without re-dispatching")
     kaggle.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|log|output + flags")
 
+    repair = subparsers.add_parser("repair", help="Re-seal artifact manifest file hashes that drifted after a run (or --check to report)")
+    repair.add_argument("--project-root", default=".", help="Attached task workspace root (default: current dir)")
+    repair.add_argument("--exp", action="append", default=None, help="Experiment (run folder) name to repair; repeat for several")
+    repair.add_argument("--all", action="store_true", help="Repair every drifted run in the workspace")
+    repair.add_argument("--check", action="store_true", help="Only report drifted/unverifiable runs; do not write anything")
+    repair.add_argument("--drop-missing", action="store_true", help="Also drop manifest file entries missing on disk")
+    repair.add_argument("--json", action="store_true", help="Emit machine-readable result")
+
     phase = subparsers.add_parser("phase", help="Manage the workspace-owned 8-phase prompt workflow")
     phase_commands = phase.add_subparsers(dest="phase_command", required=True)
     phase_init = phase_commands.add_parser("init", help="Create editable starter prompts under prompts/ai-harness")
@@ -112,6 +120,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "kaggle":
         from harness.kaggle_inspect import main as kaggle_main
         return kaggle_main(list(args.args))
+
+    if args.command == "repair":
+        from harness.repair import run_repair
+        return run_repair(
+            project_root=args.project_root,
+            exp=args.exp,
+            all_drifted=args.all,
+            check=args.check,
+            drop_missing=args.drop_missing,
+            as_json=args.json,
+        )
 
     if args.command == "phase":
         root = Path(args.project_root or ".").expanduser().resolve()

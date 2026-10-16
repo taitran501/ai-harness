@@ -114,6 +114,24 @@ Preview a cloud dispatch without pushing anything:
 ai-harness-run --config configs/exp001.yaml --backend kaggle --dry-run
 ```
 
+If a completed run's artifacts drift after the fact (an artifact file was edited,
+re-imported from cloud, or a file went missing), `validate_run()` raises
+"Artifact hash mismatch" and the run becomes invisible to the research memory and
+dashboard. Re-seal the manifest's per-file hashes from the bytes on disk — repair
+touches **only** the `files` hash map, never run identity (run_id, exp_id,
+task/data/split/config sha256):
+
+```bash
+ai-harness repair --check          # report drifted / unverifiable runs, write nothing
+ai-harness repair --all            # re-seal every drifted run
+ai-harness repair --exp exp013     # re-seal a specific run
+ai-harness repair --check --json   # machine-readable report
+```
+
+`--check` distinguishes *drifted* runs (repairable: file bytes changed or a
+declared file is missing) from *unverifiable* runs (identity mismatch, missing
+manifest — repair will not help those).
+
 ## Features
 
 | Component | Description |
