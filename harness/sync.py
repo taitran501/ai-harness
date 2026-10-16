@@ -133,7 +133,7 @@ def run_sync(
     as_json: bool = False,
 ) -> int:
     """Run the full sync pipeline; returns a process exit code (0 ok / 2 problem)."""
-    from harness.project import HarnessProject, attach_project
+    from harness.project import HarnessProject
 
     root = Path(project_root or ".").expanduser().resolve()
     report: Dict[str, Any] = {
@@ -218,28 +218,79 @@ def run_sync(
             }
         else:
             # Pin project discovery for the (cwd-based) skill injector.
+            # ATTACH MUST RUN IN A SUBPROCESS: the `ai-harness` console
+            # script is a single global editable install whose target
+            # changes per workspace, so this process may have imported
+            # harness from ANOTHER workspace's clone (observed: sync
+            # attached with stale code and silently skipped new
+            # workspace-level features). PYTHONPATH pins resolution to
+            # the clone just pulled/installed above.
             prev_root_env = os.environ.get("HARNESS_PROJECT_ROOT")
             os.environ["HARNESS_PROJECT_ROOT"] = str(root)
             try:
-                result = attach_project(root, task_config=Path(task_cfg), force=True)
-                from harness.skill_injector import inject_skill_file
-
-                skill_path = inject_skill_file(config_path=Path(task_cfg))
-                attach = {
-                    "skipped": False,
-                    "rc": 0,
-                    "status": result.get("status"),
-                    "manifest": result.get("manifest"),
-                    "skill_path": str(skill_path),
-                }
-            except (FileNotFoundError, ValueError, FileExistsError, OSError) as exc:
-                attach = {"skipped": False, "rc": 2, "error": str(exc)}
+                code = (
+                    "import harness, json;"
+                    "from pathlib import Path;"
+                    "from harness.project import attach_project;"
+                    "from harness.skill_injector import inject_skill_file;"
+                    "result = attach_project("
+                    f"{str(root)!r}, task_config=Path({str(task_cfg)!r}), force=True);"
+                    "result['skill_path'] = str("
+                    f"inject_skill_file(config_path=Path({str(task_cfg)!r}))" ") ;"
+                    "result['harness_origin'] = harness.__file__;"
+                    "print(json.dumps(result))"
+                )
+                child_env = dict(os.environ)
+                child_env["PYTHONPATH"] = str(repo) + os.pathsep + child_env.get("PYTHONPATH", "")
+                proc = subprocess.run(
+                    [sys.executable, "-c", code],
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    env=child_env,
+                    cwd=str(root),
+                )
+                if proc.returncode == 0:
+                    out = proc.stdout.strip().splitlines()
+                    result = json.loads(out[-1]) if out else {}
+                    attach = {
+                        "skipped": False,
+                        "rc": 0,
+                        "status": result.get("status"),
+                        "manifest": result.get("manifest"),
+                        "skill_path": result.get("skill_path"),
+                        "harness_origin": result.get("harness_origin"),
+                    }
+                else:
+                    attach = {
+                        "skipped": False,
+                        "rc": proc.returncode,
+                        "error": ((proc.stderr or proc.stdout)[-800:]).strip(),
+                    }
+            except subprocess.TimeoutExpired:
+                attach = {"skipped": False, "rc": 3, "error": "attach subprocess timed out"}
             finally:
                 if prev_root_env is None:
                     os.environ.pop("HARNESS_PROJECT_ROOT", None)
                 else:
                     os.environ["HARNESS_PROJECT_ROOT"] = prev_root_env
     report["steps"]["attach"] = attach
+
+    # Toolchain drift check: did this process start with harness code from
+    # the workspace's own clone? (Informational — attach now always uses a
+    # pinned subprocess, so drift no longer affects sync results.)
+    try:
+        import harness as _harness_mod
+
+        origin = Path(_harness_mod.__file__).resolve()
+        expected = (repo / "harness" / "__init__.py").resolve()
+        report["toolchain"] = {
+            "console_script_origin": str(origin),
+            "expected_origin": str(expected),
+            "pinned_subprocess": True,
+        }
+    except Exception:  # noqa: BLE001 - informational only
+        report["toolchain"] = {"error": "unreadable"}
 
     report["after"] = git_state(repo)
     report["installed_version"] = installed_version()
