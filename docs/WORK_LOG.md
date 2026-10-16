@@ -6,6 +6,41 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — P2 Audit Items: Submissions HUD, Workspace Hygiene, Mechanism Anti-Duplicate
+
+**Task:** Close the three P2 friction items left open by the Oct 2026 agent
+chat audit (recurring user complaints: "submission ghi đè lên nhau", "để mọi
+thứ ở root folder làm rối quá", repeated mechanism re-runs).
+
+**Changes**
+
+- `harness/hygiene.py` (new): deterministic, read-only root-clutter scan —
+  scratch files (`_*`, `~$*`, `*.tmp/bak/swp/orig`), stray top-level
+  CSV/parquet data files, unknown top-level dirs (generous allow-list).
+  Advisory only; never deletes or blocks. `hygiene_hud_lines()` renders the
+  compact HUD block (empty when clean).
+- `AgentBridge.get_context_packet`: new `recent_submissions` (last 6 registry
+  entries: id, exp, status, local CV, official score, relative path) and
+  `workspace_hygiene` keys; `render_context_markdown` now shows a
+  `## 📦 Submissions` block (with empty state) and `## 🧹 Workspace Hygiene`
+  (only when findings exist).
+- `ResearchMemory.review`: new `_mechanism_key()` (model family from
+  `architecture/model_type/family/name/type`, hyperparameters ignored) and a
+  `mechanism_matches` advisory list (up to 5 earlier entries on the same
+  model family; never blocks). `run_full_validation` surfaces matching
+  earlier work as `mechanism_warnings` in the SUCCESS/FAILED observation data.
+
+**Validation**
+
+- New `tests/test_p2_audits.py` (13 tests: packet/HUD submissions incl. empty
+  state, hygiene scan + HUD lines, mechanism match incl. same-exp exclusion,
+  empty-model no-crash).
+- Full suite: 584 passed, 1 skipped (Windows symlink-privilege self-skip).
+
+**Next action:** verify in a Kaggle-locked workspace (smoke `--debug --fold 0`
+stays local, full run dispatches to Kaggle), then `ai-harness sync` into the
+5 active competition workspaces.
+
 ### 2026-10-16 — Artifact CSV Deduplication (Hardlink Mirrors + Canonical Truth)
 
 **Task:** Port the `local-hacks` experiment from `airline_prediction`
