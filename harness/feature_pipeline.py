@@ -7,11 +7,11 @@ dense transformer embeddings, and tabular metadata feature engineering.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.sparse import hstack, issparse
+from scipy.sparse import hstack
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import FeatureUnion

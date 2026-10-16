@@ -18,7 +18,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import zipfile
@@ -766,7 +765,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
         """Download remote kernel log and extract failure traceback/stderr chunks."""
         try:
             with tempfile.TemporaryDirectory(prefix="aih-klog-") as temp_dir:
-                proc = subprocess.run(
+                subprocess.run(
                     ["kaggle", "kernels", "output", kernel_slug, "-p", temp_dir],
                     capture_output=True,
                     text=True,

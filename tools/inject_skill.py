@@ -9,7 +9,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from harness.skill_injector import inject_skill_file, load_task_config
+from harness.skill_injector import inject_skill_file
 from tools.dashboard_server import TASK_PRESETS
 
 

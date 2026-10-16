@@ -12,10 +12,6 @@ import pandas as pd
 from harness.tree_journal import Node, TreeJournal
 from harness.task_spec import UniversalTaskSpec
 from harness.validator import ExperimentValidator
-from tools.audit_gate import (
-    audit_prediction_integrity,
-    compute_sha256,
-)
 
 
 class TreeJournalTests(unittest.TestCase):

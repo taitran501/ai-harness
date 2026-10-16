@@ -12,9 +12,6 @@ Tests:
 from __future__ import annotations
 
 import json
-import math
-import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,8 +26,6 @@ from tools.audit_gate import (
     audit_prediction_integrity,
     compute_continuous_significance,
     compute_diff_metrics,
-    compute_mcnemar_significance,
-    compute_sha256,
 )
 
 

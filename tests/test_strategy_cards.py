@@ -4,7 +4,6 @@ import urllib.request
 import threading
 import time
 import socketserver
-from pathlib import Path
 from tools.dashboard_server import DEFAULT_STRATEGY_CARDS, DashboardHandler, get_next_experiment_id
 
 class TestStrategyCardsAndSpawner(unittest.TestCase):

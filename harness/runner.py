@@ -10,35 +10,29 @@ Provides standardized headless execution across:
 from __future__ import annotations
 
 import argparse
-import datetime
 import os
 import platform
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-import sklearn
 import yaml
 
 from harness.diagnostics import DiagnosticEngine
 from harness.grounding_gate import GroundingGate
 from harness.io_utils import (
     get_git_commit_hash,
-    get_project_root,
     load_yaml_config,
-    render_experiment_card,
     save_json,
     set_seed,
-    setup_logger,
-    update_experiments_leaderboard,
 )
-from harness.task_spec import UniversalTaskSpec, load_active_task_spec
+from harness.task_spec import load_active_task_spec
 from harness.plugins import TaskPluginContext, load_task_plugin
 from harness.project import HarnessProject
-from harness.tree_journal import Node, TreeJournal
+from harness.tree_journal import TreeJournal
 from harness.validator import ExperimentValidator
 
 
@@ -53,7 +47,7 @@ def merge_configs(base: Dict[str, Any], exp: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
-from harness.models import GenericBaselineModel, call_model
+from harness.models import call_model
 from harness.evaluation import resolve_evaluation
 import json
 import importlib

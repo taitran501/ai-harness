@@ -10,7 +10,6 @@ Enables remote training on A10G / A100 / H100 with:
 from __future__ import annotations
 
 import subprocess
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional

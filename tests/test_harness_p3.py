@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -18,8 +17,7 @@ import unittest
 
 import pandas as pd
 
-from harness.agent_bridge import AgentBridge, ApprovalTier
-from harness.competition_state import CompetitionState
+from harness.agent_bridge import AgentBridge
 from harness.environment_detector import EnvironmentDetector
 from harness.submission_manager import SubmissionEntry, SubmissionManager
 from harness.task_spec import UniversalTaskSpec, SubtaskSpec

@@ -16,20 +16,18 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness.cloud_inspector import CloudPreflightInspector
 from harness.project import HarnessProject
-from harness.submission_manager import SubmissionManager
 from harness.templates.kaggle_template import KaggleKernelManager
 from harness.templates.modal_template import generate_modal_script
 from harness.cloud_policy import UploadConsentStore, dataset_fingerprint, private_upload_resource_names
@@ -171,7 +169,7 @@ def run_via_modal(
         )
 
     try:
-        import modal
+        import modal  # noqa: F401  (import presence is the availability check)
     except ImportError:
         print(
             "❌ Modal is not installed. Run `pip install modal` and `modal setup` to authenticate.",
@@ -410,30 +408,6 @@ def run_via_kaggle(
         )
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return result
-
-
-def handle_auto_submit(exp_id: str, baseline_csv: Optional[str] = None) -> None:
-    """Register verified submission if predictions.csv or oof_predictions.csv exists."""
-    pred_path = Path("artifacts") / exp_id / "predictions.csv"
-    if not pred_path.exists():
-        pred_path = Path("artifacts") / exp_id / "oof_predictions.csv"
-    if not pred_path.exists():
-        print(f"⚠ Auto-submit skipped: neither predictions.csv nor oof_predictions.csv found on local disk.", file=sys.stderr)
-        return
-
-    print(f"\n--- Initiating Auto-Submit for '{exp_id}' ---")
-    mgr = SubmissionManager()
-    try:
-        entry = mgr.register_submission(
-            exp_id=exp_id,
-            candidate_csv=str(pred_path),
-            baseline_csv=baseline_csv,
-            notes="Auto-submitted after cloud execution",
-        )
-        print(f"🎉 Auto-Submit Succeeded! Submission ID: {entry.id}")
-        print(f"Registered at: submissions/SUBMISSIONS.md")
-    except Exception as e:
-        print(f"❌ Auto-submit failed: {e}", file=sys.stderr)
 
 
 def main() -> None:

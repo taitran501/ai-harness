@@ -36,52 +36,21 @@ from unittest.mock import patch
 import pandas as pd
 import yaml
 
-from harness.project import attach_project
+from tests.fixtures import make_workspace as _make_workspace, task_document
+
+_PRB_TASK = task_document(task_id="prb-fixture-task", name="PRB Fixture")
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
-# Shared fixture: minimal attached workspace (mirrors WorkspaceFixture)
+# Shared fixture: minimal attached workspace (from tests/fixtures.py)
 # ---------------------------------------------------------------------------
-
-def _make_workspace() -> tuple[Path, Path]:
-    root = Path(tempfile.mkdtemp(prefix="prb_ws_"))
-    (root / "configs").mkdir()
-    (root / "dataset").mkdir()
-    (root / "dataset" / "train.csv").write_text(
-        "id,text,label\n0,nice dog,0\n1,kind dog,0\n2,awful cat,1\n3,mean cat,1\n",
-        encoding="utf-8",
-    )
-    task_config = root / "configs" / "task.yaml"
-    task_config.write_text(
-        yaml.safe_dump(
-            {
-                "task": {
-                    "id": "prb-fixture-task",
-                    "name": "PRB Fixture",
-                    "task_type": "classification",
-                    "type": "classification",
-                    "primary_metric": "accuracy",
-                    "direction": "maximize",
-                    "data_config": {
-                        "train_path": "dataset/train.csv",
-                        "target_column": "label",
-                    },
-                    "validation": {"strategy": "kfold", "num_folds": 2},
-                }
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
-    attach_project(root, task_config)
-    return root, task_config
 
 
 class _WorkspaceBase(unittest.TestCase):
     def setUp(self) -> None:
-        self.root, self.task_config = _make_workspace()
+        self.root, self.task_config = _make_workspace(task=_PRB_TASK)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -610,7 +579,6 @@ class TestSessionGpuReconcile(unittest.TestCase):
         self._ws.cleanup()
 
     def test_terminal_rows_without_gpu_hours_yield_zero(self) -> None:
-        from harness.artifacts import sha256
 
         ledger = {
             "reservations": {

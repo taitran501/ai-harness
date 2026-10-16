@@ -6,10 +6,9 @@ probability calibration, and cascaded error control for hierarchical tasks.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Tuple
 
 import numpy as np
-import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
@@ -39,49 +38,6 @@ class ThresholdOptimizer:
                 best_threshold = float(thresh)
 
         return best_threshold, best_f1
-
-    @staticmethod
-    def optimize_multilabel_thresholds(
-        y_true: np.ndarray,
-        y_probs: np.ndarray,
-        labels: List[str],
-        default_threshold: float = 0.5,
-    ) -> Dict[str, float]:
-        """Optimize threshold independently per label for multi-label classification."""
-        best_thresholds: Dict[str, float] = {}
-
-        n_labels = y_true.shape[1]
-        for idx in range(n_labels):
-            label_name = labels[idx] if idx < len(labels) else f"label_{idx}"
-            col_true = y_true[:, idx]
-            col_prob = y_probs[:, idx]
-
-            # If label has zero support or almost zero support in OOF
-            if col_true.sum() < 2:
-                best_thresholds[label_name] = default_threshold
-                continue
-
-            thresh, _ = ThresholdOptimizer.optimize_binary_threshold(col_true, col_prob)
-            best_thresholds[label_name] = thresh
-
-        return best_thresholds
-
-    @staticmethod
-    def optimize_group_thresholds(
-        df: pd.DataFrame,
-        group_col: str,
-        true_col: str,
-        prob_col: str,
-    ) -> Dict[Any, float]:
-        """Optimize thresholds separately for each declared group or cohort."""
-        group_thresholds = {}
-        for group_val, group_sub in df.groupby(group_col):
-            y_t = group_sub[true_col].to_numpy()
-            y_p = group_sub[prob_col].to_numpy()
-            t_star, _ = ThresholdOptimizer.optimize_binary_threshold(y_t, y_p)
-            group_thresholds[group_val] = t_star
-        return group_thresholds
-
 
 class ProbabilityCalibrator:
     """Calibrates predicted probabilities using Platt scaling or Isotonic Regression."""

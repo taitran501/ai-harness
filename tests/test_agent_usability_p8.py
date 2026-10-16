@@ -26,7 +26,6 @@ from harness.evaluation import (
     default_metric_direction,
     evaluate,
     mask_to_rle,
-    metric_name,
     rle_to_mask,
 )
 from harness.task_spec import UniversalTaskSpec

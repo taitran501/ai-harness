@@ -10,8 +10,8 @@ import zipfile
 
 from harness.runner import UniversalRunner
 from harness.task_spec import UniversalTaskSpec
-from harness.plugins import TaskPluginContext, DeclarativeTaskPlugin, load_task_plugin
-from harness.artifacts import validate_run, validate_test_prediction, sha256
+from harness.plugins import TaskPluginContext, DeclarativeTaskPlugin
+from harness.artifacts import validate_test_prediction, sha256
 from harness.candidates import build_candidate, validate_candidate
 from harness.submission_manager import SubmissionManager
 from harness.agent_bridge import AgentBridge, TypedActionName

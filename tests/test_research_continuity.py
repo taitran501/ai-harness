@@ -12,7 +12,6 @@ import pandas as pd
 import yaml
 
 from harness.agent_bridge import AgentBridge
-from harness.agent_runtime import AgentRuntime
 from harness.artifacts import digest, validate_run
 from harness.diagnostics import DiagnosticEngine
 from harness.research_memory import ResearchMemory
@@ -151,10 +150,11 @@ class ResearchContinuity(unittest.TestCase):
         self.assertEqual(restored.get_context_packet()["research_memory"]["latest_checkpoint"]["next_action"],
                          "Inspect minority slice")
         for approved in (False, True):
-            run = AgentRuntime(self.root).start_run("Scientific planning", auto_approve_all=approved)
-            self.assertEqual(run.status, "ACTIVE")
-            self.assertEqual(run.actions, [])
-            self.assertIsNone(run.pending_approval_action)
+            run_bridge = AgentBridge(self.root)
+            session2 = run_bridge.start_session("Scientific planning")
+            self.assertEqual(session2.status, "ACTIVE")
+            self.assertEqual(session2.actions, [])
+            self.assertIsNone(session2.pending_approval_action)
         _, created = bridge.execute_action("create_experiment", params={"exp_id": "one"})
         _, blocked = bridge.execute_action("create_experiment", params={"exp_id": "two"})
         self.assertEqual(created.status, "SUCCESS")

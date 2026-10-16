@@ -8,8 +8,7 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.dashboard_server import DashboardHandler, generate_priming_prompt
-from harness.tree_journal import Node, TreeJournal
+from tools.dashboard_server import DashboardHandler
 import socketserver
 from tests.workspace_fixtures import (
     cleanup_dashboard_workspace,

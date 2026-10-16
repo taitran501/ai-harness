@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -13,14 +12,10 @@ import zipfile
 import pandas as pd
 import yaml
 
-from harness.agent_bridge import AgentBridge, TypedActionName
 from harness.task_spec import UniversalTaskSpec, load_dataframe_file, extract_archives_in_directory
 from tools.bootstrap_task import (
-    analyze_dataset_schema,
     bootstrap_competition_task,
     extract_context_from_markdown,
-    find_data_files,
-    generate_validation_splits,
 )
 
 

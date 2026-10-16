@@ -5,7 +5,6 @@ import hashlib
 import inspect
 import json
 from pathlib import Path
-import pandas as pd
 
 REQUIRED = (
     "run_config.yaml",

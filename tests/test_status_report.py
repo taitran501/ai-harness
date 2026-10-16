@@ -5,9 +5,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
-from pathlib import Path
 
-import yaml
 
 from harness.status_report import collect_status, render_markdown
 from harness.cli import build_parser, main

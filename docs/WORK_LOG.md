@@ -6,6 +6,70 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — Wave 1+2: Codebase Cleanup & Test Re-architecture
+
+**Task:** Address the user's three concerns measured against the live tree:
+(1) codebase size, (2) agent understandability, (3) 600+ tests / ~2 min e2e
+feedback loop.
+
+**Evidence (measured):**
+- `harness/` = 25.2k lines / 51 files; god modules: agent_bridge (3.9k),
+  competition_state (1.7k), runner (1.6k), llm_engine (1.5k).
+- In-process test timing: 99s total; only 4 modules ≥5s (test_kaggle_runtime
+  22.3s, test_dashboard 8.1s, test_audit_gate 5.5s, test_harness 5.2s = 41s).
+- 141 unused imports + 14 unused variables (ruff F401/F841); ~25 dead
+  functions (0 refs in py+ts+md corpus); legacy `agent_runtime.py` adapter
+  (self-documented source of runtime confusion).
+- Tests organized by fix-history: 7 PR-regression files (2.8k lines) with
+  copy-pasted workspace fixtures (up to 16 per file).
+
+**Work:**
+- Wave 1 cleanup:
+  - `ruff --fix` for F401/F841 (170 fixes); manual removal of 21 unused
+    variables and 15 dead functions
+    (`handle_auto_submit`, `assert_conditional_integrity`,
+    `compute_file_hash`, `analyze_minority_label_matrix`,
+    `optimize_{group,multilabel}_thresholds`, `submit_and_track`,
+    `get_active_session_id`, `inspect_splits`, `create_and_activate_task`,
+    `generate_priming_prompt`, `render_experiment_card`, `setup_logger`,
+    `update_experiments_leaderboard`, `activate_modal_profile`,
+    `set_modal_token`, `_get_fallback_unsloth_models`).
+  - Deleted legacy `harness/agent_runtime.py` + `tools/agent_runtime_cli.py`
+    (compat adapter superseded by `AgentBridge`); rewrote the two tests that
+    used it against `AgentBridge.start_session`; updated
+    `docs/research_continuity.md` wording.
+  - Intentional optional-dependency imports (`lightgbm`/`xgboost`/`catboost`/
+    `modal`) annotated with `# noqa: F401` (import presence is the check).
+- Wave 2 test re-architecture:
+  - New `tests/fixtures.py`: `task_document()`, `make_workspace()`,
+    `workspace_with_repo_configs()`, `copy_repo_configs()` — the two workspace
+    patterns that were copy-pasted across test files.
+  - Wired into `test_pr_b_guardrails.py`, `test_pr_c_state_agent_friction.py`,
+    `test_agent_bridge_p0_p1_fixes.py` (7 inline copytree calls removed),
+    `test_p2_audits.py`. pr_b keeps its task id (`prb-fixture-task`) because
+    tests hardcode artifact paths under it.
+  - Hardened `test_correctness_state.test_threads_and_processes_preserve_updates`
+    with a one-retry on `Process.start()` (observed Windows spawn flake under
+    load after subprocess-heavy modules).
+  - New `tools/run_tests.py` tiered runner: `--fast` skips the 4 slow
+    full-pipeline modules (SLOW_MODULES), `--list-slow`, selective modules.
+  - AGENTS.md quality gates now document fast tier (iteration) vs full suite
+    (pre-push) and the shared-fixture convention.
+
+**Validation:** full suite 642 tests OK (99s, was 643 incl. the deleted adapter
+test); fast tier 566 tests in 64.7s; ruff F401/F841 clean; py_compile clean on
+all touched modules.
+
+**Lesson:** the "too many tests" pain was a feedback-loop problem, not a
+count problem — tiering gives a ~35s faster iteration signal without losing
+coverage. Dead-code scan must include docs/skills/dashboard as reference
+corpus, and functions with multi-line signatures need paren-counted ranges,
+not indent-based ones (first deletion attempt corrupted 5 files; recovered
+via git restore).
+
+**Next:** none blocking. Optional Wave 3 (not approved): split
+`agent_bridge.py` god module — high risk, low agent-ROI per the audit evidence.
+
 ### 2026-10-16 — PR #C: State & Agent-Friction Fixes (Narrow Scope, Part 2)
 
 **Task:** Implement the narrow 10-item PR #C scope from the 2026-10-16

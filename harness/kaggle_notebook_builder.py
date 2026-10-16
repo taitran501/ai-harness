@@ -29,10 +29,6 @@ def build_kaggle_submission_notebook(
     id_col = id_column or "id"
     target_col = target_column or "target"
 
-    # Inspect test_predictions or metrics if present
-    test_pred_csv = exp_dir / "test_predictions.csv"
-    has_test_pred = test_pred_csv.exists()
-
     cells: List[Dict[str, Any]] = []
 
     # Cell 0: Markdown Header

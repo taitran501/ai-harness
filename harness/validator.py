@@ -8,7 +8,7 @@ Enforces physical code assertions instead of relying on LLM self-policing:
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Optional, Set
+from typing import Any, Optional, Set
 import pandas as pd
 
 
@@ -74,26 +74,6 @@ class ExperimentValidator:
                 f"[CRITICAL DATA LEAKAGE DETECTED] {len(intersection)} '{group_column}' groups leaked between "
                 f"train and validation splits! Sample leaked: {leaked_sample}. "
                 f"Pipelines MUST strictly use valid grouped split assignments without cross-fold leakage."
-            )
-
-    @classmethod
-    def assert_conditional_integrity(
-        cls,
-        df: pd.DataFrame,
-        parent_col: str,
-        cond_val: Any,
-        child_col: str,
-        req_val: Any,
-    ) -> None:
-        """Assert that if parent_col == cond_val then child_col == req_val."""
-        if parent_col not in df.columns or child_col not in df.columns:
-            return
-        cond_mask = df[parent_col] == cond_val
-        invalid = df[cond_mask & (df[child_col] != req_val)]
-        if len(invalid) > 0:
-            raise AssertionError(
-                f"[CONDITIONAL CONSTRAINT VIOLATION] Found {len(invalid)} rows where {parent_col} == '{cond_val}' "
-                f"but {child_col} != '{req_val}'."
             )
 
     @classmethod

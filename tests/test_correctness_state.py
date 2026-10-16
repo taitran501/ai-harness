@@ -22,12 +22,19 @@ class StateContracts(unittest.TestCase):
             path = str(Path(tmp) / "state.json")
             with concurrent.futures.ThreadPoolExecutor(4) as executor:
                 list(executor.map(lambda _: increment(path, 10), range(4)))
-            workers = [
-                multiprocessing.Process(target=increment, args=(path, 10))
-                for _ in range(3)
-            ]
-            for worker in workers:
-                worker.start()
+            workers = []
+            for _ in range(3):
+                worker = multiprocessing.Process(target=increment, args=(path, 10))
+                # Windows spawn can transiently fail under load (leaked handles
+                # from earlier subprocess-heavy tests); one retry is enough.
+                try:
+                    worker.start()
+                except Exception:
+                    # Windows spawn can transiently fail under load (leaked
+                    # handles from earlier subprocess-heavy tests); one retry.
+                    worker = multiprocessing.Process(target=increment, args=(path, 10))
+                    worker.start()
+                workers.append(worker)
             for worker in workers:
                 worker.join(30)
                 self.assertEqual(worker.exitcode, 0)

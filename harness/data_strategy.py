@@ -7,12 +7,8 @@ and physical Data Leakage auditing.
 
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -93,13 +89,6 @@ class DataStrategyEngine:
     """Universal splitter and dataset partitioner."""
 
     @staticmethod
-    def compute_file_hash(path: Path | str) -> str:
-        digest = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-
     @staticmethod
     def generate_splits(
         df: pd.DataFrame,

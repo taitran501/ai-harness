@@ -4,7 +4,7 @@ The external assistant owns scientific reasoning. The harness retains evidence,
 decisions, and restart instructions so that a fresh session can continue the work.
 For insight IDs, bounded probe plans, linked experiment history, lessons and resume
 triage, see [the research trace protocol](research_trace.md).
-`AgentRuntime.start_run()` only starts an active session. It does not invent an
+`AgentBridge.start_session()` only starts an active session. It does not invent an
 experiment, synthesize a portfolio, or propose freezing it.
 
 ## Durable state and evidence

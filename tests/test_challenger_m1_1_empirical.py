@@ -14,9 +14,6 @@ Empirically challenges the implementation across 5 required adversarial vectors:
 
 from __future__ import annotations
 
-import json
-import math
-import os
 import subprocess
 import sys
 import tempfile
@@ -25,14 +22,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import pearsonr, spearmanr
 
 from harness.ensemble_guard import EnsembleGuard
 from tools.audit_gate import (
     compute_continuous_significance,
     compute_diff_metrics,
-    compute_mcnemar_significance,
-    compute_sha256,
 )
 
 
