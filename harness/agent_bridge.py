@@ -332,6 +332,55 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
     return lines
 
 
+def adoption_gate_lines(
+    hygiene: Optional[Dict[str, Any]], total_experiments: int = 0
+) -> List[str]:
+    """T3 session-start adoption gate (aexp pattern, host-agnostic layer).
+
+    Rendered into the Context HUD AND the start-session observation so the
+    bypass evidence / zero-experiment state is in front of the agent at the
+    session entry point itself - not only if it happens to call `context`.
+    """
+    hygiene = hygiene or {}
+    bypassed = [
+        f for f in hygiene.get("findings", []) if f.get("kind") == "bypassed_run_output"
+    ]
+    total_experiments = int(total_experiments or 0)
+    if not bypassed and total_experiments != 0:
+        return []
+    lines = ["## ⛔ Adoption protocol — read before any experiment work"]
+    if bypassed:
+        sample = bypassed[0].get("detail", "")
+        n_dirs = max(int(f.get("dir_count") or 0) for f in bypassed)
+        scope = (
+            f"**{n_dirs} run-output dir(s) lack harness evidence**"
+            if n_dirs
+            else "**run-output dirs lack harness evidence**"
+        )
+        lines.append(
+            f"- {scope} — dirs created OUTSIDE the harness (manual `kaggle kernels push` / "
+            "ad-hoc scripts): no audit trail, no leaderboard record, invisible "
+            "to the framework. " + sample[:160]
+        )
+    if total_experiments == 0:
+        lines.append(
+            "- **0 harness experiments so far.** Every experiment MUST go "
+            "through `create_experiment` → `run_smoke_test` → "
+            "`run_full_validation` (Bridge actions below) — there is no "
+            "supported alternative path for tracked runs."
+        )
+    lines.append(
+        "- If harness dispatch fails, **report the failure** — do not silently "
+        "fall back to a manual run. Manual pushes are the human operator's "
+        "privilege (`AI_HARNESS_ALLOW_MANUAL=1`), not the agent's."
+    )
+    lines.append(
+        "- Do not delete or rename run-output dirs to make this warning "
+        "disappear; surface them to the user instead."
+    )
+    return lines
+
+
 class AgentBridge(metaclass=_AgentBridgeMeta):
     """Bidirectional Context & Typed Action Bridge between Antigravity (IDE) and the ML Harness.
 
@@ -1603,50 +1652,16 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             lines.extend(["", "## 🧹 Workspace Hygiene"])
             lines.extend(hygiene_lines)
 
-        # T3 session-start adoption gate (aexp pattern, implemented in the
-        # host-agnostic layer we control): the SOP mandates reading this
-        # context at session start, so bypass evidence is put in front of
-        # the agent on every session — instructions alone are advisory.
-        hygiene = pkt.get("workspace_hygiene") or {}
-        bypassed = [
-            f
-            for f in hygiene.get("findings", [])
-            if f.get("kind") == "bypassed_run_output"
-        ]
-        total_experiments = int(
-            (pkt.get("competition_hud") or {}).get("total_experiments") or 0
+        # T3 session-start adoption gate (shared with the start-session
+        # observation): instructions alone are advisory, so bypass evidence
+        # is put in front of the agent at session start.
+        gate_lines = adoption_gate_lines(
+            pkt.get("workspace_hygiene"),
+            int((pkt.get("competition_hud") or {}).get("total_experiments") or 0),
         )
-        if bypassed or total_experiments == 0:
-            lines.extend(
-                [
-                    "",
-                    "## ⛔ Adoption protocol — read before any experiment work",
-                ]
-            )
-            if bypassed:
-                sample = bypassed[0].get("detail", "")
-                lines.append(
-                    f"- **{len(bypassed)} run-output finding(s) lack harness evidence** — "
-                    "dirs created OUTSIDE the harness (manual `kaggle kernels push` / "
-                    "ad-hoc scripts): no audit trail, no leaderboard record, invisible "
-                    "to the framework. " + sample[:160]
-                )
-            if total_experiments == 0:
-                lines.append(
-                    "- **0 harness experiments so far.** Every experiment MUST go "
-                    "through `create_experiment` → `run_smoke_test` → "
-                    "`run_full_validation` (Bridge actions below) — there is no "
-                    "supported alternative path for tracked runs."
-                )
-            lines.append(
-                "- If harness dispatch fails, **report the failure** — do not silently "
-                "fall back to a manual run. Manual pushes are the human operator's "
-                "privilege (`AI_HARNESS_ALLOW_MANUAL=1`), not the agent's."
-            )
-            lines.append(
-                "- Do not delete or rename run-output dirs to make this warning "
-                "disappear; surface them to the user instead."
-            )
+        if gate_lines:
+            lines.extend(["", gate_lines[0]])
+            lines.extend(gate_lines[1:])
 
         lines.extend(
             [
@@ -3018,6 +3033,15 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 f"'grounding.source_id' + 'grounding.verified_via' (verify the source first). "
                 f"Grounding issues: {grounding_errors}"
             )
+            next_required_step = (
+                f"Grounding required before run_smoke_test / run_full_validation (the runner "
+                f"circuit-breaks on 'not_verified'). Verify a real source with your host "
+                f"tools, then update the 'grounding' block in {rel_cfg} with source_id + "
+                f"verified_via in one of: search_web | read_url_content | huggingface_hub | "
+                f"mcp_gemini-docs | local_registry | verified_baseline. If the parent "
+                f"baseline was verified locally, cite it (verified_via: verified_baseline). "
+                f"Check with: python harness/grounding_gate.py --config {rel_cfg}"
+            )
 
         return ActionObservation(
             step_index=call.step_index,
@@ -3032,6 +3056,9 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 "grounding_status": grounding_status,
                 "grounding_verification": grounding_verification,
                 "grounding_errors": grounding_errors,
+                "next_required_step": next_required_step
+                if grounding_status == "UNVERIFIED"
+                else None,
                 "novelty_review": review,
             },
             elapsed_seconds=round(time.time() - t0, 3),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from typing import Optional, Sequence
 
 
@@ -14,6 +15,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--port", type=int, default=8080, help="HTTP port (default: 8080)")
     args = parser.parse_args(argv)
 
+    from harness.toolchain import ensure_pinned_toolchain
+
+    _pinned = ensure_pinned_toolchain(args.project_root, "tools.dashboard_cli", sys.argv[1:])
+    if _pinned is not None:
+        sys.exit(int(_pinned.returncode))
     if args.project_root:
         os.environ["HARNESS_PROJECT_ROOT"] = args.project_root
     if args.task_config:

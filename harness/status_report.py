@@ -296,11 +296,14 @@ def _adoption_section(project_root: Optional[str]) -> Dict[str, Any]:
     if sessions_dir.is_dir():
         sessions_total = len(list(sessions_dir.glob("session_*.json")))
     bypassed = 0
+    bypassed_dirs = 0
     try:
         from harness.hygiene import scan_workspace_hygiene
 
         findings = scan_workspace_hygiene(root).get("findings", [])
-        bypassed = sum(1 for f in findings if f.get("kind") == "bypassed_run_output")
+        bypass_findings = [f for f in findings if f.get("kind") == "bypassed_run_output"]
+        bypassed = len(bypass_findings)
+        bypassed_dirs = sum(int(f.get("dir_count") or 0) for f in bypass_findings)
     except Exception:  # noqa: BLE001 - advisory only
         bypassed = -1
     if bypassed > 0:
@@ -313,6 +316,7 @@ def _adoption_section(project_root: Optional[str]) -> Dict[str, Any]:
         "status": "ok",
         "experiments": experiments,
         "bypassed_run_outputs": bypassed,
+        "bypassed_run_output_dirs": bypassed_dirs,
         "sessions": sessions_total,
         "verdict": verdict,
     }
@@ -390,7 +394,8 @@ def render_markdown(status: Dict[str, Any]) -> str:
         ok = verdict == "healthy"
         detail = f"{adoption.get('experiments', 0)} experiments, {adoption.get('sessions', 0)} sessions"
         if adoption.get("bypassed_run_outputs", 0) > 0:
-            detail += f", **{adoption['bypassed_run_outputs']} bypassed run-output dirs**"
+            dirs = adoption.get("bypassed_run_output_dirs") or 0
+            detail += f", **{dirs} bypassed run-output dirs**" if dirs else ", **bypassed run-output dirs**"
         lines.append(f"{mark(ok)} adoption: {detail} ({verdict})")
     return "\n".join(lines)
 

@@ -207,6 +207,7 @@ def _aggregate_run_output_dirs(findings: List[Dict[str, str]]) -> List[Dict[str,
         aggregated.append({
             "kind": "bypassed_run_output",
             "path": f"{len(manual)} dirs",
+            "dir_count": len(manual),
             "detail": (
                 f"run-output dirs at workspace root lack the harness artifact manifest "
                 f"(manual kernel pushes, no evidence trail) — run experiments through harness "
@@ -219,6 +220,7 @@ def _aggregate_run_output_dirs(findings: List[Dict[str, str]]) -> List[Dict[str,
         aggregated.append({
             "kind": "stale_run_output",
             "path": f"{len(sealed)} dirs",
+            "dir_count": len(sealed),
             "detail": f"Kaggle/kernel run-output dirs at workspace root — move to artifacts/ or delete (e.g. {examples})",
         })
     return aggregated + others
