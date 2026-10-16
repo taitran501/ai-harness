@@ -130,18 +130,15 @@ class CloudJobManager:
                     # cloud runs. A row with gpu_hours=None would otherwise make
                     # `_reconcile_session_usage` set gpu_hours_used=None, which
                     # silently disables the GPU budget.
+                    # A managed job allocates exactly one GPU; the model name
+                    # ("A10G", "A100", "T4") must never be regex-parsed as a
+                    # count — that inflated gpu_hours 4–100× and silently
+                    # exhausted max_gpu_hours budgets.
                     gpu_count = None
                     allocation_seconds = None
-                    try:
-                        if getattr(job, "gpu", None):
-                            import re
-
-                            m = re.search(r"(\d+(?:\.\d+)?)", str(job.gpu))
-                            if m:
-                                gpu_count = float(m.group(1))
-                                allocation_seconds = wall_seconds
-                    except Exception:
-                        gpu_count = None
+                    if getattr(job, "gpu", None):
+                        gpu_count = 1.0
+                        allocation_seconds = wall_seconds
                     terminal(
                         ledger_path,
                         token,
@@ -775,15 +772,27 @@ class CloudJobManager:
             elif job.auto_audit:
                 f.write(f"🛡️ Running SWE-Agent Deterministic Audit Gate...\n")
                 try:
+                    # Audit outputs live OUTSIDE the sealed run directory —
+                    # CORRECTNESS_CONTRACT §3: completed run evidence folders
+                    # are strictly immutable. The job record keeps the receipt.
+                    audit_dir = (
+                        HarnessProject.discover(self.project_root).artifacts_dir
+                        .parent
+                        / "audit"
+                        / job.job_id
+                    )
+                    audit_dir.mkdir(parents=True, exist_ok=True)
+                    audit_zip = audit_dir / "candidate-audit.zip"
+                    audit_receipt = audit_dir / "AUDIT_RECEIPT.json"
                     audit_cmd = [
                         sys.executable,
                         str(_find_script("tools/audit_gate.py")),
                         "--candidate",
                         str(candidate_csv),
                         "--output-zip",
-                        str(exp_dir / "candidate-audit.zip"),
+                        str(audit_zip),
                         "--receipt",
-                        str(exp_dir / "AUDIT_RECEIPT.json"),
+                        str(audit_receipt),
                     ]
                     if job.baseline_csv and Path(job.baseline_csv).exists():
                         audit_cmd.extend(["--baseline", job.baseline_csv])
@@ -802,10 +811,9 @@ class CloudJobManager:
                     job.audit_passed = audit_proc.returncode == 0
 
                     # Check for receipt
-                    exp_receipt = exp_dir / "AUDIT_RECEIPT.json"
-                    if exp_receipt.exists():
+                    if audit_receipt.exists():
                         try:
-                            with open(exp_receipt, "r", encoding="utf-8") as rf:
+                            with open(audit_receipt, "r", encoding="utf-8") as rf:
                                 job.audit_receipt = json.load(rf)
                         except Exception:
                             pass

@@ -1015,7 +1015,7 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 sum(float(r.get("wall_seconds") or 0) for r in terminal_rows), 3
             ),
             gpu_hours_used=(
-                sum(gpu_hours) if gpu_hours else (0.0 if not terminal_rows else None)
+                round(sum(gpu_hours), 6) if gpu_hours else 0.0
             ),
         )
 
@@ -1505,7 +1505,13 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
         observation).
         """
         # 1. Hard Stop: Freeze lock guard
-        if self.comp_state.state["gates"].get("freeze_locked") and action not in (
+        # A FINALIZED competition is terminal too: finalize_competition now
+        # requires freeze_locked, and once finalized the same stop set applies
+        # (the terminal state must not be display-only).
+        frozen = self.comp_state.state["gates"].get("freeze_locked") or (
+            self.comp_state.state["gates"].get("finalized")
+        )
+        if frozen and action not in (
             TypedActionName.EMERGENCY_UNFREEZE.value,
             TypedActionName.FINALIZE_COMPETITION.value,
             TypedActionName.INSPECT_EXPERIMENT.value,
@@ -1519,9 +1525,14 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             TypedActionName.TRACE_RESEARCH_INSIGHT.value,
             TypedActionName.SUGGEST_NEXT_INTERVENTIONS.value,
         ):
+            state_word = (
+                "FINALIZED"
+                if self.comp_state.state["gates"].get("finalized")
+                else "FROZEN"
+            )
             return (
                 "STOP_POLICY_TRIGGERED",
-                "Competition state is FROZEN. Only inspection, research notes, finalization, or `emergency_unfreeze` (with USER_APPROVAL) is allowed.",
+                f"Competition state is {state_word}. Only inspection, research notes, finalization, or `emergency_unfreeze` (with USER_APPROVAL) is allowed.",
             )
 
         budget = session.budget

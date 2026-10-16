@@ -148,21 +148,33 @@ def _repair_one(run_dir: Path, drop_missing: bool = False) -> Dict[str, Any]:
     declared = manifest.get("files") or {}
 
     if drop_missing:
-        # keep only files that exist on disk (drop declared-but-missing)
-        new_files = on_disk
+        # drop_missing mode: keep only declared files that still exist on
+        # disk. Undeclared (stray) files are never adopted into the evidence
+        # bundle — that would violate the bundle-exclusivity invariant.
+        new_files = {
+            name: on_disk[name]
+            for name in declared
+            if name in on_disk and (run_dir / name).is_file()
+        }
     else:
-        # refresh hashes for declared files that exist; keep declared set stable
-        # so we do not silently add undeclared files into the evidence bundle
+        # Default mode: keep the declared set verbatim so a missing file
+        # stays a *visible* validation failure (stale hash). Refresh hashes
+        # only for declared files that exist; never silently drop
+        # declarations (that would let the run re-pass validate_run with a
+        # silently shrunken bundle) and never add undeclared files.
         new_files = {}
         for name, value in declared.items():
             if (run_dir / name).is_file():
                 new_files[name] = on_disk[name]
+            else:
+                new_files[name] = value
         # surface (but do not add) undeclared files so the caller can decide
         extra = sorted(name for name in on_disk if name not in declared)
 
     manifest["files"] = new_files
-    manifest_path = run_dir / _MANIFEST_NAME
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    from harness.io_utils import atomic_write_json
+
+    atomic_write_json(run_dir / _MANIFEST_NAME, manifest)
     # clear the per-file hash cache so the very next validate_run re-reads bytes
     from harness.artifacts import _HASH_CACHE
 

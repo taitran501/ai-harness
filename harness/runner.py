@@ -1443,6 +1443,26 @@ def resolve_cli_backend(
     return requested
 
 
+def is_local_only_run(args, cfg_doc: Optional[Dict[str, Any]] = None) -> bool:
+    """Whether this CLI invocation is a sample probe that must stay local.
+
+    ``--debug``, ``--fold``, ``--probe-samples``, or a ``validation.sample_limit``
+    in the experiment config all make the run a sample probe. Probes must never
+    dispatch to the cloud backend: CORRECTNESS_CONTRACT §3 (sample probes never
+    enter the official solution tree or candidate pool) and AGENTS.md §2.4
+    (smoke/probes always run locally) — regardless of the contract backend lock.
+    """
+    if bool(getattr(args, "debug", False)) or getattr(args, "fold", None) is not None:
+        return True
+    if getattr(args, "probe_samples", None):
+        return True
+    if cfg_doc:
+        limit = (cfg_doc.get("validation") or {}).get("sample_limit")
+        if limit:
+            return True
+    return False
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """CLI entrypoint for universal training runner."""
     parser = build_parser()
@@ -1482,7 +1502,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     except Exception:
         pass  # spec load failure surfaces in UniversalRunner with full context
     requested_backend = args.backend
-    is_smoke_run = bool(args.debug) or args.fold is not None
+    # Probe detection must see validation.sample_limit, which lives in the
+    # experiment config; load it here (UniversalRunner re-validates it).
+    cfg_doc: Optional[Dict[str, Any]] = None
+    try:
+        cfg_doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(cfg_doc, dict):
+            cfg_doc = None
+    except Exception:
+        cfg_doc = None  # config errors surface in UniversalRunner with context
+    is_smoke_run = is_local_only_run(args, cfg_doc)
     try:
         args.backend = resolve_cli_backend(
             requested_backend, contract_backend, backend_locked, is_smoke_run
