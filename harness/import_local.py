@@ -133,9 +133,10 @@ def scan_importable_runs(project_root: Path) -> List[Dict[str, Any]]:
         project, spec, plugin = _load_spec_and_plugin(root)
         current = contract_identity(spec, plugin)
         drift = _identity_drift(manifest, current)
-        target = project.artifacts_dir / exp_id
-        if target.is_dir():
-            entry.update(verdict="already_imported", detail=str(target))
+        if (project.artifacts_dir / exp_id).is_dir():
+            entry.update(verdict="already_imported", detail=str(project.artifacts_dir / exp_id))
+        elif (project.artifacts_dir / "quarantine" / exp_id).is_dir():
+            entry.update(verdict="already_imported", detail=str(project.artifacts_dir / "quarantine" / exp_id))
         else:
             error = _content_verified(child, manifest)
             if error:
