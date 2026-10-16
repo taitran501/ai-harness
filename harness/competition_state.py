@@ -295,16 +295,16 @@ class CompetitionStateMachine:
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError("Required competition state is unreadable") from error
 
-    def _save_raw(self, data: Dict[str, Any]) -> None:
-        data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        from harness.io_utils import atomic_write_json
-
-        atomic_write_json(self.state_file, data, indent=2, ensure_ascii=False)
-
     def save(self) -> None:
         import copy
         from harness.state_store import save_snapshot
 
+        # Stamp freshness on every persist: consumers (dashboard, HUD) read
+        # `updated_at` to detect stale state, and it previously stayed at the
+        # init timestamp forever.
+        self.state["updated_at"] = datetime.datetime.now(
+            datetime.timezone.utc
+        ).isoformat()
         self.state = save_snapshot(
             self.state_file, getattr(self, "_state_snapshot", {}), self.state
         )
@@ -452,6 +452,30 @@ class CompetitionStateMachine:
                 ),
                 "group_column": group_col,
             }
+
+            # A missing or empty dataset must never read as READY: it would
+            # render as "0 data risks" in the HUD and let the agent confirm
+            # data risks on a broken mount. Block until the data path works.
+            if report["dataset_overview"]["total_rows"] == 0:
+                declared_path = (
+                    (self.spec.get("data_config") or {}).get("train_path")
+                    or "dataset"
+                )
+                report["status"] = "BLOCKED"
+                report["warnings"].insert(
+                    0,
+                    {
+                        "id": "DATA_MISSING",
+                        "severity": "critical",
+                        "title": "Declared training dataset is missing or empty",
+                        "detail": (
+                            f"No rows could be loaded from `{declared_path}`. "
+                            "Fix the data mount or `data_config.train_path` "
+                            "in the task contract before establishing the "
+                            "baseline."
+                        ),
+                    },
+                )
 
             # Execute declarative checks from CompetitionSpec
             for chk in declared_checks:
@@ -965,11 +989,44 @@ class CompetitionStateMachine:
         snapshot = self.evaluate_journey_snapshot(journal, sub_mgr, task_info)
         recommendation = snapshot["hud"]["what_should_i_do_next"]
         action_id = recommendation.get("action_id")
+        # Every recommendation id the HUD can emit must map to a real typed
+        # action. The previous silent fallback to `inspect_diagnostics`
+        # executed the wrong action for FREEZE_FOR_PRIVATE_LB,
+        # GENERATE_FINAL_PAPER, and BUILD_SPECIALIST_ROUTER, so the co-pilot
+        # click never advanced the phase.
         action = {
             "CONFIRM_TASK_SPEC": "confirm_task_spec",
             "CONFIRM_DATA_RISKS": "inspect_data_readiness",
             "LOCK_BASELINE_ANCHOR": "establish_baseline_anchor",
-        }.get(action_id, "inspect_diagnostics")
+            # First step of the documented agent_plan for this recommendation.
+            "BUILD_SPECIALIST_ROUTER": "inspect_diagnostics",
+            "FREEZE_FOR_PRIVATE_LB": "freeze_candidate",
+            "GENERATE_FINAL_PAPER": "finalize_competition",
+        }.get(action_id)
+        if action is None:
+            # ESTABLISH_VERIFIED_BASELINE is a composite workflow (create the
+            # baseline experiment, run full validation, then lock the anchor)
+            # and no single typed action performs it. Name it explicitly
+            # instead of silently substituting an unrelated action.
+            from harness.agent_bridge import ActionObservation
+
+            obs = ActionObservation(
+                step_index=0,
+                action=str(action_id or "UNKNOWN"),
+                status="FAILED",
+                summary=(
+                    f"Co-pilot cannot run '{action_id}': it is a multi-step "
+                    "workflow, not a single typed action. Sequence: "
+                    "create_experiment -> run_full_validation -> "
+                    "establish_baseline_anchor."
+                ),
+            )
+            return {
+                "status": "FAILED",
+                "reason": "composite workflow requires manual sequencing",
+                "action_id": action_id,
+                "observation": obs.__dict__,
+            }
         params = {}
         if action == "establish_baseline_anchor":
             params["exp_id"] = self.state["gates"].get("baseline_exp_id") or (
@@ -1555,7 +1612,18 @@ class CompetitionStateMachine:
     ) -> str:
         """Render the Competition State block to inject into the Agent Priming Prompt."""
         snap = self.evaluate_journey_snapshot(journal, sub_mgr, task_info)
-        cfg = AgentContextConfig(**self.state["agent_context_config"])
+        # Filter persisted keys: `update_workspace_settings` accepts
+        # agent-supplied dicts, and unknown keys would raise TypeError here,
+        # silently dropping the whole competition block from the priming
+        # prompt (the dashboard swallows render errors).
+        stored_cfg = self.state.get("agent_context_config") or {}
+        cfg = AgentContextConfig(
+            **{
+                key: value
+                for key, value in stored_cfg.items()
+                if key in AgentContextConfig.__dataclass_fields__
+            }
+        )
         hud = snap["hud"]
         sections: List[str] = []
 
