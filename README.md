@@ -100,6 +100,23 @@ ai-harness status --markdown   # human-readable summary
 ai-harness status --no-cloud   # skip cloud checks (offline-friendly)
 ```
 
+The `artifacts` section separates **verified** runs from two failure classes an
+agent can act on differently:
+
+- `drifted_repairable` — artifact file bytes changed after the run (a hash
+  mismatch). `ai-harness repair --check` previews the fix; a `repair_hint`
+  string tells the agent to run it.
+- `unverifiable` — an identity/structural problem (missing manifest, identity
+  mismatch) that `repair` will **not** fix.
+
+```json
+"artifacts": {
+  "runs_total": 26, "verified": 0,
+  "drifted_repairable": 21, "unverifiable": 5,
+  "repair_hint": "21 run(s) have artifact hash drift — ai-harness repair --check ..."
+}
+```
+
 If a Kaggle kernel fails, inspect its state **without re-dispatching** (no new push, no quota burned):
 
 ```bash

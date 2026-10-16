@@ -7,8 +7,11 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
+import yaml
+
 from harness.status_report import collect_status, render_markdown
 from harness.cli import build_parser, main
+from tests.test_repair import _make_project, _seal_into, _drift_metrics
 
 
 def _run_main(argv):
@@ -67,6 +70,62 @@ class TestStatusCommand(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             code, _ = _run_main(["status", "--project-root", tmp, "--no-cloud", "--markdown"])
             self.assertEqual(code, 2)
+
+
+class TestArtifactDriftSurfacing(unittest.TestCase):
+    """status must tell an agent which broken runs are repairable (drift) vs not."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="aih-status-")
+        self.root, self.spec, self.artifacts = _make_project(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_all_verified_no_drift(self):
+        _seal_into(self.artifacts / "exp001_ok", self.spec, 0.8)
+        status = collect_status(project_root=str(self.root), include_cloud=False)
+        art = status["artifacts"]
+        self.assertEqual(art["verified"], 1)
+        self.assertEqual(art["drifted_repairable"], 0)
+        self.assertIsNone(art["repair_hint"])
+
+    def test_drifted_run_is_repairable_with_hint(self):
+        folder = _seal_into(self.artifacts / "exp002_ok", self.spec, 0.8)
+        _drift_metrics(folder, self.spec, 0.9)  # change bytes after sealing
+        status = collect_status(project_root=str(self.root), include_cloud=False)
+        art = status["artifacts"]
+        self.assertEqual(art["verified"], 0)
+        self.assertEqual(art["drifted_repairable"], 1)
+        self.assertIsNotNone(art["repair_hint"])
+        self.assertIn("repair --check", art["repair_hint"])
+        # markdown surfaces it too
+        md = render_markdown(status)
+        self.assertIn("1 drift-repairable", md)
+        self.assertIn("repair --check", md)
+
+    def test_mixed_verified_and_drifted(self):
+        _seal_into(self.artifacts / "exp001_ok", self.spec, 0.8)
+        bad = _seal_into(self.artifacts / "exp002_bad", self.spec, 0.8)
+        _drift_metrics(bad, self.spec, 0.9)
+        status = collect_status(project_root=str(self.root), include_cloud=False)
+        art = status["artifacts"]
+        self.assertEqual(art["verified"], 1)
+        self.assertEqual(art["drifted_repairable"], 1)
+        self.assertEqual(art["runs_total"], 2)
+
+    def test_unverifiable_not_counted_as_repairable(self):
+        # A run whose identity is broken (not a hash drift) must NOT be repairable.
+        folder = _seal_into(self.artifacts / "exp003_bad", self.spec, 0.8)
+        # corrupt an identity field so validate_run fails for non-drift reasons
+        manifest = json.loads((folder / "artifact_manifest.json").read_text(encoding="utf-8"))
+        manifest["exp_id"] = "tampered-not-a-real-hash"
+        (folder / "artifact_manifest.json").write_text(json.dumps(manifest))
+        status = collect_status(project_root=str(self.root), include_cloud=False)
+        art = status["artifacts"]
+        self.assertEqual(art["drifted_repairable"], 0)
+        self.assertGreaterEqual(art["unverifiable"], 1)
+        self.assertIsNone(art["repair_hint"])
 
 
 if __name__ == "__main__":
