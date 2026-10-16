@@ -219,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"Unrecognized arguments: {' '.join(extra_argv)}")
 
     project = HarnessProject.discover(args.project_root, args.task_config)
+    from harness.toolchain import ensure_pinned_toolchain
+
+    _pinned = ensure_pinned_toolchain(project.root, "tools.agent_bridge_cli", sys.argv[1:])
+    if _pinned is not None:
+        return int(_pinned.returncode)
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     if str(project.root) not in sys.path:
@@ -240,7 +245,23 @@ def main(argv: list[str] | None = None) -> int:
             "max_consecutive_rejections": args.max_consecutive_rejections,
         }
         sess = bridge.start_session(goal=args.goal, budget=budget, session_id=args.session_id)
-        print(json.dumps(asdict(sess), indent=2, ensure_ascii=False, default=_json_serial))
+        payload = asdict(sess)
+        # T3: the adoption gate belongs at the session ENTRY point, not only
+        # in the separate `context` call - an agent that goes straight from
+        # start-session to act would otherwise never see it.
+        from harness.agent_bridge import adoption_gate_lines
+        from harness.hygiene import scan_workspace_hygiene
+
+        gate = adoption_gate_lines(
+            scan_workspace_hygiene(project.root),
+            int(
+                ((bridge.get_context_packet(session_id=sess.session_id) or {})
+                 .get("competition_hud") or {}).get("total_experiments") or 0
+            ),
+        )
+        if gate:
+            payload["adoption_gate"] = [""] + gate
+        print(json.dumps(payload, indent=2, ensure_ascii=False, default=_json_serial))
 
     elif args.command == "act":
         raw = args.params

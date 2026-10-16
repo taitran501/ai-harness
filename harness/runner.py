@@ -1471,6 +1471,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                 stream.reconfigure(line_buffering=True, write_through=True)
 
     project = HarnessProject.discover(args.project_root, args.task_config)
+    from harness.toolchain import ensure_pinned_toolchain
+
+    _pinned = ensure_pinned_toolchain(project.root, "harness.runner", sys.argv[1:])
+    if _pinned is not None:
+        return int(_pinned.returncode)
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     if str(project.root) not in sys.path:

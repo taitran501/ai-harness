@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -110,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command != "plugins":
+        from harness.toolchain import ensure_pinned_toolchain
+
+        _pinned = ensure_pinned_toolchain(getattr(args, "project_root", None), "harness.cli", sys.argv[1:])
+        if _pinned is not None:
+            return int(_pinned.returncode)
     if args.command == "plugins":
         print(json.dumps(list_task_plugins(), indent=2, ensure_ascii=False))
         return 0

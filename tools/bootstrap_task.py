@@ -570,7 +570,11 @@ def main() -> None:
 
     try:
         from harness.project import resolve_project_root
+        from harness.toolchain import ensure_pinned_toolchain
 
+        _pinned = ensure_pinned_toolchain(args.project_root, "tools.bootstrap_task", sys.argv[1:])
+        if _pinned is not None:
+            sys.exit(int(_pinned.returncode))
         project_root = Path(args.project_root).expanduser().resolve() if args.project_root else resolve_project_root()
         report = bootstrap_competition_task(
             dataset_dir=args.dataset,

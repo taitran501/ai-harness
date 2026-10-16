@@ -372,6 +372,13 @@ def generate_skill_content(
         "",
         "The kernel slug is derived as `<owner>/<task_slug>-<exp_id>` (same rule as dispatch) — pass `--exp <exp_id>` or an explicit `--kernel-slug owner/title` instead of guessing.",
         "",
+        "**Manual runs & bypass policy (enforced, not advisory):**",
+        "",
+        "- Manual `kaggle kernels push` / `kaggle competitions submit` at the workspace root create run-output dirs with NO audit trail. In attached workspaces a host hook (Claude/Cursor) blocks them (exit 2); `ai-harness status` → `adoption` and the Context HUD adoption gate surface any bypass evidence.",
+        "- If harness dispatch fails, **report the failure** to the user — do NOT silently fall back to a manual push.",
+        "- `AI_HARNESS_ALLOW_MANUAL=1 <command>` is the **human operator's** override (block-no-verify philosophy: the AI fixes dispatch properly; humans keep full autonomy). The agent must never set this for itself.",
+        "- Do not delete or rename run-output dirs to silence the adoption warning; surface them instead.",
+        "",
     ])
 
     return "\n".join(lines)
