@@ -241,6 +241,9 @@ def run_training_remote(config_path: str, exp_id: str):
     print(f"[Modal Remote] Config: {{config_path}}")
 
     cmd = ["python", "-u", "-m", "harness.runner", "--project-root", ".", "--task-config", {task_config_rel!r}, "--config", config_path]
+    _remote_job_id = {job_id!r}
+    if _remote_job_id:
+        cmd += ["--job-id", _remote_job_id]
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,

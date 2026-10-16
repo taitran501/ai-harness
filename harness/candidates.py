@@ -619,19 +619,26 @@ def register_external_prediction(
         else:
             raise ValueError(f"External OOF predictions missing ID column '{id_col}' and row counts do not match")
 
-    # Ensure pred_ columns exist
-    preds_dict = {}
-    for target in spec.subtasks.keys():
-        col = f"pred_{target}" if f"pred_{target}" in raw_oof.columns else target
-        if col in raw_oof.columns:
-            preds_dict[f"pred_{target}"] = raw_oof[col].values
-        if f"proba_{target}" in raw_oof.columns:
-            preds_dict[f"proba_{target}"] = raw_oof[f"proba_{target}"].values
-
-    # Merge OOF with truth to align rows exactly
+    # Merge OOF with truth to align rows exactly. Evaluation must consume the
+    # aligned frame — external files may be sorted differently from the
+    # training split, and positional evaluation would silently mislabel rows.
+    if truth[id_col].duplicated().any():
+        raise ValueError(f"Ground truth has duplicate IDs in '{id_col}'")
+    if raw_oof[id_col].duplicated().any():
+        raise ValueError(f"External OOF file has duplicate IDs in '{id_col}'")
     aligned = truth[[id_col]].merge(raw_oof, on=id_col, how="inner")
     if len(aligned) != len(truth):
         raise ValueError(f"OOF predictions match {len(aligned)} rows out of {len(truth)} ground truth rows")
+
+    # Ensure pred_ columns exist (read from the aligned frame so rows are in
+    # ground-truth order)
+    preds_dict = {}
+    for target in spec.subtasks.keys():
+        col = f"pred_{target}" if f"pred_{target}" in aligned.columns else target
+        if col in aligned.columns:
+            preds_dict[f"pred_{target}"] = aligned[col].values
+        if f"proba_{target}" in aligned.columns:
+            preds_dict[f"proba_{target}"] = aligned[f"proba_{target}"].values
 
     # 3. Official evaluation
     evaluation = plugin.evaluate_predictions(context, truth, preds_dict)

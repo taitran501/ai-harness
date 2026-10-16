@@ -221,7 +221,24 @@ class PhaseWorkflow:
                 if not baseline_id:
                     raise ValueError("The locked baseline has no experiment identity.")
                 spec = load_active_task_spec(self.project.task_config_path)
-                validate_baseline_artifact(self.project.artifacts_dir, baseline_id, str(spec.primary_metric))
+                from harness.plugins import TaskPluginContext, load_task_plugin
+
+                plugin_context = TaskPluginContext(
+                    self.project.root,
+                    self.project.task_config_path,
+                    spec,
+                    self.project.plugin_id or "default",
+                )
+                plugin = load_task_plugin(self.project.plugin_id, plugin_context)
+                # task_spec/plugin enable the contract-identity check: the
+                # anchored run must match the current task/scorer hashes.
+                validate_baseline_artifact(
+                    self.project.artifacts_dir,
+                    baseline_id,
+                    str(spec.primary_metric),
+                    task_spec=spec,
+                    plugin=plugin,
+                )
             except Exception as exc:
                 blocked["baseline"] = f"The locked baseline no longer has verified run metrics: {exc}"
         if not gates.get("freeze_locked"):

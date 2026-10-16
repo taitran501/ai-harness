@@ -32,6 +32,21 @@ from harness.submission_manager import SubmissionManager
 from harness.tree_journal import Node, TreeJournal
 
 
+def official_primary_value(entry, primary_metric: str):
+    """Extract the primary official score from a submission entry.
+
+    ``record_official_score`` writes the primary value under the spec's metric
+    name (falling back to ``"score"`` when the spec is unavailable); legacy
+    entries may store it under ``"primary"``. Probe all known keys.
+    """
+    scores = getattr(entry, "official_scores", None) or {}
+    for key in (primary_metric, "primary", "score"):
+        value = scores.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
 @dataclass
 class DataAuditConfig:
     """User-configurable settings for Phase 2 Data & Problem Understanding."""
@@ -1140,9 +1155,17 @@ class CompetitionStateMachine:
         subs_today = sum(1 for s in subs if str(s.created_at).startswith(today_prefix))
 
         overall_best = pool.get("overall_best")
-        scored_subs = [s for s in subs if s.official_scores.get("primary") is not None]
+        primary_metric = str(self.spec.get("primary_metric") or "score")
+        scored_subs = [
+            s
+            for s in subs
+            if official_primary_value(s, primary_metric) is not None
+        ]
         best_pub_sub = (
-            max(scored_subs, key=lambda s: float(s.official_scores["primary"]))
+            max(
+                scored_subs,
+                key=lambda s: official_primary_value(s, primary_metric),
+            )
             if scored_subs
             else None
         )
@@ -1393,12 +1416,14 @@ class CompetitionStateMachine:
                     "sub_id": best_pub_sub.id if best_pub_sub else None,
                     "exp_id": best_pub_sub.exp_id if best_pub_sub else None,
                     "score": (
-                        best_pub_sub.official_scores.get("primary")
+                        official_primary_value(best_pub_sub, primary_metric)
                         if best_pub_sub
                         else None
                     ),
                     "delta_vs_cv": (
-                        best_pub_sub.score_deltas.get("primary_delta")
+                        best_pub_sub.score_deltas.get(
+                            primary_metric, best_pub_sub.score_deltas.get("primary_delta")
+                        )
                         if best_pub_sub
                         else None
                     ),

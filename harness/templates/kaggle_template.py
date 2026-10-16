@@ -608,6 +608,9 @@ with tempfile.TemporaryDirectory(prefix="aih-kaggle-work-") as temporary:
         helpers["restore_dataset"](input_root, workspace)
         cmd = [sys.executable, "-u", "-m", "harness.runner", "--project-root", ".",
                "--task-config", {task_config_rel!r}, "--config", {config_rel!r}]
+        _remote_job_id = {job_id!r}
+        if _remote_job_id:
+            cmd += ["--job-id", _remote_job_id]
         print(f"Executing: {{' '.join(cmd)}}", flush=True)
         subprocess.run(cmd, check=True)
         helpers["export_run"](Path({artifact_dir!r}) / {exp_id!r}, output_root, {{

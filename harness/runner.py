@@ -206,6 +206,21 @@ class UniversalRunner:
                 inspect.getsource(getattr(importlib.import_module(module), name))
             )
 
+    def _probe_sample_limit(self):
+        """Effective subsample size for probe runs (None = full data).
+
+        Precedence: explicit ``--probe-samples`` > 50 when ``--debug`` is set >
+        ``validation.sample_limit`` from the experiment config. A single-fold
+        run is not subsampled on its own.
+        """
+        cli = getattr(self.args, "probe_samples", None)
+        if cli:
+            return int(cli)
+        if getattr(self.args, "debug", False):
+            return 50
+        limit = self.cfg.get("validation", {}).get("sample_limit")
+        return int(limit) if limit else None
+
     def _evaluate(self, truth, predictions):
         from harness.evaluation import validate_prediction_contract
 
@@ -223,8 +238,17 @@ class UniversalRunner:
                     self.plugin_context, truth, predictions
                 )
                 result = {**base_result, **result}
-            except Exception:
-                pass
+            except Exception as exc:
+                # A custom metrics_evaluator is configured but the official
+                # plugin scorer failed. Keep the custom result, but surface
+                # the failure — it must not be silently swallowed.
+                result.setdefault("_evaluation_warnings", []).append(
+                    f"official evaluation failed: {exc.__class__.__name__}: {exc}"
+                )
+                print(
+                    f"[ai-harness] WARNING: official plugin evaluation failed: "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
         else:
             result = self.task_plugin.evaluate_predictions(
                 self.plugin_context, truth, predictions
@@ -859,10 +883,10 @@ class UniversalRunner:
             for part, tr, dv in partitions:
                 if tr.empty:
                     raise ValueError("Partition has no training data")
-                limit = getattr(self.args, "probe_samples", None)
-                if getattr(self.args, "debug", False) or limit:
-                    tr = tr.sample(n=min(len(tr), limit or 50), random_state=self.seed)
-                    dv = dv.head(limit or 50)
+                limit = self._probe_sample_limit()
+                if limit:
+                    tr = tr.sample(n=min(len(tr), limit), random_state=self.seed)
+                    dv = dv.head(limit)
                 truths.append(dv)
                 for variant in variants:
                     config = self.cfg.get("model", {})
@@ -1019,11 +1043,9 @@ class UniversalRunner:
             raise ValueError("LLM prompt references ground-truth labels")
         for fold, train, dev in self._resolve_validation_splits(df, strategy):
             self._progress(f"LLM fold {fold} started: dev={len(dev)}")
-            limit = self.cfg.get("validation", {}).get("sample_limit")
-            if getattr(self.args, "debug", False):
-                limit = getattr(self.args, "probe_samples", None) or 50
+            limit = self._probe_sample_limit()
             if limit:
-                dev = dev.head(int(limit))
+                dev = dev.head(limit)
             truths.append(dev)
             predictions = {key: [] for key in self.task_spec.subtasks}
             for _, row in dev.iterrows():
@@ -1485,6 +1507,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         run_via_modal(
             config_path=str(config_path),
             project_root=project.root,
+            job_id=getattr(args, "job_id", None),
         )
         return 0
     elif args.backend == "kaggle":
@@ -1493,6 +1516,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         run_via_kaggle(
             config_path=str(config_path),
             project_root=project.root,
+            job_id=getattr(args, "job_id", None),
             force_import=getattr(args, "force_import", False),
             dry_run=getattr(args, "dry_run", False),
         )
@@ -1513,16 +1537,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     exp_id = cfg.get("experiment", {}).get("id", config_path.stem)
     args.project_root = str(project.root)
     args.task_config = str(project.task_config_path)
+    # Worker state belongs to dashboard job IDs (job_...). Remote dispatch
+    # identities (e.g. kaggle_<exp>_<hex>) only bind the artifact run_id and
+    # must not touch worker state.
+    worker_job_id = None
+    if args.job_id:
+        from harness.job_state import JOB_ID_PATTERN
+
+        if JOB_ID_PATTERN.fullmatch(str(args.job_id)):
+            worker_job_id = str(args.job_id)
+        else:
+            print(
+                f"[ai-harness] job-id '{args.job_id}' is not a dashboard worker "
+                "job id; skipping worker state update"
+            )
     try:
         runner = UniversalRunner(cfg=cfg, config_path=str(config_path), args=args)
         runner.run()
     except Exception as exc:
-        if args.job_id:
+        if worker_job_id:
             from harness.job_state import update_worker_state
 
             update_worker_state(
                 project.root,
-                args.job_id,
+                worker_job_id,
                 status="FAILED",
                 provider_status="FAILED",
                 error_message=str(exc),
@@ -1532,7 +1570,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 .hexdigest(),
             )
         raise
-    if args.job_id:
+    if worker_job_id:
         import json
         from harness.job_state import update_worker_state
 
@@ -1550,7 +1588,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         update_worker_state(
             project.root,
-            args.job_id,
+            worker_job_id,
             status="COMPLETED",
             provider_status="COMPLETED",
             result_metrics=metrics if isinstance(metrics, dict) else {"folds": metrics},
