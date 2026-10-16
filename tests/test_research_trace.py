@@ -132,8 +132,11 @@ class ResearchTraceTests(unittest.TestCase):
 
     def test_declared_notes_require_scope_and_do_not_fabricate_verified_evidence(self):
         insight = self.insight()
-        with self.assertRaises(ValueError):
-            self.memory.record_decision(insight_id=insight["id"], outcome="deferred", conclusion="Need evidence", next_action="Audit", lesson="No verified data")
+        # ``revisit_when`` now has a sensible default for rejected/deferred
+        # outcomes, so the decision succeeds; the fabricated-evidence case
+        # still raises.
+        decision = self.memory.record_decision(insight_id=insight["id"], outcome="deferred", conclusion="Need evidence", next_action="Audit", lesson="No verified data")
+        self.assertTrue(decision["revisit_when"])
         with self.assertRaises(ValueError):
             self.insight(evidence=["missing-run"])
         changed = task_document()

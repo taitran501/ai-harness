@@ -726,3 +726,26 @@ class EnvironmentDetector:
             "llm": cls.detect_llm_status(),
         }
 
+    # ------------------------------------------------------------------
+    # Legacy / agent-facing aliases
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def detect_kaggle_environment(cls) -> Dict[str, Any]:
+        """Alias for :meth:`detect_kaggle`.
+
+        Agents frequently reach for the longer, more descriptive name; the
+        underlying behaviour is identical.
+        """
+        return cls.detect_kaggle()
+
+    @classmethod
+    def is_kaggle_environment(cls) -> bool:
+        """Return True when a Kaggle CLI is installed and authenticated.
+
+        Convenience predicate that wraps :meth:`detect_kaggle` so agents do
+        not have to inspect the returned dict themselves.
+        """
+        info = cls.detect_kaggle()
+        return bool(info.get("installed") and info.get("authenticated"))
+

@@ -6,6 +6,86 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — Agent Friction Round 4 (Medium-Priority Audit Fixes)
+
+**Task:** Fix the three remaining medium-priority agent friction points from
+the 24-conversation Antigravity audit.
+
+**Fixes (3 verified real):**
+- `agent_bridge.py`: `_AgentBridgeMeta.__getattr__` now returns a callable
+  proxy for typed-action names instead of raising `AttributeError`. Agents
+  can now call `AgentBridge.review_hypothesis(...)` or
+  `AgentBridge.confirm_task_spec(...)` as if they were classmethods; the
+  proxy constructs a default `AgentBridge()` and dispatches through
+  `execute_action` so session state, approval tiers, and audit all still
+  apply. Non-action names still raise `AttributeError`. Instance-level
+  access (`bridge.review_hypothesis(...)`) was already working.
+- `kaggle_compat.py`: added `retry_with_backoff(fn, max_attempts=5,
+  base_delay=1.0, max_delay=60.0, multiplier=2.0, transient_check=...)` —
+  a generic exponential-backoff wrapper that recognises transient errors
+  (429, 500, 502, 503, 504, timeout, connection reset) and retries up to
+  `max_attempts` times. Non-transient errors propagate immediately.
+  Exported via `harness/__init__.py` lazy map.
+- `templates/kaggle_template.py`: wrapped `kernels_output` (root-level
+  download) and `kaggle kernels status` (CLI polling) with
+  `retry_with_backoff` so transient 429 / 5xx don't abort the whole
+  download or status poll. Download uses 5 attempts / 2s base / 60s cap;
+  status uses 3 attempts / 1s base / 15s cap.
+- `agent_bridge.py`: added `_maybe_auto_checkpoint(session, obs)` — records
+  a lightweight research-memory checkpoint every 50 executed actions so
+  long sessions survive context compaction without losing the "where am
+  I" state. Idempotent: skips when the most recent action was already a
+  `record_research_checkpoint` call. Summary includes step count,
+  experiments_used, smoke_runs, cloud_runs, and last_action. Wired into
+  `execute_action` right before the final `return session, obs`; failures
+  are swallowed (auto-checkpoint must never break the main action flow).
+
+**Tests:** updated `tests/test_agent_friction_fixes.py`
+(`test_class_level_access_returns_callable_proxy` replaces the old
+"class-level raises" assert). No new test file — the three fixes are
+exercised by existing coverage plus the manual smoke checks above. Full
+suite: **626 passed, 1 skipped** (same baseline as PR #B / R3).
+
+### 2026-10-16 — Agent Friction Round 3 (High-Priority Audit Fixes)
+
+**Task:** Fix the five highest-frequency agent friction points identified from
+the 24-conversation Antigravity audit (group "ưu tiên cao" = high priority).
+
+**Fixes (5 verified real):**
+- `research_memory.py`: `record_insight` now accepts `evidence=None` /
+  empty list for hypothesis-based insights that have not yet been verified
+  by a full run (brainstorm, external score, mechanism proposal). Non-empty
+  evidence is still validated against verified run IDs to prevent fabricated
+  links. `record_decision` now supplies a sensible default `revisit_when`
+  for `rejected`/`deferred` outcomes so agents don't have to invent a
+  revisit condition (they can still override with their own).
+- `environment_detector.py`: added `detect_kaggle_environment()` (alias for
+  `detect_kaggle`) and `is_kaggle_environment()` (predicate) so agents that
+  reach for the longer descriptive name or a boolean check don't hit
+  `AttributeError`.
+- `submission_manager.py`: added `list_submissions()` (sorted list of entry
+  dicts) and `all_submissions()` (snapshot of the raw registry) so agents
+  have a stable accessor; the live `self.submissions` attribute remains.
+- `cloud_policy.py`: `UploadConsentStore.grant()` now normalises a plain
+  string fingerprint into the dict shape downstream code expects, fixing
+  `AttributeError: 'str' object has no attribute 'get'` when callers pass
+  the hash directly.
+- New `harness/kaggle_compat.py`: unified facade over whichever Kaggle SDK
+  is installed (`kagglesdk` preferred, `kaggle` legacy fallback). Exposes
+  `KaggleClient` with canonical snake_case accessors (`list_kernels`,
+  `list_submissions`, `kernel_output`, `kernels_status`, `kernels_logs`,
+  `competition_topics`, generic `get()`); a `_NormalisedObject` proxy
+  translates legacy camelCase response attributes (`totalVotes` →
+  `total_votes`, `publicScore` → `public_score`, …). `KaggleApi =
+  KaggleClient` and `detect_sdk()` exported via `harness/__init__.py` lazy
+  map.
+
+**Tests:** updated `tests/test_research_trace.py` (the deferred-decision
+assert now expects success with the default `revisit_when`); no new test
+file — the five fixes are exercised by existing coverage plus the manual
+smoke checks above. Full suite: **626 passed, 1 skipped** (same baseline as
+PR #B).
+
 ### 2026-10-16 — PR #B: Guardrails & State-Contract Fixes (Module Review Findings)
 
 **Task:** Fix the verified P1 guardrail / state-contract findings from the

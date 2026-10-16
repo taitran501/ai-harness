@@ -673,11 +673,18 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
             slug = f"{username}/{slug}"
 
         try:
-            proc = subprocess.run(
-                ["kaggle", "kernels", "status", slug],
-                capture_output=True,
-                text=True,
-                timeout=30,
+            # Wrap with retry-with-backoff so transient 429 / network errors from
+            # the `kaggle` CLI don't abort status polling; the API rate-limits
+            # bursty callers and the CLI surfaces that as a non-zero exit.
+            from harness.kaggle_compat import retry_with_backoff
+            proc = retry_with_backoff(
+                lambda: subprocess.run(
+                    ["kaggle", "kernels", "status", slug],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                ),
+                max_attempts=3, base_delay=1.0, max_delay=15.0,
             )
             output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
             status_state = "UNKNOWN"
@@ -812,12 +819,19 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
     def _download_output_api(cls, slug, download_dir):
         """Use the public API's pagination and HTTP checks for root-level run output."""
         from kaggle.api.kaggle_api_extended import KaggleApi
+        from harness.kaggle_compat import retry_with_backoff
 
         api = KaggleApi()
         api.authenticate()
         # Root exports have no experiment ID in their filenames. Filter by layout,
         # not by ID, and avoid old nested source/data copies and duplicate manifests.
-        api.kernels_output(slug, path=str(download_dir), file_pattern=r"^[^/\\]+$", quiet=True)
+        # Wrap with retry-with-backoff so transient 429 / 5xx don't abort the
+        # whole download; the Kaggle API rate-limits bursty callers.
+        retry_with_backoff(
+            lambda: api.kernels_output(slug, path=str(download_dir),
+                                       file_pattern=r"^[^/\\]+$", quiet=True),
+            max_attempts=5, base_delay=2.0, max_delay=60.0,
+        )
 
     @classmethod
     def pull_kernel_output(

@@ -129,6 +129,22 @@ class SubmissionManager:
         next_idx = max(existing_indices, default=0) + 1
         return f"sub_{next_idx:03d}"
 
+    def list_submissions(self) -> List[Dict[str, Any]]:
+        """Return a list of submission entry dicts, sorted by submission ID.
+
+        Agents commonly reach for a ``list_submissions`` method; this is the
+        canonical accessor for the registry contents.
+        """
+        return [asdict(entry) for sid, entry in sorted(self.submissions.items())]
+
+    def all_submissions(self) -> Dict[str, "SubmissionEntry"]:
+        """Return a copy of the submissions registry (mapping sub_id -> entry).
+
+        Use this when you need the raw dict (the ``self.submissions`` attribute
+        is live and may mutate; this returns a snapshot).
+        """
+        return dict(self.submissions)
+
     def register_submission(
         self,
         exp_id: str,

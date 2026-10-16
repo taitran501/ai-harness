@@ -163,13 +163,22 @@ class UploadConsentStore:
     def grant(
         self,
         provider: str,
-        fingerprint_data: Dict[str, Any],
+        fingerprint_data: Dict[str, Any] | str,
         confirmed_upload: bool = True,
         **_extra: Any,
     ) -> Dict[str, Any]:
         # ``confirmed_upload`` and any other caller-supplied flags are accepted
         # and recorded so callers can pass their confirmation semantics without
         # a TypeError; the record itself stays stable for downstream readers.
+        #
+        # Some callers pass the fingerprint hash as a plain string rather than
+        # the full dict; normalise to a dict so downstream .get() calls work.
+        if isinstance(fingerprint_data, str):
+            fingerprint_data = {
+                "fingerprint": fingerprint_data,
+                "task_id": None,
+                "file_count": 0,
+            }
         record_extra = {
             "confirmed_upload": bool(confirmed_upload),
             "flags": {k: _extra[k] for k in sorted(_extra) if isinstance(

@@ -136,12 +136,18 @@ class TestAgentBridgeTypedActionAliases(unittest.TestCase):
             with self.subTest(action=action.value):
                 self.assertTrue(callable(getattr(self.bridge, action.value)))
 
-    def test_class_level_call_gets_actionable_error(self) -> None:
+    def test_class_level_access_returns_callable_proxy(self) -> None:
+        # Class-level access to a typed action now returns a callable proxy
+        # that dispatches through AgentBridge().execute_action. This lets
+        # agents reach for `AgentBridge.review_hypothesis(...)` without
+        # having to construct a bridge first. Non-action names still raise.
+        proxy = AgentBridge.review_hypothesis  # type: ignore[attr-defined]
+        self.assertTrue(callable(proxy))
+        self.assertEqual(proxy.__name__, "review_hypothesis")
+        self.assertIn("review_hypothesis", proxy.__doc__ or "")
         with self.assertRaises(AttributeError) as ctx:
-            AgentBridge.review_hypothesis  # type: ignore[attr-defined]
-        msg = str(ctx.exception)
-        self.assertIn("review_hypothesis", msg)
-        self.assertIn("call it on an instance", msg)
+            _ = AgentBridge.not_a_real_action  # type: ignore[attr-defined]
+        self.assertIn("not_a_real_action", str(ctx.exception))
 
     def test_alias_forwards_to_execute_action(self) -> None:
         observation = self.bridge.get_next_experiment_id(

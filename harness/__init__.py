@@ -49,6 +49,10 @@ _LAZY_MAP = {
     # templates.kaggle_template
     "KaggleKernelManager": (".templates.kaggle_template", "KaggleKernelManager"),
     "kaggle_manager": (".templates.kaggle_template", "KaggleKernelManager"),
+    # kaggle_compat
+    "KaggleClient": ".kaggle_compat",
+    "detect_sdk": ".kaggle_compat",
+    "retry_with_backoff": ".kaggle_compat",
     # models
     "RobustTabularTransformer": ".models",
     "NativeCategoricalTransformer": ".models",
@@ -98,6 +102,9 @@ __all__ = [
     "SubmissionValidator",
     "KaggleKernelManager",
     "kaggle_manager",
+    "KaggleClient",
+    "detect_sdk",
+    "retry_with_backoff",
     "KaggleLeaderboardTracker",
     "ThresholdOptimizer",
     "QuantileMatcher",
