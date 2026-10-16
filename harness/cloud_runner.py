@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from harness.cloud_inspector import CloudPreflightInspector
 from harness.project import HarnessProject
 from harness.templates.kaggle_template import KaggleKernelManager
-from harness.templates.modal_template import generate_modal_script
+from harness.templates.modal_template import generate_modal_script, push_dataset_to_modal
 from harness.cloud_policy import UploadConsentStore, dataset_fingerprint, private_upload_resource_names
 from harness.remote_runtime import resolve_remote_runtime
 from harness.tree_journal import TreeJournal
