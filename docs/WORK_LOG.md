@@ -6,6 +6,57 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — Coverage gap closed (kaggle_compat) + lint gate extended to tests/
+
+**Task:** third improvement audit — "còn gì để improve cho codebase" — after the
+ergonomics round; scanned the angles not yet audited (coverage, dead code,
+exception swallowing, fixture reuse, docs/CLI consistency, packaging).
+
+**Findings (measured, not assumed):**
+- `harness/kaggle_compat.py` (348 lines) was the ONLY module with zero test
+  references. It runs inside the REMOTE Kaggle kernel (generated template
+  imports `retry_with_backoff`), where a normalisation bug means a full
+  kernel loss with no local traceback.
+- `tests/` was outside the ruff gate; 6 pre-existing lint errors lived there
+  (1 F401, 3 F541, 2 E741, 1 E702).
+- Dead-code scan: 29 initial candidates → 6 after full corpus (tests +
+  templates + pyproject) → 0 real: all are documented agent-facing aliases
+  (`detect_kaggle_environment`), snapshot accessors (`all_submissions`),
+  HTTP handlers (`do_POST`/`do_OPTIONS`), or `get_next_session_id`
+  (public session API).
+- Exception scan: 192 bare-except candidates are mostly legitimate
+  best-effort probes (env detection, IO). Targeted check for the dangerous
+  pattern (failed write swallowed as success) in state modules
+  (competition_state, tree_journal, research_memory, session_budget,
+  artifact_registry): zero.
+- Fixture scan: 18 test files build workspaces manually instead of
+  `make_workspace()` — real but low-value/high-risk to refactor (all pass,
+  e2e structures differ); left as-is by decision.
+- Docs/CLI: all four AGENTS.md binaries exist as entry points;
+  `ai-harness-audit`/`ai-harness-bootstrap` documented in docs/; tiered
+  runner auto-discovers new test files (no stale SLOW list).
+
+**Changes:**
+- New `tests/test_kaggle_compat.py` (18 tests, network-free): `detect_sdk`
+  precedence, `_NormalisedObject` (direct / forward-alias / reverse-alias /
+  pydantic `model_dump` / primitive passthrough / eq/hash/repr / miss),
+  `_is_transient_error` classification, `retry_with_backoff` (success,
+  retry-then-succeed, immediate permanent fail, exhaustion, custom
+  transient_check). Bite-checked twice: (a) removing the forward-alias step
+  fails `test_reverse_alias_canonical_to_legacy` (first attempt was masked
+  by the `model_dump` fallback — isolated with a no-model_dump fixture),
+  (b) removing the permanent-error check fails
+  `test_permanent_error_raises_immediately`.
+- Fixed all 6 tests/ lint errors; extended the pre-push gate in AGENTS.md
+  to `ruff check harness/ tools/ tests/ --select F,E7`.
+
+**Tests:** 679 OK (was 661). Ruff gate clean across harness + tools + tests.
+
+**Lesson:** the riskiest untested code is the code that runs where you
+cannot debug it — remote kernels. Coverage decisions should weigh
+"how expensive is a silent failure" more than line count. Lint gates must
+cover where the code is, not just where the gate was first written.
+
 ### 2026-10-17 — Agent-ergonomics update: HUD token economy, hygiene signal, plugin/model discoverability, PowerShell-safe SOP
 
 **Task:** "còn gì để improve cho repo / update để agent thao tác thuận tiện" —

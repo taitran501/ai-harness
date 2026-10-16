@@ -245,7 +245,7 @@ class TestZeroCVContamination(unittest.TestCase):
         self.assertEqual(
             len(matches),
             0,
-            f"Found (CV) contamination in dashboard/src/:\n" + "\n".join(matches),
+            "Found (CV) contamination in dashboard/src/:\n" + "\n".join(matches),
         )
 
 
@@ -283,7 +283,7 @@ class TestI18nCompletenessAndQuality(unittest.TestCase):
         self.assertEqual(
             mismatches,
             [],
-            f"Parameter interpolation mismatches:\n" + "\n".join(mismatches),
+            "Parameter interpolation mismatches:\n" + "\n".join(mismatches),
         )
 
     def test_all_used_translation_keys_are_defined(self):
