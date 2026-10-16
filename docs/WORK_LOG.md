@@ -6,6 +6,74 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — status-command performance part 2: cross-process env probe cache + lazy heavy imports (PR #73)
+
+**Context:** PR #71 (TTL cache + parallel probes + torch-skip + localhost
+fix) took the fresh-process `status` from ~18.4 s to ~4.7 s. Measured the
+remainder per component from a "new user" vantage point:
+
+| component | before part 2 | after part 2 |
+|---|---|---|
+| env probes (5 subprocesses, fresh process) | ~3.0 s | ~40–90 ms (disk cache hit) |
+| `harness.models` import (sklearn+GBDT) | ~2.5 s at module level | ~0 ms for name discovery |
+| `_plugins_section` | ~1.7 s | ~0.5 s |
+| `status` CLI, warm, no toolchain re-exec | ~2.4 s | **~1.7 s** |
+| `status` CLI, first-ever (cold) | 18.4 s | ~5.4 s |
+
+**Changes:**
+- `harness/env_cache.py`: added `disk_store`/`disk_load` (JSON, atomic
+  `os.replace`, fail-open, 120 s TTL = min of the per-probe process TTLs).
+- `harness/environment_detector.py`: `get_full_status(force=...,
+  disk_cache_dir=...)` primes the in-process TTL cache from a fresh
+  on-disk record *before* probing (so only stale keys re-probe) and writes
+  merged results back. Probes still run in parallel.
+- `harness/status_report.py` + `harness/cli.py` (`cloud status`): pass the
+  workspace `.ai-harness` dir as `disk_cache_dir` (no directory creation
+  for detached roots).
+- `harness/models.py`: lightgbm/xgboost/catboost presence now via
+  `importlib.util.find_spec` (no module execution); the real imports moved
+  to the three `_build_estimator` sites (first actual model build).
+  `HAS_*` semantics preserved.
+- `harness/model_registry.py` (new): `builtin_model_names()` serves the
+  built-in name list from an mtime-validated disk cache
+  (`harness/.model_names_cache.json`, gitignored); a miss delegates to
+  `harness.models.available_model_names()` — name logic never duplicated.
+  `status_report._plugins_section` now uses it.
+
+**Key diagnosis (measured, not assumed):**
+- `localhost` dual-stack on Windows doubled every dead-port probe
+  (2 × timeout) — fixed by normalizing to `127.0.0.1` in
+  `LLMEngine.check_local_endpoint` (part of #71's verification loop).
+- The status hot path paid the full numpy/pandas/sklearn first import
+  (~1.3 s) just to read class `NAMES` attributes — the registry exists
+  because `available_model_names()` lives inside the heavy module.
+- Order-dependent test flake root cause: first-time import of
+  `harness.evaluation` inside a `subprocess.Popen` mock window (scipy init
+  calls subprocess) — fixed by pre-importing at test module top.
+
+**Verification:**
+- 25 new tests in `tests/test_env_cache.py` (process TTL semantics, disk
+  cache across simulated processes, force-bypass both layers, TTL expiry,
+  corrupt/missing file fallbacks, model-registry no-import assertion,
+  mtime invalidation, corruption fallback).
+- Full suite: 782 passed, 1 skipped. `ruff check --select F,E7` clean.
+- Live (aimo workspace, after sync): cold ~5.4 s → warm **~1.7 s** direct.
+
+**Caveat discovered (not fixed here):** workspaces do not ship their own
+`harness/` package — `import harness` resolves to whichever workspace
+clone the global editable install last targeted (observed: aimo resolving
+to zindi's clone). `ensure_pinned_toolchain` detects this drift and
+re-execs under the workspace clone, which adds ~0.8–1.0 s per CLI call
+for every non-last-synced workspace. Correct behavior, real cost. The
+structural fix is "one canonical install + workspace pointers" instead of
+N clones + N `pip install -e .` — tracked as a future architecture item.
+
+**Next:**
+- `--smoke` test tier (<10 s critical invariants) for fast iteration.
+- Dependency pinning (`uv.lock`/constraints) — metric reproducibility.
+- `ai-harness validate-task` for instant task.yaml schema feedback.
+- Single-install architecture (eliminate the re-exec tax entirely).
+
 ### 2026-10-17 — evidence-continuity recovery: import verified local runs + cross-workspace adoption scan
 
 **Task:** the harness's purpose is anti-hallination + brainstorm
