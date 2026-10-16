@@ -189,6 +189,8 @@ def render_agents_md_body() -> str:
         "Never push kernels manually (`kaggle kernels push`) - manual runs have no evidence trail "
         "and the framework cannot see them.",
         "- If harness dispatch fails, **report the error** - do not silently fall back to a manual run.",
+        "- Manual cloud pushes are the **human operator's** privilege only (override env "
+        "`AI_HARNESS_ALLOW_MANUAL=1`, enforced by host hooks). Agents must not use it.",
         "- Directories under `.ai-harness/artifacts/` are immutable: never mutate completed runs.",
         "- After each iteration, record research continuity through the Bridge "
         "(`record_research_insight` / `record_research_decision` / `record_research_checkpoint`; "
@@ -312,9 +314,16 @@ def attach_project(
             shutil.rmtree(legacy_dir, ignore_errors=True)
 
     agents_md = update_agents_md(root)
+    try:
+        from harness.host_hooks import write_host_hooks
+
+        host_hooks = write_host_hooks(root)
+    except Exception:  # noqa: BLE001 - guardrail must never break attach
+        host_hooks = {"status": "failed"}
     return {
         "status": "ATTACHED",
         "agents_md": agents_md["status"],
+        "host_hooks": host_hooks.get("script", "") or host_hooks.get("status", "ok"),
         "project_root": str(root),
         "manifest": str(manifest_path),
         "agent_skill": str(skill_path),

@@ -1603,6 +1603,51 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             lines.extend(["", "## 🧹 Workspace Hygiene"])
             lines.extend(hygiene_lines)
 
+        # T3 session-start adoption gate (aexp pattern, implemented in the
+        # host-agnostic layer we control): the SOP mandates reading this
+        # context at session start, so bypass evidence is put in front of
+        # the agent on every session — instructions alone are advisory.
+        hygiene = pkt.get("workspace_hygiene") or {}
+        bypassed = [
+            f
+            for f in hygiene.get("findings", [])
+            if f.get("kind") == "bypassed_run_output"
+        ]
+        total_experiments = int(
+            (pkt.get("competition_hud") or {}).get("total_experiments") or 0
+        )
+        if bypassed or total_experiments == 0:
+            lines.extend(
+                [
+                    "",
+                    "## ⛔ Adoption protocol — read before any experiment work",
+                ]
+            )
+            if bypassed:
+                sample = bypassed[0].get("detail", "")
+                lines.append(
+                    f"- **{len(bypassed)} run-output finding(s) lack harness evidence** — "
+                    "dirs created OUTSIDE the harness (manual `kaggle kernels push` / "
+                    "ad-hoc scripts): no audit trail, no leaderboard record, invisible "
+                    "to the framework. " + sample[:160]
+                )
+            if total_experiments == 0:
+                lines.append(
+                    "- **0 harness experiments so far.** Every experiment MUST go "
+                    "through `create_experiment` → `run_smoke_test` → "
+                    "`run_full_validation` (Bridge actions below) — there is no "
+                    "supported alternative path for tracked runs."
+                )
+            lines.append(
+                "- If harness dispatch fails, **report the failure** — do not silently "
+                "fall back to a manual run. Manual pushes are the human operator's "
+                "privilege (`AI_HARNESS_ALLOW_MANUAL=1`), not the agent's."
+            )
+            lines.append(
+                "- Do not delete or rename run-output dirs to make this warning "
+                "disappear; surface them to the user instead."
+            )
+
         lines.extend(
             [
                 "",
