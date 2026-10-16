@@ -25,6 +25,35 @@ from harness.state_store import transaction, workspace_lock
 _SYNC_CACHE: dict = {}
 
 
+class _EntryRecord(dict):
+    """A ledger entry that is a real dict but also exposes fields as attributes.
+
+    Keeping it a dict subclass means every existing consumer (``entry["kind"]``,
+    ``entry.get(...)``, ``json.dumps(entry)``) keeps working, while agents that
+    reach for ``entry.kind`` also get a natural answer.
+    """
+
+    def __getattr__(self, name: str):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def __setattr__(self, name: str, value):
+        self[name] = value
+
+
+class _EntryList(list):
+    """List of :class:`_EntryRecord` that also supports the legacy callable form.
+
+    ``memory.entries`` and ``memory.entries()`` therefore both yield the same
+    list, so code written against either convention keeps working.
+    """
+
+    def __call__(self) -> "_EntryList":
+        return self
+
+
 class ResearchMemory:
     def __init__(self, project_root, artifacts_dir, task_spec, plugin=None):
         self.root = Path(project_root)
@@ -41,8 +70,19 @@ class ResearchMemory:
             return {"entries": []}
         return json.loads(self.path.read_text(encoding="utf-8"))
 
-    def entries(self):
-        return [e for e in self._read().get("entries", []) if e["scope"] == self.scope]
+    @property
+    def entries(self) -> _EntryList:
+        """All entries for this scope, newest last.
+
+        Works as a property (``memory.entries[-3:]``) and as the legacy callable
+        (``memory.entries()``). Each element supports both attribute access
+        (``entry.kind``) and dict access (``entry["kind"]``).
+        """
+        return _EntryList(
+            _EntryRecord(e)
+            for e in self._read().get("entries", [])
+            if e["scope"] == self.scope
+        )
 
     def _append(self, kind, **fields):
         entry = {"id": uuid.uuid4().hex, "scope": self.scope, "kind": kind,

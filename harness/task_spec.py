@@ -212,7 +212,7 @@ TASK_TYPE_NORMALIZATIONS = {
 }
 
 
-@dataclass
+@dataclass(init=False)
 class SubtaskSpec:
     """Specification for an individual subtask."""
 
@@ -227,6 +227,44 @@ class SubtaskSpec:
     direction: str = "maximize"
     weight: float = 1.0
     condition: Optional[ConditionalRoutingRule] = None
+
+    def __init__(
+        self,
+        id: str,
+        name: Optional[str] = None,
+        task_type: str = "binary_classification",
+        column: Optional[str] = None,
+        column_prefix: Optional[str] = None,
+        classes: Optional[List[str]] = None,
+        labels: Optional[List[str]] = None,
+        primary_metric: Optional[str] = None,
+        direction: str = "maximize",
+        weight: float = 1.0,
+        condition: Optional[ConditionalRoutingRule] = None,
+        *,
+        metric: Optional[str] = None,
+    ) -> None:
+        # ``metric`` is accepted as an alias for ``primary_metric``: task configs
+        # and agents routinely use the singular name, and rejecting it at
+        # construction time is a pure friction bug (no information is lost).
+        if primary_metric is None:
+            primary_metric = metric if metric is not None else "macro_f1"
+        elif metric is not None and metric != primary_metric:
+            raise ValueError(
+                f"Conflicting metric aliases: primary_metric={primary_metric!r} "
+                f"and metric={metric!r}"
+            )
+        self.id = id
+        self.name = name if name is not None else id
+        self.task_type = task_type
+        self.column = column
+        self.column_prefix = column_prefix
+        self.classes = list(classes) if classes else []
+        self.labels = list(labels) if labels else []
+        self.primary_metric = primary_metric
+        self.direction = direction
+        self.weight = weight
+        self.condition = condition
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> SubtaskSpec:

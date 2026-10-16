@@ -118,6 +118,42 @@ class TestBackendResolution(unittest.TestCase):
         self.assertEqual((backend, locked), ("local", False))
 
 
+class TestCliBackendResolution(unittest.TestCase):
+    """ai-harness-run (runner.main) resolves the backend the same way the
+    bridge does, and never sends smoke/probe runs to a cloud backend."""
+
+    def test_contract_default_applies_to_full_runs(self) -> None:
+        from harness.runner import resolve_cli_backend
+
+        self.assertEqual(resolve_cli_backend(None, "kaggle", True, False), "kaggle")
+        self.assertEqual(resolve_cli_backend(None, "modal", False, False), "modal")
+        self.assertEqual(resolve_cli_backend(None, None, False, False), "local")
+
+    def test_smoke_runs_always_local(self) -> None:
+        from harness.runner import resolve_cli_backend
+
+        # omitted --backend on a locked kaggle contract: smoke stays local
+        self.assertEqual(resolve_cli_backend(None, "kaggle", True, True), "local")
+        # explicit local smoke on a locked contract is allowed
+        self.assertEqual(resolve_cli_backend("local", "kaggle", True, True), "local")
+
+    def test_lock_violation_rejected_for_full_runs(self) -> None:
+        from harness.runner import resolve_cli_backend
+
+        with self.assertRaises(ValueError) as ctx:
+            resolve_cli_backend("local", "kaggle", True, False)
+        self.assertIn("Backend lock violation", str(ctx.exception))
+        self.assertIn("kaggle", str(ctx.exception))
+
+    def test_matching_and_unlocked_backends_accepted(self) -> None:
+        from harness.runner import resolve_cli_backend
+
+        self.assertEqual(resolve_cli_backend("KAGGLE", "kaggle", True, False), "kaggle")
+        # unlocked contract: any backend override is fine
+        self.assertEqual(resolve_cli_backend("local", "kaggle", False, False), "local")
+        self.assertEqual(resolve_cli_backend("modal", None, False, False), "modal")
+
+
 class TestHudAndGuard(unittest.TestCase):
     def test_hud_surfaces_locked_backend(self) -> None:
         bridge, ws = _make_bridge(LOCKED_TASK)

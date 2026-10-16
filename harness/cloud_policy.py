@@ -160,7 +160,21 @@ class UploadConsentStore:
             for item in self._load().get("consents", [])
         )
 
-    def grant(self, provider: str, fingerprint_data: Dict[str, Any]) -> Dict[str, Any]:
+    def grant(
+        self,
+        provider: str,
+        fingerprint_data: Dict[str, Any],
+        confirmed_upload: bool = True,
+        **_extra: Any,
+    ) -> Dict[str, Any]:
+        # ``confirmed_upload`` and any other caller-supplied flags are accepted
+        # and recorded so callers can pass their confirmation semantics without
+        # a TypeError; the record itself stays stable for downstream readers.
+        record_extra = {
+            "confirmed_upload": bool(confirmed_upload),
+            "flags": {k: _extra[k] for k in sorted(_extra) if isinstance(
+                _extra[k], (bool, int, float, str))},
+        }
         state = self._load()
         record = {
             "provider": provider,
@@ -171,6 +185,7 @@ class UploadConsentStore:
             "granted_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "visibility": "private",
         }
+        record.update(record_extra)
         consents = [
             item for item in state.get("consents", [])
             if not (item.get("provider") == provider and item.get("fingerprint") == record["fingerprint"])

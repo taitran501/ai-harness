@@ -224,11 +224,71 @@ class BridgeSession:
     stop_reason: Optional[str] = None
 
 
-class AgentBridge:
+_TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName)
+
+
+class _AgentBridgeMeta(type):
+    """Metaclass that routes class-level typed-action lookups to actionable guidance."""
+
+    def __getattr__(cls, name: str):
+        if name in _TYPED_ACTION_NAMES:
+            raise AttributeError(
+                f"AgentBridge.{name} is a typed action; call it on an instance: "
+                f"bridge = AgentBridge(project_root); bridge.{name}(**params) "
+                f"(or bridge.execute_action('{name}', {{...}}))."
+            )
+        raise AttributeError(name)
+
+
+class AgentBridge(metaclass=_AgentBridgeMeta):
     """Bidirectional Context & Typed Action Bridge between Antigravity (IDE) and the ML Harness.
 
     Motto: Antigravity thinks. AgentBridge coordinates. Harness verifies and executes.
     """
+
+    # execute_action keyword arguments that must not be swallowed into `params`
+    _EXEC_RESERVED_KEYWORDS = (
+        "rationale", "session_id", "goal", "budget", "user_approved",
+    )
+
+    def __getattr__(self, name: str):
+        """Expose every registered Typed Action as a direct method.
+
+        Agents naturally call ``bridge.review_hypothesis(...)`` or
+        ``bridge.run_smoke_test(config_path=...)`` as if they were Python
+        methods. This keeps that ergonomic style working while preserving a
+        single execution path through :meth:`execute_action` (session state,
+        approval tiers, and audit all still apply).
+        """
+        if name.startswith("__") or name not in _TYPED_ACTION_NAMES:
+            raise AttributeError(f"'AgentBridge' object has no attribute '{name}'")
+
+        def _invoke(*args, **kwargs):
+            params: Dict[str, Any] = {}
+            if args and isinstance(args[0], dict):
+                params = dict(args[0])
+                args = args[1:]
+            if len(args) > 1:
+                raise TypeError(
+                    f"{name}() takes at most one positional argument (the params dict)"
+                )
+            params.update(kwargs)
+            reserved = {
+                key: params.pop(key)
+                for key in list(params)
+                if key in self._EXEC_RESERVED_KEYWORDS
+            }
+            _, observation = self.execute_action(name, params=params, **reserved)
+            return observation
+
+        _invoke.__name__ = name
+        _invoke.__qualname__ = f"AgentBridge.{name}"
+        _invoke.__doc__ = (
+            f"Direct alias for the typed action '{name}' "
+            f"(forwards to execute_action)."
+        )
+        return _invoke
+
 
     def __init__(
         self,
@@ -2389,28 +2449,38 @@ class AgentBridge:
         configs_dir.mkdir(parents=True, exist_ok=True)
 
         exp_id = params.get("exp_id")
+        auto_exp_note = ""
         if not exp_id:
             next_num = self.get_next_experiment_num()
             exp_id = f"exp{next_num:03d}_{branch}_{descriptor}"
         else:
-            # Check if exp_id collides with existing immutable artifacts
+            # A requested ID must never overwrite immutable artifacts. Instead of
+            # failing, auto-assign the next free ID and report it in the result.
+            collision_dir = None
             for hidden in [".ai-harness", ".ml-harness"]:
                 art_root = self.project_root / hidden / "artifacts"
-                if art_root.exists():
-                    for cand_dir in art_root.iterdir():
-                        if cand_dir.is_dir() and (cand_dir / exp_id).exists():
-                            next_num = self.get_next_experiment_num()
-                            return ActionObservation(
-                                step_index=call.step_index,
-                                action=act,
-                                status="FAILED",
-                                summary=(
-                                    f"Experiment artifacts for '{exp_id}' already exist at '{cand_dir / exp_id}'. "
-                                    f"Completed runs are immutable under the Correctness Contract. "
-                                    f"Use next available ID: exp{next_num:03d}_{branch}_{descriptor}"
-                                ),
-                                elapsed_seconds=round(time.time() - t0, 3),
-                            )
+                if not art_root.exists():
+                    continue
+                collision_dir = next(
+                    (
+                        cand_dir
+                        for cand_dir in art_root.iterdir()
+                        if cand_dir.is_dir() and (cand_dir / exp_id).exists()
+                    ),
+                    None,
+                )
+                if collision_dir is not None:
+                    break
+            if collision_dir is not None:
+                requested_exp_id = exp_id
+                next_num = self.get_next_experiment_num()
+                exp_id = f"exp{next_num:03d}_{branch}_{descriptor}"
+                auto_exp_note = (
+                    f"Requested ID '{requested_exp_id}' already has immutable artifacts "
+                    f"at '{collision_dir / requested_exp_id}' (completed runs are "
+                    f"immutable under the Correctness Contract); auto-assigned "
+                    f"'{exp_id}' instead. "
+                )
 
         cfg_path = configs_dir / f"{exp_id}.yaml"
         uncertainty = str(params.get("uncertainty_level", "low")).lower()
@@ -2656,11 +2726,12 @@ class AgentBridge:
             step_index=call.step_index,
             action=act,
             status="SUCCESS",
-            summary=grounding_summary,
+            summary=(auto_exp_note + grounding_summary).strip(),
             artifact_path=rel_cfg,
             data={
                 "exp_id": exp_id,
                 "config_path": rel_cfg,
+                "auto_assigned_exp_id": exp_id if auto_exp_note else None,
                 "grounding_status": grounding_status,
                 "grounding_verification": grounding_verification,
                 "grounding_errors": grounding_errors,
@@ -2857,6 +2928,8 @@ class AgentBridge:
             str(self.project.task_config_path),
             "--config",
             cfg_path,
+            "--backend",
+            "local",
         ]
         if force:
             cmd.append("--force")

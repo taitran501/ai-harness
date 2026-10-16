@@ -32,6 +32,22 @@ from typing import Any, Callable, Dict, List, Optional
 _BUNDLE_BYTES_CACHE: Optional[Dict[tuple, bytes]] = None
 
 
+def _is_critical_identity_mismatch(key: str, mismatch: Dict[str, Any]) -> bool:
+    """Decide whether an artifact identity mismatch should block the import.
+
+    ``core_version`` drift is always tolerated (forward-compatible harness
+    versions). A ``job_id`` mismatch is only critical when the remote kernel
+    actually reports a *different* concrete job id; remote kernels do not know
+    about the locally generated job id, so an empty/``None`` actual value is not
+    a real conflict and must not block the import.
+    """
+    if key == "core_version":
+        return False
+    if key == "job_id" and mismatch.get("actual") in (None, ""):
+        return False
+    return True
+
+
 class KaggleKernelManager:
     """Manages Kaggle Dataset sync, Kernel dispatch, status monitoring, and output pulling."""
 
@@ -880,8 +896,9 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                         if value is not None and manifest.get(key) != value
                     }
                     critical_mismatches = {
-                        k: v for k, v in mismatches.items()
-                        if k not in {"core_version"}
+                        k: v
+                        for k, v in mismatches.items()
+                        if not _is_critical_identity_mismatch(k, v)
                     }
                     if mismatches:
                         if force_import:
@@ -891,9 +908,11 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                             )
                         elif not critical_mismatches:
                             import logging
+                            non_critical = ", ".join(sorted(mismatches))
                             logging.getLogger("ai-harness").warning(
-                                f"Kaggle artifact core_version mismatch: expected {mismatches['core_version']['expected']}, "
-                                f"got {mismatches['core_version']['actual']}. Proceeding with import."
+                                f"Kaggle artifact identity mismatch on non-critical field(s) "
+                                f"[{non_critical}]; the remote kernel did not report a concrete "
+                                f"conflicting value. Proceeding with import."
                             )
                         else:
                             return {
