@@ -278,6 +278,8 @@ def _adoption_section(project_root: Optional[str]) -> Dict[str, Any]:
         return {"status": "not_attached"}
     artifacts = root / ".ai-harness" / "artifacts"
     experiments = 0
+    quarantined_experiments = 0
+    recovered_dirs = 0
     if artifacts.is_dir():
         for task_dir in artifacts.iterdir():
             if not task_dir.is_dir():
@@ -285,6 +287,17 @@ def _adoption_section(project_root: Optional[str]) -> Dict[str, Any]:
             for run in task_dir.iterdir():
                 if run.is_dir() and (run / "artifact_manifest.json").is_file():
                     experiments += 1
+            quar_dir = task_dir / "quarantine"
+            if quar_dir.is_dir():
+                for run in quar_dir.iterdir():
+                    if run.is_dir() and (run / "artifact_manifest.json").is_file():
+                        quarantined_experiments += 1
+            try:
+                src_payload = json.loads((task_dir / "imported_sources.json").read_text(encoding="utf-8"))
+                if isinstance(src_payload, list):
+                    recovered_dirs += sum(1 for r in src_payload if isinstance(r, dict))
+            except (OSError, json.JSONDecodeError):
+                pass
     sessions_total = 0
     sessions_dir = root / ".ai-harness" / "agent_sessions"
     if not sessions_dir.is_dir() and artifacts.is_dir():
@@ -315,8 +328,10 @@ def _adoption_section(project_root: Optional[str]) -> Dict[str, Any]:
     return {
         "status": "ok",
         "experiments": experiments,
+        "quarantined_experiments": quarantined_experiments,
         "bypassed_run_outputs": bypassed,
         "bypassed_run_output_dirs": bypassed_dirs,
+        "recovered_run_output_dirs": recovered_dirs,
         "sessions": sessions_total,
         "verdict": verdict,
     }
@@ -391,8 +406,14 @@ def render_markdown(status: Dict[str, Any]) -> str:
     adoption = status.get("adoption", {})
     if adoption.get("status") == "ok":
         verdict = adoption.get("verdict", "?")
-        ok = verdict == "healthy"
-        detail = f"{adoption.get('experiments', 0)} experiments, {adoption.get('sessions', 0)} sessions"
+        ok = verdict in ("healthy", "bypass_detected") and adoption.get("bypassed_run_outputs", 0) == 0
+        detail = (
+            f"{adoption.get('experiments', 0)} experiments"
+            + (f", {adoption.get('quarantined_experiments', 0)} quarantined" if adoption.get("quarantined_experiments") else "")
+            + f", {adoption.get('sessions', 0)} sessions"
+        )
+        if adoption.get("recovered_run_output_dirs", 0) > 0:
+            detail += f", {adoption['recovered_run_output_dirs']} recovered"
         if adoption.get("bypassed_run_outputs", 0) > 0:
             dirs = adoption.get("bypassed_run_output_dirs") or 0
             detail += f", **{dirs} bypassed run-output dirs**" if dirs else ", **bypassed run-output dirs**"

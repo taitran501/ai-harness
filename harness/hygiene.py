@@ -22,6 +22,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import json
+
 import yaml
 
 # Top-level directories considered legitimate workspace structure.
@@ -148,6 +150,7 @@ def scan_workspace_hygiene(
     project_root = Path(project_root)
     findings: List[Dict[str, str]] = []
     non_run_output = 0
+    recovered_dirs = _recovered_source_dirs(project_root)
     try:
         entries = sorted(project_root.iterdir(), key=lambda p: p.name.lower())
     except OSError:
@@ -175,6 +178,7 @@ def scan_workspace_hygiene(
                             "path": entry.name,
                             "detail": "run-output dir",
                             "sealed": sealed,
+                            "recovered": entry.name in recovered_dirs,
                         }
                     )
                     continue
@@ -230,6 +234,33 @@ def scan_workspace_hygiene(
     return {"clean": clean, "findings": findings, "summary": summary}
 
 
+def _recovered_source_dirs(project_root: Path) -> set:
+    """Workspace-level dir names already recovered into the artifact tree.
+
+    Read from ``artifacts/<task>/imported_sources.json`` files written by
+    ``import_verified_local_run``. Advisory only: a missing/unreadable file
+    yields an empty set (dirs stay flagged as before)."""
+    names: set = set()
+    artifacts = project_root / ".ai-harness" / "artifacts"
+    if not artifacts.is_dir():
+        return names
+    try:
+        task_dirs = list(artifacts.iterdir())
+    except OSError:
+        return names
+    for task_dir in task_dirs:
+        try:
+            if not task_dir.is_dir():
+                continue
+            payload = json.loads((task_dir / "imported_sources.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for record in payload if isinstance(payload, list) else []:
+            if isinstance(record, dict) and isinstance(record.get("source_dir"), str):
+                names.add(record["source_dir"])
+    return names
+
+
 def _aggregate_run_output_dirs(findings: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """Collapse per-directory run-output findings into a single advisory.
 
@@ -241,9 +272,24 @@ def _aggregate_run_output_dirs(findings: List[Dict[str, str]]) -> List[Dict[str,
     others = [f for f in findings if f not in run_output]
     if len(run_output) <= 2:
         return findings
-    manual = [f for f in run_output if not f.get("sealed")]
-    sealed = [f for f in run_output if f.get("sealed")]
+    recovered = [f for f in run_output if f.get("recovered")]
+    rest = [f for f in run_output if not f.get("recovered")]
+    manual = [f for f in rest if not f.get("sealed")]
+    sealed = [f for f in rest if f.get("sealed")]
     aggregated: List[Dict[str, str]] = []
+    if recovered:
+        names = [f["path"] for f in recovered]
+        examples = ", ".join(names[:3]) + (f", … +{len(names) - 3} more" if len(names) > 3 else "")
+        aggregated.append({
+            "kind": "recovered_run_output",
+            "path": f"{len(recovered)} dirs",
+            "dir_count": len(recovered),
+            "detail": (
+                f"run-output dirs already imported into the artifact tree "
+                f"(see .ai-harness/artifacts/<task>/quarantine or run dirs + IMPORT_RECEIPT.json) — "
+                f"safe to delete (e.g. {examples})"
+            ),
+        })
     if manual:
         names = [f["path"] for f in manual]
         examples = ", ".join(names[:3]) + (f", … +{len(names) - 3} more" if len(names) > 3 else "")
