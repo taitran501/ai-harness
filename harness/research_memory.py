@@ -423,12 +423,30 @@ class ResearchMemory:
         ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
         return [self._compact(r) for _, _, r in ranked[:max(1, min(int(limit), 30))]]
 
+    @staticmethod
+    def _mechanism_key(model):
+        """Normalized model-family identifier for advisory mechanism matching.
+
+        Deliberately coarse: the family (architecture / model type / name) is
+        compared, hyperparameters are not — different C on the same logistic
+        model is the same mechanism. Returns "" when the model block is empty
+        (no family signal, no advisory).
+        """
+        if not isinstance(model, dict) or not model:
+            return ""
+        for key in ("architecture", "model_type", "family", "name", "type"):
+            value = model.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip().lower()
+        return ""
+
     def review(self, cfg, revisit_reason="", for_execution=False):
         fp = self.fingerprint(cfg)
         exp_id = cfg.get("experiment", {}).get("id")
         records = [*self.entries(), *self.sync()]
-        exact, neighbors = [], []
+        exact, neighbors, mechanism_matches = [], [], []
         model = cfg.get("model", {})
+        mechanism_key = self._mechanism_key(model)
         tokens = set(re.findall(r"\w+", " ".join(self._narrative(cfg).values()).lower()))
         for record in records:
             if for_execution and record.get("kind") == "proposal":
@@ -445,6 +463,19 @@ class ResearchMemory:
             overlap = len(tokens & other) / max(1, len(tokens | other))
             if overlap >= 0.45 or (model and model == record.get("model")):
                 neighbors.append({**self._compact(record), "token_similarity": round(overlap, 3)})
+            # Advisory mechanism match: same model family as an earlier entry
+            # (verified run, rejected decision, ...). Never blocks; lets the
+            # agent compare mechanisms and scores before re-running.
+            if (
+                mechanism_key
+                and record.get("exp_id") != exp_id
+                and self._mechanism_key(record.get("model")) == mechanism_key
+            ):
+                compact = self._compact(record)
+                compact["mechanism"] = mechanism_key
+                if record.get("score") is not None:
+                    compact.setdefault("score", record["score"])
+                mechanism_matches.append(compact)
         insight_id = (cfg.get("research") or {}).get("insight_id")
         trace_state = None
         if insight_id:
@@ -452,9 +483,11 @@ class ResearchMemory:
             if not trace_state["latest_plan_id"]:
                 raise ValueError("Linked insight needs plan_research_probe before implementation or execution")
         return {"fingerprint": fp, "exact_config_matches": exact[:8], "research_trace": trace_state,
-                "related_approaches": neighbors[:8], "revisit_reason": str(revisit_reason).strip(),
+                "related_approaches": neighbors[:8], "mechanism_matches": mechanism_matches[:5],
+                "revisit_reason": str(revisit_reason).strip(),
                 "allowed": not exact or bool(str(revisit_reason).strip()),
-                "interpretation": "Exact means same declared execution config; related is lexical advisory only. "
+                "interpretation": "Exact means same declared execution config; related is lexical advisory only; "
+                    "mechanism_matches lists earlier work on the same model family (advisory). "
                     "Explain changed mechanism or provide revisit_reason for replication/data/code changes."}
 
     def propose(self, cfg, revisit_reason="", session_id=None):

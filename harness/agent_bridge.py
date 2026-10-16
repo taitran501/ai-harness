@@ -1250,6 +1250,48 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
 
         graveyard = self._extract_idea_graveyard()
 
+        # P2 audit: submissions visibility — recent registry entries so agents
+        # can see what was submitted where without digging through the tree.
+        recent_submissions = []
+        try:
+            for entry in sorted(
+                sub_mgr.submissions.values(),
+                key=lambda e: e.created_at or "",
+                reverse=True,
+            )[:6]:
+                item: Dict[str, Any] = {
+                    "id": entry.id,
+                    "exp_id": entry.exp_id,
+                    "status": entry.status,
+                    "created_at": entry.created_at,
+                    "local_cv": {
+                        k: round(float(v), 4)
+                        for k, v in list(entry.local_cv_scores.items())[:4]
+                    },
+                    "official": {
+                        k: (round(float(v), 4) if v is not None else None)
+                        for k, v in list(entry.official_scores.items())[:4]
+                    },
+                }
+                if entry.archive_path:
+                    try:
+                        item["path"] = str(
+                            Path(entry.archive_path).relative_to(self.project_root)
+                        ).replace("\\", "/")
+                    except ValueError:
+                        item["path"] = entry.archive_path
+                recent_submissions.append(item)
+        except Exception:
+            pass
+
+        # P2 audit: workspace hygiene — advisory clutter scan of the root.
+        try:
+            from harness.hygiene import scan_workspace_hygiene
+
+            workspace_hygiene = scan_workspace_hygiene(self.project_root)
+        except Exception:
+            workspace_hygiene = {"clean": True, "findings": [], "summary": "unreadable"}
+
         packet = {
             "bridge_version": "1.1_antigravity_bridge",
             "project_root": str(self.project_root),
@@ -1270,6 +1312,8 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             "ucb_recommendation": ucb_rec,
             "parent_diagnostics_bottlenecks": bottlenecks,
             "idea_graveyard": graveyard,
+            "recent_submissions": recent_submissions,
+            "workspace_hygiene": workspace_hygiene,
             "research_memory": self._research_memory().context(
                 min_improvement=self._get_spec_min_improvement((active_session or {}).get("budget", {})),
                 patience=int((active_session or {}).get("budget", {}).get("max_consecutive_rejections") or 3),
@@ -1326,6 +1370,32 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 else " (default; explicit `--backend` overrides)"
             )
             lines.append(f"- **Execution Backend**: `{contract_backend.upper()}`{suffix}")
+
+        subs = pkt.get("recent_submissions") or []
+        lines.extend(["", "## 📦 Submissions (last {})".format(len(subs))])
+        if not subs:
+            lines.append(
+                "- (none yet — `prepare_submission` then `record_external_score`)"
+            )
+        for s in subs:
+            local = s.get("local_cv") or {}
+            official = s.get("official") or {}
+            local_label = (
+                f"{next(iter(local.values())):.4f} ({next(iter(local))})"
+                if local
+                else "—"
+            )
+            official_vals = [v for v in official.values() if v is not None]
+            official_label = (
+                f"{official_vals[0]:.4f}"
+                if official_vals
+                else ("—" if not official else "pending")
+            )
+            lines.append(
+                f"- `{s['id']}` exp=`{s['exp_id']}` | {s['status']} | "
+                f"local CV: {local_label} | official: {official_label}"
+                + (f" | `{s['path']}`" if s.get("path") else "")
+            )
 
         if sess:
             cu = sess.get("compute_usage", {})
@@ -1392,6 +1462,13 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                           "unreviewed_result_count", "unreviewed_results", "progress_path", "progress_warning")},
                           ensure_ascii=False),
                       *[f"- {step}" for step in memory["resume_protocol"]]])
+
+        from harness.hygiene import hygiene_hud_lines
+
+        hygiene_lines = hygiene_hud_lines(pkt.get("workspace_hygiene"))
+        if hygiene_lines:
+            lines.extend(["", "## 🧹 Workspace Hygiene"])
+            lines.extend(hygiene_lines)
 
         lines.extend(
             [
@@ -2878,7 +2955,13 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             else {}
         )
         exp_id = raw_cfg.get("experiment", {}).get("id", Path(cfg_path).stem)
-        self._review_research_config(raw_cfg, params, for_execution=True)
+        review = self._review_research_config(raw_cfg, params, for_execution=True)
+        # Advisory (never blocks): same model family as earlier work.
+        mechanism_warnings = [
+            f"{m.get('exp_id')} ({m.get('outcome') or m.get('evidence_status')}: "
+            f"{m.get('score') if m.get('score') is not None else 'n/a'})"
+            for m in (review.get("mechanism_matches") or [])
+        ]
 
         if backend in ("modal", "kaggle"):
             from harness.cloud_job_runner import CloudJobManager
@@ -2969,7 +3052,11 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 artifact_path=str(
                     (self.artifacts_dir / exp_id).relative_to(self.project_root)
                 ).replace("\\", "/"),
-                data={"returncode": retcode, "tail": out_text[-600:]},
+                data={
+                    "returncode": retcode,
+                    "tail": out_text[-600:],
+                    **({"mechanism_warnings": mechanism_warnings} if mechanism_warnings else {}),
+                },
                 elapsed_seconds=elapsed,
             )
 
@@ -3059,6 +3146,7 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                 "backend": backend,
                 "scores": detail_scores,
                 "incumbent_utility_gain": incumbent_gain,
+                **({"mechanism_warnings": mechanism_warnings} if mechanism_warnings else {}),
             },
             elapsed_seconds=elapsed,
         )
