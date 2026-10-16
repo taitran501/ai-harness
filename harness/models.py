@@ -15,27 +15,34 @@ from sklearn.linear_model import Ridge, LogisticRegression, Lasso
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 import warnings
 
-try:
-    import lightgbm as lgb  # noqa: F401  (import presence is the availability check)
-    from lightgbm import LGBMClassifier, LGBMRegressor
-    HAS_LIGHTGBM = True
-except (ImportError, Exception):
-    LGBMClassifier = LGBMRegressor = None
-    HAS_LIGHTGBM = False
+# Heavy GBDT libraries are imported LAZILY, on first actual model build.
+# `import harness.models` is on the `ai-harness status` hot path (the
+# plugins section asks for model names); a full lightgbm+xgboost+catboost
+# import costs ~1.2 s here and buys nothing for name discovery.
+# `importlib.util.find_spec` gives an accurate installed/not-installed
+# answer without executing the package (module execution is where the
+# seconds go - it loads the compiled runtime).
+import importlib.util
 
-try:
-    import xgboost as xgb  # noqa: F401  (import presence is the availability check)
-    from xgboost import XGBClassifier, XGBRegressor
-    HAS_XGBOOST = True
-except (ImportError, Exception):
-    XGBClassifier = XGBRegressor = None
-try:
-    import catboost as cb  # noqa: F401  (import presence is the availability check)
-    from catboost import CatBoostClassifier, CatBoostRegressor
-    HAS_CATBOOST = True
-except (ImportError, Exception):
-    CatBoostClassifier = CatBoostRegressor = None
-    HAS_CATBOOST = False
+
+def _library_present(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+HAS_LIGHTGBM = _library_present("lightgbm")
+HAS_XGBOOST = _library_present("xgboost")
+HAS_CATBOOST = _library_present("catboost")
+
+# Import surface preserved (previously the real classes when installed).
+# Callers should use the model classes (LightGBMModel, ...) which import
+# the underlying libraries in _build_estimator; these module-level names
+# stay None until a model build has actually imported them.
+LGBMClassifier = LGBMRegressor = None
+XGBClassifier = XGBRegressor = None
+CatBoostClassifier = CatBoostRegressor = None
 
 
 def validate_model_features(features: list, df: pd.DataFrame, forbidden: set, variant: str) -> None:
@@ -390,6 +397,8 @@ class LightGBMModel:
                 )
             col = st.column or key
             reg = st.task_type in ("regression", "ranking")
+            from lightgbm import LGBMClassifier, LGBMRegressor
+
             cls = LGBMRegressor if reg else LGBMClassifier
             valid = inspect.signature(cls).parameters
             model_kwargs = dict(self.kwargs)
@@ -520,6 +529,8 @@ class XGBoostModel:
                 )
             col = st.column or key
             reg = st.task_type in ("regression", "ranking")
+            from xgboost import XGBClassifier, XGBRegressor
+
             cls = XGBRegressor if reg else XGBClassifier
             valid = inspect.signature(cls).parameters
             has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in valid.values())
@@ -665,6 +676,8 @@ class CatBoostModel:
                 )
             col = st.column or key
             reg = st.task_type in ("regression", "ranking")
+            from catboost import CatBoostClassifier, CatBoostRegressor
+
             cls = CatBoostRegressor if reg else CatBoostClassifier
             valid = inspect.signature(cls).parameters
             has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in valid.values())

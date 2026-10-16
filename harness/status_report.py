@@ -91,12 +91,12 @@ def _plugins_section(project_root: Optional[str]) -> Dict[str, Any]:
     its active plugin; this section makes that discoverable from one health
     command instead of trial-and-error.
     """
-    from harness.models import available_model_names
+    from harness.model_registry import builtin_model_names
     from harness.plugins import list_task_plugins, load_task_plugin
     from harness.project import HarnessProject
 
     plugins = list_task_plugins()
-    built_in = available_model_names()
+    built_in = builtin_model_names()
     plugin_names: Dict[str, List[str]] = {}
     active_plugin_id = None
     project: Optional[HarnessProject] = None
@@ -234,11 +234,22 @@ def _count_unverified(artifacts_dir: Path) -> int:
 
 
 def _cloud_section(project_root: Optional[str]) -> Dict[str, Any]:
+    from pathlib import Path as _Path
+
     from harness.cloud_policy import UploadConsentStore
     from harness.environment_detector import EnvironmentDetector
     from harness.project import HarnessProject
 
-    env = EnvironmentDetector.get_full_status()
+    # One-shot CLI processes get nothing from the in-process TTL cache, so
+    # attach a disk cache under the workspace's .ai-harness dir (advisory:
+    # 120 s TTL, atomic write, fail-open). Workspaces without .ai-harness
+    # (detached roots) skip it rather than creating the directory.
+    disk_dir = None
+    if project_root:
+        candidate = _Path(project_root) / ".ai-harness"
+        if candidate.is_dir():
+            disk_dir = candidate
+    env = EnvironmentDetector.get_full_status(disk_cache_dir=disk_dir)
     # keep only presence flags, not credentials.
     # Each provider reports readiness under different key names; using the
     # wrong key made an authenticated kaggle CLI report as unavailable,
