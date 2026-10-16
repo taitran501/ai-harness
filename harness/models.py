@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import numpy as np
 import pandas as pd
+from typing import List
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -1013,6 +1014,25 @@ class DummyBaselineModel:
     def num_parameters(self):
         return max(len(self.fitted_targets), 1)
 
+
+
+def available_model_names() -> List[str]:
+    """Names accepted by :func:`create_model` (the generic built-in registry).
+
+    Task plugins can serve additional names via their ``build_model`` hook;
+    the workspace-level union is assembled by ``ai-harness status``.
+    """
+    names: set = set()
+    for cls in (
+        DummyBaselineModel,
+        GenericBaselineModel,
+        LightGBMModel,
+        XGBoostModel,
+        CatBoostModel,
+        RandomForestModel,
+    ):
+        names.update(getattr(cls, "NAMES", ()))
+    return sorted(names)
 
 
 def create_model(task_spec, model_name="baseline", **kwargs):

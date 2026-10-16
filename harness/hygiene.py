@@ -32,6 +32,8 @@ ALLOWED_TOP_DIRS = {
     "tools",
     "submissions",
     "data",
+    "dataset",
+    "splits",
     "notebooks",
     "models",
     "outputs",
@@ -41,11 +43,30 @@ ALLOWED_TOP_DIRS = {
     "kaggle",
     "ai-harness",
     "research",
+    "research_datasets",
+    "research_kernels",
+    "external_kernels",
     "prompts",
+    "scratch",
+    "plugin",
+    "__pycache__",
     ".ai-harness",
     ".ml-harness",
     ".agents",
 }
+
+# Run-output directories produced by Kaggle/cloud dispatches. Individually
+# these are legitimate, but dozens of them pile up at the workspace root;
+# the scanner aggregates them into ONE advisory instead of 30 lines of noise.
+RUN_OUTPUT_DIR_PREFIXES = ("kaggle_sub", "kernel_output")
+RUN_OUTPUT_DIR_EXACT = {"kaggle_results", "kaggle_err_log"}
+
+
+def _is_run_output_dir(name: str) -> bool:
+    low = name.lower()
+    if low in RUN_OUTPUT_DIR_EXACT:
+        return True
+    return low.startswith(RUN_OUTPUT_DIR_PREFIXES)
 
 _SCRATCH_SUFFIXES = (".tmp", ".bak", ".swp", ".orig")
 _SCRATCH_STEM_PREFIXES = ("_", "~$")
@@ -83,6 +104,7 @@ def scan_workspace_hygiene(
     """
     project_root = Path(project_root)
     findings: List[Dict[str, str]] = []
+    non_run_output = 0
     try:
         entries = sorted(project_root.iterdir(), key=lambda p: p.name.lower())
     except OSError:
@@ -93,53 +115,89 @@ def scan_workspace_hygiene(
             continue  # hidden state dirs are harness-managed
         try:
             if entry.is_dir():
-                if entry.name.lower() not in ALLOWED_TOP_DIRS:
-                    try:
-                        n_files = sum(1 for _ in entry.rglob("*") if _.is_file())
-                    except OSError:
-                        n_files = -1
-                    detail = f"top-level dir outside allow-list ({n_files} files)"
-                    if n_files == -1:
-                        detail = "top-level dir outside allow-list"
+                name_low = entry.name.lower()
+                if name_low in ALLOWED_TOP_DIRS:
+                    continue
+                if _is_run_output_dir(name_low):
+                    # Run-output dirs collapse into ONE aggregated advisory
+                    # later; count ALL of them (no file-count rglob needed)
+                    # without being limited by max_findings.
                     findings.append(
-                        {"kind": "unknown_dir", "path": entry.name, "detail": detail}
+                        {"kind": "unknown_dir", "path": entry.name, "detail": "run-output dir"}
                     )
+                    continue
+                if non_run_output >= max_findings:
+                    break
+                try:
+                    n_files = sum(1 for _ in entry.rglob("*") if _.is_file())
+                except OSError:
+                    n_files = -1
+                detail = f"top-level dir outside allow-list ({n_files} files)"
+                if n_files == -1:
+                    detail = "top-level dir outside allow-list"
+                findings.append(
+                    {"kind": "unknown_dir", "path": entry.name, "detail": detail}
+                )
+                non_run_output += 1
             else:
+                if non_run_output >= max_findings:
+                    break
+                finding = None
                 if _is_scratch_file(entry):
                     try:
                         size = entry.stat().st_size
                     except OSError:
                         size = 0
-                    findings.append(
-                        {
-                            "kind": "scratch_file",
-                            "path": entry.name,
-                            "detail": f"scratch/temp file ({_human_size(size)})",
-                        }
-                    )
+                    finding = {
+                        "kind": "scratch_file",
+                        "path": entry.name,
+                        "detail": f"scratch/temp file ({_human_size(size)})",
+                    }
                 elif entry.suffix.lower() in {".csv", ".parquet", ".feather"}:
                     try:
                         size = entry.stat().st_size
                     except OSError:
                         size = 0
-                    findings.append(
-                        {
-                            "kind": "stray_data_file",
-                            "path": entry.name,
-                            "detail": (
-                                f"data file in workspace root ({_human_size(size)}); "
-                                "move to data/ or ignore it"
-                            ),
-                        }
-                    )
+                    finding = {
+                        "kind": "stray_data_file",
+                        "path": entry.name,
+                        "detail": (
+                            f"data file in workspace root ({_human_size(size)}); "
+                            "move to data/ or ignore it"
+                        ),
+                    }
+                if finding is not None:
+                    findings.append(finding)
+                    non_run_output += 1
         except OSError:
             continue
-        if len(findings) >= max_findings:
-            break
 
+    findings = _aggregate_run_output_dirs(findings)
     clean = not findings
     summary = "workspace root clean" if clean else f"{len(findings)} hygiene issue(s)"
     return {"clean": clean, "findings": findings, "summary": summary}
+
+
+def _aggregate_run_output_dirs(findings: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Collapse per-directory run-output findings into a single advisory.
+
+    A workspace with 30 ``kaggle_sub_*`` / ``kernel_output*`` directories
+    should produce ONE line (with examples + count), not 30 lines that
+    dominate the context HUD.
+    """
+    run_output = [f for f in findings if f["kind"] == "unknown_dir" and _is_run_output_dir(f["path"].lower())]
+    others = [f for f in findings if f not in run_output]
+    if len(run_output) <= 2:
+        return findings
+    names = [f["path"] for f in run_output]
+    examples = ", ".join(names[:3]) + (f", … +{len(names) - 3} more" if len(names) > 3 else "")
+    return [
+        {
+            "kind": "stale_run_output",
+            "path": f"{len(run_output)} dirs",
+            "detail": f"Kaggle/kernel run-output dirs at workspace root — move to artifacts/ or delete (e.g. {examples})",
+        }
+    ] + others
 
 
 def hygiene_hud_lines(hygiene: Optional[Dict[str, object]], limit: int = 6) -> List[str]:

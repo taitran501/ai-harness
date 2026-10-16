@@ -77,6 +77,22 @@ AI-Harness supports three execution targets:
 2. **Modal.com**: Serverless GPU dispatch with persistent volume caching for heavy transformer training.
 3. **Kaggle**: Automated kernel generation, push, and remote artifact synchronization.
 
+### 3.1 Backend resolution and locking
+
+`run_full_validation` resolves the backend in order: **explicit `--backend` param > task contract `execution.backend` > `local`**. A task contract may declare `execution: {backend: kaggle, locked: true}`; with `locked: true`, any conflicting backend is rejected (`Backend lock violation`) — this stops accidental local OOM runs on GPU-locked tasks. Smoke tests (`run_smoke_test`, single fold) **always run locally**, even in locked workspaces.
+
+### 3.2 Dispatch preflight and remote re-validation
+
+Before dispatch, `CloudPreflightInspector` runs a preflight pass. The dispatch path uses `full_data_check=False` (fast mode): it validates environment, config, and dataset-file presence without loading the training frame, so a multi-GB frame is not re-loaded into local memory on every dispatch. Explicit preflight commands keep `full_data_check=True`. The remote job re-validates its own data as its first step.
+
+### 3.3 Remote job lifecycle
+
+`CloudJobManager` (`harness/cloud_job_runner.py`) tracks dispatched jobs in a JSON store (`.ai-harness/artifacts/<task>/cloud_jobs.json`): status, log file, return code, timestamps. Agents inspect and wait through the agent bridge (`act --action inspect_cloud_job / wait_cloud_job --job-id <id>`); the dashboard streams logs over SSE with a byte-offset resume (`start_byte`) using a binary seek — text-mode `seek()` is undefined behaviour on CPython. `ai-harness kaggle status|log --exp <id>` inspects a Kaggle kernel without re-dispatching (kernel slug derived as `<owner>/<task_slug>-<exp_id>`), and `ai-harness export-kaggle-notebook` exports a standalone offline submission notebook from a verified run.
+
+### 3.4 Framework upgrades in workspaces
+
+Workspaces hold a clone of this repository; after a framework release, `ai-harness sync` updates the clone (git fast-forward only), reinstalls, re-attaches, and regenerates the agent skill — one command, no hand-written multi-step sync prompts.
+
 ---
 
 ## 4. Verification Scope and Development Roadmap

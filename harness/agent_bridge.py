@@ -269,6 +269,69 @@ class _AgentBridgeMeta(type):
         )
 
 
+def _truncate_text(value: Any, limit: int) -> str:
+    text = str(value or "").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "\u2026"
+
+
+def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
+    """Render the research memory payload as compact HUD lines.
+
+    The pre-fix HUD embedded the full payload as one raw ``json.dumps`` line
+    (~500 tokens even for an empty workspace, far more with real research
+    history) — exactly the context saturation the framework forbids. The full
+    payload stays available via ``context --format json`` and the research
+    memory actions; the HUD only surfaces what a restarted agent needs to
+    resume: counts, latest checkpoint conclusion/next action, recent decisions
+    with lessons, unreviewed results, progress path.
+    """
+    lines: List[str] = []
+    streak = memory.get("consecutive_non_improvements") or 0
+    lines.append(
+        f"- Entries: {memory.get('entry_count', 0)} (insights {memory.get('insight_count', 0)}, "
+        f"open {memory.get('open_insight_count', 0)}) | verified runs: {memory.get('verified_run_count', 0)} | "
+        f"non-improvement streak: {streak}"
+        + (" | REASSESS PLATEAU" if memory.get("reassess_recommended") else "")
+    )
+    checkpoint = memory.get("latest_checkpoint")
+    if checkpoint:
+        ids = ", ".join(str(i)[:8] for i in (checkpoint.get("insight_ids") or [])[:3])
+        suffix = f" [{ids}]" if ids else ""
+        conclusion = _truncate_text(checkpoint.get("conclusion"), 160)
+        next_action = _truncate_text(checkpoint.get("next_action"), 140)
+        lines.append(f"- Latest checkpoint: {conclusion} -> next: {next_action}{suffix}")
+        questions = checkpoint.get("open_questions") or []
+        if questions:
+            lines.append(
+                f"- Open questions: {'; '.join(_truncate_text(q, 120) for q in questions[:2])}"
+            )
+    for decision in (memory.get("recent_decisions") or [])[:2]:
+        outcome = decision.get("outcome") or "recorded"
+        conclusion = _truncate_text(decision.get("conclusion"), 120)
+        lesson = _truncate_text(decision.get("lesson"), 120)
+        lines.append(
+            f"- Recent decision ({outcome}): {conclusion}" + (f" | lesson: {lesson}" if lesson else "")
+        )
+    frontier = memory.get("research_frontier") or []
+    frontier_label = (
+        "empty"
+        if not frontier
+        else "; ".join(
+            f"{str(state.get('insight_id', '?'))[:8]}={state.get('status')}"
+            for state in frontier[:3]
+        )
+    )
+    lines.append(
+        f"- Unreviewed results: {memory.get('unreviewed_result_count', 0)} | frontier: {frontier_label}"
+    )
+    progress = memory.get("progress_path")
+    if progress:
+        lines.append(f"- Progress: `{progress}`")
+    if memory.get("progress_warning"):
+        lines.append(f"- \u26a0\ufe0f {memory['progress_warning']}")
+    return lines
+
+
 class AgentBridge(metaclass=_AgentBridgeMeta):
     """Bidirectional Context & Typed Action Bridge between Antigravity (IDE) and the ML Harness.
 
@@ -1529,14 +1592,9 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             lines.append(f"- ❌ {g}")
 
         memory = pkt["research_memory"]
-        lines.extend(["", "## Research continuity (survives sessions and compaction)",
-                      json.dumps({key: memory[key] for key in (
-                          "entry_count", "verified_run_count", "latest_checkpoint", "recent_decisions",
-                          "recent_results", "consecutive_non_improvements", "reassess_recommended",
-                          "insight_count", "open_insight_count", "research_frontier",
-                          "unreviewed_result_count", "unreviewed_results", "progress_path", "progress_warning")},
-                          ensure_ascii=False),
-                      *[f"- {step}" for step in memory["resume_protocol"]]])
+        lines.extend(["", "## Research continuity (survives sessions and compaction)"])
+        lines.extend(_research_continuity_hud_lines(memory))
+        lines.extend(f"- {step}" for step in memory["resume_protocol"])
 
         from harness.hygiene import hygiene_hud_lines
 

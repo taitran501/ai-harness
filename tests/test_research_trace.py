@@ -176,7 +176,12 @@ class ResearchTraceTests(unittest.TestCase):
         self.assertEqual(traced.data["state"]["status"], "needs_diagnosis")
         self.assertEqual(next(event for event in traced.data["events"] if event["kind"] == "execution")["exp_id"], "replicate")
         self.assertFalse(bridge.comp_state.state["gates"].get("freeze_locked"))
-        self.assertIn("research_frontier", bridge.render_context_markdown())
+        hud = bridge.render_context_markdown()
+        # The compact HUD must surface the open frontier (insight id + status),
+        # not a raw JSON dump of the memory payload.
+        self.assertIn("frontier:", hud)
+        self.assertIn(insight_id[:8], hud)
+        self.assertNotIn('"research_frontier"', hud)
 
     def test_phase_revision_and_attached_skill_include_research_updates(self):
         attach_project(self.root, self.root / "configs/task.yaml")

@@ -100,24 +100,34 @@ ai-harness-agent start-session --goal "Improve primary validation metric" --max-
 ```
 
 ### Executing Actions
-All actions are executed using the `act` subcommand:
+All actions are executed using the `act` subcommand. Prefer **flat flags**
+(`--exp-id`, `--config-path`, `--branch`, … — kebab-case maps to snake_case
+params). On **PowerShell, never inline JSON** (`--params '{...}'` breaks under
+PowerShell quoting): save params to a UTF-8 JSON file and pass `--param-file`.
 
-```bash
+```powershell
 # 1. Create a child experiment from a parent node
-ai-harness-agent act --action create_experiment --params '{"branch": "feat", "descriptor": "stemming_clean", "parent_id": "exp000_baseline"}'
+ai-harness-agent act --action create_experiment --branch feat --descriptor stemming_clean --parent-id exp000_baseline
 
 # 2. Inspect diagnostics and error slices of a parent run
-ai-harness-agent act --action inspect_diagnostics --params '{"exp_id": "exp000_baseline"}'
+ai-harness-agent act --action inspect_diagnostics --exp-id exp000_baseline
 
 # 3. Promote an experiment to the candidate pool
-ai-harness-agent act --action promote_candidate --params '{"exp_id": "exp001", "name": "candidate_v1"}'
+ai-harness-agent act --action promote_candidate --exp-id exp001 --name candidate_v1
 
-# 4. Synthesize an ensemble from candidates
-ai-harness-agent act --action build_ensemble --params '{"name": "ens_v1", "candidates": ["candidate_v1", "candidate_v2"]}'
+# 4. Synthesize an ensemble from candidates (complex params -> --param-file on PowerShell)
+#    synthesize.json: {"name": "ens_v1", "candidates": ["candidate_v1", "candidate_v2"]}
+ai-harness-agent act --action build_ensemble --param-file synthesize.json
 
 # 5. Freeze a final candidate (requires user approval)
-ai-harness-agent act --action freeze_candidate --user-approved --params '{"slot_1_id": "candidate_v1", "notes": "Best validation score"}'
+ai-harness-agent act --action freeze_candidate --user-approved --slot-1-id candidate_v1 --notes "Best validation score"
 ```
+
+> Smoke tests always run locally (`run_smoke_test`, single fold) even in
+> backend-locked workspaces; full validation dispatches through the task's
+> declared execution backend (`run_full_validation`). Session budgets
+> (`--max-experiments`, `--max-gpu-hours`, `--max-cloud-runs`) are tracked per
+> `BridgeSession`.
 
 ---
 
