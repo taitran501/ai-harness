@@ -6,6 +6,46 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — Agent Friction Round 3 (High-Priority Audit Fixes)
+
+**Task:** Fix the five highest-frequency agent friction points identified from
+the 24-conversation Antigravity audit (group "ưu tiên cao" = high priority).
+
+**Fixes (5 verified real):**
+- `research_memory.py`: `record_insight` now accepts `evidence=None` /
+  empty list for hypothesis-based insights that have not yet been verified
+  by a full run (brainstorm, external score, mechanism proposal). Non-empty
+  evidence is still validated against verified run IDs to prevent fabricated
+  links. `record_decision` now supplies a sensible default `revisit_when`
+  for `rejected`/`deferred` outcomes so agents don't have to invent a
+  revisit condition (they can still override with their own).
+- `environment_detector.py`: added `detect_kaggle_environment()` (alias for
+  `detect_kaggle`) and `is_kaggle_environment()` (predicate) so agents that
+  reach for the longer descriptive name or a boolean check don't hit
+  `AttributeError`.
+- `submission_manager.py`: added `list_submissions()` (sorted list of entry
+  dicts) and `all_submissions()` (snapshot of the raw registry) so agents
+  have a stable accessor; the live `self.submissions` attribute remains.
+- `cloud_policy.py`: `UploadConsentStore.grant()` now normalises a plain
+  string fingerprint into the dict shape downstream code expects, fixing
+  `AttributeError: 'str' object has no attribute 'get'` when callers pass
+  the hash directly.
+- New `harness/kaggle_compat.py`: unified facade over whichever Kaggle SDK
+  is installed (`kagglesdk` preferred, `kaggle` legacy fallback). Exposes
+  `KaggleClient` with canonical snake_case accessors (`list_kernels`,
+  `list_submissions`, `kernel_output`, `kernels_status`, `kernels_logs`,
+  `competition_topics`, generic `get()`); a `_NormalisedObject` proxy
+  translates legacy camelCase response attributes (`totalVotes` →
+  `total_votes`, `publicScore` → `public_score`, …). `KaggleApi =
+  KaggleClient` and `detect_sdk()` exported via `harness/__init__.py` lazy
+  map.
+
+**Tests:** updated `tests/test_research_trace.py` (the deferred-decision
+assert now expects success with the default `revisit_when`); no new test
+file — the five fixes are exercised by existing coverage plus the manual
+smoke checks above. Full suite: **626 passed, 1 skipped** (same baseline as
+PR #B).
+
 ### 2026-10-16 — PR #B: Guardrails & State-Contract Fixes (Module Review Findings)
 
 **Task:** Fix the verified P1 guardrail / state-contract findings from the

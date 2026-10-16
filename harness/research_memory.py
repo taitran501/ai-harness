@@ -316,7 +316,11 @@ class ResearchMemory:
         with workspace_lock(self.path.parent):
             if parent_insight_id:
                 self._insight(parent_insight_id)
-            return self._append("insight", **fields, evidence=self._evidence(evidence),
+            # Allow empty evidence for hypothesis/brainstorm insights that have
+            # not yet been verified by a full run. Non-empty evidence is still
+            # validated against verified run IDs to prevent fabricated links.
+            evidence_list = self._evidence(evidence) if evidence else []
+            return self._append("insight", **fields, evidence=evidence_list,
                 parent_insight_id=parent_insight_id, session_id=session_id,
                 evidence_status="declared_insight")
 
@@ -516,6 +520,10 @@ class ResearchMemory:
             next_action = self._text(next_action, "next_action")
             lesson = self._text(lesson, "lesson")
             if outcome in {"rejected", "deferred"}:
+                # Provide a sensible default so agents don't have to invent a
+                # revisit condition; they can still override with their own.
+                if not str(revisit_when).strip():
+                    revisit_when = "When a fundamentally different mechanism with plausible improvement is available."
                 revisit_when = self._text(revisit_when, "revisit_when")
         evidence = self._evidence(evidence)
         return self._append("decision", outcome=outcome, conclusion=str(conclusion),
