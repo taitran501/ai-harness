@@ -67,15 +67,19 @@ class AgentUsabilityP3Tests(unittest.TestCase):
             self.assertEqual(obs.data["next_num"], 3)
             self.assertEqual(obs.data["suggested_exp_id"], "exp003_model_lgbm")
 
-            # Test collision prevention: trying to create_experiment with exp_id that already has artifacts
+            # Collision handling: requesting an exp_id that already has immutable
+            # artifacts must NOT fail — the bridge auto-assigns the next free ID
+            # and reports it (completed runs stay immutable).
             sess, obs_collide = bridge.execute_action(
                 action=TypedActionName.CREATE_EXPERIMENT.value,
                 params={"exp_id": "exp002_feat_v1", "branch": "feat", "descriptor": "v1"},
                 session_id=sess.session_id,
             )
-            self.assertEqual(obs_collide.status, "FAILED")
-            self.assertIn("already exist", obs_collide.summary)
-            self.assertIn("exp003", obs_collide.summary)
+            self.assertEqual(obs_collide.status, "SUCCESS")
+            self.assertEqual(obs_collide.data["exp_id"], "exp003_feat_v1")
+            self.assertEqual(obs_collide.data["auto_assigned_exp_id"], "exp003_feat_v1")
+            self.assertIn("auto-assigned", obs_collide.summary)
+            self.assertIn("immutable", obs_collide.summary)
 
     def test_kaggle_submission_notebook_builder(self):
         with tempfile.TemporaryDirectory() as td:

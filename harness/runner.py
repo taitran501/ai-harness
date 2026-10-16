@@ -129,6 +129,9 @@ class UniversalRunner:
             raise ValueError(
                 "Refusing to overwrite an existing run; use a new experiment ID. --force cannot overwrite artifacts"
             )
+        # Initialize eagerly so any code path (script adapters, independent
+        # validation checks) can reference it before split resolution runs.
+        self.expected_validation_ids: set = set()
         self.manifest = {
             "schema_version": 2,
             "run_id": self.run_id,
@@ -1364,9 +1367,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backend",
         type=str,
-        default="local",
+        default=None,
         choices=["local", "modal", "kaggle"],
-        help="Execution backend",
+        help=(
+            "Execution backend. Omit to use the task contract default "
+            "(task.execution.backend) when declared, else 'local'. A locked "
+            "contract (task.execution.locked: true) rejects other backends."
+        ),
     )
     parser.add_argument(
         "--skip-leaderboard",
@@ -1379,6 +1386,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="(cloud backends only) Build and print the dispatch plan without pushing or consuming cloud quota",
     )
     return parser
+
+
+def resolve_cli_backend(
+    requested: Optional[str],
+    contract_backend: Optional[str],
+    backend_locked: bool,
+    is_smoke_run: bool,
+) -> str:
+    """Resolve the effective execution backend for the runner CLI.
+
+    Explicit ``--backend`` wins; otherwise the task contract's declared
+    backend applies; otherwise local. Smoke tests and bounded probes always
+    run locally. A locked contract rejects a different backend for FULL runs
+    (raises ValueError; the CLI translates that into a parser error).
+    """
+    if requested is None:
+        if is_smoke_run:
+            return "local"
+        return (contract_backend or "local").strip().lower()
+    requested = requested.strip().lower()
+    if (
+        backend_locked
+        and contract_backend
+        and requested != contract_backend
+        and not is_smoke_run
+    ):
+        raise ValueError(
+            f"Backend lock violation: the task contract locks the execution "
+            f"backend to '{contract_backend}' (execution.locked: true) but "
+            f"'{requested}' was requested. Drop the --backend flag "
+            f"(the contract default applies) or change the contract."
+        )
+    return requested
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1404,6 +1444,39 @@ def main(argv: Optional[List[str]] = None) -> int:
     config_path = resolve_project_path(args.config)
     if not config_path.is_file():
         parser.error(f"Experiment config does not exist: {config_path}")
+
+    # Execution-backend contract: the task spec may declare a default backend
+    # (task.execution.backend) and lock it (task.execution.locked). Enforcing
+    # here — not only in the agent bridge — stops silent local training when
+    # the runner CLI is invoked directly (agent terminal calls, scripts).
+    contract_backend = None
+    backend_locked = False
+    try:
+        from harness.task_spec import load_active_task_spec
+
+        _spec = load_active_task_spec(project.task_config_path)
+        contract_backend = getattr(_spec, "execution_backend", None)
+        backend_locked = bool(getattr(_spec, "execution_locked", False))
+    except Exception:
+        pass  # spec load failure surfaces in UniversalRunner with full context
+    requested_backend = args.backend
+    is_smoke_run = bool(args.debug) or args.fold is not None
+    try:
+        args.backend = resolve_cli_backend(
+            requested_backend, contract_backend, backend_locked, is_smoke_run
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    if requested_backend is None and contract_backend and not is_smoke_run:
+        print(
+            f"[ai-harness] backend from task contract: {args.backend}"
+            + (" (execution.locked: true)" if backend_locked else "")
+        )
+    elif is_smoke_run and backend_locked and contract_backend:
+        print(
+            f"[ai-harness] smoke run staying local despite backend lock "
+            f"(contract backend: {contract_backend})"
+        )
 
     # If backend is modal or kaggle, delegate to cloud runner
     if args.backend == "modal":

@@ -32,6 +32,9 @@ class ValidationReport:
     mean_val: float
     nan_count: int
     errors: List[str]
+    # Standard deviation of the predicted values. Agents use this to detect
+    # prediction collapse (constant output) before packaging a submission.
+    std_val: float = 0.0
 
 
 class SubmissionPreflightValidator:
@@ -94,7 +97,7 @@ class SubmissionPreflightValidator:
                 errors.append(f"Declared target column '{target_col}' missing from submission")
 
         nan_count = 0
-        min_v = max_v = mean_v = 0.0
+        min_v = max_v = mean_v = std_v = 0.0
 
         if target_col and target_col in sub_df.columns:
             series = sub_df[target_col]
@@ -106,6 +109,7 @@ class SubmissionPreflightValidator:
                 min_v = float(series.min())
                 max_v = float(series.max())
                 mean_v = float(series.mean())
+                std_v = float(series.std()) if len(series) > 1 else 0.0
 
                 if probability_mode:
                     if min_v < 0.0 or max_v > 1.0:
@@ -129,6 +133,7 @@ class SubmissionPreflightValidator:
             mean_val=mean_v,
             nan_count=nan_count,
             errors=errors,
+            std_val=std_v,
         )
 
 
