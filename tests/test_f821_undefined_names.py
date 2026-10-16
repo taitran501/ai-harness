@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import time
 import types
 import unittest
 from pathlib import Path

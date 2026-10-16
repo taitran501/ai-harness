@@ -462,8 +462,12 @@ class TestFinalizeContract(_WorkspaceBase):
         res = comp.finalize_competition({}, self._journal(), self._sub_mgr())
         report = res["report_markdown"]
 
-        slot1 = next(l for l in report.splitlines() if "Slot 1 (Primary Safe)" in l)
-        slot2 = next(l for l in report.splitlines() if "Slot 2 (Secondary)" in l)
+        slot1 = next(
+            line for line in report.splitlines() if "Slot 1 (Primary Safe)" in line
+        )
+        slot2 = next(
+            line for line in report.splitlines() if "Slot 2 (Secondary)" in line
+        )
         # slot 1 shows ITS OWN cv (0.70) and public (0.61) scores
         self.assertIn("`0.7000`", slot1)
         self.assertIn("`0.6100`", slot1)

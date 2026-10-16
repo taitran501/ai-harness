@@ -223,7 +223,8 @@ class TestUniversalPlugin(unittest.TestCase):
 
         root_node.eligible=root_node.verified=True
         child_node.eligible=child_node.verified=True
-        journal.append(root_node); journal.append(child_node)
+        journal.append(root_node)
+        journal.append(child_node)
         best = journal.get_best_node()
         self.assertIsNotNone(best)
         self.assertEqual(best.id, "exp001_ngram_feat")
