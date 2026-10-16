@@ -713,19 +713,38 @@ class EnvironmentDetector:
         return {"success": True, "key_name": key_name, "preview": preview}
 
     @classmethod
-    def get_full_status(cls, force: bool = False) -> Dict[str, Any]:
+    def get_full_status(cls, force: bool = False, disk_cache_dir: Optional[Path] = None) -> Dict[str, Any]:
         """Aggregate full environment and hardware status.
 
         Probes run in parallel (they are subprocess/network-bound and
         independent) and each is TTL-cached, so a repeated call within a
-        process is nearly free. ``force=True`` bypasses the cache.
+        process is nearly free. ``force=True`` bypasses the caches.
+
+        ``disk_cache_dir`` adds a cross-process layer: when given (and the
+        cache is not disabled) a fresh ``env_probes.json`` record inside that
+        directory is returned as-is, and freshly probed results are written
+        back. This is what makes one-shot CLI commands fast — without it
+        every new process re-runs all five probes.
         """
         from concurrent.futures import ThreadPoolExecutor
 
-        if force:
-            from harness import env_cache
+        from harness import env_cache
 
+        if force:
             env_cache.invalidate()
+
+        # The in-process TTL cache holds only per-probe values, so a fresh
+        # process with a warm disk record still re-runs every probe before
+        # writing the merged record. Prime the process cache from the disk
+        # record first; fully fresh keys are the only ones that re-probe.
+        # (A per-key TTL on disk would require per-probe timestamps; the
+        # wall-clock cost of one full probe round per 120 s is acceptable.)
+        cache_path = disk_cache_dir / "env_probes.json" if disk_cache_dir is not None else None
+        if cache_path is not None and not force:
+            record = env_cache.disk_load(cache_path)
+            if record is not None:
+                for key, value in record.items():
+                    env_cache.set_cached(key, value)
 
         # Call the public cached wrappers (not the raw _probe_* methods)
         # so tests can patch the public API and caching stays composed.
@@ -735,13 +754,16 @@ class EnvironmentDetector:
                 for name in ("modal", "kaggle", "docker", "gpu", "llm_status")
             }
         result = {name: fut.result() for name, fut in futures.items()}
-        return {
+        payload = {
             "modal": result["modal"],
             "kaggle": result["kaggle"],
             "docker": result["docker"],
             "gpu": result["gpu"],
             "llm": result["llm_status"],
         }
+        if cache_path is not None:
+            env_cache.disk_store(cache_path, payload)
+        return payload
 
     # ------------------------------------------------------------------
     # Legacy / agent-facing aliases

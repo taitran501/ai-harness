@@ -101,3 +101,55 @@ def invalidate() -> None:
     """Drop every cached probe result (used by ``--force`` and tests)."""
     with _lock:
         _cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# Disk cache (cross-process)
+# ---------------------------------------------------------------------------
+# The process cache above only helps inside one long-lived process (agents,
+# dashboard). One-shot CLI commands (``ai-harness status``) are new processes
+# every time, so without a disk cache each call re-runs every probe. Probe
+# results (GPU model, CLI installs, credential presence) change on the scale
+# of hours, not seconds, so a short wall-clock TTL shared across processes is
+# safe: worst case a stale answer for at most the TTL window.
+
+DISK_TTL: float = min(DEFAULT_TTLS.values())  # 120 s — the fastest-changing key
+
+
+def disk_store(cache_path, data: Dict[str, Any]) -> None:
+    """Atomically write {generated_at, data}; never raises (cache is advisory)."""
+    if _caching_disabled():
+        return
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+
+        cache_path = _Path(cache_path)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {"generated_at": time.time(), "data": data}
+        tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        tmp.write_text(_json.dumps(record), encoding="utf-8")
+        os.replace(tmp, cache_path)  # atomic on Windows + POSIX
+    except Exception:
+        pass
+
+
+def disk_load(cache_path, max_age: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Read a disk record; ``None`` when missing, corrupt, or older than *max_age*."""
+    if _caching_disabled():
+        return None
+    if max_age is None:
+        max_age = DISK_TTL
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+
+        cache_path = _Path(cache_path)
+        record = _json.loads(cache_path.read_text(encoding="utf-8"))
+        age = time.time() - float(record["generated_at"])
+        if age > max_age:
+            return None
+        data = record.get("data")
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None

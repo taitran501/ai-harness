@@ -310,8 +310,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             consent_store = UploadConsentStore(project)
             if args.cloud_command == "status":
                 from harness.environment_detector import EnvironmentDetector
+
+                disk_dir = project.root / ".ai-harness"
+                if not disk_dir.is_dir():
+                    disk_dir = None
                 result = {
-                    "accounts": EnvironmentDetector.get_full_status(),
+                    "accounts": EnvironmentDetector.get_full_status(disk_cache_dir=disk_dir),
                     "upload_consent": consent_store.status(),
                 }
             elif args.cloud_command == "consent":

@@ -60,3 +60,4 @@ Thumbs.db
 .env.*
 .gemini/
 .pi/
+harness/.model_names_cache.json
