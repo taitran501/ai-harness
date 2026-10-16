@@ -239,6 +239,9 @@ def run_training_remote(config_path: str, exp_id: str):
     print(f"[Modal Remote] Starting GPU training for experiment: {{exp_id}} on {gpu}")
     print(f"[Modal Remote] Config: {{config_path}}")
 
+    # Tell the runner it is already inside the dispatched kernel so the
+    # task contract's cloud backend is not re-applied (no nested dispatch).
+    os.environ["AI_HARNESS_REMOTE_KERNEL"] = "1"
     cmd = ["python", "-u", "-m", "harness.runner", "--project-root", ".", "--task-config", {task_config_rel!r}, "--config", config_path]
     _remote_job_id = {job_id!r}
     if _remote_job_id:

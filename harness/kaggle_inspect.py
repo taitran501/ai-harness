@@ -10,20 +10,68 @@ an *existing* kernel slug with no new push.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-def kernel_status(kernel_slug: Optional[str] = None, exp_id: Optional[str] = None) -> Dict[str, Any]:
+def _resolve_exp_kernel_slug(exp_id: str) -> Optional[str]:
+    """Return the kernel slug actually pushed for ``exp_id``, if a job state
+    recorded one. The dispatch slug carries a job-hash suffix that slug
+    derivation cannot reconstruct (``<owner>/<task>-<exp>-<hash8>``), so the
+    derived default slug 404s on every real dispatch. Job state is the source
+    of truth; derivation remains only as a fallback for legacy/unknown jobs.
+    """
+    if not exp_id:
+        return None
+    try:
+        from harness.project import HarnessProject
+
+        project = HarnessProject.discover(Path.cwd())
+    except Exception:
+        return None
+    jobs_dir: Optional[Path] = None
+    try:
+        jobs_dir = project.artifacts_dir / "jobs"
+    except Exception:
+        return None
+    if not jobs_dir.is_dir():
+        return None
+    best: Optional[tuple] = None
+    for state_file in jobs_dir.glob("*.json"):
+        if state_file.name.endswith(".worker.json"):
+            continue
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if state.get("exp_id") != exp_id or not state.get("remote_id"):
+            continue
+        stamp = state.get("started_at") or 0
+        if best is None or stamp >= best[0]:
+            best = (stamp, str(state["remote_id"]))
+    return best[1] if best else None
+
+
+def _status_for(kernel_slug: Optional[str], exp_id: Optional[str]):
     from harness.templates.kaggle_template import KaggleKernelManager
 
+    if not kernel_slug and exp_id:
+        kernel_slug = _resolve_exp_kernel_slug(exp_id)
     return KaggleKernelManager.get_kernel_status(exp_id or "", kernel_slug)
+
+
+def kernel_status(kernel_slug: Optional[str] = None, exp_id: Optional[str] = None) -> Dict[str, Any]:
+    status = _status_for(kernel_slug, exp_id)
+    if not kernel_slug and exp_id:
+        status["kernel_slug"] = _resolve_exp_kernel_slug(exp_id) or status.get("kernel_slug")
+    return status
 
 
 def kernel_log(kernel_slug: Optional[str] = None, exp_id: Optional[str] = None, max_lines: int = 60) -> Dict[str, Any]:
     from harness.templates.kaggle_template import KaggleKernelManager
 
-    status = KaggleKernelManager.get_kernel_status(exp_id or "", kernel_slug)
-    slug = status.get("kernel_slug") or kernel_slug or ""
+    status = _status_for(kernel_slug, exp_id)
+    slug = status.get("kernel_slug") or (_resolve_exp_kernel_slug(exp_id) if exp_id else None) or kernel_slug or ""
     err_log = KaggleKernelManager.get_kernel_error_log(slug, max_lines=max_lines) if slug else None
     return {
         "kernel_slug": slug,
@@ -35,13 +83,11 @@ def kernel_log(kernel_slug: Optional[str] = None, exp_id: Optional[str] = None, 
 
 def kernel_output(kernel_slug: Optional[str] = None, exp_id: Optional[str] = None) -> Dict[str, Any]:
     """Download the kernel output to a temp dir and list files present (nothing is written to artifacts/)."""
-    from harness.templates.kaggle_template import KaggleKernelManager
     import subprocess
     import tempfile
-    from pathlib import Path
 
-    status = KaggleKernelManager.get_kernel_status(exp_id or "", kernel_slug)
-    slug = status.get("kernel_slug") or kernel_slug or ""
+    status = _status_for(kernel_slug, exp_id)
+    slug = status.get("kernel_slug") or (_resolve_exp_kernel_slug(exp_id) if exp_id else None) or kernel_slug or ""
     if not slug:
         return {"kernel_slug": slug, "status": status.get("status"), "files": [], "error": "no kernel slug provided"}
     try:

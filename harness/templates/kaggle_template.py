@@ -605,6 +605,9 @@ with tempfile.TemporaryDirectory(prefix="aih-kaggle-work-") as temporary:
         input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
         print(f"[Kaggle Kernel] Using input_root: {{input_root}}", flush=True)
         helpers["restore_dataset"](input_root, workspace)
+        # Tell the runner it is already inside the dispatched kernel so the
+        # task contract's cloud backend is not re-applied (no nested dispatch).
+        os.environ["AI_HARNESS_REMOTE_KERNEL"] = "1"
         cmd = [sys.executable, "-u", "-m", "harness.runner", "--project-root", ".",
                "--task-config", {task_config_rel!r}, "--config", {config_rel!r}]
         _remote_job_id = {job_id!r}

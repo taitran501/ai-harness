@@ -38,6 +38,12 @@ from harness.data_bundle import declared_data_roots
 
 
 def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[str | Path] = None) -> Dict[str, Any]:
+    if os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1":
+        raise RuntimeError(
+            "Refusing to prepare a remote dispatch: this process is already "
+            "inside a dispatched remote kernel (AI_HARNESS_REMOTE_KERNEL=1). "
+            "Run the experiment locally with the runner CLI instead."
+        )
     project = HarnessProject.discover(project_root)
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
