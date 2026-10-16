@@ -6,6 +6,37 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-16 — PR #51 Follow-up: Competition State Fixes
+
+**Task:** Four fixes to `competition_state.py` surfaced during PR #51
+review.
+
+**Fixes (4 verified real):**
+- `save()` now stamps `updated_at` on every persist so the dashboard/HUD
+  can detect stale state. Previously the timestamp stayed at the init
+  value forever.
+- `inspect_data_readiness` blocks when the declared training dataset is
+  missing or empty (`total_rows == 0`) instead of rendering "0 data
+  risks" in the HUD and letting the agent confirm data risks on a broken
+  mount.
+- Co-pilot action mapping now routes `FREEZE_FOR_PRIVATE_LB` →
+  `freeze_candidate`, `GENERATE_FINAL_PAPER` → `finalize_competition`,
+  `BUILD_SPECIALIST_ROUTER` → `inspect_diagnostics` (first step of the
+  documented agent_plan). The previous silent fallback to
+  `inspect_diagnostics` executed the wrong action for all three, so the
+  co-pilot click never advanced the phase.
+  `ESTABLISH_VERIFIED_BASELINE` is a composite workflow and is now named
+  explicitly instead of silently substituting an unrelated action.
+- `render_competition_state` filters persisted `agent_context_config`
+  keys against `AgentContextConfig.__dataclass_fields__` so unknown keys
+  from `update_workspace_settings` don't raise `TypeError` and silently
+  drop the whole competition block from the priming prompt.
+
+**Tests:** full suite **626 passed, 1 skipped** (same baseline as PR #51).
+
+**Commit:** `ac38597` fix(competition-state): updated_at stamp,
+DATA_MISSING block, co-pilot action mapping, AgentContextConfig key filter
+
 ### 2026-10-16 — Agent Friction Round 4 (Medium-Priority Audit Fixes)
 
 **Task:** Fix the three remaining medium-priority agent friction points from
