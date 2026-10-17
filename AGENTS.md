@@ -78,13 +78,19 @@ Run before pushing changes to this repository:
 ```bash
 python tools/run_tests.py                # Full suite (all modules must pass 100%)
 python tools/run_tests.py --fast         # Fast tier during iteration (skips 4 slow pipeline modules)
+python tools/run_tests.py --smoke        # <10s critical-invariants gate for rapid iteration
 ruff check harness/ tools/ tests/ --select F,E7 # Static gate: undefined names (F821) & pyflakes (zero-noise incl. tests/)
 ```
 
-The suite is tiered: `tools/run_tests.py --fast` runs everything except the four
-slow full-pipeline modules (`test_kaggle_runtime`, `test_dashboard`, `test_audit_gate`,
-`test_harness`). Always run the **full** suite before pushing; use `--fast` while
-iterating. Shared workspace fixtures live in `tests/fixtures.py` — reuse
+The suite is tiered: `--fast` runs everything except the four slow
+full-pipeline modules (`test_kaggle_runtime`, `test_dashboard`,
+`test_audit_gate`, `test_harness`); `--smoke` runs only the framework's
+critical invariants (correctness contract, label-integrity audit,
+anti-hallucination grounding gate, research-memory scope stability,
+backend-lock policy) in ~2 s for instant feedback while iterating.
+Always run the **full** suite before pushing; use `--fast` while
+iterating; `--smoke` for a fast core sanity check. Shared workspace
+fixtures live in `tests/fixtures.py` — reuse
 `make_workspace()` / `workspace_with_repo_configs()` / `copy_repo_configs()`
 instead of copy-pasting workspace setup into new test files.
 
