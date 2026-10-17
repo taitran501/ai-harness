@@ -43,6 +43,12 @@ def build_parser() -> argparse.ArgumentParser:
     kaggle = subparsers.add_parser("kaggle", help="Inspect Kaggle kernel state (status/log/output) without re-dispatching")
     kaggle.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|log|output + flags")
 
+    submission = subparsers.add_parser("submission", help="Kaggle submission dispatch + score polling (harness-native)")
+    submission.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: dispatch|status|watch|latest + flags")
+
+    dispatch_kernel_cmd = subparsers.add_parser("dispatch-kernel", help="Wrap a local notebook into a Kaggle kernel and push it")
+    dispatch_kernel_cmd.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: notebook + flags")
+
     repair = subparsers.add_parser("repair", help="Re-seal artifact manifest file hashes that drifted after a run (or --check to report)")
     repair.add_argument("--project-root", default=".", help="Attached task workspace root (default: current dir)")
     repair.add_argument("--exp", action="append", default=None, help="Experiment (run folder) name to repair; repeat for several")
@@ -266,6 +272,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "kaggle":
         from harness.kaggle_inspect import main as kaggle_main
         return kaggle_main(list(args.args))
+
+    if args.command == "submission":
+        from harness.submission_dispatch import main as submission_main
+        return submission_main(list(args.args))
+
+    if args.command == "dispatch-kernel":
+        from harness.kernel_dispatch import main as kernel_dispatch_main
+        return kernel_dispatch_main(list(args.args))
 
     if args.command == "repair":
         from harness.repair import run_repair

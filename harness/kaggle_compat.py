@@ -143,6 +143,7 @@ class KaggleClient:
 
     def __init__(self):
         self.sdk: str = detect_sdk()
+        self._legacy_api_cache: Optional[Any] = None
         if self.sdk == "kagglesdk":
             kagglesdk = _try_import_kagglesdk()
             self._sdk_module = kagglesdk
@@ -199,19 +200,84 @@ class KaggleClient:
         return [_NormalisedObject(k, self.sdk) for k in kernels]
 
     def list_submissions(self, competition: Optional[str] = None, **kwargs: Any) -> List[Any]:
-        """List submissions for a competition; returns normalised objects."""
-        if self.sdk == "kaggle":
-            api = self._legacy_api
-            if competition:
-                subs = api.competitions_submissions(competition)
-            else:
-                subs = api.competitions_submissions()
+        """List submissions for a competition; returns normalised objects.
+
+        Uses the self-contained legacy ``KaggleApi.competition_submissions`` for
+        BOTH SDKs (the kagglesdk client exposes only namespaced low-level
+        services, not this flat call, so the legacy entry point is the
+        reliable cross-SDK path).
+        """
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        if competition:
+            subs = api.competition_submissions(competition)
         else:
-            if competition:
-                subs = self._client.competitions_submissions(competition, **kwargs)
-            else:
-                subs = self._client.competitions_submissions(**kwargs)
+            subs = api.competition_submissions()
         return [_NormalisedObject(s, self.sdk) for s in subs]
+
+    def submit_submission(
+        self,
+        file_name: str,
+        message: str,
+        competition: str,
+        kernel: Optional[str] = None,
+        kernel_version: Optional[str] = None,
+    ) -> Any:
+        """Submit to a competition (standard file, or code-competition kernel output).
+
+        Uses the self-contained legacy ``KaggleApi`` (``competition_submit`` /
+        ``competition_submit_code``) which encapsulates the upload + create
+        round-trip that the kagglesdk low-level client does not expose as a
+        single call. Returns a normalised response exposing ``ref`` and
+        ``message``.
+        """
+        api = self._legacy_api_instance()
+        if kernel:
+            resp = api.competition_submit_code(
+                file_name,
+                message,
+                competition,
+                kernel=kernel,
+                kernel_version=kernel_version,
+            )
+        else:
+            resp = api.competition_submit(file_name, message, competition)
+        return _NormalisedObject(resp, self.sdk)
+
+    def kernels_push(
+        self, folder: str, timeout: Optional[int] = None, acc: Optional[str] = None
+    ) -> Any:
+        """Push a kernel folder (``kernel-metadata.json`` + code) to Kaggle.
+
+        Self-contained legacy call: reads the metadata + code, builds the save
+        request, and pushes. Returns a normalised response with ``ref``,
+        ``url``, ``kernel_id``, ``version_number`` and the ``invalid_*`` source
+        warnings.
+        """
+        api = self._legacy_api_instance()
+        resp = api.kernels_push(folder, timeout=timeout, acc=acc)
+        return _NormalisedObject(resp, self.sdk)
+
+    def _legacy_api_instance(self) -> Any:
+        """Return a self-contained legacy ``KaggleApi`` instance (cached).
+
+        The legacy ``kaggle`` package is always present alongside the
+        ``kaggle`` CLI, and its high-level methods encapsulate the multi-step
+        SDK plumbing. We reuse it for dispatch operations even when the
+        detected SDK is ``kagglesdk``.
+        """
+        if self.sdk == "kaggle":
+            return self._legacy_api
+        if self._legacy_api_cache is None:
+            KaggleApi = _try_import_kaggle_legacy()
+            if KaggleApi is None:
+                raise ImportError(
+                    "Legacy 'kaggle' package is required for submission/kernel "
+                    "dispatch but is not installed (pip install kaggle)."
+                )
+            api = KaggleApi()
+            api.authenticate()
+            self._legacy_api_cache = api
+        return self._legacy_api_cache
 
     def kernel_output(self, slug: str, path: Optional[str] = None, **kwargs: Any) -> Any:
         """Download kernel output. Canonical name for both SDKs."""

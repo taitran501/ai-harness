@@ -183,6 +183,44 @@ recovery passes its attached project root explicitly to the importer.
 
 Source: [kernel commands](https://github.com/Kaggle/kaggle-cli/blob/main/docs/kernels.md).
 
+## Submission dispatch and score polling
+
+The host hook blocks the raw `kaggle competitions submit` / `kaggle kernels push`
+*shell* commands. The harness-native alternative is the in-process dispatch path,
+which drives the Kaggle API internally via the `KaggleClient` facade so every
+dispatch is attributable and auditable:
+
+```powershell
+# Submit + get the submission ref (standard, or code competition with a kernel)
+ai-harness submission dispatch <competition> <submission.csv> -m "Exp 22"
+ai-harness submission dispatch <competition> submission.csv -m "Exp 22" \
+    --kernel owner/kernel --kernel-version 3
+
+# One-shot status check, or poll until the score lands, or show the best scored
+ai-harness submission status <competition> <ref>
+ai-harness submission watch <competition> <ref> --timeout 1800 --poll 15
+ai-harness submission latest <competition>
+```
+
+`watch` uses adaptive polling (start at `--poll` seconds, grow 1.5x per round,
+cap at `--max-poll`) — the in-process equivalent of the native `--wait`. Every
+action prints a JSON payload (the dispatch ref, the status/score, or the best
+scored submission) so agents can read the result programmatically.
+
+Wrapping a local notebook into a Kaggle kernel is the same first-class story —
+no hand-written `build_expXXX.py` wrappers:
+
+```powershell
+ai-harness dispatch-kernel my_notebook.ipynb \
+    --kernel-id owner/exp048 --title "Exp048: Ensemble" \
+    --machine-shape KaggleGPU --dataset owner/dataset
+```
+
+`dispatch-kernel` stages the notebook + a generated `kernel-metadata.json`
+(machine shape, dataset/competition/kernel/model sources, internet) into a temp
+dir and pushes via `KaggleClient.kernels_push`, returning the kernel
+ref/URL/version (and any `invalid_*` source warnings).
+
 ## Regressions and verification
 
 Commits `492211c` and `a150799` added embedding/metadata fixes and corrected Python
