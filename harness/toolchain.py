@@ -29,6 +29,14 @@ from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
 PIN_DISABLE_ENV = "AI_HARNESS_TOOLCHAIN_NO_PIN"
+#: Re-exec generation counter. Any process launched with this set is ALREADY
+#: a pinned child; if drift persists there, re-exec cannot converge (the
+#: child's `-m` sys.path puts the cwd first, and a cwd that itself holds a
+#: different ``harness`` package — e.g. the framework repo — will always
+#: win over PYTHONPATH). Observed live: an unguarded chain spawned 35+
+#: generations of ``python -m harness.cli`` and pegged the CPU. The guard
+#: bounds the chain to one re-exec and fails open with a clear message.
+PIN_DEPTH_ENV = "AI_HARNESS_PIN_DEPTH"
 CLONE_DIR_NAMES = ("ai-harness", "ai_harness")
 
 
@@ -91,12 +99,36 @@ def ensure_pinned_toolchain(
         return None
     if not needs:
         return None
+    # Circuit breaker: we are already the pinned child and the clone still
+    # does not win path resolution. Re-exec would loop forever (each child
+    # re-detects the same drift); continue with the loaded code instead.
+    try:
+        depth = int(os.environ.get(PIN_DEPTH_ENV, "0") or "0")
+    except ValueError:
+        depth = 0
+    if depth >= 1:
+        cwd = os.getcwd()
+        hint = (
+            f" the cwd ({cwd}) appears to hold a different harness package, which "
+            f"'-m' path resolution always prefers over the pinned clone. Run the "
+            f"command from inside the workspace, or from outside it set "
+            f"{PIN_DISABLE_ENV}=1."
+        ) if (Path(cwd) / "harness" / "__init__.py").is_file() else (
+            " check that the clone at the pinned dir is complete."
+        )
+        print(
+            f"[ai-harness] toolchain pin: drift still present in the pinned child; "
+            f"NOT re-executing again (would loop) — continuing with {origin}.{hint}",
+            file=sys.stderr,
+        )
+        return None
     clone = find_workspace_clone(project_root)
     if clone is None:
         return None
     cmd = [sys.executable, "-m", module] + list(argv if argv is not None else sys.argv[1:])
     env = dict(os.environ)
     env["PYTHONPATH"] = str(clone) + os.pathsep + env.get("PYTHONPATH", "")
+    env[PIN_DEPTH_ENV] = str(depth + 1)
     print(
         f"[ai-harness] toolchain pin: re-executing '{module}' under the workspace "
         f"clone ({clone}) - loaded code originated from {origin}",
