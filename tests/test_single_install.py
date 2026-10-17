@@ -25,7 +25,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from harness.project import read_framework_pointer
+from harness.project import read_framework_pointer, write_framework_pointer
 from harness.status_report import _framework_section
 from harness.sync import run_sync
 from harness.toolchain import (
@@ -264,6 +264,44 @@ class TestStatusFrameworkSection(unittest.TestCase):
             with mock.patch.dict(os.environ, env), \
                     mock.patch("harness.toolchain.current_origin", return_value=stale):
                 section = _framework_section(str(ws))
+            self.assertIn("pip install -e", section["advisory"])
+
+    def test_pointer_fallback_when_no_env(self) -> None:
+        """No env var + no clone, but the manifest pointer is OUTSIDE the
+        workspace -> single_install True (falls back to the recorded pointer),
+        and the advisory is computed against that pointer."""
+        with tempfile.TemporaryDirectory(prefix="test_sis_ptr_fb_") as tmp:
+            tmp = Path(tmp)
+            ws = tmp / "ws"
+            (ws / "configs").mkdir(parents=True)
+            canonical = _make_canonical(tmp)
+            manifest = ws / ".ai-harness" / "project.yaml"
+            write_framework_pointer(manifest, canonical, commit="abc123", branch="main")
+            canonical_origin = (canonical / "harness" / "__init__.py").resolve()
+            env = {k: v for k, v in os.environ.items() if k != FRAMEWORK_DIR_ENV}
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch("harness.toolchain.current_origin", return_value=canonical_origin):
+                section = _framework_section(str(ws))
+            self.assertTrue(section["single_install"], "pointer fallback should mark single-install")
+            self.assertIsNone(section["resolved_framework"], "no env -> no resolved root")
+            self.assertIsNotNone(section["workspace_pointer"])
+            self.assertIsNone(section["advisory"], "origin matches pointer -> no advisory")
+
+    def test_pointer_fallback_advisory_on_mismatch(self) -> None:
+        """No env var, pointer outside, but import origin stale -> advisory."""
+        with tempfile.TemporaryDirectory(prefix="test_sis_ptr_adv_") as tmp:
+            tmp = Path(tmp)
+            ws = tmp / "ws"
+            (ws / "configs").mkdir(parents=True)
+            canonical = _make_canonical(tmp)
+            manifest = ws / ".ai-harness" / "project.yaml"
+            write_framework_pointer(manifest, canonical, commit="abc123", branch="main")
+            stale = tmp / "stale" / "harness" / "__init__.py"
+            env = {k: v for k, v in os.environ.items() if k != FRAMEWORK_DIR_ENV}
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch("harness.toolchain.current_origin", return_value=stale):
+                section = _framework_section(str(ws))
+            self.assertTrue(section["single_install"])
             self.assertIn("pip install -e", section["advisory"])
 
 
