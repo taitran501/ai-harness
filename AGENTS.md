@@ -22,6 +22,7 @@ Canonical context file for AI coding assistants (Antigravity, OpenAI Codex, Clau
 - **[docs/TASK_SPEC_TEMPLATE.md](docs/TASK_SPEC_TEMPLATE.md)** — Declarative `configs/task.yaml` specification schema.
 - **[docs/plugin_architecture.md](docs/plugin_architecture.md)** — Pluggable task adapters, registration, and discovery.
 - **[docs/kaggle_execution.md](docs/kaggle_execution.md)** — Kaggle CLI setup, data mounts, dependency policy, polling, and verified artifact import.
+- **[docs/DESIGN_single_install.md](docs/DESIGN_single_install.md)** — Single-install architecture: one canonical framework checkout shared by all workspaces, `HARNESS_FRAMEWORK_DIR` resolution, and how sync/status behave under it.
 - **[docs/prompts/README.md](docs/prompts/README.md)** — Prompt library across onboarding, iteration, and ensembling phases.
 
 ---
@@ -41,6 +42,7 @@ Assistant / Engineer (Layer 1)  ──>  Agent Bridge (Layer 2)  ──>  Harnes
 6. **Research Continuity**: After restart/compaction, read `context`, the latest checkpoint, and pending results in `research_frontier`. Before brainstorming/implementation, use `search_research_memory` and `review_hypothesis`. Record an insight with `record_research_insight`, plan its bounded discriminating probe with `plan_research_probe`, and link `research.insight_id` in the experiment config. Use `trace_research_insight` to recover its history. Record a decision with lesson/next action and checkpoint after each iteration; link derived insights to their parent. An intentional repeated configuration requires `revisit_reason`; related approaches need a mechanism comparison. Plateau calls for diagnostics and reassessment, never automatic freeze.
 7. **Written Progress**: Record research notes after meaningful observations/results and before stopping. The harness generates task-level `RESEARCH_PROGRESS.md`; its path is in the context HUD. Read its resume section after restart, then retrieve only the relevant insight history. For repository code changes, append a concise entry to `docs/WORK_LOG.md` with work, evidence, lesson, and next action.
 8. **Execution Backend Policy**: A task contract may declare `execution: {backend: kaggle, locked: true}`. `run_full_validation` resolves the backend as explicit `--backend` param > `execution.backend` > `local`; when locked, other backends are rejected (`Backend lock violation`). Smoke tests/probes always run locally. When updating a competition workspace after a framework release, use `ai-harness sync` instead of hand-written multi-step sync prompts.
+9. **Single-Install Framework**: All workspaces share ONE canonical framework checkout located by `HARNESS_FRAMEWORK_DIR` (falling back to a legacy per-workspace `<workspace>/ai-harness` clone only until migrated). `import harness` therefore always resolves to the same code, eliminating cross-workspace drift and the re-exec tax. Under single-install, `ai-harness sync` pulls the shared checkout but does **not** retarget the global editable install per workspace; `ai-harness status` reports a `framework` section (`single_install` flag + stale-install advisory). Remote dispatch bundles `harness/` from the installed (canonical) source, so cloud runs are unaffected.
 
 ---
 
@@ -51,8 +53,10 @@ Assistant / Engineer (Layer 1)  ──>  Agent Bridge (Layer 2)  ──>  Harnes
 ai-harness attach --project-root . --task-config configs/task.yaml
 ai-harness-agent --project-root . context
 
-# Update a competition workspace's framework clone (git ff-only + reinstall + re-attach/skill regen)
+# Update the shared framework (canonical single-install, or legacy workspace clone)
 ai-harness sync --project-root .
+# In single-install (HARNESS_FRAMEWORK_DIR set) this pulls the canonical
+# checkout and re-attaches; it does NOT retarget the global editable install.
 
 # Start session & run experiments (flat CLI flags avoid PowerShell JSON escaping errors)
 ai-harness-agent --project-root . start-session --goal "Improve metric" --max-experiments 3

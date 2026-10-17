@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shutil
@@ -22,6 +23,39 @@ def _read_yaml(path: Path) -> Dict[str, Any]:
         return {}
     value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return value if isinstance(value, dict) else {}
+
+
+def write_framework_pointer(
+    manifest_path: Path | str,
+    framework_root: Path | str,
+    commit: Optional[str] = None,
+    branch: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record which framework (path + commit) a workspace attached against.
+
+    This provenance pointer is what lets ``status`` later flag a workspace as
+    stale once the shared canonical checkout advances past the recorded
+    commit. It never blocks attach — it is purely informational.
+    """
+    manifest_path = Path(manifest_path)
+    manifest = _read_yaml(manifest_path)
+    pointer: Dict[str, Any] = {
+        "path": str(Path(framework_root).expanduser().resolve()),
+        "commit": commit,
+        "branch": branch,
+        "updated": datetime.now(timezone.utc).isoformat(),
+    }
+    manifest["framework"] = pointer
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    return pointer
+
+
+def read_framework_pointer(manifest_path: Path | str) -> Optional[Dict[str, Any]]:
+    """Return the recorded framework provenance pointer, or ``None``."""
+    manifest = _read_yaml(Path(manifest_path))
+    pointer = manifest.get("framework")
+    return pointer if isinstance(pointer, dict) else None
 
 
 def resolve_project_root(root: Optional[Path | str] = None) -> Path:

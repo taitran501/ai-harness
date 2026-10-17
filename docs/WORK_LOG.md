@@ -6,6 +6,57 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — single-install architecture (PR #78)
+
+**arch: one canonical framework checkout shared by every workspace.**
+
+Problem (root cause, not a symptom): every workspace carried its own clone of
+the framework, and `ai-harness sync` retargeted the ONE global editable install
+to the workspace it ran in. With N workspaces competing for one global pointer,
+`import harness` resolved to whichever workspace synced last — cross-workspace
+drift. That drift is what the re-exec pin (PR #63) and the depth circuit
+breaker (PR #74) had to *contain*. This change removes the drift at the source.
+
+- **`harness/toolchain.py`**: new `find_framework_root(project_root)` —
+  resolution order `HARNESS_FRAMEWORK_DIR` > legacy per-workspace clone > None.
+  `ensure_pinned_toolchain` / `_needs_pin` now pin to the framework root. When
+  the loaded origin already IS the framework root, no re-exec happens at all
+  (the re-exec tax disappears). `find_workspace_clone` is kept as the legacy
+  fallback.
+- **`harness/sync.py`**: canonical-aware `run_sync`. When the resolved
+  framework repo lives OUTSIDE the workspace (canonical), sync pulls it but
+  does NOT run `pip install -e` per workspace (the shared editable install is
+  retargeted once, by hand, during migration); it only verifies the install
+  points at the canonical checkout and warns (advisory) if not. Legacy
+  per-workspace clones keep the old retarget behavior. Sync now also records a
+  provenance pointer (`framework: {path, commit, branch, updated}`) in the
+  manifest, and reports `mode: canonical|workspace-clone`.
+- **`harness/project.py`**: `write_framework_pointer` / `read_framework_pointer`
+  (manifest provenance helpers).
+- **`harness/status_report.py`**: new `framework` section — `single_install`
+  flag, resolved framework root, recorded pointer, and a stale-install advisory
+  when the import origin != framework root.
+- Remote dispatch is unaffected: the Kaggle/Modal bundle copies `harness/` from
+  the installed (now canonical) source, so cloud runs pick up canonical code
+  automatically.
+
+Evidence: 12 new tests in `tests/test_single_install.py` (find_framework_root
+precedence/fallback/none/invalid, canonical pin + no-pin-when-already-canonical,
+canonical sync skips pip + writes pointer, workspace-clone mode, status
+single-install flag + advisory). **Full suite green: 808 tests, OK (1 skipped)
+in ~200s**; ruff F,E7 clean.
+
+Also hardened `tests/test_sync_command.py` `_make_workspace`: it hardcoded
+`git push origin main`, which broke the full suite when run on a non-`main`
+feature branch (the throwaway clone checks out the source's HEAD branch, so a
+`main` refspec did not exist). Now branch-agnostic (`git push -u origin HEAD` /
+`git push origin HEAD`), so the suite is green on any branch.
+
+Next action: one-time migration — clone the canonical checkout to
+`C:\Users\trant\ai-harness-framework`, `pip install -e` it once, set
+`HARNESS_FRAMEWORK_DIR` (setx), then per workspace delete the clone +
+`ai-harness sync`; verify import origin, status, and a live probe.
+
 ### 2026-10-17 — toolchain pin loop breaker (PR #74) + validate-task (PR #75) + smoke test tier (PR #76)
 
 **PR #74 — fix: bound toolchain re-exec chain to one generation.**

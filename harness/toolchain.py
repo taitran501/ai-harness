@@ -38,6 +38,11 @@ PIN_DISABLE_ENV = "AI_HARNESS_TOOLCHAIN_NO_PIN"
 #: bounds the chain to one re-exec and fails open with a clear message.
 PIN_DEPTH_ENV = "AI_HARNESS_PIN_DEPTH"
 CLONE_DIR_NAMES = ("ai-harness", "ai_harness")
+#: Environment variable pointing at the single canonical framework checkout
+#: shared by every workspace (single-install architecture). When set and
+#: valid it takes precedence over any per-workspace clone — this is what
+#: removes cross-workspace drift at the source.
+FRAMEWORK_DIR_ENV = "HARNESS_FRAMEWORK_DIR"
 
 
 def find_workspace_clone(project_root: Optional[Path | str]) -> Optional[Path]:
@@ -57,6 +62,33 @@ def find_workspace_clone(project_root: Optional[Path | str]) -> Optional[Path]:
     return None
 
 
+def find_framework_root(project_root: Optional[Path | str]) -> Optional[Path]:
+    """Return the authoritative framework root for this invocation.
+
+    Resolution order (single-install architecture):
+
+    1. ``HARNESS_FRAMEWORK_DIR`` — an explicit canonical checkout shared by
+       every workspace. When set and valid it is always preferred, which is
+       exactly what removes cross-workspace drift.
+    2. The per-workspace clone (``<workspace>/ai-harness``) — the legacy
+       layout, kept as a fallback so not-yet-migrated workspaces keep
+       working.
+
+    Returns the directory that directly contains the ``harness`` package, or
+    ``None`` when no framework checkout can be found.
+    """
+    env_dir = os.environ.get(FRAMEWORK_DIR_ENV)
+    if env_dir:
+        candidate = Path(env_dir).expanduser()
+        if not candidate.is_absolute():
+            base = Path(project_root).expanduser() if project_root is not None else Path.cwd()
+            candidate = base / candidate
+        candidate = candidate.resolve()
+        if (candidate / "harness" / "__init__.py").is_file():
+            return candidate
+    return find_workspace_clone(project_root)
+
+
 def current_origin() -> Optional[Path]:
     """Path of the ``harness.__init__`` this process actually loaded."""
     try:
@@ -68,12 +100,12 @@ def current_origin() -> Optional[Path]:
 
 
 def _needs_pin(project_root: Optional[Path | str]) -> Tuple[bool, str, str]:
-    """(drift?, loaded_origin, expected_origin). No clone -> no pin."""
-    clone = find_workspace_clone(project_root)
+    """(drift?, loaded_origin, expected_origin). No framework root -> no pin."""
+    framework_root = find_framework_root(project_root)
     origin = current_origin()
-    if clone is None or origin is None:
+    if framework_root is None or origin is None:
         return False, "", ""
-    expected = (clone / "harness" / "__init__.py").resolve()
+    expected = (framework_root / "harness" / "__init__.py").resolve()
     return origin != expected, str(origin), str(expected)
 
 
@@ -83,7 +115,7 @@ def ensure_pinned_toolchain(
     argv: Optional[Sequence[str]] = None,
     runner=subprocess.run,
 ) -> Optional[subprocess.CompletedProcess]:
-    """Re-exec ``module`` under the workspace clone when the loaded code
+    """Re-exec ``module`` under the framework root when the loaded code
     originates elsewhere.
 
     Returns ``None`` when the current process may continue (no drift, no
@@ -122,16 +154,16 @@ def ensure_pinned_toolchain(
             file=sys.stderr,
         )
         return None
-    clone = find_workspace_clone(project_root)
-    if clone is None:
+    pinned_root = find_framework_root(project_root)
+    if pinned_root is None:
         return None
     cmd = [sys.executable, "-m", module] + list(argv if argv is not None else sys.argv[1:])
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(clone) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(pinned_root) + os.pathsep + env.get("PYTHONPATH", "")
     env[PIN_DEPTH_ENV] = str(depth + 1)
     print(
-        f"[ai-harness] toolchain pin: re-executing '{module}' under the workspace "
-        f"clone ({clone}) - loaded code originated from {origin}",
+        f"[ai-harness] toolchain pin: re-executing '{module}' under the framework "
+        f"root ({pinned_root}) - loaded code originated from {origin}",
         file=sys.stderr,
     )
     try:

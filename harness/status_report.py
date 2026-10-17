@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.metadata as _importlib_metadata
 import json
+import os
 import platform
 import sys
 from pathlib import Path
@@ -53,6 +54,54 @@ def _installed_dist(name: str) -> bool:
         return _importlib_metadata.version(name) is not None
     except Exception:
         return False
+
+
+def _framework_section(project_root: Optional[str]) -> Dict[str, Any]:
+    """Framework provenance (single-install architecture).
+
+    Reports which framework root the workspace resolved to, whether it is the
+    shared canonical checkout (single-install) or a legacy per-workspace
+    clone, the recorded pointer, and an advisory when the import origin does
+    not match the resolved root (the shared install is stale and needs a
+    one-time ``pip install -e``).
+    """
+    from harness.project import MANIFEST_RELATIVE_PATH, read_framework_pointer
+    from harness.toolchain import FRAMEWORK_DIR_ENV, current_origin, find_framework_root
+
+    root = Path(project_root or ".").expanduser().resolve()
+    canonical_env = os.environ.get(FRAMEWORK_DIR_ENV)
+    resolved = find_framework_root(root)
+    origin = current_origin()
+
+    pointer = None
+    manifest = root / MANIFEST_RELATIVE_PATH
+    if manifest.is_file():
+        pointer = read_framework_pointer(manifest)
+
+    single_install = False
+    if resolved is not None:
+        try:
+            resolved.resolve().relative_to(root)
+            single_install = False  # inside the workspace -> legacy clone
+        except ValueError:
+            single_install = True  # outside the workspace -> canonical
+
+    advisory = None
+    if resolved is not None and origin is not None:
+        expected = (resolved / "harness" / "__init__.py").resolve()
+        if origin != expected:
+            advisory = (
+                f"import origin {origin} != framework root {resolved}; "
+                f"run `pip install -e {resolved}` once, or `ai-harness sync`"
+            )
+    return {
+        "single_install": single_install,
+        "framework_dir_env": canonical_env,
+        "resolved_framework": str(resolved) if resolved else None,
+        "import_origin": str(origin) if origin else None,
+        "workspace_pointer": pointer,
+        "advisory": advisory,
+    }
 
 
 def _section(fn, *args) -> Dict[str, Any]:
@@ -356,6 +405,7 @@ def collect_status(project_root: Optional[str] = None, include_cloud: bool = Tru
             "executable": sys.executable,
         },
         "install": _section(_installed_info),
+        "framework": _section(_framework_section, project_root),
         "project": _section(_project_section, project_root),
         "plugins": _section(_plugins_section, project_root),
         "adoption": _section(_adoption_section, project_root),
@@ -381,6 +431,13 @@ def render_markdown(status: Dict[str, Any]) -> str:
             lines[-1] += f" (v{inst['version']})"
     else:
         lines.append(f"{mark(False)} install: {inst.get('error', 'not found')}")
+    fw = status.get("framework", {})
+    if fw.get("single_install"):
+        lines.append(f"{mark(True)} framework: single-install @ {fw.get('resolved_framework')}")
+    elif fw.get("resolved_framework"):
+        lines.append(f"{mark(False)} framework: workspace-clone @ {fw.get('resolved_framework')}")
+    if fw.get("advisory"):
+        lines.append(f"         ⚠ {fw['advisory']}")
     proj = status.get("project", {})
     if proj.get("attached"):
         lines.append(f"{mark(True)} project: {proj['root']}")

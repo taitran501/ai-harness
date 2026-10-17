@@ -1,16 +1,18 @@
 """`ai-harness sync` — one-command framework update for a competition workspace.
 
-Every competition workspace carries its own clone of the ai-harness repository
-(e.g. `<workspace>/ai-harness`). Historically, updating after a framework
-release required a hand-written 4-step brief pasted into each chat
-(`git pull`, `pip install -e`, re-attach, verify entrypoints). This command
-performs those steps deterministically:
+Two layouts are supported (single-install architecture):
 
-1. update the framework clone (fast-forward only; a dirty tree is never touched),
-2. reinstall the editable package with the current interpreter,
-3. re-attach the workspace (regenerates `.ai-harness/project.yaml` and the
-   task-specific `.agents/skills/ai-harness/SKILL.md` from the new code),
-4. report before/after commit + installed version + entrypoint health.
+- **workspace-clone (legacy)**: the workspace carries its own clone
+  (``<workspace>/ai-harness``); sync pulls it and retargets the global
+  editable install to that clone.
+- **canonical (single-install)**: every workspace shares ONE checkout named
+  by ``HARNESS_FRAMEWORK_DIR``; sync pulls that checkout but does NOT
+  retarget the shared editable install per workspace (it only verifies the
+  install points at the canonical checkout and warns otherwise).
+
+In both modes sync then re-attaches the workspace (regenerates
+``.ai-harness/project.yaml`` and the task skill from the new code) and records
+a framework provenance pointer (path + commit) in the manifest.
 
 The command never commits, never resets, and never deletes anything.
 """
@@ -74,6 +76,22 @@ def find_framework_repo(
         if p.is_dir() and (p / ".git").exists() and (p / "harness").is_dir():
             return p
     return None
+
+
+def _is_canonical(repo: Path, project_root: Path) -> bool:
+    """True when the resolved framework repo lives OUTSIDE the workspace.
+
+    The single-install (canonical) checkout is shared by every workspace and
+    lives outside any single one; the legacy per-workspace clone lives inside
+    the workspace (``<workspace>/ai-harness``). This discriminator decides
+    whether sync retargets the global editable install (clone) or leaves the
+    shared install untouched (canonical).
+    """
+    try:
+        repo.resolve().relative_to(Path(project_root).expanduser().resolve())
+        return False  # inside the workspace -> legacy clone
+    except ValueError:
+        return True  # outside the workspace -> canonical
 
 
 def _git(repo: Path, *args: str) -> Dict[str, Any]:
@@ -155,6 +173,7 @@ def run_sync(
         _emit(report, as_json)
         return 2
     report["framework_repo"] = str(repo)
+    report["mode"] = "canonical" if _is_canonical(repo, root) else "workspace-clone"
 
     before = git_state(repo)
     report["before"] = before
@@ -187,22 +206,44 @@ def run_sync(
                     pull["fetch_error"] = fetch["error"]
     report["steps"]["pull"] = pull
 
-    # 2. Reinstall the editable package with the current interpreter.
+    # 2. Editable install.
+    #    - workspace-clone (legacy): retarget the global editable install to
+    #      this clone, exactly as before.
+    #    - canonical (single-install): the global editable install is shared
+    #      by every workspace, so sync must NOT retarget it per workspace.
+    #      We only verify it already points at the canonical checkout and
+    #      warn (advisory) when it does not.
     install: Dict[str, Any] = {"skipped": no_install, "rc": None}
     if not no_install:
-        install = _run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-e",
-                str(repo),
-                "--quiet",
-                "--disable-pip-version-check",
-            ],
-            timeout=1800,
-        )
+        if report["mode"] == "canonical":
+            from harness.toolchain import current_origin
+
+            origin = current_origin()
+            expected = repo / "harness" / "__init__.py"
+            install = {
+                "skipped": True,
+                "rc": None,
+                "reason": "canonical mode: global editable install is shared; not retargeted per sync",
+            }
+            if origin is not None and expected.is_file() and origin != expected.resolve():
+                report.setdefault("warnings", []).append(
+                    f"global editable install points to {origin}, not the canonical {repo}; "
+                    f"run `pip install -e {repo}` once to retarget it"
+                )
+        else:
+            install = _run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "-e",
+                    str(repo),
+                    "--quiet",
+                    "--disable-pip-version-check",
+                ],
+                timeout=1800,
+            )
     report["steps"]["install"] = install
 
     # 3. Re-attach: refresh manifest + regenerate the task skill from new code.
@@ -276,6 +317,23 @@ def run_sync(
                     os.environ["HARNESS_PROJECT_ROOT"] = prev_root_env
     report["steps"]["attach"] = attach
 
+    # Record provenance: which framework (path + commit) this workspace
+    # attached against. Written into the manifest so `status` can report it
+    # later and flag a stale pointer once the canonical checkout advances.
+    if not no_attach and attach.get("rc") in (0, None) and not attach.get("error"):
+        try:
+            from harness.project import write_framework_pointer
+
+            manifest_path = Path(
+                attach.get("manifest") or str(root / ".ai-harness" / "project.yaml")
+            )
+            gs = git_state(repo)
+            report["framework_pointer"] = write_framework_pointer(
+                manifest_path, repo, commit=gs.get("commit"), branch=gs.get("branch")
+            )
+        except Exception as exc:  # noqa: BLE001 - provenance is advisory, never fatal
+            report.setdefault("warnings", []).append(f"framework pointer: {exc}")
+
     # Toolchain drift check: did this process start with harness code from
     # the workspace's own clone? (Informational — attach now always uses a
     # pinned subprocess, so drift no longer affects sync results.)
@@ -333,6 +391,7 @@ def _emit(report: Dict[str, Any], as_json: bool) -> None:
     before = report.get("before") or {}
     after = report.get("after") or {}
     print(f"AI-Harness sync — workspace: {report['project_root']}")
+    print(f"  mode         : {report.get('mode', '?')}")
     print(f"  framework repo : {repo}")
     print(
         f"  commit       : {before.get('commit') or '?'} -> {after.get('commit') or '?'}"

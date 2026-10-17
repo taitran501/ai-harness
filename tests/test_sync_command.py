@@ -52,7 +52,7 @@ def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -
             ["git", "init", "--bare", str(origin)], capture_output=True, text=True, check=True, env=env
         )
         subprocess.run(["git", "remote", "set-url", "origin", str(origin)], cwd=fw, capture_output=True, text=True, check=True)
-        subprocess.run(["git", "push", "-u", "origin", "main"], cwd=fw, capture_output=True, text=True, check=True)
+        subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=fw, capture_output=True, text=True, check=True)
     (ws / "configs" / "task.yaml").write_text(
         "task:" + chr(10) + "  name: SyncTask" + chr(10) + "  primary_metric: rmsle" + chr(10) +
         "  execution:" + chr(10) + "    backend: kaggle" + chr(10) + "    locked: true" + chr(10),
@@ -165,7 +165,7 @@ class TestRunSync(unittest.TestCase):
             subprocess.run(["git", "add", "-A"], cwd=fw, capture_output=True, text=True, env=env)
             subprocess.run(["git", "commit", "-m", "second"], cwd=fw, capture_output=True, text=True, env=env)
             # publish the second commit so the remote actually has it
-            subprocess.run(["git", "push", "origin", "main"], cwd=fw, capture_output=True, text=True, env=env)
+            subprocess.run(["git", "push", "origin", "HEAD"], cwd=fw, capture_output=True, text=True, env=env)
             # The second commit is the target; local is then reset behind it.
             target = subprocess.run(["git", "rev-parse", "HEAD"], cwd=fw, capture_output=True, text=True, env=env).stdout.strip()
             # reset local branch behind origin so pull --ff-only advances it
