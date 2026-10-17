@@ -1034,6 +1034,9 @@ class UniversalRunner:
         # 5. Persist stage manifest
         save_json(self.exp_dir / "stage_manifest.json", stage_manifest)
 
+        # 5.5. Audit gate: verify the manifest is complete and consistent
+        self._verify_pipeline_manifest(len(stages))
+
         # 6. Verify output artifacts (mirrors _run_custom_script)
         oof_path = self.exp_dir / "oof_predictions.csv"
         if not oof_path.exists():
@@ -1108,6 +1111,49 @@ class UniversalRunner:
         return self._save_and_finalize(
             truth, details, rows, records, git_hash, test_df=test_df, fold_test_preds=fold_test_preds
         )
+
+    def _verify_pipeline_manifest(self, expected_count: int) -> None:
+        """Audit gate: verify stage_manifest.json is complete and consistent.
+
+        Raises ValueError if any check fails:
+        - manifest missing
+        - stage count != expected_count
+        - any exit_code != 0 (inconsistent with fail-fast)
+        - index not 0..N-1 (order violated)
+        - any per-stage log file missing
+        """
+        manifest_path = self.exp_dir / "stage_manifest.json"
+        if not manifest_path.exists():
+            raise ValueError("Pipeline audit gate: stage_manifest.json missing")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if len(manifest) != expected_count:
+            raise ValueError(
+                f"Pipeline audit gate: expected {expected_count} stages, "
+                f"found {len(manifest)}"
+            )
+        for i, stage in enumerate(manifest):
+            if stage.get("index") != i:
+                raise ValueError(
+                    f"Pipeline audit gate: stage {i} has index {stage.get('index')} "
+                    f"(order violated)"
+                )
+            if stage.get("exit_code") != 0:
+                raise ValueError(
+                    f"Pipeline audit gate: stage '{stage.get('name')}' "
+                    f"exit code {stage.get('exit_code')} != 0"
+                )
+            log_rel = stage.get("log_file", "")
+            if not log_rel:
+                raise ValueError(
+                    f"Pipeline audit gate: stage '{stage.get('name')}' "
+                    f"has no log_file"
+                )
+            log_path = self.exp_dir / log_rel
+            if not log_path.exists():
+                raise ValueError(
+                    f"Pipeline audit gate: log file missing for stage "
+                    f"'{stage.get('name')}': {log_rel}"
+                )
 
     def _run_model_training(self, df, val_strategy, git_hash):
         variants = self.cfg.get("data", {}).get("input_variants") or list(

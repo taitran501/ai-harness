@@ -281,6 +281,94 @@ class TestPipelineExecution(unittest.TestCase):
                 runner, {"pipeline": [{"name": "train"}]}
             )
 
+    # ---- _verify_pipeline_manifest (audit gate) ----
+
+    def _manifest_runner(self, exp_dir: Path) -> UniversalRunner:
+        runner = UniversalRunner.__new__(UniversalRunner)
+        runner.exp_dir = exp_dir
+        return runner
+
+    def test_manifest_verify_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exp_dir = Path(tmp)
+            (exp_dir / "stages").mkdir()
+            (exp_dir / "stages" / "train.log").write_text("train done\n")
+            (exp_dir / "stages" / "blend.log").write_text("blend done\n")
+            stages = [
+                {"name": "train", "index": 0, "total": 2, "exit_code": 0,
+                 "duration_seconds": 0.1, "log_file": "stages/train.log"},
+                {"name": "blend", "index": 1, "total": 2, "exit_code": 0,
+                 "duration_seconds": 0.2, "log_file": "stages/blend.log"},
+            ]
+            (exp_dir / "stage_manifest.json").write_text(json.dumps(stages), encoding="utf-8")
+            # Should not raise
+            self._manifest_runner(exp_dir)._verify_pipeline_manifest(2)
+
+    def test_manifest_file_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError) as ctx:
+                self._manifest_runner(Path(tmp))._verify_pipeline_manifest(2)
+            self.assertIn("stage_manifest.json missing", str(ctx.exception))
+
+    def test_manifest_count_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exp_dir = Path(tmp)
+            (exp_dir / "stages").mkdir()
+            (exp_dir / "stages" / "train.log").write_text("train done\n")
+            stages = [
+                {"name": "train", "index": 0, "total": 1, "exit_code": 0,
+                 "duration_seconds": 0.1, "log_file": "stages/train.log"},
+            ]
+            (exp_dir / "stage_manifest.json").write_text(json.dumps(stages), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                self._manifest_runner(exp_dir)._verify_pipeline_manifest(2)
+            self.assertIn("expected 2 stages, found 1", str(ctx.exception))
+
+    def test_manifest_bad_exit_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exp_dir = Path(tmp)
+            (exp_dir / "stages").mkdir()
+            (exp_dir / "stages" / "train.log").write_text("train done\n")
+            stages = [
+                {"name": "train", "index": 0, "total": 1, "exit_code": 7,
+                 "duration_seconds": 0.1, "log_file": "stages/train.log"},
+            ]
+            (exp_dir / "stage_manifest.json").write_text(json.dumps(stages), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                self._manifest_runner(exp_dir)._verify_pipeline_manifest(1)
+            self.assertIn("exit code 7 != 0", str(ctx.exception))
+
+    def test_manifest_order_violation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exp_dir = Path(tmp)
+            (exp_dir / "stages").mkdir()
+            (exp_dir / "stages" / "train.log").write_text("train done\n")
+            (exp_dir / "stages" / "blend.log").write_text("blend done\n")
+            stages = [
+                {"name": "train", "index": 1, "total": 2, "exit_code": 0,
+                 "duration_seconds": 0.1, "log_file": "stages/train.log"},
+                {"name": "blend", "index": 0, "total": 2, "exit_code": 0,
+                 "duration_seconds": 0.2, "log_file": "stages/blend.log"},
+            ]
+            (exp_dir / "stage_manifest.json").write_text(json.dumps(stages), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                self._manifest_runner(exp_dir)._verify_pipeline_manifest(2)
+            self.assertIn("order violated", str(ctx.exception))
+
+    def test_manifest_log_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exp_dir = Path(tmp)
+            (exp_dir / "stages").mkdir()
+            # NOTE: train.log is intentionally NOT created (missing)
+            stages = [
+                {"name": "train", "index": 0, "total": 1, "exit_code": 0,
+                 "duration_seconds": 0.1, "log_file": "stages/train.log"},
+            ]
+            (exp_dir / "stage_manifest.json").write_text(json.dumps(stages), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                self._manifest_runner(exp_dir)._verify_pipeline_manifest(1)
+            self.assertIn("log file missing", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
