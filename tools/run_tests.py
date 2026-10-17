@@ -67,13 +67,16 @@ def build_suite(modules: list[str]) -> unittest.TestSuite:
 
 
 def main(argv: list[str]) -> int:
-    # Isolate the test environment: drop any globally-set HARNESS_FRAMEWORK_DIR so
-    # the suite runs in a clean environment. The sync / toolchain-pin / status /
-    # single-install tests assume no global framework pointer is present by default
-    # (single-install tests that need the pointer set it explicitly per test). Without
-    # this, a migrated machine (where the one-time migration set the var globally)
-    # contaminates the suite with false failures unrelated to the code under test.
-    os.environ.pop("HARNESS_FRAMEWORK_DIR", None)
+    # Isolate the test environment: drop ANY globally-set HARNESS_* / AI_HARNESS_*
+    # var so the suite runs in a clean environment. The suite is written to run in
+    # a clean environment — tests that need a specific var set it explicitly per test
+    # (via mock.patch.dict or direct os.environ assignment). Without this, a machine
+    # with harness env vars set globally (e.g. the one-time single-install migration
+    # sets HARNESS_FRAMEWORK_DIR) contaminates the suite with false failures
+    # unrelated to the code under test. The prefix sweep is systemic: a future new
+    # env var is isolated automatically without touching each test module.
+    for k in [k for k in os.environ if k.startswith(("HARNESS_", "AI_HARNESS_"))]:
+        del os.environ[k]
     args = [a for a in argv if a]
     fast = "--fast" in args
     args = [a for a in args if a != "--fast"]

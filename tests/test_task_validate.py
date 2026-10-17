@@ -171,6 +171,26 @@ class TestTaskValidate(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertTrue(any("top-level YAML must be a mapping" in e for e in result["errors"]))
 
+    def test_placeholder_values_are_warned(self) -> None:
+        """Adoption guard: a copied template with placeholder values is warned.
+
+        The single most common 'copied template, ran as-is' failure mode —
+        train_path / target_column still carry a placeholder token.
+        """
+        ws = self._make_ws("tv_placeholder_")
+        raw = _valid_raw("dataset/YOUR_DATASET.parquet")
+        raw["task"]["data_config"]["target_column"] = "YOUR_TARGET_COL"
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        # train_path is missing (file doesn't exist) -> error
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("train_path missing" in e for e in result["errors"]))
+        # AND the placeholder guard warns on both train_path and target_column
+        warnings_text = "\n".join(result["warnings"])
+        self.assertIn("uncustomized template placeholder", warnings_text)
+        self.assertIn("train_path", warnings_text)
+        self.assertIn("target_column", warnings_text)
+
 
 if __name__ == "__main__":
     unittest.main()

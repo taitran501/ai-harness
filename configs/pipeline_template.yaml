@@ -1,0 +1,78 @@
+# =============================================================================
+# PIPELINE EXPERIMENT TEMPLATE
+# -----------------------------------------------------------------------------
+# MẪU KHỞI ĐIỂM (starting point) — NOT a runnable config.
+#
+# HOW TO USE:
+#   1. Copy this file to  configs/exp<NNN>_<branch>_<descriptor>.yaml
+#      (e.g. configs/exp005_ens_blend.yaml)
+#   2. Replace EVERY  [CUSTOMIZE]  marker with a real value.
+#   3. Write one script per stage under  src/  (see src/_templates/ for
+#      copy-paste scaffolds: train_template.py, blend_template.py).
+#   4. Sanity-check:   ai-harness validate-task --config configs/<this>.yaml
+#   5. Smoke probe:    ai-harness-run --project-root . \
+#                       --config configs/<this>.yaml --debug --fold 0
+#   6. Full run:       ai-harness-run --project-root . --config configs/<this>.yaml
+#
+# DO NOT run this template as-is. The [CUSTOMIZE] placeholders (and the
+# placeholder verified_via) will fail validation / the grounding gate, forcing
+# you to customize before the run actually makes sense.
+# =============================================================================
+
+experiment:
+  id: "[CUSTOMIZE] exp00X_short_name"
+  branch: "ens"                      # baseline | feat | model | loss | ens
+  parent_id: "[CUSTOMIZE] exp000_anchor_id"   # parent experiment node id
+  date: "[CUSTOMIZE] YYYY-MM-DD"
+  # REQUIRED for pipeline mode — the runner rejects pipeline with any other
+  # approach (runner._execute_run: 'Pipeline execution requires
+  # experiment.approach script or custom_script').
+  approach: "custom_script"
+  problem_addressed: "[CUSTOMIZE] one sentence: what gap does this pipeline address?]"
+  hypothesis: "[CUSTOMIZE] expected outcome + mechanism + expected metric range]"
+  intervention: "[CUSTOMIZE] what changed vs the parent experiment?]"
+
+# --- Pipeline execution -------------------------------------------------------
+# One entry = one stage. Stages run SEQUENTIALLY, share the same experiment
+# dir (exp_dir), and communicate via files (OOF/test CSVs) they write there.
+# A stage that exits non-zero HALTS the pipeline (fail-fast) and is recorded
+# in exp_dir/stage_manifest.json. Per-stage logs: exp_dir/stages/<name>.log.
+#
+# Two equivalent forms:
+#   execution.pipeline:   named stages  ({name, entrypoint, args?})
+#   execution.entrypoints: anonymous    (list of src/*.py paths)
+execution:
+  mode: "pipeline"
+  pipeline:
+    - name: "train_a"
+      entrypoint: "src/train_a.py"     # [CUSTOMIZE] stage script (see src/_templates/)
+    - name: "train_b"
+      entrypoint: "src/train_b.py"     # [CUSTOMIZE] stage script
+    - name: "blend"
+      entrypoint: "src/blend.py"       # [CUSTOMIZE] blend/stack stage script
+    # optional per-stage args:
+    # - name: "blend"
+    #   entrypoint: "src/blend.py"
+    #   args: ["--weights", "0.5,0.5"]
+
+grounding:
+  source_type: "[CUSTOMIZE] huggingface_hub|kaggle|paper|verified_baseline"
+  source_id: "[CUSTOMIZE] exact dataset / model / paper identifier"
+  retrieval_summary: "[CUSTOMIZE] what you fetched + verified, and when"
+  # Must be a real verifier name the grounding gate recognizes, e.g.
+  # huggingface_hub, kaggle, local_registry. A placeholder value is REJECTED.
+  verified_via: "[CUSTOMIZE] huggingface_hub"
+
+assumption_register:
+  known_facts:
+    - "[CUSTOMIZE] verified fact 1 (with source)"
+    - "[CUSTOMIZE] verified fact 2"
+  assumptions:
+    - "[CUSTOMIZE] unverified assumption 1 (bounded, stated risk)"
+    - "[CUSTOMIZE] unverified assumption 2"
+  uncertainty_level: "medium"         # low | medium | high
+  verification_probe: "ai-harness-run --project-root . --config configs/<this>.yaml --debug --fold 0"
+
+# NOTE: data / model / evaluation sections are inherited from configs/task.yaml
+# by default. Override here ONLY if this pipeline needs different data, model
+# family, or metric than the task baseline.
