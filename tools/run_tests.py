@@ -2,13 +2,22 @@
 
 Usage:
     python tools/run_tests.py                 # full suite (all modules)
+    python tools/run_tests.py --smoke         # smoke tier: <10s critical invariants
     python tools/run_tests.py --fast          # fast tier: skip slow modules
     python tools/run_tests.py --list-slow     # show which modules are slow
+    python tools/run_tests.py --list-smoke    # show which modules are smoke
     python tools/run_tests.py test_x test_y   # run specific modules
 
 The slow tier holds the modules that exercise full pipelines (Kaggle
 packaging, dashboard server, git audit gate, legacy end-to-end harness).
 Run the full suite before pushing; use --fast during iteration.
+
+The smoke tier is the <10 s critical-invariants set for rapid feedback.
+It covers the framework core (correctness contract + metric reference,
+label-integrity audit, anti-hallucination grounding gate, research-memory
+scope stability, backend-lock policy) in a single process, so the heavy
+pandas/sklearn/pyarrow import cost is paid exactly once. Module membership
+is chosen from per-module timing measurement, not by feel.
 """
 
 from __future__ import annotations
@@ -31,6 +40,18 @@ SLOW_MODULES = (
     "test_harness",          # legacy end-to-end harness pipeline
 )
 
+#: Critical-invariants subset for the <10 s smoke tier, chosen by
+#: per-module timing measurement (tools/timing/_measure_modules.py).
+#: In-process total is below the per-module pytest sum because the
+#: heavy shared imports (pandas/sklearn/pyarrow) are paid once.
+SMOKE_MODULES = (
+    "test_correctness_contracts",    # correctness contract + metric reference
+    "test_correctness_candidates",   # label-integrity audit (missing/duplicate)
+    "test_grounding_gate",           # anti-hallucination verified_via gate
+    "test_research_scope_stability", # research-memory scope stability
+    "test_execution_backend_policy", # kaggle backend lock policy
+)
+
 
 def discover_modules() -> list[str]:
     test_dir = REPO_ROOT / "tests"
@@ -49,9 +70,16 @@ def main(argv: list[str]) -> int:
     args = [a for a in argv if a]
     fast = "--fast" in args
     args = [a for a in args if a != "--fast"]
+    smoke = "--smoke" in args
+    args = [a for a in args if a != "--smoke"]
 
     if "--list-slow" in args:
         for name in SLOW_MODULES:
+            print(name)
+        return 0
+
+    if "--list-smoke" in args:
+        for name in SMOKE_MODULES:
             print(name)
         return 0
 
@@ -61,13 +89,22 @@ def main(argv: list[str]) -> int:
         for a in args:
             stem = Path(a).stem if a.endswith(".py") else a.split(".")[-1]
             modules.append(stem)
+    elif smoke:
+        modules = list(SMOKE_MODULES)
     else:
         modules = discover_modules()
         if fast:
             modules = [m for m in modules if m not in SLOW_MODULES]
 
-    label = "fast tier" if fast and not args else "full suite" if not args else "selected modules"
-    excluded = f" ({len(SLOW_MODULES)} slow excluded)" if fast and not args else ""
+    if smoke and not args:
+        label = "smoke tier (<10s invariants)"
+    elif fast and not args:
+        label = "fast tier"
+    elif not args:
+        label = "full suite"
+    else:
+        label = "selected modules"
+    excluded = f" ({len(SLOW_MODULES)} slow excluded)" if fast and not smoke and not args else ""
     print(f"Running {label}: {len(modules)} test modules{excluded}")
 
     t0 = time.time()
