@@ -1,0 +1,81 @@
+"""Tests for the verified-API-surface reference (anti-hallucination).
+
+Guards that the reference delivered to the agent (SKILL.md §7) stays honest:
+every listed CLI command / Python symbol / module / facade method must actually
+resolve, and the module names agents keep inventing (``harness.agents``,
+``harness.task_config``) must remain absent so the "correct name" hints keep
+their meaning.
+"""
+from __future__ import annotations
+
+import importlib
+import unittest
+
+import harness.api_reference as api_ref
+
+
+class ValidateReferenceTests(unittest.TestCase):
+    def test_reference_is_fully_valid(self):
+        problems = api_ref.validate_reference()
+        self.assertEqual(
+            problems, [],
+            msg="stale reference entries:\n" + "\n".join(problems),
+        )
+
+    def test_all_cli_commands_registered(self):
+        commands = api_ref._ai_harness_commands()
+        for name, _ in api_ref.CLI_COMMANDS:
+            self.assertIn(name, commands, "%r not a real ai-harness command" % name)
+
+    def test_facade_methods_exist_on_client(self):
+        client = api_ref._resolve("harness.kaggle_compat.KaggleClient")
+        for method, _ in api_ref.FACADE_METHODS:
+            self.assertTrue(hasattr(client, method), "KaggleClient.%s missing" % method)
+
+    def test_key_modules_import(self):
+        for dotted, _ in api_ref.KEY_MODULES:
+            importlib.import_module(dotted)
+
+
+class RenderReferenceTests(unittest.TestCase):
+    def test_render_includes_verified_names(self):
+        md = api_ref.render_reference()
+        for needle in (
+            "## 7. Verified API surface",
+            "harness.kaggle_compat.KaggleClient",
+            "harness.task_spec",
+            "list_submissions",
+            "submission",
+            "dispatch-kernel",
+            "ai-harness-agent",
+        ):
+            self.assertIn(needle, md)
+
+    def test_render_warns_against_guessing(self):
+        md = api_ref.render_reference()
+        self.assertIn("do NOT invent", md)
+        self.assertIn("never guess", md)
+
+
+class SkillInjectionTests(unittest.TestCase):
+    def test_skill_md_contains_reference(self):
+        from harness.skill_injector import generate_skill_content
+
+        md = generate_skill_content({"name": "T", "platform": "kaggle"})
+        self.assertIn("## 7. Verified API surface", md)
+        self.assertIn("harness.task_spec", md)
+
+
+class HallucinatedNamesAbsentTests(unittest.TestCase):
+    """Pin the motivation: the module names agents invent are NOT real."""
+
+    def test_invented_module_names_do_not_exist(self):
+        for bad in ("harness.agents", "harness.task_config"):
+            with self.assertRaises(
+                ModuleNotFoundError, msg="%s should not exist" % bad
+            ):
+                importlib.import_module(bad)
+
+
+if __name__ == "__main__":
+    unittest.main()
