@@ -1,11 +1,14 @@
 # Single-Install Architecture — Design
 
-**Status:** Implemented (PR #78) — `find_framework_root` + canonical-aware
-`sync` + manifest provenance pointer + `status` framework section are in
-place; the one-time operator migration (canonical clone + `pip install -e`
-+ `HARNESS_FRAMEWORK_DIR` + delete per-workspace clones) is the remaining
-step. Legacy per-workspace clones keep working via the `find_workspace_clone`
-fallback until migrated.
+**Status:** Migrated (PR #78 + one-time migration on 2026-10-17) —
+`find_framework_root` + canonical-aware `sync` + manifest provenance pointer +
+`status` framework section are in place, and the one-time operator migration is
+done: canonical checkout at `C:\Users\trant\ai-harness-framework` (branch `main`),
+global editable install retargeted to it, `HARNESS_FRAMEWORK_DIR` set (user env),
+and all 5 workspace clones removed. PR #79 added a pointer fallback so `status`
+reports `single_install` correctly even in a shell predating `setx`.
+Legacy per-workspace clones keep working via the `find_workspace_clone`
+fallback for any not-yet-migrated workspace.
 **Supersedes:** the per-workspace framework clone model introduced with the
 adoption stack. **Relates to:** PR #74 (toolchain re-exec loop breaker),
 `docs/architecture.md`, `docs/kaggle_execution.md`.

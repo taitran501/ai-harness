@@ -6,6 +6,41 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — one-time single-install migration executed + status pointer fallback (PR #79)
+
+**Migration done: all 5 workspaces now on the shared canonical checkout.**
+
+The single-install architecture (PR #78) was implemented but not yet migrated.
+Today the one-time migration was executed and verified end to end:
+
+- **Canonical clone** at `C:\Users\trant\ai-harness-framework` (branch `main`),
+  the **global editable install retargeted** to it (`pip install -e`), and
+  `HARNESS_FRAMEWORK_DIR` set in the user environment (`setx`, persistent).
+- All **5 workspace clones removed** (`aimo`, `rsna-knee`, `airline_prediction`,
+  `semeval_2027`, `zindi`); each re-`sync`ed in canonical mode — install step
+  correctly **skipped** ("not retargeted per sync"), attach ran on the
+  canonical code, and the provenance pointer was recorded (now at `d3b6e85`).
+- **Verified**: `import harness` from every workspace cwd resolves to the
+  canonical checkout (drift eliminated); `status` reports `single_install: true`
+  with `advisory: null`.
+
+- **PR #79 — status pointer fallback** (`harness/status_report.py`): a shell
+  that predates `setx` (e.g. a long-lived IDE session) resolves no framework
+  root, so `status` reported `single_install: false` and skipped the drift
+  advisory even though the workspace was already migrated. `_framework_section`
+  now uses the recorded manifest pointer as a fallback signal for
+  `single_install` and for the origin-mismatch advisory. +2 tests.
+
+- Evidence: 14 single-install + 11 status tests pass; smoke gate 47 tests OK;
+  Ruff F,E7 clean. Live: all 5 workspaces `ok=true`, pointer `d3b6e85`, import
+  origin canonical, advisory null.
+- Lesson: a one-time global migration must be verified from the *real* usage
+  context (workspace cwd, console entrypoint), not just unit-tested — and the
+  status signal must survive the transition window where the env var is not yet
+  present in a running shell.
+- Next action: none for the framework — single-install is live. Resume
+  competition work (aimo) on the new architecture.
+
 ### 2026-10-17 — single-install architecture (PR #78)
 
 **arch: one canonical framework checkout shared by every workspace.**
