@@ -149,6 +149,51 @@ ai-harness-run --project-root . --config configs/exp001_feat_stemming_clean.yaml
 ```
 This computes full out-of-fold predictions, writes `metrics.json`, produces `DIAGNOSTICS.md`, generates `EXPERIMENT_CARD.md`, and updates the Solution Tree.
 
+### Multi-Stage Pipeline Execution (train / blend / stack)
+When a hypothesis needs several sequential subprocesses — e.g. train model A, train
+model B, blend, then fit a stack — declare `execution.mode: pipeline` instead of a
+single `entrypoint`. The harness runs each stage as an audited subprocess, in order,
+sharing the experiment directory so later stages can read artifacts written by earlier
+ones. This replaces the pattern of hand-writing one monolithic orchestration script
+outside the harness, which bypassed the per-stage audit trail.
+
+```yaml
+experiment:
+  approach: custom_script   # or "script"
+execution:
+  mode: pipeline
+  pipeline:
+    - name: train_a
+      entrypoint: src/train_a.py
+      args: [--fold, 0]
+    - name: blend
+      entrypoint: src/blend.py
+```
+
+A simpler form (names derived from the script stem, no per-stage args) is also
+accepted:
+
+```yaml
+execution:
+  mode: pipeline
+  entrypoints: [src/train_a.py, src/blend.py]
+```
+
+Behavior and guarantees:
+- **Sequential, shared dir.** Stages run in config order; each writes into the shared
+  experiment directory (or `HARNESS_STAGE_DIR`). The last stage must produce
+  `oof_predictions.csv` (and optionally `test_predictions.csv`), which the harness
+  verifies exactly as for `mode: script` before finalizing.
+- **Per-stage audit trail.** Every stage's stdout/stderr is captured to
+  `stages/<name>.log`; per-stage exit code, duration, and log path are recorded in
+  `stage_manifest.json` (persisted even when a stage fails).
+- **Stage env vars.** In addition to the usual `HARNESS_*` env vars, each stage receives
+  `HARNESS_STAGE_NAME`, `HARNESS_STAGE_INDEX`, `HARNESS_STAGE_TOTAL`, and
+  `HARNESS_STAGE_DIR`.
+- **Fail-fast.** The first non-zero stage exit stops the pipeline and raises a
+  `RuntimeError` naming the failed stage and its stderr. Later stages do not run.
+- **Back-compat.** `execution.mode: script` (single `entrypoint`) is unchanged.
+
 ---
 
 ## 6. Pre-Submission Audit Gate

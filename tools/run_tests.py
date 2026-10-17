@@ -67,6 +67,13 @@ def build_suite(modules: list[str]) -> unittest.TestSuite:
 
 
 def main(argv: list[str]) -> int:
+    # Isolate the test environment: drop any globally-set HARNESS_FRAMEWORK_DIR so
+    # the suite runs in a clean environment. The sync / toolchain-pin / status /
+    # single-install tests assume no global framework pointer is present by default
+    # (single-install tests that need the pointer set it explicitly per test). Without
+    # this, a migrated machine (where the one-time migration set the var globally)
+    # contaminates the suite with false failures unrelated to the code under test.
+    os.environ.pop("HARNESS_FRAMEWORK_DIR", None)
     args = [a for a in argv if a]
     fast = "--fast" in args
     args = [a for a in args if a != "--fast"]

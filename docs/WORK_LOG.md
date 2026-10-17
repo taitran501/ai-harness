@@ -6,6 +6,56 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — multi-stage pipeline execution (PR #81)
+
+**Closes the single-entrypoint gap: agents no longer need a monolithic
+orchestration script for train/blend/stack workflows.**
+
+Historical Antigravity audits showed agents writing dozens of bypass scripts
+(82 in `rsna-knee`, 38 in `airline_prediction`) because `UniversalRunner`
+executed exactly one entrypoint. Multi-stage workflows (train N models →
+blend → stack) had no native support, so the agent hand-wrote one big
+orchestration script outside the harness, losing the per-stage audit trail.
+
+- **`harness/runner.py`** — added `execution.mode: pipeline` dispatch in
+  `_execute_run` (validates `approach ∈ {script, custom_script}`, skips the
+  model-factory gate) and a new `_run_pipeline` + `_resolve_pipeline_stages`
+  pair. Stages run **sequentially** in config order as audited subprocesses
+  sharing the experiment directory (later stages read earlier stages'
+  artifacts). Two config forms: `execution.pipeline` (named stages with
+  per-stage `args`) and `execution.entrypoints` (simple list, names derived
+  from the script stem). Per-stage stdout/stderr → `stages/<name>.log`, and
+  per-stage exit code/duration/log path → `stage_manifest.json` (persisted
+  even on failure). New stage env vars: `HARNESS_STAGE_NAME`,
+  `HARNESS_STAGE_INDEX`, `HARNESS_STAGE_TOTAL`, `HARNESS_STAGE_DIR`. Fail-fast:
+  the first non-zero stage exit stops the pipeline and raises a `RuntimeError`
+  naming the stage. The final stage must produce `oof_predictions.csv`, which
+  is verified exactly as for `mode: script` before `_save_and_finalize`.
+- **Back-compat**: `execution.mode: script` (single `entrypoint`) is unchanged.
+- **Docs**: `docs/agent_workflow.md` §5 gained a "Multi-Stage Pipeline
+  Execution" subsection; `AGENTS.md` doc-map entry for `agent_workflow.md`
+  now mentions the pipeline mode.
+- **Test-runner env isolation** (`tools/run_tests.py`): on a migrated machine
+  the one-time single-install migration left `HARNESS_FRAMEWORK_DIR` set
+  globally, which contaminated the sync / toolchain-pin / status / runtime
+  suites (they assume a clean environment) and produced false `--fast`
+  failures unrelated to the code under test. `main()` now pops
+  `HARNESS_FRAMEWORK_DIR` before running so the gate is reliable regardless of
+  the machine's global state; single-install tests that need the pointer set it
+  per-test.
+- Evidence: 9 new tests in `tests/test_pipeline_execution.py` pass
+  (sequential success, simple-entrypoints form, fail-fast, approach
+  validation, `_resolve_pipeline_stages` named/simple/empty/collision/
+  missing-entrypoint); `test_script_adapter.py` (back-compat) 2/2 pass;
+  smoke gate 47 tests OK; Ruff F,E7 clean (modified files + full gate).
+- Lesson: the single-entrypoint design was a *structural* gap, not a missing
+  feature — it forced every multi-stage workflow into a hand-written script
+  that bypassed the audit trail. Adding a first-class sequential stage runner
+  (with per-stage logs + a manifest) restores the audit guarantee without
+  changing the single-script contract.
+- Next action: resume competition work; when a task needs train/blend/stack,
+  declare `execution.mode: pipeline` instead of writing a monolithic script.
+
 ### 2026-10-17 — one-time single-install migration executed + status pointer fallback (PR #79)
 
 **Migration done: all 5 workspaces now on the shared canonical checkout.**
