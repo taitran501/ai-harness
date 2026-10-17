@@ -78,21 +78,34 @@ def _framework_section(project_root: Optional[str]) -> Dict[str, Any]:
     if manifest.is_file():
         pointer = read_framework_pointer(manifest)
 
-    single_install = False
-    if resolved is not None:
-        try:
-            resolved.resolve().relative_to(root)
-            single_install = False  # inside the workspace -> legacy clone
-        except ValueError:
-            single_install = True  # outside the workspace -> canonical
+    pointer_path = pointer.get("path") if pointer else None
 
+    def _outside_workspace(p) -> bool:
+        """True if p is outside the workspace root (i.e. the shared canonical)."""
+        if p is None:
+            return False
+        try:
+            Path(p).expanduser().resolve().relative_to(root)
+            return False  # inside the workspace -> legacy clone
+        except (ValueError, OSError):
+            return True  # outside the workspace -> canonical
+
+    # The env var is authoritative. If it is not set in the current process
+    # (e.g. a shell predating `setx` after a one-time migration), fall back to
+    # the recorded pointer so the status reflects the real architecture rather
+    # than a stale shell environment.
+    single_install = _outside_workspace(resolved) or _outside_workspace(pointer_path)
+
+    expected_root = resolved if resolved is not None else (
+        Path(pointer_path).expanduser() if pointer_path else None
+    )
     advisory = None
-    if resolved is not None and origin is not None:
-        expected = (resolved / "harness" / "__init__.py").resolve()
+    if expected_root is not None and origin is not None:
+        expected = (expected_root / "harness" / "__init__.py").resolve()
         if origin != expected:
             advisory = (
-                f"import origin {origin} != framework root {resolved}; "
-                f"run `pip install -e {resolved}` once, or `ai-harness sync`"
+                f"import origin {origin} != framework root {expected_root}; "
+                f"run `pip install -e {expected_root}` once, or `ai-harness sync`"
             )
     return {
         "single_install": single_install,
