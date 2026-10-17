@@ -9,6 +9,7 @@ Guarantees 100% submission integrity before dispatching to Kaggle/Remote:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -134,7 +135,172 @@ class SubmissionPreflightValidator:
 
 
 class KaggleLeaderboardTracker:
-    """Manages Kaggle CLI submission dispatch and programmatic status polling."""
+    """Kaggle endgame tracker: dispatch submissions, poll for scores, track best.
+
+    This is the harness-native, in-process dispatch path. The host hook blocks
+    raw ``kaggle competitions submit`` / ``kaggle kernels push`` *shell* commands;
+    this tracker is the authorized alternative — it drives the Kaggle API
+    internally via :class:`harness.kaggle_compat.KaggleClient`, so every dispatch
+    is attributable and auditable rather than a forced raw-CLI friction loop.
+
+    Typical endgame loop::
+
+        tracker = KaggleLeaderboardTracker()
+        sub = tracker.dispatch("comp", "submission.csv", "Exp 22")
+        info = tracker.wait_for_score("comp", sub["ref"], timeout_s=1800)
+        print(info["public_score_f"])
+    """
+
+    _COMPLETE = "COMPLETE"
+    _ERROR = "ERROR"
+
+    def __init__(self, client=None, sleep_fn=None):
+        """Initialise the tracker.
+
+        Args:
+            client: A :class:`harness.kaggle_compat.KaggleClient` (or any object
+                exposing ``submit_submission`` / ``list_submissions``). Created
+                lazily when omitted, so construction never requires credentials
+                until a dispatch/poll actually runs.
+            sleep_fn: Injectable sleep callable (tests pass a no-op). Defaults to
+                :func:`time.sleep`.
+        """
+        if client is None:
+            from harness.kaggle_compat import KaggleClient
+
+            client = KaggleClient()
+        self._client = client
+        self._sleep = sleep_fn if sleep_fn is not None else time.sleep
+
+    @staticmethod
+    def _status_str(status: Any) -> str:
+        """Normalise a (possibly wrapped) SubmissionStatus to an uppercase name."""
+        raw = getattr(status, "_raw", status)
+        return str(raw).upper()
+
+    @staticmethod
+    def _score(value: Any) -> Optional[float]:
+        """Parse a score string to float, or None when unset/invalid."""
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def dispatch(
+        self,
+        competition: str,
+        file_name: str,
+        message: str = "",
+        kernel: Optional[str] = None,
+        kernel_version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Submit a file (or code-competition kernel output) and return the ref.
+
+        Args:
+            competition: Kaggle competition slug.
+            file_name: Local submission file (standard) or the kernel output
+                filename (code competition, e.g. ``submission.csv``).
+            message: Human-readable leaderboard label.
+            kernel: Code competition — public kernel slug (``owner/kernel``) that
+                produces the submission output.
+            kernel_version: Code competition — the kernel version number.
+
+        Returns:
+            dict with ``ref`` (int), ``message`` and the dispatch inputs.
+        """
+        resp = self._client.submit_submission(
+            file_name,
+            message,
+            competition,
+            kernel=kernel,
+            kernel_version=kernel_version,
+        )
+        return {
+            "ref": getattr(resp, "ref", None),
+            "message": getattr(resp, "message", ""),
+            "competition": competition,
+            "file_name": file_name,
+            "kernel": kernel,
+            "kernel_version": kernel_version,
+        }
+
+    def get_submission(self, competition: str, ref: Any) -> Dict[str, Any]:
+        """Fetch a single submission by ref (list + filter, cross-SDK safe)."""
+        for sub in self._client.list_submissions(competition):
+            if str(getattr(sub, "ref", "")) == str(ref):
+                return self._submission_dict(sub)
+        return {"found": False, "ref": ref, "status": "NOT_FOUND"}
+
+    def _submission_dict(self, sub: Any) -> Dict[str, Any]:
+        """Project a normalised submission object into a flat dict."""
+        pub = getattr(sub, "public_score", "") or ""
+        priv = getattr(sub, "private_score", "") or ""
+        return {
+            "found": True,
+            "ref": getattr(sub, "ref", None),
+            "status": self._status_str(getattr(sub, "status", "")),
+            "public_score": pub,
+            "public_score_f": self._score(pub),
+            "private_score": priv,
+            "private_score_f": self._score(priv),
+            "error_description": getattr(sub, "error_description", "") or "",
+            "description": getattr(sub, "description", "") or "",
+            "file_name": getattr(sub, "file_name", "") or "",
+        }
+
+    def wait_for_score(
+        self,
+        competition: str,
+        ref: Any,
+        timeout_s: float = 1800.0,
+        poll_interval_s: float = 15.0,
+        max_poll_interval_s: float = 60.0,
+    ) -> Dict[str, Any]:
+        """Poll until the submission is COMPLETE/ERROR or ``timeout_s`` elapses.
+
+        Polling starts at ``poll_interval_s`` and grows 1.5x per round (capped at
+        ``max_poll_interval_s``), mirroring the native ``--wait`` backoff. Returns
+        the final :meth:`get_submission` dict plus ``final`` (bool), ``outcome``
+        (``scored``/``error``/``timeout``) and ``attempts`` (int).
+        """
+        deadline = time.monotonic() + timeout_s
+        interval = poll_interval_s
+        attempts = 0
+        while True:
+            info = self.get_submission(competition, ref)
+            attempts += 1
+            status = info.get("status", "")
+            if self._COMPLETE in status:
+                info.update(final=True, outcome="scored", attempts=attempts)
+                return info
+            if self._ERROR in status:
+                info.update(final=True, outcome="error", attempts=attempts)
+                return info
+            if time.monotonic() >= deadline:
+                info.update(final=False, outcome="timeout", attempts=attempts)
+                return info
+            self._sleep(interval)
+            interval = min(interval * 1.5, max_poll_interval_s)
+
+    def latest(self, competition: str) -> Dict[str, Any]:
+        """Summarise a competition's submissions: count + best scored entry."""
+        subs = list(self._client.list_submissions(competition))
+        scored = [
+            s for s in subs
+            if self._score(getattr(s, "public_score", "")) is not None
+        ]
+        scored.sort(
+            key=lambda s: self._score(getattr(s, "public_score", "")) or 0.0,
+            reverse=True,
+        )
+        return {
+            "competition": competition,
+            "total": len(subs),
+            "scored": len(scored),
+            "best": self._submission_dict(scored[0]) if scored else None,
+        }
 
 class ThresholdOptimizer:
     """Optimizes classification decision thresholds on Out-Of-Fold probabilities."""

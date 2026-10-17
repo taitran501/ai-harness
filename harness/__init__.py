@@ -53,6 +53,10 @@ _LAZY_MAP = {
     "KaggleClient": ".kaggle_compat",
     "detect_sdk": ".kaggle_compat",
     "retry_with_backoff": ".kaggle_compat",
+    # kernel_dispatch
+    "build_kernel_metadata": ".kernel_dispatch",
+    "dispatch_kernel": ".kernel_dispatch",
+    "KNOWN_MACHINE_SHAPES": ".kernel_dispatch",
     # models
     "RobustTabularTransformer": ".models",
     "NativeCategoricalTransformer": ".models",
@@ -105,6 +109,9 @@ __all__ = [
     "KaggleClient",
     "detect_sdk",
     "retry_with_backoff",
+    "build_kernel_metadata",
+    "dispatch_kernel",
+    "KNOWN_MACHINE_SHAPES",
     "KaggleLeaderboardTracker",
     "ThresholdOptimizer",
     "QuantileMatcher",
