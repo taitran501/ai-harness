@@ -410,6 +410,14 @@ def generate_skill_content(
         "- `AI_HARNESS_ALLOW_MANUAL=1 <command>` is the **human operator's** override (block-no-verify philosophy: the AI fixes dispatch properly; humans keep full autonomy). The agent must never set this for itself.",
         "- Do not delete or rename run-output dirs to silence the adoption warning; surface them instead.",
         "",
+        "## 6. Framework development — documenting changes (only if you modify the harness)",
+        "",
+        "If you change the **framework itself** (the `ai-harness` repo) and open a PR — not just run experiments — document it before committing:",
+        "",
+        "- Write `docs/changes/<YYYY-MM-DD>-<slug>.md` (copy `docs/changes/_TEMPLATE.md`): why / what / approach / evidence / impact.",
+        "- Add a row to the `docs/changes/README.md` index.",
+        "- `docs/WORK_LOG.md` is archived (read-only) — do not append there.",
+        "",
     ])
 
     return "\n".join(lines)
