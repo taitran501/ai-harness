@@ -67,6 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
     adoption_scan.add_argument("--root", default=None, help="Parent directory containing workspaces (default: parent of current dir)")
     adoption_scan.add_argument("--include", default=None, help="Comma-separated workspace dir names to include; default: every dir with .ai-harness")
 
+    validate_task_cmd = subparsers.add_parser(
+        "validate-task",
+        help="Static task.yaml validation (schema, data files, column cross-checks, fold sanity) without running anything",
+    )
+    validate_task_cmd.add_argument("--project-root", default=".", help="Attached task workspace root (default: current dir)")
+    validate_task_cmd.add_argument("--config", default=None, help="Task spec path (default: the attached task config)")
+
     phase = subparsers.add_parser("phase", help="Manage the workspace-owned 8-phase prompt workflow")
     phase_commands = phase.add_subparsers(dest="phase_command", required=True)
     phase_init = phase_commands.add_parser("init", help="Create editable starter prompts under prompts/ai-harness")
@@ -150,6 +157,26 @@ def _run_import_artifacts(args) -> int:
         return 2
     print(json.dumps({"status": "ok", **result}, indent=2, ensure_ascii=False))
     return 0
+
+
+def _run_validate_task(args) -> int:
+    """Static task.yaml validation; JSON report, exit 0 ok / 1 errors / 2 usage."""
+    from harness.task_validate import validate_task
+    from harness.project import HarnessProject
+
+    root = Path(args.project_root or ".").expanduser().resolve()
+    config = args.config
+    if config is None:
+        try:
+            config = str(HarnessProject.discover(root).task_config_path)
+        except Exception as exc:  # noqa: BLE001 - not attached: report it
+            print(json.dumps({"status": "error",
+                              "error": f"no task config found under {root} ({exc}); "
+                                       f"pass --config explicitly"}))
+            return 2
+    result = validate_task(Path(config), root)
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    return 0 if result["ok"] else 1
 
 
 def _run_adoption_scan(args) -> int:
@@ -256,6 +283,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.command == "adoption-scan":
         return _run_adoption_scan(args)
+
+    if args.command == "validate-task":
+        return _run_validate_task(args)
 
     if args.command == "phase":
         root = Path(args.project_root or ".").expanduser().resolve()
