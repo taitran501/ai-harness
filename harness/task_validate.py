@@ -41,6 +41,10 @@ SUSPECT_RUN_OUTPUT_DIRS = (
     "run_output",
     "submission_output",
 )
+#: Substring tokens that indicate an uncustomized template placeholder
+#: (adoption guard — warn when a config was copied from a template without
+#: being customized, so the agent is nudged to fill in real values).
+PLACEHOLDER_TOKENS = ("YOUR_", "CHANGE_ME", "REPLACE_ME", "FILL_IN")
 # Parquet scans (group-unique / target-constant) are bounded: larger files
 # get a "skipped" note instead of a slow check.
 _MAX_SCAN_BYTES = 100 * 1024 * 1024
@@ -170,6 +174,23 @@ def validate_task(config_path: Path, root: Path) -> Dict[str, Any]:
             errors.append(f"train_path missing: {train_rel}")
         else:
             info["train_rows"] = _train_row_count(train_path)
+
+    # ---- template not customized (adoption guard) ----------------------
+    # Warn (do not error) when train_path / target_column still carry a
+    # template placeholder token — the config was copied without being
+    # customized. This is the single most common "copied template, ran
+    # as-is" failure mode.
+    if train_rel and any(tok in str(train_rel) for tok in PLACEHOLDER_TOKENS):
+        warnings.append(
+            f"train_path {train_rel!r} looks like an uncustomized template "
+            "placeholder — did you forget to customize the config?"
+        )
+    raw_target_col = data_cfg.get("target_column")
+    if raw_target_col and any(tok in str(raw_target_col) for tok in PLACEHOLDER_TOKENS):
+        warnings.append(
+            f"target_column {str(raw_target_col)!r} looks like an uncustomized "
+            "template placeholder — did you forget to customize the config?"
+        )
     test_rel = data_cfg.get("test_path")
     if test_rel:
         test_path = (root / test_rel) if not Path(test_rel).is_absolute() else Path(test_rel)
