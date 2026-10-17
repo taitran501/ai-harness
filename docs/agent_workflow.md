@@ -193,6 +193,29 @@ Behavior and guarantees:
 - **Fail-fast.** The first non-zero stage exit stops the pipeline and raises a
   `RuntimeError` naming the failed stage and its stderr. Later stages do not run.
 - **Back-compat.** `execution.mode: script` (single `entrypoint`) is unchanged.
+- **Audit gate.** After the stages complete, the harness verifies
+  `stage_manifest.json` is complete and consistent (stage count, all exit codes 0,
+  index order 0..N-1, and every per-stage log present) before finalizing; any
+  inconsistency raises an audit error.
+
+**Valid `approach` × `mode` combos** (the runner rejects incompatible pairs at
+dispatch — see `runner._execute_run`). The critical rule for pipelines:
+
+| `execution.mode` | required `experiment.approach` |
+|---|---|
+| `pipeline` | `custom_script` or `script` (any other approach is rejected) |
+| `script` | any approach |
+| `built_in` | `ml_classical`, `ml`, `dl`, `llm_peft`, or `llm_prompt` |
+
+So a pipeline config **MUST** set `experiment.approach: custom_script` (or `script`).
+
+> [!TIP]
+> Start from the **pipeline template** (`configs/pipeline_template.yaml`) — copy it
+> to `configs/exp<NNN>_<branch>_<descriptor>.yaml`, replace every `[CUSTOMIZE]`
+> marker, and write one script per stage under `src/` (scaffolds in the
+> framework's `templates/pipeline/`). `ai-harness validate-task` warns if
+> `train_path` /
+> `target_column` still carry a placeholder token (uncustomized template).
 
 ---
 
