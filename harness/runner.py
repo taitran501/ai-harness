@@ -277,9 +277,14 @@ class UniversalRunner:
         frame = self._load_training_data()
         approach = self.cfg.get("experiment", {}).get("approach", "ml_classical")
         execution_mode = self.cfg.get("execution", {}).get("mode") or ("script" if approach in {"script", "custom_script"} else "built_in")
-        if execution_mode != "script" and approach not in {"ml_classical", "ml", "dl", "llm_peft", "llm_prompt"}:
+        if execution_mode == "pipeline":
+            if approach not in {"script", "custom_script"}:
+                raise ValueError(
+                    "Pipeline execution requires experiment.approach 'script' or 'custom_script'"
+                )
+        elif execution_mode != "script" and approach not in {"ml_classical", "ml", "dl", "llm_peft", "llm_prompt"}:
             raise ValueError(f"Unsupported approach {approach}")
-        if approach in {"dl", "llm_peft"} and execution_mode != "script" and not (
+        if approach in {"dl", "llm_peft"} and execution_mode not in {"script", "pipeline"} and not (
             self.cfg.get("model", {}).get("factory")
             or self.task_plugin.capabilities()["custom_model_factory"]
         ):
@@ -294,6 +299,8 @@ class UniversalRunner:
         )
         if execution_mode == "script":
             return self._run_custom_script(frame, strategy, git_hash)
+        if execution_mode == "pipeline":
+            return self._run_pipeline(frame, strategy, git_hash)
         return (
             self._run_llm_prompting(frame, git_hash)
             if approach == "llm_prompt"
@@ -835,6 +842,267 @@ class UniversalRunner:
             "class": "CustomScriptAdapter",
             "script": str(script_path),
             "args": extra_args,
+        })
+
+        return self._save_and_finalize(
+            truth, details, rows, records, git_hash, test_df=test_df, fold_test_preds=fold_test_preds
+        )
+
+    def _resolve_pipeline_stages(self, exec_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Resolve sequential pipeline stages from ``execution.pipeline`` (named stages)
+        or ``execution.entrypoints`` (simple list of scripts).
+
+        Returns a list of ``{"name": str, "entrypoint": str, "args": list}`` dicts in
+        execution order. Stage names are derived from the entrypoint stem when not
+        provided; collisions are disambiguated with the stage index.
+        """
+        # Variant 2: named stages (execution.pipeline)
+        pipeline = exec_cfg.get("pipeline")
+        if pipeline:
+            if not isinstance(pipeline, list):
+                raise ValueError("'execution.pipeline' must be a list of stages")
+            stages: List[Dict[str, Any]] = []
+            seen: set = set()
+            for i, stage in enumerate(pipeline):
+                if isinstance(stage, str):
+                    entrypoint = stage
+                    name = Path(stage).stem or f"stage_{i}"
+                    args: List[Any] = []
+                elif isinstance(stage, dict):
+                    entrypoint = stage.get("entrypoint")
+                    if not entrypoint:
+                        raise ValueError(
+                            f"Pipeline stage at index {i} is missing 'entrypoint'"
+                        )
+                    name = stage.get("name") or Path(entrypoint).stem or f"stage_{i}"
+                    args = list(stage.get("args") or [])
+                else:
+                    raise ValueError(
+                        f"Pipeline stage at index {i} must be a string or a dict with 'entrypoint'"
+                    )
+                if name in seen:
+                    name = f"{name}_{i}"
+                seen.add(name)
+                stages.append({
+                    "name": name,
+                    "entrypoint": entrypoint,
+                    "args": [str(a) for a in args],
+                })
+            return stages
+
+        # Variant 1: simple entrypoints list (execution.entrypoints)
+        entrypoints = exec_cfg.get("entrypoints")
+        if entrypoints:
+            if not isinstance(entrypoints, list):
+                raise ValueError("'execution.entrypoints' must be a list of script paths")
+            stages = []
+            seen = set()
+            for i, entrypoint in enumerate(entrypoints):
+                if not isinstance(entrypoint, str):
+                    raise ValueError(f"Pipeline entrypoint at index {i} must be a string")
+                name = Path(entrypoint).stem or f"stage_{i}"
+                if name in seen:
+                    name = f"{name}_{i}"
+                seen.add(name)
+                stages.append({"name": name, "entrypoint": entrypoint, "args": []})
+            return stages
+
+        return []
+
+    def _run_pipeline(self, df, val_strategy, git_hash):
+        """Execute a sequential multi-stage pipeline (train/blend/stack) with per-stage audit.
+
+        Each stage is a separate subprocess that shares the experiment directory, so later
+        stages can read artifacts produced by earlier stages. Every stage's stdout/stderr is
+        captured to ``stages/<name>.log`` and its exit code/duration recorded in
+        ``stage_manifest.json``. Execution is fail-fast: the first non-zero exit stops the
+        pipeline. The final stage must produce ``oof_predictions.csv`` (and optionally
+        ``test_predictions.csv``), which the harness verifies before finalizing.
+        """
+        import subprocess
+
+        exec_cfg = self.cfg.get("execution", {})
+        stages = self._resolve_pipeline_stages(exec_cfg)
+        if not stages:
+            raise ValueError(
+                "Pipeline execution requires 'execution.pipeline' (list of stages) or "
+                "'execution.entrypoints' (list of scripts) in the experiment config"
+            )
+
+        # 1. Resolve validation splits (mirrors _run_custom_script)
+        splits = self._resolve_validation_splits(df, val_strategy)
+        if "fold" not in df.columns:
+            df = df.copy()
+            df["fold"] = 0
+            for fold, _, dev in splits:
+                df.loc[dev.index, "fold"] = fold
+
+        # 2. Resolve test dataframe
+        test_df = None
+        if self.task_spec.test_path:
+            tp = Path(self.task_spec.test_path)
+            if not tp.is_absolute():
+                tp = self.project_root / tp
+            if tp.exists():
+                try:
+                    test_df = self.task_spec.load_dataset_split("test", project_root=self.project_root)
+                except Exception:
+                    test_df = None
+
+        # 3. Export splits
+        splits_file = self.exp_dir / "splits.tsv"
+        id_col = self.task_spec.id_column
+        df[[id_col, "fold"]].to_csv(splits_file, sep="\t", index=False)
+
+        # 4. Run each stage in sequence
+        stage_root = self.exp_dir / "stages"
+        stage_root.mkdir(parents=True, exist_ok=True)
+        stage_manifest: List[Dict[str, Any]] = []
+        total = len(stages)
+        for idx, stage in enumerate(stages):
+            name = stage["name"]
+            script_path_str = stage["entrypoint"]
+            args = stage["args"]
+
+            script_path = Path(script_path_str)
+            if not script_path.is_absolute():
+                script_path = self.project_root / script_path
+            if not script_path.exists():
+                raise FileNotFoundError(
+                    f"Pipeline stage '{name}' entrypoint '{script_path}' not found"
+                )
+
+            child_env = os.environ.copy()
+            python_bin = str(Path(sys.executable).parent)
+            child_env["PATH"] = python_bin + os.pathsep + child_env.get("PATH", "")
+            child_env["HARNESS_EXP_ID"] = self.exp_id
+            child_env["HARNESS_EXP_DIR"] = str(self.exp_dir)
+            child_env["HARNESS_PROJECT_ROOT"] = str(self.project_root)
+            child_env["HARNESS_RUN_CONFIG"] = str(self.exp_dir / "run_config.yaml")
+            child_env["HARNESS_TASK_CONFIG"] = str(self.project.task_config_path)
+            child_env["HARNESS_SEED"] = str(self.seed)
+            if splits_file.exists():
+                child_env["HARNESS_SPLIT_FILE"] = str(splits_file)
+            child_env["HARNESS_STAGE_NAME"] = name
+            child_env["HARNESS_STAGE_INDEX"] = str(idx)
+            child_env["HARNESS_STAGE_TOTAL"] = str(total)
+            child_env["HARNESS_STAGE_DIR"] = str(stage_root)
+
+            cmd = [
+                sys.executable,
+                str(script_path),
+                "--exp-dir", str(self.exp_dir),
+                "--config", str(self.exp_dir / "run_config.yaml"),
+            ]
+            cmd.extend(args)
+
+            self._progress(f"Pipeline stage {idx + 1}/{total} '{name}': {script_path.name}")
+            start_time = time.monotonic()
+            res = subprocess.run(
+                cmd, cwd=str(self.project_root), env=child_env, capture_output=True, text=True
+            )
+            duration = time.monotonic() - start_time
+
+            log_file = stage_root / f"{name}.log"
+            with open(log_file, "w", encoding="utf-8") as handle:
+                handle.write(f"# stage: {name}\n# index: {idx}/{total}\n")
+                handle.write(f"# entrypoint: {script_path}\n# duration_seconds: {duration:.3f}\n")
+                handle.write(f"# exit_code: {res.returncode}\n\n")
+                handle.write("=== STDOUT ===\n")
+                handle.write(res.stdout or "")
+                handle.write("\n\n=== STDERR ===\n")
+                handle.write(res.stderr or "")
+
+            stage_manifest.append({
+                "name": name,
+                "entrypoint": str(script_path),
+                "index": idx,
+                "total": total,
+                "exit_code": res.returncode,
+                "duration_seconds": round(duration, 3),
+                "log_file": log_file.relative_to(self.exp_dir).as_posix(),
+            })
+
+            if res.returncode != 0:
+                err_msg = res.stderr or res.stdout or f"Exited with code {res.returncode}"
+                save_json(self.exp_dir / "stage_manifest.json", stage_manifest)
+                raise RuntimeError(
+                    f"Pipeline stage '{name}' (index {idx + 1}/{total}) failed "
+                    f"(exit {res.returncode}):\n{err_msg}"
+                )
+
+        # 5. Persist stage manifest
+        save_json(self.exp_dir / "stage_manifest.json", stage_manifest)
+
+        # 6. Verify output artifacts (mirrors _run_custom_script)
+        oof_path = self.exp_dir / "oof_predictions.csv"
+        if not oof_path.exists():
+            pred_fallback = self.exp_dir / "predictions.csv"
+            if pred_fallback.exists():
+                oof_df = pd.read_csv(pred_fallback)
+                oof_df.to_csv(oof_path, index=False)
+            else:
+                raise FileNotFoundError(
+                    f"Pipeline must generate '{oof_path.name}' in target experiment dir"
+                )
+
+        oof_df = pd.read_csv(oof_path)
+        if id_col not in oof_df.columns:
+            raise ValueError(f"OOF predictions file missing ID column '{id_col}'")
+
+        truth = df.drop_duplicates(id_col).copy()
+        merged_oof = truth[[id_col]].merge(oof_df, on=id_col, how="inner")
+        if len(merged_oof) != len(truth):
+            raise ValueError(f"OOF predictions cover {len(merged_oof)} rows, expected {len(truth)}")
+
+        variant = "pipeline"
+        self.selection_variant = variant
+        records = []
+        for i in range(len(merged_oof)):
+            row = merged_oof.iloc[i]
+            rec = {
+                id_col: row[id_col],
+                "fold": int(row.get("fold", 0)) if "fold" in row and pd.notna(row["fold"]) else 0,
+                "input_variant": variant,
+            }
+            for target in self.task_spec.subtasks.keys():
+                col_name = f"pred_{target}" if f"pred_{target}" in row else target
+                if col_name in row:
+                    rec[f"pred_{target}"] = row[col_name]
+                if f"proba_{target}" in row:
+                    rec[f"proba_{target}"] = row[f"proba_{target}"]
+            records.append(rec)
+
+        total_duration = sum(s["duration_seconds"] for s in stage_manifest)
+        details = [{
+            "input_variant": variant,
+            "dev_fold": "all",
+            "train_rows": len(df),
+            "dev_rows": len(df),
+            "fit_time_seconds": total_duration,
+        }]
+        rows = [{
+            "input_variant": variant,
+            "dev_fold": "all",
+            "primary_score": 0.0,
+        }]
+
+        fold_test_preds = []
+        test_pred_path = self.exp_dir / "test_predictions.csv"
+        if test_pred_path.exists() and test_df is not None:
+            t_df = pd.read_csv(test_pred_path)
+            cand_test = {}
+            for target in self.task_spec.subtasks.keys():
+                col_name = f"pred_{target}" if f"pred_{target}" in t_df.columns else target
+                if col_name in t_df.columns:
+                    cand_test[f"pred_{target}"] = t_df[col_name].values
+                if f"proba_{target}" in t_df.columns:
+                    cand_test[f"proba_{target}"] = t_df[f"proba_{target}"].values
+            fold_test_preds.append(cand_test)
+
+        self.estimator_metadata.append({
+            "class": "PipelineAdapter",
+            "stages": stage_manifest,
         })
 
         return self._save_and_finalize(

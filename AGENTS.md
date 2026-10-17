@@ -14,7 +14,7 @@ Canonical context file for AI coding assistants (Antigravity, OpenAI Codex, Clau
 ## 1. Documentation & Architecture Map
 
 - **[docs/architecture.md](docs/architecture.md)** — 3-layer architecture, decoupling, and empirical evolution roadmap.
-- **[docs/agent_workflow.md](docs/agent_workflow.md)** — Full 8-phase workflow, detailed CLI guides, and agent conventions.
+- **[docs/agent_workflow.md](docs/agent_workflow.md)** — Full 8-phase workflow, detailed CLI guides, agent conventions, and multi-stage pipeline execution (`execution.mode: pipeline`, for train/blend/stack with per-stage audit trail).
 - **[docs/research_continuity.md](docs/research_continuity.md)** — Durable research memory, novelty review, restart checkpoints, and stagnation reassessment.
 - **[docs/research_trace.md](docs/research_trace.md)** — Insight IDs, bounded probe plans, per-insight lessons, lineage, and resume triage.
 - **[docs/WORK_LOG.md](docs/WORK_LOG.md)** — Repository development journal: completed changes, validation, and next steps. Update after meaningful implementation steps and before handing off; do not invent results.
