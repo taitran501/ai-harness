@@ -6,6 +6,59 @@ or before handing off. Earlier entries are historical evidence, not a claim
 about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
+### 2026-10-17 — toolchain pin loop breaker (PR #74) + validate-task (PR #75) + smoke test tier (PR #76)
+
+**PR #74 — fix: bound toolchain re-exec chain to one generation.**
+
+Live incident: running `python -m harness.cli validate-task --project-root
+<workspace>` **from the framework repo** spawned **35+ generations** of
+`python -m harness.cli` re-execution and pegged the CPU (operator
+observed it directly). Root cause (verified): when the cwd itself holds
+a different `harness` package (the framework repo), `-m` path
+resolution always prefers **cwd** over the pinned `PYTHONPATH`, so the
+pinned child re-detects the same drift and re-execs again — the pin
+could not converge. Fix: `AI_HARNESS_PIN_DEPTH` generation counter in
+`harness/toolchain.py`; a process launched with depth >= 1 that still
+drifts fails open with a stderr diagnostic (cwd hint +
+`AI_HARNESS_TOOLCHAIN_NO_PIN=1`) instead of spawning another child.
+Chain bounded to a single re-exec. 3 regression tests, including an
+end-to-end simulation of the incident asserting exactly one runner
+call. The exact command that looped 35x now completes in one re-exec +
+one warning, exit 0.
+
+**PR #75 — feat: `ai-harness validate-task`.**
+
+Static validation of `task.yaml` in <1 s, before any compute. Surfaces
+mid-run failure classes observed live: missing declared data files;
+subtask/input/id columns absent from the train parquet schema;
+**GroupKFold with fewer group uniques than folds** (the `Null
+validation folds` class); constant target column; unknown
+task_type/direction/backend; and **hygiene allow-lists whitelisting
+genuine run-output dirs** (`kernel_output_*`, `kaggle_results`) — the
+rsna-knee lesson where bypasses stayed hidden from the adoption scan.
+Reads only the spec YAML plus cheap metadata (parquet footer; single
+column scans bounded to 100 MB); never loads row contents. JSON report;
+exit 0 ok / 1 errors / 2 usage. 10 regression tests (real parquet
+fixtures); live on aimo: `ok: true`, no false positives.
+
+**PR #76 — perf: `--smoke` test tier (<10 s critical invariants).**
+
+Full suite ≈ 6.4 min; `--fast` skipped only 4 slow modules — agents had no
+sub-10 s feedback gate. `tools/timing/_measure_modules.py` timed all 76
+modules (387 s total, one measurement run). Smoke set = the framework's
+critical invariants, chosen from the data:
+
+correctness contract + metric reference, label-integrity audit,
+anti-hallucination grounding gate, research-memory scope stability,
+backend-lock policy. Runs in one process so the heavy shared imports
+(pandas/sklearn/pyarrow) are paid once: **47 tests in 2.2 s** measured
+(vs the per-module pytest sum of ~9.3 s). `--list-smoke` included;
+`--fast`/`--list-slow` unchanged.
+
+**Next:** dependency pinning (`uv.lock`/constraints) — metric
+reproducibility; single-install architecture (eliminate the re-exec tax
+entirely).
+
 ### 2026-10-17 — status-command performance part 2: cross-process env probe cache + lazy heavy imports (PR #73)
 
 **Context:** PR #71 (TTL cache + parallel probes + torch-skip + localhost
