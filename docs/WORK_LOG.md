@@ -1,9 +1,16 @@
-# Repository work log
+# Repository work log (ARCHIVED)
 
-This journal tracks development of AI-Harness. Read the latest entry after a
-restart and append an entry after a meaningful implementation/validation step
-or before handing off. Earlier entries are historical evidence, not a claim
-about the latest code. Task experiments have their own generated
+> [!WARNING]
+> **ARCHIVED as of 2026-10-17.** This file is a **read-only archive** of
+> framework-repo development history — **do not append new entries here**.
+> New changes get a dedicated file in **[docs/changes/](changes/README.md)**
+> (one file per change/PR, from the template) + an index row in
+> `docs/changes/README.md`. Everything below pre-dates that per-file
+> change-doc convention and is kept as-is (not split out individually).
+
+This journal tracked development of AI-Harness. Read the latest entry after a
+restart for historical context. Earlier entries are historical evidence, not a
+claim about the latest code. Task experiments have their own generated
 `RESEARCH_PROGRESS.md` in the resolved artifact root.
 
 ### 2026-10-17 — multi-stage pipeline execution (PR #81)

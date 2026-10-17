@@ -90,6 +90,7 @@ Use the following reading guide based on your current task:
 
 | Document | Primary Audience | When to Read |
 |---|---|---|
+| **[changes/](changes/README.md)** | Engineers & Agents | **Active change log** — one file per framework-repo change/PR (why/what/approach/evidence/impact). Write a new file here for every change, before committing. |
 | **[architecture.md](architecture.md)** | Engineers & Agents | Understanding the three-layer system design, Solution Tree DAG, and execution backends. |
 | **[agent_workflow.md](agent_workflow.md)** | AI Coding Assistants | Practical guide to interacting with the harness via CLI, reading context HUDs, and managing sessions. |
 | **[CORRECTNESS_CONTRACT.md](CORRECTNESS_CONTRACT.md)** | Engineers & Agents | Critical specification on run immutability, manifest hashing, scoring rules, and submission validation. |
