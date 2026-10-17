@@ -412,11 +412,7 @@ def generate_skill_content(
         "",
         "## 6. Framework development — documenting changes (only if you modify the harness)",
         "",
-        "If you change the **framework itself** (the `ai-harness` repo) and open a PR — not just run experiments — document it before committing:",
-        "",
-        "- Write `docs/changes/<YYYY-MM-DD>-<slug>.md` (copy `docs/changes/_TEMPLATE.md`): why / what / approach / evidence / impact.",
-        "- Add a row to the `docs/changes/README.md` index.",
-        "- `docs/WORK_LOG.md` is archived (read-only) — do not append there.",
+        "If you change the **framework itself** (the `ai-harness` repo) and open a PR — not just run experiments — document it in `docs/changes/` (one file from the template) + a row in its index, before committing. `docs/WORK_LOG.md` is archived (read-only).",
         "",
     ])
 

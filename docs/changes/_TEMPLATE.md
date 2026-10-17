@@ -1,5 +1,5 @@
 <!--
-Copy this file to docs/changes/<YYYY-MM-DD>-<slug>.md for each framework-repo
+Copy this file to docs/changes/<slug>.md for each framework-repo
 change/PR. Fill every section. This is the durable record of what was done and
 why — be specific. Delete this comment block in the real file.
 -->
