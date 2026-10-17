@@ -20,6 +20,7 @@ from unittest import mock
 
 from harness.toolchain import (
     PIN_DISABLE_ENV,
+    PIN_DEPTH_ENV,
     _needs_pin,
     ensure_pinned_toolchain,
     find_workspace_clone,
@@ -112,6 +113,87 @@ class TestToolchainPin(unittest.TestCase):
                 self.assertIsNone(
                     ensure_pinned_toolchain(ws, "harness.runner", [], runner=bad_runner)
                 )
+
+    def test_reexec_bumps_pin_depth_in_child_env(self) -> None:
+        """The pinned child must carry the generation counter (depth=1)."""
+        with tempfile.TemporaryDirectory(prefix="test_tc_depth_") as tmp:
+            ws = Path(tmp)
+            clone = ws / "ai-harness"
+            (clone / "harness").mkdir(parents=True)
+            (clone / "harness" / "__init__.py").write_text("", encoding="utf-8")
+            fake_origin = Path(tmp) / "elsewhere" / "harness" / "__init__.py"
+            captured: dict = {}
+
+            def fake_runner(cmd, env=None, cwd=None):
+                captured["env"] = env
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with mock.patch("harness.toolchain.current_origin", return_value=fake_origin):
+                ensure_pinned_toolchain(ws, "harness.runner", [], runner=fake_runner)
+            self.assertEqual(captured["env"][PIN_DEPTH_ENV], "1")
+
+    def test_drift_in_pinned_child_fails_open_not_loop(self) -> None:
+        """A child where drift PERSISTS must not re-exec again.
+
+        Without the guard this case spawns an unbounded re-exec chain
+        (observed live: 35+ generations of ``python -m harness.cli`` pegging
+        the CPU when the command was run from the framework repo against a
+        workspace clone — the child's ``-m`` path resolution always prefers
+        the cwd's own harness package over PYTHONPATH).
+        """
+        with tempfile.TemporaryDirectory(prefix="test_tc_noloop_") as tmp:
+            ws = Path(tmp)
+            clone = ws / "ai-harness"
+            (clone / "harness").mkdir(parents=True)
+            (clone / "harness" / "__init__.py").write_text("", encoding="utf-8")
+            fake_origin = Path(tmp) / "elsewhere" / "harness" / "__init__.py"
+            calls = {"n": 0}
+
+            def counting_runner(cmd, env=None, cwd=None):
+                calls["n"] += 1
+                return subprocess.CompletedProcess(cmd, 0)
+
+            env = {PIN_DEPTH_ENV: "1"}
+            with mock.patch("harness.toolchain.current_origin", return_value=fake_origin), \
+                    mock.patch.dict(os.environ, env):
+                result = ensure_pinned_toolchain(ws, "harness.runner", [], runner=counting_runner)
+            self.assertIsNone(result)  # fail-open, no re-exec
+            self.assertEqual(calls["n"], 0)
+
+    def test_chain_bounded_to_single_reexec_when_drift_persists(self) -> None:
+        """End-to-end simulation of the live incident: parent re-execs once,
+        the simulated child still drifts (cwd keeps its own harness package),
+        and the child's pin must fail open — total runner calls exactly 1.
+        """
+        with tempfile.TemporaryDirectory(prefix="test_tc_chain_") as tmp:
+            ws = Path(tmp)
+            clone = ws / "ai-harness"
+            (clone / "harness").mkdir(parents=True)
+            (clone / "harness" / "__init__.py").write_text("", encoding="utf-8")
+            fake_origin = Path(tmp) / "elsewhere" / "harness" / "__init__.py"
+            calls = {"n": 0}
+
+            def emulating_runner(cmd, env=None, cwd=None):
+                calls["n"] += 1
+                if calls["n"] > 50:  # the unguarded bug
+                    raise AssertionError("unbounded re-exec chain")
+                # Emulate the child process: same interpreter, same cwd,
+                # child env as its os.environ, and the SAME persistent drift.
+                with mock.patch("harness.toolchain.current_origin", return_value=fake_origin), \
+                        mock.patch.dict(os.environ, env, clear=False):
+                    child_pin = ensure_pinned_toolchain(ws, "harness.runner", [], runner=counting_runner)
+                # The child either fails open (guard) or would loop: the
+                # guard guarantees it exits with its own result code.
+                return subprocess.CompletedProcess(cmd, 0 if child_pin is None else 3)
+
+            def counting_runner(cmd, env=None, cwd=None):  # pragma: no cover - unreachable
+                raise AssertionError("child must not re-exec")
+
+            with mock.patch("harness.toolchain.current_origin", return_value=fake_origin):
+                result = ensure_pinned_toolchain(ws, "harness.runner", [], runner=emulating_runner)
+            self.assertIsNotNone(result)
+            self.assertEqual(result.returncode, 0)  # child failed open, exited 0
+            self.assertEqual(calls["n"], 1)         # exactly one generation
 
 
 def _make_workspace(tmp: Path) -> Path:
