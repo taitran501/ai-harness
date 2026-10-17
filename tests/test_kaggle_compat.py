@@ -16,8 +16,10 @@ SDK session); their contracts are covered by ``test_kaggle_runtime``.
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from harness.kaggle_compat import (
+    KaggleClient,
     _is_transient_error,
     _NormalisedObject,
     detect_sdk,
@@ -188,6 +190,74 @@ class RetryWithBackoffTests(unittest.TestCase):
             transient_check=lambda e: isinstance(e, AlwaysTransient),
         )
         self.assertEqual(out, "done")
+
+
+class _FakeLegacyApi:
+    """Records the high-level dispatch calls (legacy ``kaggle`` surface)."""
+
+    def __init__(self):
+        self.calls = []
+
+    def competition_submit(self, file, message, competition):
+        self.calls.append(("competition_submit", file, message, competition))
+        return SimpleNamespace(ref=111)
+
+    def competition_submit_code(self, file, message, competition, kernel=None, kernel_version=None):
+        self.calls.append(("competition_submit_code", file, message, competition, kernel, kernel_version))
+        return SimpleNamespace(ref=222)
+
+    def kernels_push(self, folder, timeout=None, acc=None):
+        self.calls.append(("kernels_push", folder, timeout, acc))
+        return SimpleNamespace(ref=333, url="https://www.kaggle.com/kernels/own/k")
+
+
+def _make_client(sdk="kaggle"):
+    """Build a ``KaggleClient`` without a live SDK (dispatch-path unit tests)."""
+    c = KaggleClient.__new__(KaggleClient)
+    c.sdk = sdk
+    c._legacy_api = _FakeLegacyApi()
+    c._legacy_api_cache = None
+    c._client = c._legacy_api if sdk == "kaggle" else object()
+    c._sdk_module = None
+    return c
+
+
+class ClientDispatchPathTests(unittest.TestCase):
+    """The dispatch routing an agent would otherwise guess at by bypassing the
+    facade (file vs code-comp submit, kernels push). Pinning these prevents a
+    silent regression on the exact high-level calls the reference advertises.
+    """
+
+    def test_submit_file_uses_competition_submit(self):
+        c = _make_client("kaggle")
+        resp = c.submit_submission("sub.csv", "msg", "comp")
+        self.assertEqual(c._legacy_api.calls[0][0], "competition_submit")
+        self.assertEqual(c._legacy_api.calls[0][3], "comp")
+        self.assertEqual(resp.ref, 111)
+
+    def test_submit_code_uses_competition_submit_code(self):
+        c = _make_client("kaggle")
+        resp = c.submit_submission("out.csv", "msg", "comp", kernel="owner/k", kernel_version="2")
+        self.assertEqual(c._legacy_api.calls[0][0], "competition_submit_code")
+        self.assertEqual(c._legacy_api.calls[0][4], "owner/k")
+        self.assertEqual(c._legacy_api.calls[0][5], "2")
+        self.assertEqual(resp.ref, 222)
+
+    def test_kernels_push_routes_to_legacy(self):
+        c = _make_client("kaggle")
+        resp = c.kernels_push("folder", acc="KaggleGPU")
+        self.assertEqual(c._legacy_api.calls[0][0], "kernels_push")
+        self.assertEqual(c._legacy_api.calls[0][3], "KaggleGPU")
+        self.assertEqual(resp.ref, 333)
+
+    def test_legacy_api_instance_returns_configured_api_for_kaggle(self):
+        c = _make_client("kaggle")
+        self.assertIs(c._legacy_api_instance(), c._legacy_api)
+
+    def test_get_resolves_registered_method(self):
+        c = _make_client("kaggle")
+        c.get("kernels_push", "f")
+        self.assertEqual(c._legacy_api.calls[-1][0], "kernels_push")
 
 
 if __name__ == "__main__":

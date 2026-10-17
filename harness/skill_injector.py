@@ -416,6 +416,13 @@ def generate_skill_content(
         "",
     ])
 
+    # Anti-hallucination API surface: render the verified command/module/method
+    # names so the agent looks them up instead of guessing (validated by
+    # tests/test_api_reference.py against the live code).
+    from harness.api_reference import render_reference
+
+    lines += render_reference().split("\n")
+
     return "\n".join(lines)
 
 

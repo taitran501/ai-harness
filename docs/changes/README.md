@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-18 | Anti-hallucination API reference (SKILL.md §7) + dispatch regression tests | [#88](https://github.com/taitran501/ai-harness/pull/88) | [anti-hallucination-api-reference](anti-hallucination-api-reference.md) |
 | 2026-10-17 | Harness-native Kaggle submission + kernel dispatch | [#84](https://github.com/taitran501/ai-harness/pull/84) | [kaggle-dispatch-polling](kaggle-dispatch-polling.md) |
 | 2026-10-17 | Skill source fix: pipeline section in generated SKILL.md | [#83](https://github.com/taitran501/ai-harness/pull/83) | [skill-source-fix](skill-source-fix.md) |
 | 2026-10-17 | Pipeline adoption stack (audit gate, config hardening, discoverability, scaffolds) | [#82](https://github.com/taitran501/ai-harness/pull/82) | [pipeline-adoption-stack](pipeline-adoption-stack.md) |
