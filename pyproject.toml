@@ -22,6 +22,10 @@ dependencies = [
 
 [project.optional-dependencies]
 cloud = ["modal>=1.5.0", "kaggle>=1.6.0"]
+# Parallel dev-path for the unit/regression suite (see conftest.py):
+#   pip install -e ".[test]"  &&  python -m pytest tests -n auto
+# The canonical gate stays unittest-based: python tools/run_tests.py
+test = ["pytest>=8.0", "pytest-xdist>=3.6"]
 
 [project.scripts]
 ai-harness = "harness.cli:main"

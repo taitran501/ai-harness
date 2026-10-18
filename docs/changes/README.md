@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-18 | Consolidate dependency source of truth in `pyproject.toml` (new `test` extra; delete drifted unreferenced `requirements.txt`) | [#105](https://github.com/taitran501/ai-harness/pull/105) | [consolidate-dependency-source](consolidate-dependency-source.md) |
 | 2026-10-18 | Minimal CI gate for main — built + verified green, **removed before merge** at operator decision (runner overhead); lands net: pyproject dep declarations (pyarrow/lightgbm/xgboost) + environment-independent dashboard/sync tests | [#104](https://github.com/taitran501/ai-harness/pull/104) | [minimal-ci-gate](minimal-ci-gate.md) |
 | 2026-10-18 | pytest-only tests → unittest: 17 module-level functions in `test_recursive_sealing` + `test_repair_integrity` converted to `TestCase` so the official runner (was 908, now 925) actually executes them; `run_tests.py` and `pytest` now agree | [#103](https://github.com/taitran501/ai-harness/pull/103) | [pytest-only-tests-unittest](pytest-only-tests-unittest.md) |
 | 2026-10-18 | Test consolidation: 13 agent-domain files → `tests/agent_bridge/` package (feature names), 4 PR-number files renamed; 3 files switch to shared `tests.fixtures.SOURCE_ROOT` | [#102](https://github.com/taitran501/ai-harness/pull/102) | [agent-test-consolidation](agent-test-consolidation.md) |
