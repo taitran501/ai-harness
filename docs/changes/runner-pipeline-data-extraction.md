@@ -1,10 +1,10 @@
 # M4 refactoring (PR-F): UniversalRunner pipeline/data extraction
 
 - **Date**: 2026-10-18
-- **PR**: — (branch `refactor/runner-pipeline-data-extraction`)
+- **PR**: [#100](https://github.com/taitran501/ai-harness/pull/100)
 - **Branch**: `refactor/runner-pipeline-data-extraction`
 - **Status**: open
-- **Commits**: —
+- **Commits**: `19fce9f`
 
 ## Why
 
