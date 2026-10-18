@@ -1,7 +1,8 @@
 """Unit tests for `ai-harness sync` (harness/sync.py + CLI wiring).
 
-The tests never run `pip install` (no_install=True) and use a throwaway git
-clone with no remote, so nothing touches the real environment.
+The tests never run `pip install` (no_install=True) and use a throwaway
+framework checkout built from `git archive` (see _make_workspace) with a
+local bare origin, so nothing touches the real environment or network.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +20,20 @@ from unittest import mock
 
 from harness.cli import build_parser, main
 from harness.sync import find_framework_repo, run_sync
+
+
+def _git(args: list[str], cwd: Path | None = None, env: dict | None = None) -> None:
+    """Run a git command, surfacing its stderr on failure.
+
+    Plain ``check=True`` swallows git's stderr, which made CI failures
+    (Linux runner) impossible to diagnose from the traceback alone.
+    """
+    r = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, env=env)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"git {' '.join(args[:2])} failed (rc={r.returncode}): "
+            f"{r.stderr.strip()[:800]} | {r.stdout.strip()[:200]}"
+        )
 
 
 def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -> Path:
@@ -38,21 +54,34 @@ def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@t",
     }
-    subprocess.run(
-        ["git", "clone", "--quiet", str(Path(_harness_pkg.__file__).resolve().parents[1]), str(fw)],
-        capture_output=True, text=True, check=True, env=env,
+    repo_root = Path(_harness_pkg.__file__).resolve().parents[1]
+    # Build the framework clone from the source's TRACKED tree via git archive
+    # instead of `git clone`. A clone inherits the source's state: on CI
+    # (GitHub Actions) the checkout is shallow (depth 1) AND detached, so a
+    # clone of it is shallow + detached with no branch refs — where
+    # `git push` is rejected ("shallow update not allowed") and
+    # `git pull --ff-only` fails (no upstream). git archive exports the full
+    # tree regardless of the source's shallow/detached state, and the fresh
+    # single-commit repo below is complete, on 'main', with clean tracking.
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", "HEAD"], cwd=repo_root, capture_output=True, env=env
     )
+    if archive.returncode != 0:
+        raise RuntimeError(f"git archive failed (rc={archive.returncode}): {archive.stderr[:400]!r}")
+    fw.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tf:
+        tf.extractall(fw)
+    _git(["git", "init", "--quiet", "-b", "main", str(fw)], env=env)
+    _git(["git", "add", "-A"], cwd=fw, env=env)
+    _git(["git", "commit", "--quiet", "-m", "test fixture snapshot"], cwd=fw, env=env)
+    # A bare origin (identical history) keeps `git pull --ff-only` a clean
+    # no-op and is the target for the with_remote fast-forward test.
+    origin = tmp / "origin.git"
+    _git(["git", "clone", "--quiet", "--bare", str(fw), str(origin)], env=env)
+    _git(["git", "remote", "add", "origin", str(origin)], cwd=fw, env=env)
+    _git(["git", "push", "--quiet", "-u", "origin", "main"], cwd=fw, env=env)
     if dirty:
         (fw / "stray.txt").write_text("local change" + chr(10), encoding="utf-8")
-    if with_remote:
-        # A second bare repo acts as the origin so pull --ff-only can succeed.
-        origin = tmp / "origin.git"
-        origin.mkdir()
-        subprocess.run(
-            ["git", "init", "--bare", str(origin)], capture_output=True, text=True, check=True, env=env
-        )
-        subprocess.run(["git", "remote", "set-url", "origin", str(origin)], cwd=fw, capture_output=True, text=True, check=True)
-        subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=fw, capture_output=True, text=True, check=True)
     (ws / "configs" / "task.yaml").write_text(
         "task:" + chr(10) + "  name: SyncTask" + chr(10) + "  primary_metric: rmsle" + chr(10) +
         "  execution:" + chr(10) + "    backend: kaggle" + chr(10) + "    locked: true" + chr(10),
