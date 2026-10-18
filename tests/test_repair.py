@@ -14,14 +14,14 @@ from pathlib import Path
 
 import yaml
 
+from harness.evaluation import utility
 from harness.repair import (
+    build_parser,
     classify_run,
+    main,
     repair_run_dir,
     scan_artifacts,
-    main,
-    build_parser,
 )
-from harness.evaluation import utility
 from tests.evidence_fixtures import seal_fixture
 from tests.test_research_continuity import task_document
 

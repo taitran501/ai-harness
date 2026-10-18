@@ -9,23 +9,24 @@ Covers:
 6. JSON serialization robustness (_json_serial in agent_bridge_cli).
 """
 
-from datetime import datetime
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
+from harness.agent_bridge import AgentBridge
 from harness.models import (
-    validate_model_features,
-    create_model,
     HAS_CATBOOST,
     CatBoostModel,
+    create_model,
+    validate_model_features,
 )
-from harness.task_spec import UniversalTaskSpec
 from harness.project import HarnessProject
-from harness.agent_bridge import AgentBridge
+from harness.task_spec import UniversalTaskSpec
 from tools.agent_bridge_cli import _json_serial
 
 
@@ -150,6 +151,7 @@ class TestAgentUsabilityP5(unittest.TestCase):
     def test_runner_split_loading_aliases_and_errors(self):
         """Verify Runner split file loading handles fold aliases, case-insensitivity, and diagnostics."""
         import argparse
+
         from harness.runner import Runner
 
         with tempfile.TemporaryDirectory() as td:

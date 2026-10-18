@@ -323,7 +323,7 @@ class ThresholdOptimizer:
         Returns:
             Tuple of (optimal_threshold, best_metric_score).
         """
-        from sklearn.metrics import f1_score, cohen_kappa_score, accuracy_score
+        from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score
 
         metric_lower = str(metric).lower()
         if metric_lower in {"kappa", "cohen_kappa"}:
@@ -405,7 +405,7 @@ class MicroDoseProbeGenerator:
             Audit dictionary with Spearman correlation, max change, and drift metrics.
         """
         from scipy.special import expit, logit
-        from scipy.stats import spearmanr, rankdata
+        from scipy.stats import rankdata, spearmanr
 
         df_base = pd.read_csv(base_csv)
         df_probe = pd.read_csv(probe_csv)

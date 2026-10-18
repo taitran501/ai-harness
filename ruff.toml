@@ -1,0 +1,21 @@
+# Canonical lint gate for the ai-harness framework repo.
+#
+# `ruff check harness/ tools/ tests/` (no ad-hoc flags) runs exactly this
+# policy — the same gate documented in AGENTS.md (pre-push quality gates).
+# An ad-hoc `--select` flag on the CLI overrides this file for one-off
+# measurements; the canonical gate needs no flags.
+#
+# Scope: real bugs only.
+#   F    — pyflakes: undefined names (F821), unused/duplicate imports, ...
+#   E7   — statement layout errors (py_compile class: E711/E712/E721/E741, ...)
+#   W605 — invalid escape sequences (string bugs that silently misbehave)
+#
+# E501 (line-too-long) is intentionally NOT gated: most long lines in this
+# repo are docstrings, embedded code samples, and URLs where re-wrapping
+# would corrupt markdown/JSON formatting. line-length below is informational
+# for formatters/tooling only.
+
+line-length = 120
+
+[lint]
+select = ["F", "E7", "W605"]

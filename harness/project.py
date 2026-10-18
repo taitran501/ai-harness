@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from datetime import datetime, timezone
-from pathlib import Path
 import re
 import shutil
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
-
 
 MANIFEST_RELATIVE_PATH = Path(".ai-harness") / "project.yaml"
 LEGACY_MANIFEST_RELATIVE_PATH = Path(".ml-harness") / "project.yaml"

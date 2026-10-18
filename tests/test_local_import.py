@@ -171,11 +171,11 @@ class AdoptionScanTests(unittest.TestCase):
             # unimported verified run in ws_a
             _make_run(ws_a_target, "kernel_output_exp001", stale_task=True)
 
-            from harness.cli import _run_adoption_scan
-
             import argparse
             import contextlib
             import io
+
+            from harness.cli import _run_adoption_scan
 
             args = argparse.Namespace(root=str(parent), include=None)
             buf = io.StringIO()

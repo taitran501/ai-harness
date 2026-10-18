@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from importlib import metadata
 from pathlib import Path
-import re
 from typing import Any, Dict
 
-from harness.plugins import TaskPluginContext, load_task_plugin, list_task_plugins
+from harness.plugins import TaskPluginContext, list_task_plugins, load_task_plugin
 from harness.project import HarnessProject
 from harness.task_spec import load_active_task_spec
-
 
 CORE_RUNTIME_DISTRIBUTIONS = {
     "numpy": "numpy",

@@ -15,9 +15,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -384,7 +384,7 @@ def generate_validation_splits(
     num_folds: int = 5,
 ) -> Path:
     """Generate leakage-proof K-Fold split assignments."""
-    from sklearn.model_selection import GroupKFold, StratifiedKFold, KFold
+    from sklearn.model_selection import GroupKFold, KFold, StratifiedKFold
 
     df = df.copy().reset_index(drop=True)
     n_samples = len(df)

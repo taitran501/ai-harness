@@ -29,9 +29,9 @@ from harness.io_utils import (
     save_json,
     set_seed,
 )
-from harness.task_spec import load_active_task_spec
 from harness.plugins import TaskPluginContext, load_task_plugin
 from harness.project import HarnessProject
+from harness.task_spec import load_active_task_spec
 from harness.tree_journal import TreeJournal
 from harness.validator import ExperimentValidator
 
@@ -47,12 +47,11 @@ def merge_configs(base: Dict[str, Any], exp: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
-from harness.models import call_model
-from harness.evaluation import resolve_evaluation
-import json
 import importlib
 import inspect
+import json
 import uuid
+
 from harness.artifacts import (
     contract_identity,
     digest,
@@ -61,6 +60,8 @@ from harness.artifacts import (
     mirror_csv,
     sha256,
 )
+from harness.evaluation import resolve_evaluation
+from harness.models import call_model
 
 
 class UniversalRunner:
@@ -1951,6 +1952,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise
     if worker_job_id:
         import json
+
         from harness.job_state import update_worker_state
 
         exp_dir = runner.exp_dir

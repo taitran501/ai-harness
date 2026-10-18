@@ -84,7 +84,7 @@ Run before pushing changes to this repository:
 python tools/run_tests.py                # Full suite (all modules must pass 100%)
 python tools/run_tests.py --fast         # Fast tier during iteration (skips 4 slow pipeline modules)
 python tools/run_tests.py --smoke        # <10s critical-invariants gate for rapid iteration
-ruff check harness/ tools/ tests/ --select F,E7 # Static gate: undefined names (F821) & pyflakes (zero-noise incl. tests/)
+ruff check harness/ tools/ tests/   # Static gate (config: ruff.toml = F, E7, W605): undefined names, pyflakes, invalid escapes; E501 intentionally not gated
 ```
 
 The suite is tiered: `--fast` runs everything except the four slow

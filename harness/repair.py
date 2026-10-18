@@ -55,7 +55,7 @@ _IDENTITY_FIELDS = (
 def _find_artifacts_dir(project_root: str | Path) -> Optional[Path]:
     """Locate the workspace artifacts directory without importing HarnessProject
     (which can be heavy). Returns None if no attach manifest is present."""
-    from harness.project import MANIFEST_RELATIVE_PATH, LEGACY_MANIFEST_RELATIVE_PATH
+    from harness.project import LEGACY_MANIFEST_RELATIVE_PATH, MANIFEST_RELATIVE_PATH
 
     root = Path(project_root).expanduser().resolve()
     if not ((root / MANIFEST_RELATIVE_PATH).is_file() or (root / LEGACY_MANIFEST_RELATIVE_PATH).is_file()):

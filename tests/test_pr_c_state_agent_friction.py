@@ -37,7 +37,6 @@ from unittest.mock import patch
 
 from tests.fixtures import make_workspace as _make_workspace
 
-
 # ---------------------------------------------------------------------------
 # B1: data readiness must not read READY on a missing/empty dataset
 # ---------------------------------------------------------------------------
@@ -333,9 +332,9 @@ class TestStateSaveStamping(unittest.TestCase):
 class TestSessionHistoryCaps(unittest.TestCase):
     def test_save_session_caps_actions_and_observations(self):
         from harness.agent_bridge import (
-            AgentBridge,
             MAX_SESSION_ACTIONS,
             MAX_SESSION_OBSERVATIONS,
+            AgentBridge,
         )
 
         root, _ = _make_workspace()

@@ -8,11 +8,19 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from harness.cloud_policy import (
+    UploadConsentStore,
+    dataset_fingerprint,
+    provider_preflight,
+)
+from harness.eda import render_eda_markdown, run_eda
+from harness.phase_workflow import (
+    PhaseWorkflow,
+    PromptPackError,
+    initialize_prompt_pack,
+)
 from harness.plugins import list_task_plugins
-from harness.phase_workflow import PhaseWorkflow, PromptPackError, initialize_prompt_pack
-from harness.eda import run_eda, render_eda_markdown
 from harness.project import HarnessProject, attach_project
-from harness.cloud_policy import UploadConsentStore, dataset_fingerprint, provider_preflight
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -167,8 +175,8 @@ def _run_import_artifacts(args) -> int:
 
 def _run_validate_task(args) -> int:
     """Static task.yaml validation; JSON report, exit 0 ok / 1 errors / 2 usage."""
-    from harness.task_validate import validate_task
     from harness.project import HarnessProject
+    from harness.task_validate import validate_task
 
     root = Path(args.project_root or ".").expanduser().resolve()
     config = args.config
@@ -186,8 +194,8 @@ def _run_validate_task(args) -> int:
 
 
 def _run_adoption_scan(args) -> int:
-    from harness.status_report import _adoption_section
     from harness.import_local import scan_importable_runs
+    from harness.status_report import _adoption_section
 
     if args.root:
         root = Path(args.root).expanduser().resolve()

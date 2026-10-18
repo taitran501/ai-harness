@@ -1,20 +1,21 @@
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import yaml
-import zipfile
 
-from harness.runner import UniversalRunner
-from harness.task_spec import UniversalTaskSpec
-from harness.plugins import TaskPluginContext, DeclarativeTaskPlugin
-from harness.artifacts import validate_test_prediction, sha256
-from harness.candidates import build_candidate, validate_candidate
-from harness.submission_manager import SubmissionManager
 from harness.agent_bridge import AgentBridge, TypedActionName
+from harness.artifacts import sha256, validate_test_prediction
+from harness.candidates import build_candidate, validate_candidate
+from harness.plugins import DeclarativeTaskPlugin, TaskPluginContext
+from harness.runner import UniversalRunner
+from harness.submission_manager import SubmissionManager
+from harness.task_spec import UniversalTaskSpec
 
 
 def make_task_spec_dict(has_submission_spec=True, has_test_path=True, archive_format="csv"):

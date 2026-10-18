@@ -750,9 +750,9 @@ class CloudJobManager:
             if digest != expected_hash:
                 raise ValueError(f"Artifact SHA-256 mismatch: {filename}")
         from harness.artifacts import validate_run
-        from harness.task_spec import load_active_task_spec
-        from harness.project import HarnessProject
         from harness.plugins import TaskPluginContext, load_task_plugin
+        from harness.project import HarnessProject
+        from harness.task_spec import load_active_task_spec
 
         project = HarnessProject.discover(self.project_root)
         spec = load_active_task_spec(project.task_config_path)

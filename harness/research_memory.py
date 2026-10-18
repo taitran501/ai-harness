@@ -7,13 +7,13 @@ interpretations, even when their referenced measurements are verified.
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
 import html
 import json
 import math
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml

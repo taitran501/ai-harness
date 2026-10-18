@@ -9,7 +9,6 @@ from typing import Any, Dict, Optional
 
 from harness.project import HarnessProject
 
-
 JOB_ID_PATTERN = re.compile(r"^job_[A-Za-z0-9_.-]{1,180}$")
 WORKER_STATUS_VALUES = {"PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"}
 

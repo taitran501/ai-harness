@@ -1,7 +1,9 @@
 import unittest
+
 import pandas as pd
-from tools.audit_gate import audit_prediction_integrity, compute_diff_metrics
+
 from tests.test_correctness_contracts import task
+from tools.audit_gate import audit_prediction_integrity, compute_diff_metrics
 
 
 class CandidateContracts(unittest.TestCase):

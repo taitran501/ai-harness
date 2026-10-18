@@ -94,8 +94,8 @@ class CloudPreflightInspector:
         dispatch (the remote job re-validates its data as its first step);
         explicit preflight commands keep the default ``True``.
         """
-        from harness.project import HarnessProject
         from harness.plugins import TaskPluginContext, load_task_plugin
+        from harness.project import HarnessProject
         from harness.task_spec import load_active_task_spec
 
         root = Path(project_root).expanduser().resolve() if project_root else Path.cwd().resolve()

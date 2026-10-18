@@ -2,13 +2,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 from harness.agent_bridge import AgentBridge, TypedActionName
-from tools.agent_bridge_cli import _parse_json_arg, _parse_dynamic_kv_args
 from harness.kaggle_notebook_builder import build_kaggle_submission_notebook
 from harness.templates.kaggle_template import KaggleKernelManager
+from tools.agent_bridge_cli import _parse_dynamic_kv_args, _parse_json_arg
 
 
 class AgentUsabilityP3Tests(unittest.TestCase):
@@ -126,8 +127,9 @@ class AgentUsabilityP3Tests(unittest.TestCase):
             self.assertNotIn("license", res["error"].lower())
 
     def test_oof_probability_float_decomposition(self):
-        from harness.runner import UniversalRunner
         from unittest.mock import MagicMock
+
+        from harness.runner import UniversalRunner
 
         runner = UniversalRunner.__new__(UniversalRunner)
         runner.task_spec = MagicMock()

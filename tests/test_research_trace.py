@@ -1,8 +1,8 @@
 """Insight-to-experiment trace, restart triage, and scientific interpretation contracts."""
 import json
-from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 

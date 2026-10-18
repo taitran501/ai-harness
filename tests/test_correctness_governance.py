@@ -1,11 +1,12 @@
+import ssl
 import tempfile
 import unittest
-import ssl
 import urllib.error
 from pathlib import Path
 from unittest.mock import patch
-from harness.resource_ledger import reserve, terminal
+
 from harness.llm_engine import _safe_urlopen
+from harness.resource_ledger import reserve, terminal
 
 
 class GovernanceContracts(unittest.TestCase):
@@ -42,11 +43,13 @@ class GovernanceContracts(unittest.TestCase):
             )
 
     def test_bridge_and_dashboard_share_hard_budget_decision(self):
-        import yaml
         from unittest.mock import Mock
+
+        import yaml
+
         from harness.agent_bridge import AgentBridge
-        from tools.dashboard_server import DashboardHandler
         from tests.test_correctness_contracts import task
+        from tools.dashboard_server import DashboardHandler
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -6,10 +6,9 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 
-
-from harness.status_report import collect_status, render_markdown
 from harness.cli import build_parser, main
-from tests.test_repair import _make_project, _seal_into, _drift_metrics
+from harness.status_report import collect_status, render_markdown
+from tests.test_repair import _drift_metrics, _make_project, _seal_into
 
 
 def _run_main(argv):

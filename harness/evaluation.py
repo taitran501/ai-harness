@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from typing import Any
 import re
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from sklearn import metrics

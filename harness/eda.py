@@ -15,7 +15,6 @@ from harness.io_utils import atomic_write_json
 from harness.project import HarnessProject
 from harness.task_spec import load_dataframe_file
 
-
 SUPPORTED_DATA_SUFFIXES = {".csv", ".tsv", ".tab", ".parquet", ".pq", ".feather", ".json", ".jsonl", ".ndjson"}
 
 

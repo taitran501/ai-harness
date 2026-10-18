@@ -20,7 +20,11 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score
 
 from harness.endgame_submission import SubmissionPreflightValidator
-from harness.foundation_models import MultiScaleBinner, HierarchicalDiscretizer, TeacherLogitPrior
+from harness.foundation_models import (
+    HierarchicalDiscretizer,
+    MultiScaleBinner,
+    TeacherLogitPrior,
+)
 from harness.stacking import (
     L2LogitStacker,
     RankAverager,

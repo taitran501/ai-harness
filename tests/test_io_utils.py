@@ -5,11 +5,11 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import json
-from pathlib import Path
 import shutil
 import tempfile
 import unittest
 import uuid
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -330,9 +330,11 @@ class TestRunnerFoldCoercion(unittest.TestCase):
     def test_universal_runner_split_with_np_int64_folds(self):
         """Validates UniversalRunner successfully ingests int64 splits and serializes metrics."""
         from types import SimpleNamespace
+
         import yaml
-        from tests.test_correctness_contracts import task
+
         from harness.runner import UniversalRunner
+        from tests.test_correctness_contracts import task
 
         tmp = tempfile.TemporaryDirectory()
         try:

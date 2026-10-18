@@ -9,11 +9,11 @@ Enables complete headless execution via Kaggle API:
 
 from __future__ import annotations
 
-import json
 import base64
 import copy
-import io
 import hashlib
+import io
+import json
 import os
 import re
 import shutil
@@ -23,7 +23,6 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-
 
 # Optional test-only bundle cache. Production code never sets this; tests inject
 # a callable so repeated identical bundle builds (copy+zip of the source tree,
@@ -116,9 +115,10 @@ class KaggleKernelManager:
         project_root: Optional[Path | str] = None,
     ) -> Dict[str, Any]:
         """Package task data and push it without inventing a dataset license."""
-        from harness.project import HarnessProject
-        from harness.data_bundle import stage_declared_data
         import yaml
+
+        from harness.data_bundle import stage_declared_data
+        from harness.project import HarnessProject
 
         root = Path(project_root or Path.cwd()).expanduser().resolve()
         project = HarnessProject.discover(root)
@@ -821,6 +821,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
     def _download_output_api(cls, slug, download_dir):
         """Use the public API's pagination and HTTP checks for root-level run output."""
         from kaggle.api.kaggle_api_extended import KaggleApi
+
         from harness.kaggle_compat import retry_with_backoff
 
         api = KaggleApi()

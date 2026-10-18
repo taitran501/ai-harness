@@ -1,6 +1,7 @@
 """Unit tests for the ML/DL Dashboard Backend & Antigravity Priming Prompt Generator."""
 
 import json
+import socketserver
 import threading
 import time
 import unittest
@@ -8,12 +9,11 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.dashboard_server import DashboardHandler
-import socketserver
 from tests.workspace_fixtures import (
     cleanup_dashboard_workspace,
     prepare_dashboard_workspace,
 )
+from tools.dashboard_server import DashboardHandler
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 

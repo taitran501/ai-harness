@@ -1,6 +1,7 @@
 """Immutable run evidence shared by execution and downstream consumers."""
 
 from __future__ import annotations
+
 import hashlib
 import inspect
 import json
@@ -110,7 +111,9 @@ def validate_run(directory, *, task_spec=None, plugin=None, expected=None):
             or sha256(directory / name) != value
         ):
             raise ValueError(f"Artifact hash mismatch: {name}")
-    import yaml, importlib
+    import importlib
+
+    import yaml
 
     cfg = yaml.safe_load((directory / "run_config.yaml").read_text(encoding="utf-8"))
     hook = cfg.get("paths", {}).get("metrics_evaluator")

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import unittest
-from pathlib import Path
 import shutil
 import tempfile
+import unittest
+from pathlib import Path
+
 import yaml
 
 from harness.agent_bridge import AgentBridge, TypedActionName
@@ -237,7 +238,9 @@ class TestAgentBridge(unittest.TestCase):
         )
 
     def test_bootstrap_task_typed_action(self) -> None:
-        import tempfile, shutil
+        import shutil
+        import tempfile
+
         import pandas as pd
 
         t_dir = Path(tempfile.mkdtemp(prefix="test_bridge_bootstrap_"))

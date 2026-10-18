@@ -24,12 +24,12 @@ Import is evidence-safe:
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from harness.artifacts import contract_identity, sha256
-import os
 
 #: Manifest identity fields compared against the attached task spec.
 IDENTITY_FIELDS = ("task_sha256", "scorer_sha256")
@@ -41,8 +41,8 @@ def _utc_now() -> str:
 
 def _load_spec_and_plugin(project_root: Path):
     from harness.plugins import TaskPluginContext, load_task_plugin
-    from harness.task_spec import load_active_task_spec
     from harness.project import HarnessProject
+    from harness.task_spec import load_active_task_spec
 
     project = HarnessProject.discover(project_root)
     spec = load_active_task_spec(project.task_config_path)

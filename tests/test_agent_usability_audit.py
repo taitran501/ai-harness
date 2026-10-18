@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 
@@ -26,13 +27,18 @@ class TestAgentUsabilityAudit(unittest.TestCase):
 
     def test_import_aliases(self):
         """Verify all package and module aliases resolve and function correctly."""
-        import ai_harness
-        import ml_harness
         from ai_harness.task_spec import UniversalTaskSpec as SpecAlias
         from ml_harness.runner import build_parser
+
+        import ai_harness
+        import ml_harness
+        from harness import KaggleKernelManager as KKM
+        from harness import kaggle_manager
         from harness.agent import AgentBridge
-        from harness.endgame_submission import SubmissionValidator, SubmissionPreflightValidator
-        from harness import kaggle_manager, KaggleKernelManager as KKM
+        from harness.endgame_submission import (
+            SubmissionPreflightValidator,
+            SubmissionValidator,
+        )
 
         self.assertIsNotNone(ai_harness)
         self.assertIsNotNone(ml_harness)

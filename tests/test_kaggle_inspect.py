@@ -5,9 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from harness import cloud_runner, kaggle_inspect
 from harness.cli import build_parser
-from harness import kaggle_inspect
-from harness import cloud_runner
 
 
 class TestKaggleInspectCli(unittest.TestCase):

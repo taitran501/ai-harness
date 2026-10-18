@@ -5,24 +5,23 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from harness.environment_detector import EnvironmentDetector
-from harness.cloud_job_runner import CloudJobManager
-from harness.project import HarnessProject
-
 # Pre-import the heavy sklearn/scipy chain OUTSIDE any test so that
 # first-time import side effects (scipy runs subprocess.run on some
 # platforms at import time) never land inside the Popen patch window of
 # test_cloud_job_manager_lifecycle. This made that test order-dependent:
 # green in the full suite, red when the file ran alone.
 import harness.evaluation  # noqa: F401
+from harness.cloud_job_runner import CloudJobManager
+from harness.environment_detector import EnvironmentDetector
+from harness.project import HarnessProject
+from tests.workspace_fixtures import (
+    cleanup_dashboard_workspace,
+    prepare_dashboard_workspace,
+)
 from tools.dashboard_server import (
     get_next_experiment_id,
     list_available_tasks,
     switch_task,
-)
-from tests.workspace_fixtures import (
-    cleanup_dashboard_workspace,
-    prepare_dashboard_workspace,
 )
 
 

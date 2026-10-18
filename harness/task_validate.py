@@ -70,9 +70,8 @@ def _column_uniques(path: Path, column: str) -> Optional[Any]:
     try:
         if path.stat().st_size > _MAX_SCAN_BYTES:
             return "too_large"
-        import pyarrow.parquet as pq
-
         import numpy as np
+        import pyarrow.parquet as pq
 
         table = pq.read_table(path, columns=[column])
         arr = np.asarray(table[column].to_pylist())

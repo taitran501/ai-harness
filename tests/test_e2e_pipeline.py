@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -15,11 +15,11 @@ import yaml
 from harness.agent_bridge import AgentBridge
 from harness.io_utils import atomic_write_json
 from harness.models import (
+    HAS_LIGHTGBM,
+    HAS_XGBOOST,
     LightGBMModel,
     XGBoostModel,
     create_model,
-    HAS_LIGHTGBM,
-    HAS_XGBOOST,
 )
 from harness.runner import UniversalRunner
 from harness.task_spec import UniversalTaskSpec

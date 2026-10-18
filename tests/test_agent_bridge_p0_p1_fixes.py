@@ -24,7 +24,6 @@ from harness.agent_bridge import AgentBridge
 from tests.fixtures import copy_repo_configs, workspace_with_repo_configs
 
 
-
 def _make_workspace() -> Path:
     return workspace_with_repo_configs(prefix="test_p0p1_")
 

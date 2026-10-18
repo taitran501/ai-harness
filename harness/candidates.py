@@ -9,11 +9,18 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from harness.artifacts import validate_run, sha256, digest, ensure_canonical_truth, mirror_csv
+
+from harness.artifacts import (
+    digest,
+    ensure_canonical_truth,
+    mirror_csv,
+    sha256,
+    validate_run,
+)
+from harness.ensemble_guard import EnsembleGuard
 from harness.evaluation import resolve_evaluation
 from harness.plugins import TaskPluginContext, load_task_plugin
 from harness.task_spec import load_active_task_spec
-from harness.ensemble_guard import EnsembleGuard
 
 
 def predictions(frame):
@@ -378,6 +385,7 @@ def find_optimal_blend_weights(
 ) -> dict[str, Any]:
     """Finds optimal blending weights for component models using SLSQP optimization."""
     from scipy.optimize import minimize
+
     from harness.project import HarnessProject
 
     if isinstance(project, (str, Path)):
@@ -560,12 +568,14 @@ def register_external_prediction(
     Generates a full, verified experiment artifact package in .ai-harness/artifacts/<name>
     evaluated against official evaluation truth and plugged into TreeJournal & Candidate manager.
     """
-    import yaml
     import shutil
     import uuid
-    from harness.artifacts import frame_hash, contract_identity
-    from harness.tree_journal import TreeJournal, Node
+
+    import yaml
+
+    from harness.artifacts import contract_identity, frame_hash
     from harness.project import HarnessProject
+    from harness.tree_journal import Node, TreeJournal
 
     if isinstance(project, (str, Path)):
         project = HarnessProject.discover(project)
