@@ -9,6 +9,7 @@ Guarantees 100% submission integrity before dispatching to Kaggle/Remote:
 
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+
+from harness.dispatch_audit import record_dispatch
 
 
 @dataclass
@@ -217,7 +220,7 @@ class KaggleLeaderboardTracker:
             kernel=kernel,
             kernel_version=kernel_version,
         )
-        return {
+        result: Dict[str, Any] = {
             "ref": getattr(resp, "ref", None),
             "message": getattr(resp, "message", ""),
             "competition": competition,
@@ -225,6 +228,38 @@ class KaggleLeaderboardTracker:
             "kernel": kernel,
             "kernel_version": kernel_version,
         }
+        # Dispatch governance (PR-C): append-only audit entry + advisory
+        # duplicate warning. Best-effort — audit failure never blocks the
+        # dispatch itself.
+        try:
+            audit = record_dispatch(
+                kind="submission",
+                competition=competition,
+                file_path=file_name,
+                kernel=kernel,
+                kernel_version=kernel_version,
+                message=message,
+                ref=result["ref"],
+            )
+        except Exception as exc:  # noqa: BLE001 - audit must never break dispatch
+            print(
+                f"[dispatch_audit] warning: audit entry not recorded: {exc}",
+                file=sys.stderr,
+            )
+            audit = None
+        if audit and audit.get("duplicate_of"):
+            dup = audit["duplicate_of"]
+            ref_info = f" (ref {dup['ref']})" if dup.get("ref") is not None else ""
+            sub_info = f" (submission {dup['sub_id']})" if dup.get("sub_id") else ""
+            result["duplicate_of"] = dup
+            result["duplicate_warning"] = (
+                f"Duplicate submission: identical file was already sent to "
+                f"'{competition}'"
+                f"{ref_info}{sub_info}; resubmitting identical content may waste a "
+                "submission slot. [matched via "
+                f"{dup.get('source', 'dispatch log')}]"
+            )
+        return result
 
     def get_submission(self, competition: str, ref: Any) -> Dict[str, Any]:
         """Fetch a single submission by ref (list + filter, cross-SDK safe)."""

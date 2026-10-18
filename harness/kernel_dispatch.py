@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -189,6 +190,35 @@ def dispatch_kernel(
             val = getattr(resp, field, None)
             if val:
                 result[field] = val
+        # Dispatch governance (PR-C): append-only audit entry + advisory
+        # duplicate warning (same notebook content re-pushed to the same
+        # kernel id). Best-effort — audit failure never blocks the push.
+        try:
+            from harness.dispatch_audit import record_dispatch
+
+            audit = record_dispatch(
+                kind="kernel",
+                kernel_id=kernel_id,
+                notebook_path=str(nb),
+                message=title,
+                ref=result.get("ref"),
+            )
+        except Exception as exc:  # noqa: BLE001 - audit must never break dispatch
+            import sys as _sys
+
+            print(
+                f"[dispatch_audit] warning: audit entry not recorded: {exc}",
+                file=_sys.stderr,
+            )
+            audit = None
+        if audit and audit.get("duplicate_of"):
+            dup = audit["duplicate_of"]
+            result["duplicate_of"] = dup
+            result["duplicate_warning"] = (
+                f"Duplicate kernel: identical notebook content was already pushed "
+                f"to kernel '{kernel_id}' earlier; pushing again creates a new "
+                "identical kernel version."
+            )
         return result
     finally:
         if not keep_staging:
@@ -239,6 +269,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2, default=str))
         return 1
     print(json.dumps(result, indent=2, default=str))
+    if result.get("duplicate_warning"):
+        print(f"WARNING: {result['duplicate_warning']}", file=sys.stderr)
     return 0
 
 
