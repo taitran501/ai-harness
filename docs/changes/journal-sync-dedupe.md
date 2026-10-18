@@ -1,10 +1,10 @@
 # Journal sync dedup: halve per-action run validation + fix orphan resurrection
 
 - **Date**: 2026-10-18
-- **PR**: — (local change, not yet pushed)
+- **PR**: [#90](https://github.com/taitran501/ai-harness/pull/90)
 - **Branch**: `perf/journal-sync-dedupe-and-dead-code-trim`
 - **Status**: open
-- **Commits**: —
+- **Commits**: `00ec8eb`
 
 ## Why
 
