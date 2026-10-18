@@ -23,6 +23,11 @@ from harness.io_utils import atomic_write_text
 from harness.state_store import transaction, workspace_lock
 
 _SYNC_CACHE: dict = {}
+# Key: (absolute folder path, sync identity digest, per-file (name, mtime_ns,
+# size) tuple over every top-level artifact file). The identity digest is the
+# task+scorer contract that produced the cached record; the per-file tuple
+# invalidates the cache when ANY artifact file changes (not only
+# manifest/config/metrics). See ResearchMemory.sync().
 
 
 class _EntryRecord(dict):
@@ -79,6 +84,11 @@ class ResearchMemory:
             )
         else:
             self.scope = digest(self.identity)
+        # sync() cache-invalidation key: the task+scorer contract identity
+        # under which each cached record was validated. A second spec/plugin
+        # in the same process (same artifacts dir) must never be served the
+        # first contract's cached "verified_full" claim.
+        self._sync_identity_key = digest(self.identity)
 
     def _read(self):
         if not self.path.exists():
@@ -281,8 +291,32 @@ class ResearchMemory:
         return {key: str(exp.get(key, ""))[:2000] for key in
                 ("hypothesis", "intervention", "problem_addressed")}
 
+    def _folder_file_key(self, folder: Path):
+        """Per-file (name, mtime_ns, size) over every top-level artifact file.
+
+        The previous cache key covered only manifest/config/metrics mtimes, so
+        tampering any other sealed artifact (e.g. OOF predictions) between two
+        syncs left a cached ``verified_full`` record that a fresh
+        ``validate_run`` rejects. mtime+size mirrors the
+        ``artifacts._HASH_CACHE`` idiom: a tamper preserving both is exactly
+        the same tamper-strength the hash cache itself relies on, and any
+        other change forces a fresh ``validate_run``. An OSError here
+        propagates to the per-folder handler (the run is skipped, not cached).
+        """
+        return tuple(
+            (p.name, p.stat().st_mtime_ns, p.stat().st_size)
+            for p in sorted(folder.iterdir())
+            if p.is_file()
+        )
+
     def sync(self):
-        """Revalidate artifacts on every read; a cached claim never verifies evidence."""
+        """Revalidate artifacts on every read; a cached claim never verifies evidence.
+
+        A cached record is reused only when the run folder's entire file
+        surface (per-file mtime+size) is unchanged AND the validating
+        contract (task+scorer identity) is the same one that produced the
+        record; anything else forces a fresh ``validate_run``.
+        """
         runs = []
         for folder in sorted(self.artifacts.iterdir()) if self.artifacts.exists() else []:
             manifest_path = folder / "artifact_manifest.json"
@@ -293,9 +327,8 @@ class ResearchMemory:
             try:
                 cache_key = (
                     str(folder.resolve()),
-                    manifest_path.stat().st_mtime_ns,
-                    cfg_path.stat().st_mtime_ns if cfg_path.is_file() else 0,
-                    metrics_path.stat().st_mtime_ns if metrics_path.is_file() else 0,
+                    self._sync_identity_key,
+                    self._folder_file_key(folder),
                 )
                 if cache_key in _SYNC_CACHE:
                     runs.append(_SYNC_CACHE[cache_key])

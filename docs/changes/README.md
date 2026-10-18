@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-18 | Test isolation (journal leak guard in conftest) + research sync cache integrity (per-file fingerprint + contract identity key) | [#95](https://github.com/taitran501/ai-harness/pull/95) | [test-isolation-and-sync-cache](test-isolation-and-sync-cache.md) |
 | 2026-10-18 | Dispatch governance: append-only `dispatch_log.jsonl` + advisory duplicate warning for harness-native Kaggle dispatches | [#97](https://github.com/taitran501/ai-harness/pull/97) | [dispatch-governance](dispatch-governance.md) |
 | 2026-10-18 | Repair integrity gate (evidence drift never re-sealed; `--verify`/`--force` + audit log) + recursive artifact sealing (nested `stages/*.log`) | [#96](https://github.com/taitran501/ai-harness/pull/96) | [repair-integrity-and-recursive-sealing](repair-integrity-and-recursive-sealing.md) |
 | 2026-10-18 | Import sort (I001) + canonical ruff gate (`ruff.toml`, W605 in gate) | [#94](https://github.com/taitran501/ai-harness/pull/94) | [import-sort-and-ruff-gate](import-sort-and-ruff-gate.md) |
