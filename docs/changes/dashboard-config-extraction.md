@@ -1,10 +1,10 @@
 # M4 refactoring (PR-D): dashboard data layer extraction
 
 - **Date**: 2026-10-18
-- **PR**: — (branch `refactor/dashboard-config-extraction`)
+- **PR**: [#98](https://github.com/taitran501/ai-harness/pull/98)
 - **Branch**: `refactor/dashboard-config-extraction`
 - **Status**: open
-- **Commits**: —
+- **Commits**: `c7bdab7`
 
 ## Why
 
