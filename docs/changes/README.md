@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-18 | Test env isolation (conftest sweep) + `kernel_dispatch.main()` CLI tests | [#93](https://github.com/taitran501/ai-harness/pull/93) | [test-env-isolation-dispatch-cli](test-env-isolation-dispatch-cli.md) |
 | 2026-10-18 | kagglesdk `list_kernels` routing + `competition_topics` method fix (both-SDK TypeError) | [#92](https://github.com/taitran501/ai-harness/pull/92) | [kagglesdk-list-routing-followup](kagglesdk-list-routing-followup.md) |
 | 2026-10-18 | §7 field truthfulness + kagglesdk kernel methods fix (live-run frictions F1/F2) | [#91](https://github.com/taitran501/ai-harness/pull/91) | [api-surface-kagglesdk-fix](api-surface-kagglesdk-fix.md) |
 | 2026-10-18 | Journal sync dedup: halve per-action run validation + fix orphan-resurrection bug | [#90](https://github.com/taitran501/ai-harness/pull/90) | [journal-sync-dedupe](journal-sync-dedupe.md) |

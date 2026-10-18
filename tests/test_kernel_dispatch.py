@@ -1,17 +1,21 @@
 """Tests for ``harness.kernel_dispatch`` (Gap B: kernel wrap + dispatch).
 
 Covers build_kernel_metadata (schema + defaults), dispatch_kernel (staging +
-push + warnings + missing notebook), and top-level CLI registration of
-``dispatch-kernel`` and ``submission``. All push calls are mocked, so the suite
-runs offline.
+push + warnings + missing notebook), the main() CLI entry point (arg
+parsing, JSON-on-stdout contract, exit codes), and top-level CLI
+registration of ``dispatch-kernel`` and ``submission``. All push calls are
+mocked, so the suite runs offline.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from harness.kernel_dispatch import build_kernel_metadata, dispatch_kernel
 
@@ -153,6 +157,82 @@ class DispatchKernelTests(unittest.TestCase):
             client = _MockKernelClient()
             result = dispatch_kernel(str(nb), "own/k", "T", client=client)
             self.assertNotIn("staging_dir", result)
+
+
+class KernelDispatchMainCliTests(unittest.TestCase):
+    """``main()`` CLI entry point: arg parsing, JSON-on-stdout contract, exit
+    codes. ``dispatch_kernel`` is mocked — no staging, client, or network.
+    The JSON printed to stdout is what the agent reads back, so it is pinned.
+    """
+
+    def _run_main(self, argv, dispatch_result=None, dispatch_exc=None):
+        from harness.kernel_dispatch import main
+
+        with mock.patch("harness.kernel_dispatch.dispatch_kernel") as dk:
+            if dispatch_exc is not None:
+                dk.side_effect = dispatch_exc
+            else:
+                dk.return_value = dispatch_result or {
+                    "ok": True, "ref": 9, "url": "https://k/own/k",
+                }
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(argv)
+        return rc, json.loads(buf.getvalue()), dk
+
+    def test_happy_path_exit_zero_and_json(self):
+        rc, out, dk = self._run_main(["nb.ipynb", "-i", "owner/k", "-t", "Title"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["ref"], 9)
+        dk.assert_called_once()
+
+    def test_failure_exit_one_and_error_json(self):
+        rc, out, _ = self._run_main(
+            ["nb.ipynb", "-i", "owner/k", "-t", "T"],
+            dispatch_exc=RuntimeError("boom"),
+        )
+        self.assertEqual(rc, 1)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["error"], "boom")
+
+    def test_all_flags_forwarded_to_dispatch(self):
+        rc, _, dk = self._run_main([
+            "nb.ipynb", "-i", "o/k", "-t", "T",
+            "--code-file", "x.py",
+            "--machine-shape", "T4",
+            "--dataset", "d1", "--dataset", "d2",
+            "--competition", "c1",
+            "--kernel-source", "ks1",
+            "--model", "m1",
+            "--keyword", "kw1",
+            "--enable-internet",
+            "--timeout", "1200",
+            "--keep-staging",
+        ])
+        self.assertEqual(rc, 0)
+        args, kwargs = dk.call_args
+        self.assertEqual(args[:3], ("nb.ipynb", "o/k", "T"))
+        self.assertEqual(kwargs["code_file"], "x.py")
+        self.assertEqual(kwargs["machine_shape"], "T4")
+        self.assertEqual(kwargs["dataset_sources"], ["d1", "d2"])
+        self.assertEqual(kwargs["competition_sources"], ["c1"])
+        self.assertEqual(kwargs["kernel_sources"], ["ks1"])
+        self.assertEqual(kwargs["model_sources"], ["m1"])
+        self.assertEqual(kwargs["keywords"], ["kw1"])
+        self.assertTrue(kwargs["enable_internet"])
+        self.assertEqual(kwargs["timeout"], 1200)
+        self.assertTrue(kwargs["keep_staging"])
+
+    def test_missing_required_args_exits_two(self):
+        from harness.kernel_dispatch import main
+
+        with mock.patch("harness.kernel_dispatch.dispatch_kernel") as dk, \
+             contextlib.redirect_stdout(io.StringIO()), \
+             self.assertRaises(SystemExit) as cm:
+            main(["nb.ipynb", "-t", "T"])  # --kernel-id missing
+        self.assertEqual(cm.exception.code, 2)
+        dk.assert_not_called()
 
 
 class CliRegistrationTests(unittest.TestCase):
