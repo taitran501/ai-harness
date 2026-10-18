@@ -113,15 +113,44 @@ class TreeJournal:
         self.task_plugin=task_plugin
         self.nodes: Dict[str, Node] = {}
         self.load()
+        # Merge baseline for save(): the state exactly as loaded from disk.
+        # It must be captured BEFORE the validation marking below — otherwise
+        # save_registry() sees the marked records as "unchanged" vs the
+        # baseline and resurrects the stale on-disk values, silently
+        # reviving orphaned nodes as verified on the next save().
+        self._snapshot=[asdict(n) for n in self.nodes.values()]
         from harness.artifacts import validate_run
+        if auto_sync:
+            # sync_from_artifacts() below re-validates every on-disk run
+            # directory (validate_run) and overwrites its node, so the full
+            # per-node check here is only needed for journal nodes whose
+            # artifact dir is gone from disk (orphans; fails fast on the
+            # missing manifest). This halves the validate_run cost of each
+            # auto-synced construction without weakening the gate: every
+            # on-disk run is still fully validated exactly once.
+            try:
+                on_disk_runs = {
+                    d.name
+                    for d in self.artifacts_dir.iterdir()
+                    if d.is_dir() and (d / "metrics.json").is_file()
+                }
+            except OSError:
+                on_disk_runs = set()
+        else:
+            on_disk_runs = None
         for node in self.nodes.values():
+            if (
+                node.artifact_dir
+                and on_disk_runs is not None
+                and Path(node.artifact_dir).name in on_disk_runs
+            ):
+                continue
             if node.artifact_dir:
                 try:
                     validate_run(node.artifact_dir, task_spec=self.task_spec, plugin=self.task_plugin)
                 except (ValueError,OSError,KeyError):
                     node.verified=node.eligible=False
                     node.status="LEGACY_UNVERIFIED"
-        self._snapshot=[asdict(n) for n in self.nodes.values()]
         if auto_sync:
             self.sync_from_artifacts(self.artifacts_dir)
 

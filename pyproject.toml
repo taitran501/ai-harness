@@ -37,4 +37,4 @@ include = ["harness*", "tools*", "ai_harness*", "ml_harness*"]
 
 [tool.setuptools.package-data]
 tools = ["web/index.html", "web/assets/*"]
-harness = ["defaults/*.yaml", "defaults/tasks/*.yaml", "templates/*.py", "vendor/*.py"]
+harness = ["defaults/*.yaml", "defaults/tasks/*.yaml", "templates/*.py"]

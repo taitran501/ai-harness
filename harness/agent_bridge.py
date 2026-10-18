@@ -2088,10 +2088,14 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
             # Auto-checkpoint must never break the main action flow.
             pass
 
-        # Update final snapshot HUD
-        snap_after = self.comp_state.evaluate_journey_snapshot(
-            self._new_journal(auto_sync=True), self._new_submission_manager()
-        )
+        # Update final snapshot HUD. Reuse the action's journal instance:
+        # one idempotent sync pass picks up anything the action just
+        # produced (new run dirs), while a brand-new TreeJournal would
+        # re-discover the project, reload journal.json and re-validate
+        # every run directory a second time. sub_mgr's in-memory state is
+        # at least as fresh as the submissions on disk after the action.
+        journal.sync_from_artifacts(self.artifacts_dir)
+        snap_after = self.comp_state.evaluate_journey_snapshot(journal, sub_mgr)
         session.final_state = snap_after.get("hud", {})
         self.save_session(session)
         return session, obs
