@@ -154,11 +154,15 @@ class TestRepairBundleContract(_WorkspaceBase):
         remains visibly unverifiable instead of quietly re-passing.
         """
         from harness.artifacts import validate_run
-        from harness.repair import repair_run_dir
+        from harness.repair import EvidenceDriftError, repair_run_dir
 
         (self.folder / "oof_predictions.csv").unlink()
 
-        res = repair_run_dir(self.folder)
+        # evidence drift (a deleted OOF) is refused by default (PR-B gate)
+        with self.assertRaises(EvidenceDriftError):
+            repair_run_dir(self.folder)
+
+        res = repair_run_dir(self.folder, force=True)
 
         manifest = json.loads(
             (self.folder / "artifact_manifest.json").read_text(encoding="utf-8")
@@ -174,7 +178,7 @@ class TestRepairBundleContract(_WorkspaceBase):
         (self.folder / "oof_predictions.csv").unlink()
         (self.folder / "stray_undeclared.txt").write_text("noise")
 
-        res = repair_run_dir(self.folder, drop_missing=True)
+        res = repair_run_dir(self.folder, drop_missing=True, force=True)
 
         manifest = json.loads(
             (self.folder / "artifact_manifest.json").read_text(encoding="utf-8")

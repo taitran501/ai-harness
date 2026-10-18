@@ -70,9 +70,13 @@ def _identity_drift(manifest: Dict[str, Any], current: Dict[str, Any]) -> Dict[s
 def _content_verified(source: Path, manifest: Dict[str, Any]) -> Optional[str]:
     """Return an error string if any manifest file is missing or hash-mismatched."""
     for name, value in (manifest.get("files") or {}).items():
-        if "/" in str(name) or "\\" in str(name) or name in (".", ".."):
+        name_str = str(name)
+        parts = Path(name_str).parts
+        # Safe relative paths only: nested keys (e.g. `stages/train.log`) are
+        # allowed by the recursive sealing contract; traversal is not.
+        if not parts or Path(name_str).is_absolute() or ".." in parts:
             return f"Manifest file name unsafe: {name}"
-        path = source / name
+        path = source / name_str
         if not path.is_file():
             return f"Manifest file missing: {name}"
         if sha256(path) != value:
@@ -195,7 +199,9 @@ def import_verified_local_run(
     try:
         tmp.mkdir()
         for name in list(manifest.get("files") or {}):
-            (tmp / name).write_bytes((source / name).read_bytes())
+            dest_file = tmp / name
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            dest_file.write_bytes((source / name).read_bytes())
         receipt = {
             "schema_version": 1,
             "imported_at": _utc_now(),

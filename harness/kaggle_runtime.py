@@ -161,7 +161,9 @@ def export_run(exp_dir, output_root, identity):
         if (output_root / name).exists():
             raise RuntimeError(f"Refusing to overwrite Kaggle output: {name}")
     for name in manifest["files"]:
-        shutil.copy2(exp_dir / name, output_root / name)
+        dst = output_root / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(exp_dir / name, dst)
     manifest.update(identity)
     (output_root / "artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     validate_run(output_root)
