@@ -77,5 +77,38 @@ class HallucinatedNamesAbsentTests(unittest.TestCase):
                 importlib.import_module(bad)
 
 
+class SubmissionFieldsTests(unittest.TestCase):
+    """The normalised Submission fields listed in §7 actually resolve.
+
+    These pin the micro-gap fix: the agent used to guess ``.date`` /
+    ``.submittedDate``; the reference now advertises the real canonical names and
+    the test proves each one resolves through the normalising proxy.
+    """
+
+    def test_submission_fields_resolve_on_normalised_object(self):
+        from harness.kaggle_compat import _NormalisedObject
+
+        sub = _NormalisedObject(api_ref._submission_fixture(), "kaggle")
+        for name, _ in api_ref.SUBMISSION_FIELDS:
+            with self.subTest(field=name):
+                getattr(sub, name)  # must not raise AttributeError
+
+    def test_created_at_is_the_normalised_date_field(self):
+        from harness.kaggle_compat import _NormalisedObject
+
+        names = [n for n, _ in api_ref.SUBMISSION_FIELDS]
+        self.assertIn("created_at", names)
+        sub = _NormalisedObject(api_ref._submission_fixture(), "kaggle")
+        self.assertEqual(sub.created_at, "2026-10-17T21:14:27Z")
+
+
+class RenderSubmissionFieldTests(unittest.TestCase):
+    def test_render_lists_submission_fields(self):
+        md = api_ref.render_reference()
+        self.assertIn("normalised fields", md)
+        for name in ("ref", "status", "public_score", "created_at"):
+            self.assertIn("`%s`" % name, md)
+
+
 if __name__ == "__main__":
     unittest.main()

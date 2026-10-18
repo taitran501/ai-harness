@@ -70,6 +70,21 @@ FACADE_METHODS: List[Tuple[str, str]] = [
     ("kernels_logs", "Fetch a kernel's logs."),
 ]
 
+#: Normalised fields on the objects returned by ``list_submissions()`` (and on
+#: the submission reference from ``submit_submission()``). The proxy
+#: (``kaggle_compat._NormalisedObject``) maps the legacy camelCase names to these
+#: canonical snake_case names, so callers use ONLY these spellings. This closes
+#: the field-name guessing gap (agents used to invent ``.date`` / ``.submittedDate``).
+SUBMISSION_FIELDS: List[Tuple[str, str]] = [
+    ("ref", "Submission id — pass to status / wait_for_score tracking."),
+    ("status", "Submission status string (e.g. IN_PROGRESS, COMPLETE, ERROR)."),
+    ("description", "The message/description attached to the submission."),
+    ("public_score", "Public (leaderboard) score; None until scored. (from publicScore)"),
+    ("private_score", "Private score, if present. (from privateScore)"),
+    ("total_votes", "Community votes, if present. (from totalVotes)"),
+    ("created_at", "Submission timestamp, if present. (from createdAt)"),
+]
+
 #: Python entry points the agent may reach for. Dotted path = module[.attr[.attr…]].
 PYTHON_SYMBOLS: List[Tuple[str, str]] = [
     ("harness.kaggle_compat.KaggleClient", "Unified Kaggle SDK facade (use this, not the raw SDK)."),
@@ -131,6 +146,26 @@ def _ai_harness_commands() -> Set[str]:
     return set()
 
 
+def _submission_fixture():
+    """A stand-in raw submission (legacy camelCase + direct names).
+
+    Used by :func:`validate_reference` to prove each canonical field in
+    :data:`SUBMISSION_FIELDS` resolves through the normalising proxy — so a typo
+    or a missing alias in the reference fails the suite instead of rotting.
+    """
+
+    class _Raw:
+        ref = "57313652"
+        status = "COMPLETE"
+        description = "Exp021 Verified SOTA"
+        publicScore = 0.958
+        privateScore = 0.957
+        totalVotes = 3
+        createdAt = "2026-10-17T21:14:27Z"
+
+    return _Raw()
+
+
 def validate_reference() -> List[str]:
     """Return a list of problems (empty == the reference is fully valid).
 
@@ -164,6 +199,21 @@ def validate_reference() -> List[str]:
                 problems.append("facade: KaggleClient.%r is missing" % method)
     except Exception as exc:  # noqa: BLE001
         problems.append("facade: cannot load KaggleClient (%s)" % exc)
+
+    try:
+        from harness.kaggle_compat import _NormalisedObject
+
+        sub = _NormalisedObject(_submission_fixture(), "kaggle")
+        for name, _ in SUBMISSION_FIELDS:
+            try:
+                getattr(sub, name)
+            except AttributeError:
+                problems.append(
+                    "submission-field: %r does not resolve on the normalised "
+                    "Submission object" % name
+                )
+    except Exception as exc:  # noqa: BLE001 - report, do not raise
+        problems.append("submission-field: cannot build fixture (%s)" % exc)
 
     return problems
 
@@ -209,6 +259,12 @@ def render_reference() -> str:
         "",
     ]
     lines += _table(FACADE_METHODS)
+    lines += [
+        "",
+        "### Submission object — normalised fields (`list_submissions()[i]`) — "
+        "use these names, not camelCase",
+    ]
+    lines += _table(SUBMISSION_FIELDS)
     lines += ["", "### Dispatch (harness-native, in-process)", ""]
     lines += _table(PYTHON_SYMBOLS)
     lines += ["", "### Key modules (correct names)", ""]
