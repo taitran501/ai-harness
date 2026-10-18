@@ -58,10 +58,12 @@ from harness.artifacts import (
     ensure_canonical_truth,
     frame_hash,
     mirror_csv,
+    seal_file_map,
     sha256,
 )
 from harness.evaluation import resolve_evaluation
 from harness.models import call_model
+from harness.oof_revalidation import build_variant_predictions
 
 
 class UniversalRunner:
@@ -1453,24 +1455,7 @@ class UniversalRunner:
             merged = selected[[key]].merge(
                 truth, on=key, how="left", validate="one_to_one"
             )
-            predictions = {}
-            for col in selected:
-                if col.startswith("pred_"):
-                    values = selected[col].tolist()
-                    predictions[col] = [
-                        json.loads(v) if isinstance(v, str) and v.startswith("[") else v
-                        for v in values
-                    ]
-                elif col.startswith("proba_"):
-                    if any(f"proba_{target}" == col for target in self.task_spec.subtasks.keys()):
-                        predictions[col] = [
-                            json.loads(v) if isinstance(v, str) and (v.startswith("[") or v.startswith("{")) else v
-                            for v in selected[col]
-                        ]
-                elif col.startswith("classes_"):
-                    if selected[col].nunique() != 1:
-                        raise ValueError("Class order changed across folds")
-                    predictions[col] = json.loads(selected[col].iloc[0])
+            predictions = build_variant_predictions(selected, self.task_spec)
             variants[variant] = self._evaluate(merged, predictions)
         aggregate = variants[self.selection_variant]
         model_name = self.cfg.get("model", {}).get("name", "baseline")
@@ -1642,14 +1627,12 @@ class UniversalRunner:
             result["diagnostics_status"] = "FAILED"
             result["diagnostics_error"] = str(error)
         save_json(self.exp_dir / "metrics.json", result)
+        # Seal the full recursive file surface (nested run logs included):
+        # bare names for top-level files, POSIX relpaths for nested ones.
         self.manifest.update(
             status="COMPLETED",
             estimator=self.estimator_metadata,
-            files={
-                p.name: sha256(p)
-                for p in self.exp_dir.iterdir()
-                if p.is_file() and p.name != "artifact_manifest.json"
-            },
+            files=seal_file_map(self.exp_dir),
         )
         save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
         if self.run_kind == "full":

@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 from pathlib import Path
+from typing import Dict
 
 REQUIRED = (
     "run_config.yaml",
@@ -16,6 +17,25 @@ REQUIRED = (
 
 
 _HASH_CACHE: dict = {}
+
+
+def seal_file_map(run_dir: str | Path) -> Dict[str, str]:
+    """Recursive sha256 map of every file under a run directory.
+
+    Keys are POSIX relative paths: top-level files keep their bare name
+    (`metrics.json`), nested files carry their relative path
+    (`stages/train.log`), so old top-level-only manifests and new recursive
+    manifests share one namespace without collision (a bare name never
+    contains `/`). The manifest itself is excluded. Used by the runner at
+    sealing time and by `repair` when re-sealing, so both always agree on
+    the sealed surface (nested run logs are sealed, not just top-level).
+    """
+    run_dir = Path(run_dir)
+    out: Dict[str, str] = {}
+    for p in sorted(run_dir.rglob("*")):
+        if p.is_file() and p.name != "artifact_manifest.json":
+            out[p.relative_to(run_dir).as_posix()] = sha256(p)
+    return out
 
 
 def sha256(path, chunk_size: int = 1048576) -> str:
@@ -105,10 +125,13 @@ def validate_run(directory, *, task_spec=None, plugin=None, expected=None):
         if name not in files:
             raise ValueError(f"Missing required artifact: {name}")
     for name, value in files.items():
+        target = directory / name
         if (
-            Path(name).name != name
-            or not (directory / name).is_file()
-            or sha256(directory / name) != value
+            name in (".", "..")
+            or Path(name).is_absolute()
+            or ".." in Path(name).parts
+            or not target.is_file()
+            or sha256(target) != value
         ):
             raise ValueError(f"Artifact hash mismatch: {name}")
     import importlib

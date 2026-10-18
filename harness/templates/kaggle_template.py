@@ -959,8 +959,13 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                         manifest.get("files") or {}
                     ).items():
                         file_path = manifest_path.parent / file_name
+                        unsafe = (
+                            not Path(file_name).parts
+                            or Path(file_name).is_absolute()
+                            or ".." in Path(file_name).parts
+                        )
                         if (
-                            Path(file_name).name != file_name
+                            unsafe
                             or not file_path.is_file()
                             or hashlib.sha256(file_path.read_bytes()).hexdigest()
                             != expected_hash
@@ -1034,7 +1039,9 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
         destination.mkdir(parents=True, exist_ok=True)
         names = [*manifest["files"], "artifact_manifest.json"]
         for name in names:
-            shutil.copy2(source_run / name, destination / name)
+            dest_file = destination / name
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_run / name, dest_file)
         validate_run(destination)
         return names
 
