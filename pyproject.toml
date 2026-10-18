@@ -38,3 +38,10 @@ include = ["harness*", "tools*", "ai_harness*", "ml_harness*"]
 [tool.setuptools.package-data]
 tools = ["web/index.html", "web/assets/*"]
 harness = ["defaults/*.yaml", "defaults/tasks/*.yaml", "templates/*.py"]
+
+# Pytest: the suite has no async tests, but pytest-asyncio is installed and
+# otherwise emits a session-wide deprecation warning about the unset default
+# fixture loop scope. Pinning it explicitly silences the warning and pins
+# the behavior for any future async fixture.
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
