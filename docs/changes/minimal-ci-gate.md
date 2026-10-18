@@ -74,8 +74,8 @@ Design choices:
     (9 skips) and now actually execute (3 skips) — declaring the dependencies
     increased clean-environment coverage, not just gate stability.
 
-**The real CI run then exposed two Linux-runner-only test bugs** (masked by
-the local Windows dev env), fixed in a follow-up commit:
+**The real CI run then exposed Linux-runner-only test bugs** (masked by
+the local Windows dev env), fixed across follow-up commits:
 
 - `test_dashboard.test_static_html_served` asserted an exact `<title>` that
   only matches the **gitignored local `dashboard/dist` build**; clean
@@ -84,6 +84,14 @@ the local Windows dev env), fixed in a follow-up commit:
 - `test_sync_command._make_workspace` ran git with `check=True`, swallowing
   stderr so CI failures were undiagnosable. Fix: `_git()` helper includes
   stderr+stdout in the raised error.
+- `_make_workspace` cloned the live repo, **inheriting its state**. GitHub
+  Actions checkouts are shallow (depth 1) AND detached, so the clone was
+  shallow + detached: push rejected (`shallow update not allowed`),
+  `pull --ff-only` failed (no upstream). Fix: build the fixture from
+  `git archive HEAD` (tracked tree, immune to shallow/detached state) into
+  a fresh `git init -b main` single-commit repo with a bare origin at the
+  same commit. Verified by simulating the exact CI scenario (shallow +
+  detached source): push rc=0, ff pull rc=0, no-op pull rc=0.
 - Both gate commands verified on the commit's tree: `ruff check` clean;
   `python tools/run_tests.py` → **925 tests OK** (262.3s).
 - Workflow takes effect on the PR that introduces it (GitHub Actions evaluates
