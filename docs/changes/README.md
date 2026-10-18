@@ -15,7 +15,8 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
-| 2026-10-18 | Test infrastructure: correct slow tier (sync_command + cloud_jobs promoted), subpackage test discovery, pytest asyncio loop-scope pin, sync detection-test clone stubbing (27.9s -> 14.7s) | — (open) | [test-infra-tiers](test-infra-tiers.md) |
+| 2026-10-18 | Test consolidation: 13 agent-domain files → `tests/agent_bridge/` package (feature names), 4 PR-number files renamed; 3 files switch to shared `tests.fixtures.SOURCE_ROOT` | [#102](https://github.com/taitran501/ai-harness/pull/102) | [agent-test-consolidation](agent-test-consolidation.md) |
+| 2026-10-18 | Test infrastructure: correct slow tier (sync_command + cloud_jobs promoted), subpackage test discovery, pytest asyncio loop-scope pin, sync detection-test clone stubbing (27.9s → 14.7s) | [#101](https://github.com/taitran501/ai-harness/pull/101) | [test-infra-tiers](test-infra-tiers.md) |
 | 2026-10-18 | M4 refactor (F): split `UniversalRunner` — data + pipeline clusters to `harness/run_data.py` + `harness/run_pipeline.py` mixins (1971 → 1363 lines) | [#100](https://github.com/taitran501/ai-harness/pull/100) | [runner-pipeline-data-extraction](runner-pipeline-data-extraction.md) |
 | 2026-10-18 | M4 refactor (E): split `AgentBridge` — typed vocabulary to `harness/bridge_common.py`, 30 `_handle_*` methods to `harness/bridge_actions.py` mixin (4098 → 2052 lines) | [#99](https://github.com/taitran501/ai-harness/pull/99) | [agent-bridge-handler-extraction](agent-bridge-handler-extraction.md) |
 | 2026-10-18 | M4 refactor (D): extract dashboard data layer to `tools/dashboard_config.py` | [#98](https://github.com/taitran501/ai-harness/pull/98) | [dashboard-config-extraction](dashboard-config-extraction.md) |
