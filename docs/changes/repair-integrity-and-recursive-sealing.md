@@ -1,10 +1,10 @@
 # Repair integrity gate + recursive artifact sealing
 
 - **Date**: 2026-10-18
-- **PR**: — (branch `fix/repair-integrity-and-recursive-sealing`)
+- **PR**: [#96](https://github.com/taitran501/ai-harness/pull/96)
 - **Branch**: `fix/repair-integrity-and-recursive-sealing`
 - **Status**: open
-- **Commits**: —
+- **Commits**: `7409d8a`
 
 ## Why
 
