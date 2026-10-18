@@ -75,9 +75,18 @@ class TestPerSubtaskDirection(unittest.TestCase):
 
         # Build a minimal journal with two completed nodes that differ on
         # the "err" subtask. Lower "err" should be preferred (minimize).
+        # Explicit temp paths: TreeJournal's default path discovery falls back
+        # to the package root (this checkout) when no project is attached to
+        # the CWD, which leaked journal.json + lock into the repo during full
+        # suite runs (see docs/changes/test-isolation-and-sync-cache.md).
         from harness.tree_journal import Node, TreeJournal
 
-        journal = TreeJournal(auto_sync=False)
+        journal = TreeJournal(
+            journal_path=comp.artifacts_dir / "journal.json",
+            artifacts_dir=comp.artifacts_dir,
+            auto_sync=False,
+            task_spec=self.bridge.task_spec,
+        )
 
         def make_node(node_id: str, err_score: float, primary: float) -> Node:
             node = Node(
