@@ -61,15 +61,31 @@ def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -
     return ws
 
 
+def _make_stub_workspace(tmp: Path, framework_dir: str = "ai-harness") -> Path:
+    """Minimal workspace stub for detection-logic tests.
+
+    ``find_framework_repo()`` only checks directory shape (a ``.git``
+    marker plus a ``harness/`` package dir), so a real git clone (~2.7 s
+    each) is not needed. Attach/sync tests keep real clones because their
+    subprocesses genuinely execute the cloned code.
+    """
+    ws = Path(tmp) / "competition"
+    fw = ws / framework_dir
+    (fw / ".git").mkdir(parents=True)
+    (fw / "harness").mkdir()
+    (ws / "configs").mkdir(parents=True)
+    return ws
+
+
 class TestFindFrameworkRepo(unittest.TestCase):
     def test_auto_detect_conventional_dir(self) -> None:
         with tempfile.TemporaryDirectory(prefix="test_sync_detect_") as tmp:
-            ws = _make_workspace(Path(tmp))
+            ws = _make_stub_workspace(Path(tmp))
             self.assertEqual(find_framework_repo(ws), ws / "ai-harness")
 
     def test_explicit_dir_wins(self) -> None:
         with tempfile.TemporaryDirectory(prefix="test_sync_detect_") as tmp:
-            ws = _make_workspace(Path(tmp))
+            ws = _make_stub_workspace(Path(tmp))
             custom = ws / "custom-harness"
             custom.mkdir()
             (custom / ".git").mkdir()

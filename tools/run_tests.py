@@ -8,8 +8,9 @@ Usage:
     python tools/run_tests.py --list-smoke    # show which modules are smoke
     python tools/run_tests.py test_x test_y   # run specific modules
 
-The slow tier holds the modules that exercise full pipelines (Kaggle
-packaging, dashboard server, git audit gate, legacy end-to-end harness).
+The slow tier holds the modules that exercise full pipelines / heavy
+subprocess work (Kaggle packaging, sync CLI against throwaway git clones,
+dashboard server, cloud-job runners, audit-gate CLI).
 Run the full suite before pushing; use --fast during iteration.
 
 The smoke tier is the <10 s critical-invariants set for rapid feedback.
@@ -32,12 +33,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 #: Modules whose tests run full pipelines / heavy subprocess work.
-#: Measured in-process: ~41s of the ~99s total suite time.
+#: Membership from per-module timing measurement (2026-10-18, standalone
+#: runs incl. cold start): kaggle_runtime ~27s, sync_command ~15s (after
+#: detection-test clone stubbing), dashboard ~12s, cloud_jobs_and_env
+#: ~12s, harness ~7s, audit_gate ~7s.
 SLOW_MODULES = (
-    "test_kaggle_runtime",   # Kaggle kernel packaging + dispatch contracts
-    "test_dashboard",        # live dashboard server + HTTP endpoints
-    "test_audit_gate",       # git audit gate subprocesses
-    "test_harness",          # legacy end-to-end harness pipeline
+    "test_kaggle_runtime",      # Kaggle kernel packaging + dispatch contracts
+    "test_dashboard",           # live dashboard server + HTTP endpoints
+    "test_audit_gate",          # audit-gate numerics (diff metrics, t-test, integrity) + CLI receipt tests
+    "test_harness",             # TreeJournal/Validator/AuditGate unit tests + audit-gate CLI subprocesses
+    "test_sync_command",        # sync CLI against throwaway git clones (heavy subprocess work)
+    "test_cloud_jobs_and_env",  # cloud job runner + environment cache (subprocess work)
 )
 
 #: Critical-invariants subset for the <10 s smoke tier, chosen by
@@ -54,16 +60,29 @@ SMOKE_MODULES = (
 
 
 def discover_modules() -> list[str]:
+    """All test modules as dotted names (``tests.test_x``).
+
+    Recursive: modules may live in subpackages
+    (``tests/agent_bridge/test_y.py`` -> ``tests.agent_bridge.test_y``).
+    """
     test_dir = REPO_ROOT / "tests"
-    return sorted(p.stem for p in test_dir.glob("test_*.py"))
+    return sorted(
+        p.relative_to(REPO_ROOT).with_suffix("").as_posix().replace("/", ".")
+        for p in test_dir.rglob("test_*.py")
+    )
 
 
 def build_suite(modules: list[str]) -> unittest.TestSuite:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for name in modules:
-        suite.addTests(loader.loadTestsFromName(f"tests.{name}"))
+        suite.addTests(loader.loadTestsFromName(name))
     return suite
+
+
+#: Slow/smoke membership is keyed by module stem (top-level test files).
+def _stem(module: str) -> str:
+    return module.rsplit(".", 1)[-1]
 
 
 def main(argv: list[str]) -> int:
@@ -94,17 +113,22 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args:
-        # Accept "test_x", "tests.test_x", or "tests/test_x.py"
+        # Accept "test_x", "tests.test_x", "tests/test_x.py",
+        # or nested paths like "tests/subpkg/test_y.py" / "tests.subpkg.test_y".
         modules = []
         for a in args:
-            stem = Path(a).stem if a.endswith(".py") else a.split(".")[-1]
-            modules.append(stem)
+            s = a.replace("/", ".")
+            if s.endswith(".py"):
+                s = s[: -len(".py")]
+            if not s.startswith("tests."):
+                s = f"tests.{s}"
+            modules.append(s)
     elif smoke:
-        modules = list(SMOKE_MODULES)
+        modules = [f"tests.{m}" for m in SMOKE_MODULES]
     else:
         modules = discover_modules()
         if fast:
-            modules = [m for m in modules if m not in SLOW_MODULES]
+            modules = [m for m in modules if _stem(m) not in SLOW_MODULES]
 
     if smoke and not args:
         label = "smoke tier (<10s invariants)"
