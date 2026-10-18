@@ -56,6 +56,15 @@ def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -
         ["git", "clone", "--quiet", str(Path(_harness_pkg.__file__).resolve().parents[1]), str(fw)],
         env=env,
     )
+    # Guarantee the clone is ON a branch with upstream tracking. CI checkouts
+    # (GitHub Actions PR events) are detached and may carry no branch refs,
+    # so a clone of one is detached with no origin/<branch> — where both
+    # `git push -u origin HEAD` and `git pull --ff-only` fail. A normal clone
+    # (branch checked out, tracking set by git clone) is left untouched.
+    if subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=fw, capture_output=True, env=env).returncode != 0:
+        _git(["git", "checkout", "-B", "main"], cwd=fw, env=env)
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=fw, capture_output=True, env=env, check=True)
+        _git(["git", "branch", "--set-upstream-to=origin/main", "main"], cwd=fw, env=env)
     if dirty:
         (fw / "stray.txt").write_text("local change" + chr(10), encoding="utf-8")
     if with_remote:
