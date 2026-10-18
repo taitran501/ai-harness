@@ -30,29 +30,55 @@ Usage::
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, List, Optional, TypeVar
+from typing import Any, Callable, List, Optional, Tuple, TypeVar
 
 T = TypeVar("T")
 
 
-# Attribute-name mapping: legacy (kaggle) name -> canonical name.
-# Callers always use the canonical (snake_case, lower) name; the wrapper
-# translates to whichever SDK is installed.
+# Attribute-name mapping: canonical (snake_case) name -> candidate raw
+# attribute names, tried in order. Callers use ONLY the canonical name; the
+# wrapper translates to whichever SDK shape is installed.
 _LEGACY_ALIASES = {
-    # KaggleApi (legacy) method names are already snake_case, but the SDK
-    # sometimes exposes camelCase on response objects. Normalise both.
-    "totalVotes": "total_votes",
-    "publicScore": "public_score",
-    "privateScore": "private_score",
-    "createdAt": "created_at",
-    "kernelOutput": "kernels_output",
-    "kernelLogs": "kernels_logs",
-    "kernelStatus": "kernels_status",
-    "competitionTopicsList": "competition_topics_list",
-    "listCompetitionFiles": "list_competition_files",
-    "listKernels": "list_kernels",
-    "listSubmissions": "list_submissions",
+    # Submission / kernel fields. MUST cover BOTH object shapes that appear
+    # in the wild (pinned by tests/test_api_reference.py):
+    #   * legacy kaggle 1.x camelCase objects (publicScore, createdAt, ...)
+    #   * kaggle 2.x / kagglesdk `ApiSubmission` snake_case objects
+    #     (public_score, date, total_bytes)
+    "public_score": ("publicScore",),
+    "private_score": ("privateScore",),
+    "total_votes": ("totalVotes",),
+    "created_at": ("createdAt", "submittedDate", "date", "creationDate"),
+    "date": ("submittedDate", "createdAt"),
+    "total_bytes": ("totalBytes",),
+    "file_name": ("fileName",),
+    "team_name": ("teamName",),
+    # Method-name aliases (used by KaggleClient.get): the SDK sometimes
+    # exposes camelCase where the facade is snake_case.
+    "kernels_output": ("kernelOutput",),
+    "kernels_logs": ("kernelLogs",),
+    "kernels_status": ("kernelStatus",),
+    "competition_topics_list": ("competitionTopicsList",),
+    "list_competition_files": ("listCompetitionFiles",),
+    "list_kernels": ("listKernels",),
+    "list_submissions": ("listSubmissions",),
 }
+
+
+def _alias_candidates(name: str) -> Tuple[str, ...]:
+    """Raw attribute names that may back a requested (normalised) name.
+
+    Forward: the normalised name maps to its ordered raw candidates.
+    Reverse: a legacy name requested on an object that holds the normalised
+    attribute resolves back to the normalised key.
+    """
+    cands = _LEGACY_ALIASES.get(name)
+    cands = tuple(cands) if cands else ()
+    reverse = tuple(
+        canonical
+        for canonical, raws in _LEGACY_ALIASES.items()
+        if canonical != name and name in raws
+    )
+    return cands + reverse
 
 
 def _try_import_kagglesdk():
@@ -93,22 +119,18 @@ class _NormalisedObject:
         if hasattr(raw, name):
             value = getattr(raw, name)
             return self._wrap(value)
-        # 2. Aliased attribute (e.g. totalVotes -> total_votes)
-        alias = _LEGACY_ALIASES.get(name)
-        if alias and hasattr(raw, alias):
-            return self._wrap(getattr(raw, alias))
-        # 3. Reverse alias (caller asked for legacy name, SDK has canonical)
-        reverse = {v: k for k, v in _LEGACY_ALIASES.items()}.get(name)
-        if reverse and hasattr(raw, reverse):
-            return self._wrap(getattr(raw, reverse))
+        # 2/3. Forward + reverse alias candidates (see _alias_candidates)
+        for alias in _alias_candidates(name):
+            if hasattr(raw, alias):
+                return self._wrap(getattr(raw, alias))
         # 4. Pydantic-style: try to_dict then lookup
         if hasattr(raw, "model_dump"):
             data = raw.model_dump()
             if name in data:
                 return self._wrap(data[name])
-            alias = _LEGACY_ALIASES.get(name)
-            if alias and alias in data:
-                return self._wrap(data[alias])
+            for alias in _alias_candidates(name):
+                if alias in data:
+                    return self._wrap(data[alias])
         if hasattr(raw, "dict"):
             data = raw.dict()
             if name in data:
@@ -283,8 +305,9 @@ class KaggleClient:
         """Download kernel output. Canonical name for both SDKs."""
         if self.sdk == "kaggle":
             return self._legacy_api.kernels_output(slug, path=path, **kwargs)
-        # kagglesdk uses the same snake_case name
-        return self._client.kernels_output(slug, path=path, **kwargs)
+        # kagglesdk clients are namespaced (client.kernels.*), so the legacy
+        # flat API is the stable cross-SDK path (same as list_submissions).
+        return self._legacy_api_instance().kernels_output(slug, path=path, **kwargs)
 
     def kernels_output(self, slug: str, path: Optional[str] = None, **kwargs: Any) -> Any:
         """Alias for :meth:`kernel_output`."""
@@ -294,13 +317,13 @@ class KaggleClient:
         """Query kernel status."""
         if self.sdk == "kaggle":
             return self._legacy_api.kernels_status(slug, **kwargs)
-        return self._client.kernels_status(slug, **kwargs)
+        return self._legacy_api_instance().kernels_status(slug, **kwargs)
 
     def kernels_logs(self, slug: str, **kwargs: Any) -> Any:
         """Fetch kernel logs."""
         if self.sdk == "kaggle":
             return self._legacy_api.kernels_logs(slug, **kwargs)
-        return self._client.kernels_logs(slug, **kwargs)
+        return self._legacy_api_instance().kernels_logs(slug, **kwargs)
 
     def competition_topics(self, competition: str, **kwargs: Any) -> Any:
         """List discussion topics for a competition (canonical name)."""
@@ -330,15 +353,12 @@ class KaggleClient:
         Useful for SDK-specific methods that are not part of the stable facade.
         """
         target = self._legacy_api if self.sdk == "kaggle" else self._client
-        # Try canonical name first, then legacy alias
+        # Try canonical name first, then legacy aliases
         if hasattr(target, method_name):
             return getattr(target, method_name)(*args, **kwargs)
-        alias = _LEGACY_ALIASES.get(method_name)
-        if alias and hasattr(target, alias):
-            return getattr(target, alias)(*args, **kwargs)
-        reverse = {v: k for k, v in _LEGACY_ALIASES.items()}.get(method_name)
-        if reverse and hasattr(target, reverse):
-            return getattr(target, reverse)(*args, **kwargs)
+        for alias in _alias_candidates(method_name):
+            if hasattr(target, alias):
+                return getattr(target, alias)(*args, **kwargs)
         raise AttributeError(f"No method '{method_name}' on {type(target).__name__}")
 
 

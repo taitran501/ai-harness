@@ -53,6 +53,26 @@ class _FakeCanonicalOnly:
         self.total_votes = 42
 
 
+class _FakeKagglesdkShape:
+    """Live kaggle 2.x / kagglesdk ``ApiSubmission`` shape (snake_case, ``date``)."""
+
+    def __init__(self):
+        self.public_score = 0.958
+        self.private_score = 0.957
+        self.date = "2026-10-17T21:14:27Z"
+        self.file_name = "submission.csv"
+        self.total_bytes = 12345
+
+
+class _FakeLegacyDateShape:
+    """Legacy kaggle 1.x shape with the ``submittedDate`` timestamp field."""
+
+    def __init__(self):
+        self.publicScore = 0.958
+        self.submittedDate = "2026-10-17T21:14:27Z"
+        self.fileName = "submission.csv"
+
+
 class DetectSdkTests(unittest.TestCase):
     def test_detect_sdk_returns_a_known_value(self):
         # Both SDKs are installed in this environment, so kagglesdk wins.
@@ -82,6 +102,18 @@ class NormalisedObjectTests(unittest.TestCase):
         # camel name -> must resolve through the forward-alias step.
         obj = _NormalisedObject(_FakeCanonicalOnly(), "kagglesdk")
         self.assertEqual(obj.totalVotes, 42)
+
+    def test_created_at_resolves_from_kagglesdk_date_field(self):
+        # Live shape: ApiSubmission exposes `date`, not `created_at`.
+        obj = _NormalisedObject(_FakeKagglesdkShape(), "kagglesdk")
+        self.assertEqual(obj.created_at, "2026-10-17T21:14:27Z")
+        self.assertEqual(obj.date, "2026-10-17T21:14:27Z")
+
+    def test_date_resolves_from_legacy_submitted_date(self):
+        # Legacy 1.x shape: timestamp lives in `submittedDate`.
+        obj = _NormalisedObject(_FakeLegacyDateShape(), "kaggle")
+        self.assertEqual(obj.date, "2026-10-17T21:14:27Z")
+        self.assertEqual(obj.created_at, "2026-10-17T21:14:27Z")
 
     def test_pydantic_model_dump_lookup(self):
         obj = _NormalisedObject(_FakePydantic(), "kagglesdk")
@@ -210,6 +242,18 @@ class _FakeLegacyApi:
         self.calls.append(("kernels_push", folder, timeout, acc))
         return SimpleNamespace(ref=333, url="https://www.kaggle.com/kernels/own/k")
 
+    def kernels_status(self, slug, **kwargs):
+        self.calls.append(("kernels_status", slug))
+        return SimpleNamespace(status="COMPLETE")
+
+    def kernels_logs(self, slug, **kwargs):
+        self.calls.append(("kernels_logs", slug))
+        return "logs for " + slug
+
+    def kernels_output(self, slug, path=None, **kwargs):
+        self.calls.append(("kernels_output", slug, path))
+        return "output of " + slug
+
 
 def _make_client(sdk="kaggle"):
     """Build a ``KaggleClient`` without a live SDK (dispatch-path unit tests)."""
@@ -258,6 +302,38 @@ class ClientDispatchPathTests(unittest.TestCase):
         c = _make_client("kaggle")
         c.get("kernels_push", "f")
         self.assertEqual(c._legacy_api.calls[-1][0], "kernels_push")
+
+
+class ClientKagglesdkKernelRoutingTests(unittest.TestCase):
+    """On kagglesdk the raw client is namespaced (client.kernels.*) and has no
+    flat kernels_status / kernels_logs / kernels_output — the facade must route
+    through the legacy flat API instead (regression: live RSNA run raised
+    ``AttributeError: 'KaggleClient' object has no attribute 'kernels_status'``).
+    """
+
+    def _make_kagglesdk_client(self):
+        c = _make_client("kagglesdk")
+        # Pre-seed the legacy cache so no real KaggleApi is constructed.
+        c._legacy_api_cache = _FakeLegacyApi()
+        return c
+
+    def test_kernels_status_routes_to_legacy_api(self):
+        c = self._make_kagglesdk_client()
+        resp = c.kernels_status("owner/kernel-1")
+        self.assertEqual(c._legacy_api_cache.calls[0][:2], ("kernels_status", "owner/kernel-1"))
+        self.assertEqual(resp.status, "COMPLETE")
+
+    def test_kernels_logs_routes_to_legacy_api(self):
+        c = self._make_kagglesdk_client()
+        out = c.kernels_logs("owner/kernel-1")
+        self.assertEqual(c._legacy_api_cache.calls[0][0], "kernels_logs")
+        self.assertEqual(out, "logs for owner/kernel-1")
+
+    def test_kernels_output_routes_to_legacy_api(self):
+        c = self._make_kagglesdk_client()
+        out = c.kernel_output("owner/kernel-1", path="out.csv")
+        self.assertEqual(c._legacy_api_cache.calls[0][:3], ("kernels_output", "owner/kernel-1", "out.csv"))
+        self.assertEqual(out, "output of owner/kernel-1")
 
 
 if __name__ == "__main__":

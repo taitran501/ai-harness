@@ -61,7 +61,7 @@ ENTRY_POINTS: List[Tuple[str, str]] = [
 #: Call these instead of the raw SDK — the facade normalises attribute names so
 #: the legacy camelCase and the new snake_case surface read identically.
 FACADE_METHODS: List[Tuple[str, str]] = [
-    ("list_submissions", "List competition submissions (normalised: .public_score, .total_votes, …)."),
+    ("list_submissions", "List competition submissions (normalised: .public_score, .date, .status, …)."),
     ("submit_submission", "Submit a file or a code-comp kernel output; returns a normalised ref."),
     ("kernels_push", "Push a kernel folder (kernel-metadata.json + code) to Kaggle."),
     ("list_kernels", "List kernels (normalised)."),
@@ -72,17 +72,22 @@ FACADE_METHODS: List[Tuple[str, str]] = [
 
 #: Normalised fields on the objects returned by ``list_submissions()`` (and on
 #: the submission reference from ``submit_submission()``). The proxy
-#: (``kaggle_compat._NormalisedObject``) maps the legacy camelCase names to these
-#: canonical snake_case names, so callers use ONLY these spellings. This closes
-#: the field-name guessing gap (agents used to invent ``.date`` / ``.submittedDate``).
+#: (``kaggle_compat._NormalisedObject``) resolves each canonical name across BOTH
+#: raw SDK shapes — legacy kaggle 1.x camelCase objects AND kaggle 2.x /
+#: kagglesdk ``ApiSubmission`` snake_case objects — so callers use ONLY these
+#: spellings. This closes the field-name guessing gap (agents used to invent
+#: ``.date`` / ``.submittedDate`` / ``.created_at`` / ``.totalVotes``).
 SUBMISSION_FIELDS: List[Tuple[str, str]] = [
     ("ref", "Submission id — pass to status / wait_for_score tracking."),
     ("status", "Submission status string (e.g. IN_PROGRESS, COMPLETE, ERROR)."),
     ("description", "The message/description attached to the submission."),
-    ("public_score", "Public (leaderboard) score; None until scored. (from publicScore)"),
-    ("private_score", "Private score, if present. (from privateScore)"),
-    ("total_votes", "Community votes, if present. (from totalVotes)"),
-    ("created_at", "Submission timestamp, if present. (from createdAt)"),
+    ("public_score", "Public (leaderboard) score; None until scored."),
+    ("private_score", "Private score, if present."),
+    ("date", "Submission timestamp (ISO string)."),
+    ("created_at", "Alias of ``date`` — resolves on both SDK shapes."),
+    ("file_name", "Submission file name, if present."),
+    ("team_name", "Submitting team name, if present."),
+    ("total_bytes", "Submission payload size in bytes, if present."),
 ]
 
 #: Python entry points the agent may reach for. Dotted path = module[.attr[.attr…]].
@@ -147,11 +152,33 @@ def _ai_harness_commands() -> Set[str]:
 
 
 def _submission_fixture():
-    """A stand-in raw submission (legacy camelCase + direct names).
+    """Stand-in raw submission in the LIVE shape: kaggle 2.x / kagglesdk
+    ``ApiSubmission`` (snake_case, ``date`` field — no ``total_votes``).
 
     Used by :func:`validate_reference` to prove each canonical field in
-    :data:`SUBMISSION_FIELDS` resolves through the normalising proxy — so a typo
-    or a missing alias in the reference fails the suite instead of rotting.
+    :data:`SUBMISSION_FIELDS` resolves through the normalising proxy on the
+    shape that actually appears in the wild.
+    """
+
+    class _Raw:
+        ref = "57313652"
+        status = "COMPLETE"
+        description = "Exp021 Verified SOTA"
+        public_score = 0.958
+        private_score = 0.957
+        date = "2026-10-17T21:14:27Z"
+        file_name = "submission.csv"
+        team_name = "Team goat"
+        total_bytes = 12345
+
+    return _Raw()
+
+
+def _submission_fixture_legacy():
+    """Stand-in raw submission in the legacy kaggle 1.x camelCase shape.
+
+    Guards the other side of the alias map: every canonical field must
+    resolve here too, so a future SDK downgrade does not silently break §7.
     """
 
     class _Raw:
@@ -160,8 +187,10 @@ def _submission_fixture():
         description = "Exp021 Verified SOTA"
         publicScore = 0.958
         privateScore = 0.957
-        totalVotes = 3
-        createdAt = "2026-10-17T21:14:27Z"
+        submittedDate = "2026-10-17T21:14:27Z"
+        fileName = "submission.csv"
+        teamName = "Team goat"
+        totalBytes = 12345
 
     return _Raw()
 
@@ -203,15 +232,22 @@ def validate_reference() -> List[str]:
     try:
         from harness.kaggle_compat import _NormalisedObject
 
-        sub = _NormalisedObject(_submission_fixture(), "kaggle")
-        for name, _ in SUBMISSION_FIELDS:
-            try:
-                getattr(sub, name)
-            except AttributeError:
-                problems.append(
-                    "submission-field: %r does not resolve on the normalised "
-                    "Submission object" % name
-                )
+        # Validate every canonical field on BOTH raw SDK shapes (live
+        # kaggle 2.x / kagglesdk ApiSubmission and legacy 1.x camelCase).
+        fixtures = (
+            ("kagglesdk", _submission_fixture()),
+            ("kaggle", _submission_fixture_legacy()),
+        )
+        for sdk, raw in fixtures:
+            sub = _NormalisedObject(raw, sdk)
+            for name, _ in SUBMISSION_FIELDS:
+                try:
+                    getattr(sub, name)
+                except AttributeError:
+                    problems.append(
+                        "submission-field: %r does not resolve on the "
+                        "normalised Submission object (%s shape)" % (name, sdk)
+                    )
     except Exception as exc:  # noqa: BLE001 - report, do not raise
         problems.append("submission-field: cannot build fixture (%s)" % exc)
 
