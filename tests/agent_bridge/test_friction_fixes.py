@@ -29,9 +29,8 @@ from harness.research_memory import ResearchMemory
 from harness.runner import UniversalRunner
 from harness.task_spec import SubtaskSpec, UniversalTaskSpec
 from harness.templates.kaggle_template import _is_critical_identity_mismatch
+from tests.fixtures import SOURCE_ROOT
 from tests.test_correctness_contracts import task
-
-SOURCE_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _make_bridge_workspace() -> Path:

@@ -11,8 +11,7 @@ import yaml
 
 from harness.agent_bridge import AgentBridge, TypedActionName
 from harness.grounding_gate import GroundingGate
-
-SOURCE_ROOT = Path(__file__).resolve().parent.parent
+from tests.fixtures import SOURCE_ROOT
 
 
 class TestAgentBridge(unittest.TestCase):
