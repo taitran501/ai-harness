@@ -1,10 +1,10 @@
 # M4 refactoring (PR-E): AgentBridge action-handler extraction
 
 - **Date**: 2026-10-18
-- **PR**: — (branch `refactor/agent-bridge-handler-extraction`)
+- **PR**: [#99](https://github.com/taitran501/ai-harness/pull/99)
 - **Branch**: `refactor/agent-bridge-handler-extraction`
 - **Status**: open
-- **Commits**: —
+- **Commits**: `1cd1a84`
 
 ## Why
 
