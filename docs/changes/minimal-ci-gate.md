@@ -97,6 +97,13 @@ the local Windows dev env), fixed across follow-up commits:
 - Workflow takes effect on the PR that introduces it (GitHub Actions evaluates
   the PR head's workflow file).
 
+**Final CI evidence** (run `39144652521`, commit `9adc007`, 2026-10-18): `test`
+job — **925 tests OK in ~40 s**, `lint` OK (earlier runs on this branch:
+`d41e4d5`/`fafca0c`/`df5fb67`/`3737f22` failed on the issues above;
+`776d0c5` was the first green run). Note: `actions/checkout@v4` / 
+`actions/setup-python@v5` emit Node.js 20 deprecation annotations; they
+migrate to Node 24 automatically — cosmetic, no action required.
+
 ## Impact
 
 - `main` now has an enforced gate: direct pushes and PRs must pass ruff + the full
