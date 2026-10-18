@@ -16,6 +16,7 @@ import yaml
 
 from harness.evaluation import utility
 from harness.repair import (
+    EvidenceDriftError,
     build_parser,
     classify_run,
     main,
@@ -150,13 +151,18 @@ class TestRepair(unittest.TestCase):
         # drift the bytes
         _drift_metrics(folder, self.spec, 0.85)
         self.assertEqual(classify_run(folder)["state"], "drifted")
-
-        res = repair_run_dir(folder)
+        # evidence drift must NOT be repaired silently (PR-B integrity gate)
+        with self.assertRaises(EvidenceDriftError):
+            repair_run_dir(folder)
+        # explicit force re-seals as an audited operator override
+        res = repair_run_dir(folder, force=True)
         self.assertTrue(res["now_verified"], res)
+        self.assertTrue(res["forced"])
         # identity fields must be untouched
         manifest = json.loads((folder / "artifact_manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["run_id"], "test-exp_a")
         self.assertEqual(manifest["status"], "COMPLETED")
+        self.assertTrue(manifest["repaired"])
         # and the run now validates
         validate_run(folder)
 
@@ -165,7 +171,7 @@ class TestRepair(unittest.TestCase):
         # an undeclared file appears on disk; repair must NOT add it to files
         (folder / "stray_file.txt").write_text("noise")
         _drift_metrics(folder, self.spec, 0.85)
-        repair_run_dir(folder)
+        repair_run_dir(folder, force=True)
         manifest = json.loads((folder / "artifact_manifest.json").read_text(encoding="utf-8"))
         self.assertNotIn("stray_file.txt", manifest["files"])
         self.assertIn("metrics.json", manifest["files"])
@@ -173,7 +179,7 @@ class TestRepair(unittest.TestCase):
     def test_repair_drop_missing_removes_deleted_files(self):
         folder = self._seal()
         (folder / "oof_predictions.csv").unlink()
-        res = repair_run_dir(folder, drop_missing=True)
+        res = repair_run_dir(folder, drop_missing=True, force=True)
         manifest = json.loads((folder / "artifact_manifest.json").read_text(encoding="utf-8"))
         self.assertNotIn("oof_predictions.csv", manifest["files"])
         self.assertIn("oof_predictions.csv", res["dropped_missing"])
@@ -227,24 +233,39 @@ class TestScanAndCli(unittest.TestCase):
         # manifest unchanged by --check
         self.assertEqual(before, (bad / "artifact_manifest.json").read_text(encoding="utf-8"))
 
-    def test_repair_all_restores_drifted_run(self):
+    def test_repair_all_blocks_evidence_drift_and_force_restores(self):
         from contextlib import redirect_stdout
         from io import StringIO
 
         bad = self._seal("bad")
         _drift_metrics(bad, self.spec, 0.99)
+        # default: evidence drift is blocked, never re-sealed (PR-B gate)
         buf = StringIO()
         with redirect_stdout(buf):
             code = main(["--project-root", str(self.root), "--all", "--json"])
+        self.assertEqual(code, 3, buf.getvalue())
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["repaired"], 0)
+        self.assertEqual(payload["blocked"], 1)
+        self.assertEqual(
+            payload["blocked_details"][0]["status"], "blocked_evidence_drift"
+        )
+        from harness.artifacts import validate_run
+
+        with self.assertRaises(Exception):
+            validate_run(bad)  # still visibly broken
+        # --force: audited operator override restores validation
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = main(["--project-root", str(self.root), "--all", "--json", "--force"])
         self.assertEqual(code, 0, buf.getvalue())
         payload = json.loads(buf.getvalue())
         self.assertEqual(payload["repaired"], 1)
         self.assertTrue(payload["details"][0]["now_verified"])
-        from harness.artifacts import validate_run
-
+        self.assertTrue(payload["details"][0]["forced"])
         validate_run(bad)
 
-    def test_repair_specific_exp(self):
+    def test_repair_specific_exp_blocks_evidence_drift(self):
         from contextlib import redirect_stdout
         from io import StringIO
 
@@ -254,6 +275,15 @@ class TestScanAndCli(unittest.TestCase):
         buf = StringIO()
         with redirect_stdout(buf):
             code = main(["--project-root", str(self.root), "--exp", "bad", "--json"])
+        self.assertEqual(code, 3, buf.getvalue())
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["repaired"], 0)
+        self.assertEqual(payload["blocked"], 1)
+        self.assertEqual(payload["blocked_details"][0]["exp_dir"], "bad")
+        # force override re-seals the specific run
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = main(["--project-root", str(self.root), "--exp", "bad", "--json", "--force"])
         self.assertEqual(code, 0, buf.getvalue())
         payload = json.loads(buf.getvalue())
         self.assertEqual(payload["repaired"], 1)

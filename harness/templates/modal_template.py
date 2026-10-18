@@ -346,6 +346,7 @@ def main():
         if fname == "artifact_manifest.json":
             continue
         out_path = local_exp_dir / fname
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(content)
         saved_files.append(fname)
     (local_exp_dir / "artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

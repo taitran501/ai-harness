@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-18 | Repair integrity gate (evidence drift never re-sealed; `--verify`/`--force` + audit log) + recursive artifact sealing (nested `stages/*.log`) | [#96](https://github.com/taitran501/ai-harness/pull/96) | [repair-integrity-and-recursive-sealing](repair-integrity-and-recursive-sealing.md) |
 | 2026-10-18 | Import sort (I001) + canonical ruff gate (`ruff.toml`, W605 in gate) | [#94](https://github.com/taitran501/ai-harness/pull/94) | [import-sort-and-ruff-gate](import-sort-and-ruff-gate.md) |
 | 2026-10-18 | Test env isolation (conftest sweep) + `kernel_dispatch.main()` CLI tests | [#93](https://github.com/taitran501/ai-harness/pull/93) | [test-env-isolation-dispatch-cli](test-env-isolation-dispatch-cli.md) |
 | 2026-10-18 | kagglesdk `list_kernels` routing + `competition_topics` method fix (both-SDK TypeError) | [#92](https://github.com/taitran501/ai-harness/pull/92) | [kagglesdk-list-routing-followup](kagglesdk-list-routing-followup.md) |
