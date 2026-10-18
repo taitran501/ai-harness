@@ -21,10 +21,13 @@ to produce the recorded score.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-import pytest
 import yaml
 
 from harness.artifacts import sha256, validate_run
@@ -126,250 +129,254 @@ def _write_run(root: Path, exp_id: str) -> Path:
     return run_dir
 
 
-@pytest.fixture()
-def workspace(tmp_path: Path):
-    root, _task_config = make_workspace(task=_regression_task_doc())
-    return root
+class RepairIntegrityGateTests(unittest.TestCase):
+    """Each test gets a fresh workspace with a re-derivable regression run."""
 
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self._out_buf = io.StringIO()
+        self._out = contextlib.redirect_stdout(self._out_buf)
+        self._out.__enter__()
+        root, _task_config = make_workspace(task=_regression_task_doc())
+        self.workspace = root
 
-# ---------------------------------------------------------------------------
-# Baseline
-# ---------------------------------------------------------------------------
+    def tearDown(self):
+        self._out.__exit__(None, None, None)
+        self._tmp.cleanup()
 
+    def _captured_output(self) -> str:
+        return self._out_buf.getvalue()
 
-def test_clean_run_verifies(workspace: Path):
-    run_dir = _write_run(workspace, "exp001_clean")
-    validate_run(run_dir)  # no exception
-    assert repair_mod.classify_run(run_dir)["state"] == "verified"
+    # ------------------------------------------------------------------
+    # Baseline
+    # ------------------------------------------------------------------
 
+    def test_clean_run_verifies(self):
+        run_dir = _write_run(self.workspace, "exp001_clean")
+        validate_run(run_dir)  # no exception
+        self.assertEqual(repair_mod.classify_run(run_dir)["state"], "verified")
 
-def test_rederivation_matches_recorded_score(workspace: Path):
-    """The gate's re-derivation path reproduces the runner's score exactly."""
-    run_dir = _write_run(workspace, "exp002_rederive")
-    from harness.oof_revalidation import rederive_primary_score
-    from harness.plugins import TaskPluginContext, load_task_plugin
-    from harness.project import HarnessProject
-    from harness.task_spec import load_active_task_spec
+    def test_rederivation_matches_recorded_score(self):
+        """The gate's re-derivation path reproduces the runner's score exactly."""
+        run_dir = _write_run(self.workspace, "exp002_rederive")
+        from harness.oof_revalidation import rederive_primary_score
+        from harness.plugins import TaskPluginContext, load_task_plugin
+        from harness.project import HarnessProject
+        from harness.task_spec import load_active_task_spec
 
-    project = HarnessProject.discover(workspace)
-    spec = load_active_task_spec(project.task_config_path)
-    plugin_context = TaskPluginContext(
-        project.root, project.task_config_path, spec, project.plugin_id or "default"
-    )
-    plugin = load_task_plugin(project.plugin_id, plugin_context)
+        project = HarnessProject.discover(self.workspace)
+        spec = load_active_task_spec(project.task_config_path)
+        plugin_context = TaskPluginContext(
+            project.root, project.task_config_path, spec, project.plugin_id or "default"
+        )
+        plugin = load_task_plugin(project.plugin_id, plugin_context)
 
-    report = rederive_primary_score(
-        run_dir, task_spec=spec, plugin=plugin, plugin_context=plugin_context
-    )
-    assert report["verifiable"] is True
-    assert report["ok"] is True
-    assert report["recorded"] == EXPECTED_SCORE
-    assert report["recomputed"] == pytest.approx(EXPECTED_SCORE)
+        report = rederive_primary_score(
+            run_dir, task_spec=spec, plugin=plugin, plugin_context=plugin_context
+        )
+        self.assertTrue(report["verifiable"])
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["recorded"], EXPECTED_SCORE)
+        self.assertAlmostEqual(report["recomputed"], EXPECTED_SCORE, places=6)
 
+    # ------------------------------------------------------------------
+    # C1: tampered evidence must NOT be laundered by default repair
+    # ------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# C1: tampered evidence must NOT be laundered by default repair
-# ---------------------------------------------------------------------------
+    def test_tampered_metrics_blocked_by_default(self):
+        run_dir = _write_run(self.workspace, "exp003_tampered")
+        metrics_path = run_dir / "metrics.json"
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        metrics["primary_score"] = 9.99  # doctored score
+        metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
+        rc = repair_mod.run_repair(project_root=str(self.workspace), exp=["exp003_tampered"])
+        self.assertEqual(rc, 3)  # blocked by the evidence integrity gate
 
-def test_tampered_metrics_blocked_by_default(workspace: Path, capsys):
-    run_dir = _write_run(workspace, "exp003_tampered")
-    metrics_path = run_dir / "metrics.json"
-    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    metrics["primary_score"] = 9.99  # doctored score
-    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+        out = self._captured_output()
+        self.assertIn("blocked_evidence_drift", out)
 
-    rc = repair_mod.run_repair(project_root=str(workspace), exp=["exp003_tampered"])
-    assert rc == 3  # blocked by the evidence integrity gate
+        # the tampered score was NOT re-sealed: validation still fails,
+        # the manifest is untouched (no repaired marker)
+        with self.assertRaises(ValueError):
+            validate_run(run_dir)
+        manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+        self.assertIsNone(manifest.get("repaired"))
+        # the declared hash is still the ORIGINAL (clean) one, not the tampered bytes
+        original = json.loads(metrics_path.read_text(encoding="utf-8"))
+        self.assertEqual(original["primary_score"], 9.99)  # file on disk is tampered...
+        self.assertNotEqual(manifest["files"]["metrics.json"], sha256(metrics_path))  # ...but not sealed
 
-    out = capsys.readouterr().out
-    assert "blocked_evidence_drift" in out
+        # audit trail recorded the blocked attempt
+        log_path = (
+            self.workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
+        )
+        self.assertTrue(log_path.is_file())
+        entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(any(e["status"] == "blocked_evidence_drift" for e in entries))
+        blocked = next(e for e in entries if e["status"] == "blocked_evidence_drift")
+        self.assertIn("metrics.json", blocked["evidence_files"])
 
-    # the tampered score was NOT re-sealed: validation still fails,
-    # the manifest is untouched (no repaired marker)
-    with pytest.raises(ValueError):
+    def test_benign_drift_still_repairs(self):
+        """Non-evidence drift keeps the classic repair behavior (+ audit trail)."""
+        run_dir = _write_run(self.workspace, "exp004_benign")
+        card = run_dir / "EXPERIMENT_CARD.md"
+        card.write_text("# updated card\n", encoding="utf-8")
+
+        rc = repair_mod.run_repair(project_root=str(self.workspace), exp=["exp004_benign"])
+        self.assertEqual(rc, 0)
+        out = self._captured_output()
+        self.assertIn("Repaired 1", out)
+
+        validate_run(run_dir)  # restored
+        manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(manifest["repaired"])
+        self.assertTrue(manifest["repaired_at"])
+        self.assertEqual(manifest["files"]["EXPERIMENT_CARD.md"], sha256(card))
+
+        log_path = (
+            self.workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
+        )
+        entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["exp_dir"], "exp004_benign")
+        self.assertEqual(entries[0]["mode"], "resave")
+        self.assertIn("EXPERIMENT_CARD.md", entries[0]["files_changed"])
+
+    # ------------------------------------------------------------------
+    # --verify: re-derivation gate
+    # ------------------------------------------------------------------
+
+    def test_verify_reseals_when_score_matches(self):
+        """Evidence hash drift with an UNCHANGED score passes --verify."""
+        run_dir = _write_run(self.workspace, "exp005_verify_ok")
+        metrics_path = run_dir / "metrics.json"
+        # re-serialize with extra whitespace: hash drifts, score is intact
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        metrics_path.write_text(json.dumps(metrics, indent=4, sort_keys=True), encoding="utf-8")
+
+        rc = repair_mod.run_repair(
+            project_root=str(self.workspace), exp=["exp005_verify_ok"], verify=True
+        )
+        self.assertEqual(rc, 0)
+        out = self._captured_output()
+        self.assertIn("Repaired 1", out)
+        self.assertIn("recorded=", out)  # metric check printed
+
         validate_run(run_dir)
-    manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
-    assert manifest.get("repaired") is None
-    # the declared hash is still the ORIGINAL (clean) one, not the tampered bytes
-    original = json.loads(metrics_path.read_text(encoding="utf-8"))
-    assert original["primary_score"] == 9.99  # file on disk is tampered...
-    assert manifest["files"]["metrics.json"] != sha256(metrics_path)  # ...but not sealed
+        manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(manifest["repaired"])
+        self.assertEqual(manifest["files"]["metrics.json"], sha256(metrics_path))
 
-    # audit trail recorded the blocked attempt
-    log_path = (
-        workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
-    )
-    assert log_path.is_file()
-    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-    assert any(e["status"] == "blocked_evidence_drift" for e in entries)
-    blocked = next(e for e in entries if e["status"] == "blocked_evidence_drift")
-    assert "metrics.json" in blocked["evidence_files"]
+        log_path = (
+            self.workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
+        )
+        entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+        check = entries[0]["metric_check"]
+        self.assertTrue(check["verifiable"])
+        self.assertTrue(check["ok"])
+        self.assertEqual(check["recorded"], EXPECTED_SCORE)
+        self.assertAlmostEqual(check["recomputed"], EXPECTED_SCORE, places=6)
 
+    def test_verify_blocks_metric_mismatch(self):
+        """A doctored score fails re-derivation: both values are reported."""
+        run_dir = _write_run(self.workspace, "exp006_mismatch")
+        metrics_path = run_dir / "metrics.json"
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        metrics["primary_score"] = 0.1  # doctored
+        metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
-def test_benign_drift_still_repairs(workspace: Path, capsys):
-    """Non-evidence drift keeps the classic repair behavior (+ audit trail)."""
-    run_dir = _write_run(workspace, "exp004_benign")
-    card = run_dir / "EXPERIMENT_CARD.md"
-    card.write_text("# updated card\n", encoding="utf-8")
+        rc = repair_mod.run_repair(
+            project_root=str(self.workspace), exp=["exp006_mismatch"], verify=True
+        )
+        self.assertEqual(rc, 3)
+        out = self._captured_output()
+        self.assertIn("metric_mismatch", out)
+        self.assertIn("recorded=0.1", out)
+        self.assertIn(f"recomputed={EXPECTED_SCORE}", out)
 
-    rc = repair_mod.run_repair(project_root=str(workspace), exp=["exp004_benign"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "Repaired 1" in out
+        # NOT re-sealed
+        with self.assertRaises(ValueError):
+            validate_run(run_dir)
+        manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+        self.assertIsNone(manifest.get("repaired"))
 
-    validate_run(run_dir)  # restored
-    manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["repaired"] is True
-    assert manifest["repaired_at"]
-    assert manifest["files"]["EXPERIMENT_CARD.md"] == sha256(card)
+        log_path = (
+            self.workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
+        )
+        entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(any(e["status"] == "metric_mismatch" for e in entries))
+        mismatch = next(e for e in entries if e["status"] == "metric_mismatch")
+        self.assertEqual(mismatch["metric_check"]["recorded"], 0.1)
+        self.assertAlmostEqual(mismatch["metric_check"]["recomputed"], EXPECTED_SCORE, places=6)
 
-    log_path = (
-        workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
-    )
-    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-    assert len(entries) == 1
-    assert entries[0]["exp_dir"] == "exp004_benign"
-    assert entries[0]["mode"] == "resave"
-    assert "EXPERIMENT_CARD.md" in entries[0]["files_changed"]
+    def test_force_reseals_but_is_audited(self):
+        """--force is an explicit operator override, never silent."""
+        run_dir = _write_run(self.workspace, "exp007_force")
+        metrics_path = run_dir / "metrics.json"
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        metrics["primary_score"] = 0.1  # doctored
+        metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
+        rc = repair_mod.run_repair(
+            project_root=str(self.workspace), exp=["exp007_force"], force=True
+        )
+        self.assertEqual(rc, 0)
+        validate_run(run_dir)  # the bytes are now sealed (operator's call)
 
-# ---------------------------------------------------------------------------
-# --verify: re-derivation gate
-# ---------------------------------------------------------------------------
+        log_path = (
+            self.workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
+        )
+        entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(entries[0]["forced"])
+        self.assertIn("exp007_force", entries[0]["exp_dir"])
 
+    def test_missing_evidence_file_blocked_and_not_verifiable(self):
+        """Deleting an evidence file is also evidence drift — and not re-derivable."""
+        run_dir = _write_run(self.workspace, "exp008_missing")
+        (run_dir / "oof_predictions.csv").unlink()
 
-def test_verify_reseals_when_score_matches(workspace: Path, capsys):
-    """Evidence hash drift with an UNCHANGED score passes --verify."""
-    run_dir = _write_run(workspace, "exp005_verify_ok")
-    metrics_path = run_dir / "metrics.json"
-    # re-serialize with extra whitespace: hash drifts, score is intact
-    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    metrics_path.write_text(json.dumps(metrics, indent=4, sort_keys=True), encoding="utf-8")
+        # default: blocked
+        rc = repair_mod.run_repair(project_root=str(self.workspace), exp=["exp008_missing"])
+        self.assertEqual(rc, 3)
 
-    rc = repair_mod.run_repair(
-        project_root=str(workspace), exp=["exp005_verify_ok"], verify=True
-    )
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "Repaired 1" in out
-    assert "recorded=" in out  # metric check printed
+        # --verify: the score cannot be re-derived without the evidence
+        rc = repair_mod.run_repair(
+            project_root=str(self.workspace), exp=["exp008_missing"], verify=True
+        )
+        out = self._captured_output()
+        self.assertEqual(rc, 3)
+        self.assertIn("not_verifiable", out)
 
-    validate_run(run_dir)
-    manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["repaired"] is True
-    assert manifest["files"]["metrics.json"] == sha256(metrics_path)
+        with self.assertRaises(ValueError):
+            validate_run(run_dir)
 
-    log_path = (
-        workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
-    )
-    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-    check = entries[0]["metric_check"]
-    assert check["verifiable"] is True
-    assert check["ok"] is True
-    assert check["recorded"] == EXPECTED_SCORE
-    assert check["recomputed"] == pytest.approx(EXPECTED_SCORE)
+    # ------------------------------------------------------------------
+    # Audit trail properties
+    # ------------------------------------------------------------------
 
+    def test_repair_log_lives_outside_every_sealed_bundle(self):
+        run_dir = _write_run(self.workspace, "exp009_log")
+        card = run_dir / "EXPERIMENT_CARD.md"
+        card.write_text("v2\n", encoding="utf-8")
+        repair_mod.run_repair(project_root=str(self.workspace), exp=["exp009_log"])
+        self._captured_output()
 
-def test_verify_blocks_metric_mismatch(workspace: Path, capsys):
-    """A doctored score fails re-derivation: both values are reported."""
-    run_dir = _write_run(workspace, "exp006_mismatch")
-    metrics_path = run_dir / "metrics.json"
-    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    metrics["primary_score"] = 0.1  # doctored
-    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+        manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+        self.assertNotIn("repair_log.jsonl", manifest["files"])
 
-    rc = repair_mod.run_repair(
-        project_root=str(workspace), exp=["exp006_mismatch"], verify=True
-    )
-    assert rc == 3
-    out = capsys.readouterr().out
-    assert "metric_mismatch" in out
-    assert "recorded=0.1" in out
-    assert f"recomputed={EXPECTED_SCORE}" in out
-
-    # NOT re-sealed
-    with pytest.raises(ValueError):
-        validate_run(run_dir)
-    manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
-    assert manifest.get("repaired") is None
-
-    log_path = (
-        workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
-    )
-    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-    assert any(e["status"] == "metric_mismatch" for e in entries)
-    mismatch = next(e for e in entries if e["status"] == "metric_mismatch")
-    assert mismatch["metric_check"]["recorded"] == 0.1
-    assert mismatch["metric_check"]["recomputed"] == pytest.approx(EXPECTED_SCORE)
-
-
-def test_force_reseals_but_is_audited(workspace: Path, capsys):
-    """--force is an explicit operator override, never silent."""
-    run_dir = _write_run(workspace, "exp007_force")
-    metrics_path = run_dir / "metrics.json"
-    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    metrics["primary_score"] = 0.1  # doctored
-    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-
-    rc = repair_mod.run_repair(
-        project_root=str(workspace), exp=["exp007_force"], force=True
-    )
-    assert rc == 0
-    validate_run(run_dir)  # the bytes are now sealed (operator's call)
-
-    log_path = (
-        workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
-    )
-    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-    assert entries[0]["forced"] is True
-    assert "exp007_force" in entries[0]["exp_dir"]
+        # a second repair appends (append-only), never overwrites
+        card.write_text("v3\n", encoding="utf-8")
+        repair_mod.run_repair(project_root=str(self.workspace), exp=["exp009_log"])
+        self._captured_output()
+        log_path = (
+            self.workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
+        )
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(json.loads(lines[0])["exp_dir"], "exp009_log")
+        self.assertEqual(json.loads(lines[1])["exp_dir"], "exp009_log")
 
 
-def test_missing_evidence_file_blocked_and_not_verifiable(workspace: Path, capsys):
-    """Deleting an evidence file is also evidence drift — and not re-derivable."""
-    run_dir = _write_run(workspace, "exp008_missing")
-    (run_dir / "oof_predictions.csv").unlink()
-
-    # default: blocked
-    rc = repair_mod.run_repair(project_root=str(workspace), exp=["exp008_missing"])
-    assert rc == 3
-
-    # --verify: the score cannot be re-derived without the evidence
-    rc = repair_mod.run_repair(
-        project_root=str(workspace), exp=["exp008_missing"], verify=True
-    )
-    out = capsys.readouterr().out
-    assert rc == 3
-    assert "not_verifiable" in out
-
-    with pytest.raises(ValueError):
-        validate_run(run_dir)
-
-
-# ---------------------------------------------------------------------------
-# Audit trail properties
-# ---------------------------------------------------------------------------
-
-
-def test_repair_log_lives_outside_every_sealed_bundle(workspace: Path, capsys):
-    run_dir = _write_run(workspace, "exp009_log")
-    card = run_dir / "EXPERIMENT_CARD.md"
-    card.write_text("v2\n", encoding="utf-8")
-    repair_mod.run_repair(project_root=str(workspace), exp=["exp009_log"])
-    capsys.readouterr()
-
-    manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
-    assert "repair_log.jsonl" not in manifest["files"]
-
-    # a second repair appends (append-only), never overwrites
-    card.write_text("v3\n", encoding="utf-8")
-    repair_mod.run_repair(project_root=str(workspace), exp=["exp009_log"])
-    capsys.readouterr()
-    log_path = (
-        workspace / ".ai-harness" / "artifacts" / "repair-integrity-task" / "repair_log.jsonl"
-    )
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2
-    assert json.loads(lines[0])["exp_dir"] == "exp009_log"
-    assert json.loads(lines[1])["exp_dir"] == "exp009_log"
+if __name__ == "__main__":
+    unittest.main()
