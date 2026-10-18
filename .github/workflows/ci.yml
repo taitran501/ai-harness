@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff (pinned to the local gate version)
+        run: pip install ruff==0.16.2
+      - name: Ruff gate
+        run: ruff check harness/ tools/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (core + cloud extras for environment parity)
+        run: pip install -e ".[cloud]"
+      - name: Full test suite
+        run: python tools/run_tests.py
+        timeout-minutes: 15
