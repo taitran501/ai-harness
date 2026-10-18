@@ -20,6 +20,20 @@ from harness.cli import build_parser, main
 from harness.sync import find_framework_repo, run_sync
 
 
+def _git(args: list[str], cwd: Path | None = None, env: dict | None = None) -> None:
+    """Run a git command, surfacing its stderr on failure.
+
+    Plain ``check=True`` swallows git's stderr, which made CI failures
+    (Linux runner) impossible to diagnose from the traceback alone.
+    """
+    r = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, env=env)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"git {' '.join(args[:2])} failed (rc={r.returncode}): "
+            f"{r.stderr.strip()[:800]} | {r.stdout.strip()[:200]}"
+        )
+
+
 def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -> Path:
     """Throwaway competition workspace whose ai-harness dir is a REAL (local,
     hardlinked) git clone of this repository. sync's attach step runs in a
@@ -38,9 +52,9 @@ def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@t",
     }
-    subprocess.run(
+    _git(
         ["git", "clone", "--quiet", str(Path(_harness_pkg.__file__).resolve().parents[1]), str(fw)],
-        capture_output=True, text=True, check=True, env=env,
+        env=env,
     )
     if dirty:
         (fw / "stray.txt").write_text("local change" + chr(10), encoding="utf-8")
@@ -48,11 +62,9 @@ def _make_workspace(tmp: Path, dirty: bool = False, with_remote: bool = False) -
         # A second bare repo acts as the origin so pull --ff-only can succeed.
         origin = tmp / "origin.git"
         origin.mkdir()
-        subprocess.run(
-            ["git", "init", "--bare", str(origin)], capture_output=True, text=True, check=True, env=env
-        )
-        subprocess.run(["git", "remote", "set-url", "origin", str(origin)], cwd=fw, capture_output=True, text=True, check=True)
-        subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=fw, capture_output=True, text=True, check=True)
+        _git(["git", "init", "--bare", str(origin)], env=env)
+        _git(["git", "remote", "set-url", "origin", str(origin)], cwd=fw)
+        _git(["git", "push", "-u", "origin", "HEAD"], cwd=fw)
     (ws / "configs" / "task.yaml").write_text(
         "task:" + chr(10) + "  name: SyncTask" + chr(10) + "  primary_metric: rmsle" + chr(10) +
         "  execution:" + chr(10) + "    backend: kaggle" + chr(10) + "    locked: true" + chr(10),
