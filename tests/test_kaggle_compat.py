@@ -10,8 +10,9 @@ no local traceback. The pure, network-free surface is exercised here:
 - ``_is_transient_error`` classification
 - ``retry_with_backoff`` success / retry / permanent-fail / exhaustion
 
-Client list_* methods are not unit-tested (they require a live or mocked
-SDK session); their contracts are covered by ``test_kaggle_runtime``.
+Client dispatch paths are unit-tested below with faked legacy instances.
+The upstream live API surface is not re-pinned here; it is verified by the
+live smoke path (see ``docs/kaggle_execution.md``).
 """
 from __future__ import annotations
 
@@ -254,6 +255,17 @@ class _FakeLegacyApi:
         self.calls.append(("kernels_output", slug, path))
         return "output of " + slug
 
+    def kernels_list(self, user=None, **kwargs):
+        self.calls.append(("kernels_list", user))
+        return [SimpleNamespace(slug="own/k1", title="Kernel One")]
+
+    def competition_list_topics(self, competition, **kwargs):
+        self.calls.append(("competition_list_topics", competition))
+        return SimpleNamespace(
+            topics=[SimpleNamespace(id=7, title="Topic", author_name="a", comment_count=3)],
+            total_count=1,
+        )
+
 
 def _make_client(sdk="kaggle"):
     """Build a ``KaggleClient`` without a live SDK (dispatch-path unit tests)."""
@@ -334,6 +346,59 @@ class ClientKagglesdkKernelRoutingTests(unittest.TestCase):
         out = c.kernel_output("owner/kernel-1", path="out.csv")
         self.assertEqual(c._legacy_api_cache.calls[0][:3], ("kernels_output", "owner/kernel-1", "out.csv"))
         self.assertEqual(out, "output of owner/kernel-1")
+
+    def test_list_kernels_routes_to_legacy_api(self):
+        c = self._make_kagglesdk_client()
+        kernels = c.list_kernels(user="owner")
+        self.assertEqual(c._legacy_api_cache.calls[0], ("kernels_list", "owner"))
+        self.assertEqual(kernels[0].slug, "own/k1")
+        self.assertEqual(kernels[0].title, "Kernel One")
+
+    def test_list_kernels_uses_legacy_api_on_kaggle_sdk(self):
+        c = _make_client("kaggle")
+        kernels = c.list_kernels()
+        self.assertEqual(c._legacy_api.calls[0], ("kernels_list", None))
+        self.assertEqual(kernels[0].slug, "own/k1")
+
+    def test_competition_topics_routes_to_legacy_api(self):
+        c = self._make_kagglesdk_client()
+        topics = c.competition_topics("rsna-knee")
+        self.assertEqual(c._legacy_api_cache.calls[0], ("competition_list_topics", "rsna-knee"))
+        self.assertEqual(len(topics), 1)
+        self.assertEqual(topics[0].id, 7)
+        self.assertEqual(topics[0].title, "Topic")
+        self.assertEqual(topics[0].comment_count, 3)
+
+    def test_competition_topics_uses_legacy_api_on_kaggle_sdk(self):
+        c = _make_client("kaggle")
+        topics = c.competition_topics("rsna-knee")
+        self.assertEqual(c._legacy_api.calls[0], ("competition_list_topics", "rsna-knee"))
+        self.assertEqual(topics[0].id, 7)
+
+
+class ConstantFieldsRegressionTests(unittest.TestCase):
+    """``KaggleApi.competition_topic_fields`` is a class-level CONSTANT (a
+    field-projection list in kaggle >= 2.x), not a method. The old
+    attribute-probing loop found it via ``hasattr`` and called it, raising
+    ``TypeError: 'list' object is not callable`` — on BOTH SDKs. The facade
+    must never treat ``*_fields`` constants as callables.
+    """
+
+    def _make_client_with_constant(self):
+        c = _make_client("kagglesdk")
+        legacy = _FakeLegacyApi()
+        # Mirror the real KaggleApi: constant list field-projection attribute.
+        legacy.competition_topic_fields = ["id", "title", "authorName"]
+        c._legacy_api_cache = legacy
+        return c
+
+    def test_constant_fields_not_treated_as_callable(self):
+        c = self._make_client_with_constant()
+        # Old code: hasattr(legacy, "competition_topic_fields") -> True -> call
+        # -> TypeError. Fixed code routes to competition_list_topics instead.
+        topics = c.competition_topics("comp-x")
+        self.assertEqual(topics[0].id, 7)
+        self.assertEqual(c._legacy_api_cache.calls[0], ("competition_list_topics", "comp-x"))
 
 
 if __name__ == "__main__":

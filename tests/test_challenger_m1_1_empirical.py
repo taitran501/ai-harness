@@ -1,4 +1,4 @@
-"""Empirical Challenger Verification Suite for Milestone 1.
+r"""Empirical Challenger Verification Suite for Milestone 1.
 
 Author: Challenger M1 1
 Target: tools/audit_gate.py and harness/ensemble_guard.py
