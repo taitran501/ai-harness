@@ -73,6 +73,17 @@ Design choices:
     by `skipUnless(HAS_LIGHTGBM/HAS_XGBOOST)` were silently skipped in run 2
     (9 skips) and now actually execute (3 skips) — declaring the dependencies
     increased clean-environment coverage, not just gate stability.
+
+**The real CI run then exposed two Linux-runner-only test bugs** (masked by
+the local Windows dev env), fixed in a follow-up commit:
+
+- `test_dashboard.test_static_html_served` asserted an exact `<title>` that
+  only matches the **gitignored local `dashboard/dist` build**; clean
+  checkouts serve the committed `tools/web/index.html` (different title).
+  Fix: assert stable SPA markers, not a build-specific title.
+- `test_sync_command._make_workspace` ran git with `check=True`, swallowing
+  stderr so CI failures were undiagnosable. Fix: `_git()` helper includes
+  stderr+stdout in the raised error.
 - Both gate commands verified on the commit's tree: `ruff check` clean;
   `python tools/run_tests.py` → **925 tests OK** (262.3s).
 - Workflow takes effect on the PR that introduces it (GitHub Actions evaluates
