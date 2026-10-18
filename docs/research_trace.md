@@ -134,10 +134,11 @@ surface as `progress_warning` without duplicating or losing committed JSON notes
 The full journal can grow; read the resume section and use scoped search/trace
 instead of putting the entire file into agent context.
 
-For development of this repository, maintain [WORK_LOG.md](WORK_LOG.md) after
-meaningful code changes with completed work, validation, lessons and next steps.
-It is an assistant-maintained development log, separate from a task's generated
-research journal.
+For development of this repository, document framework-repo changes in
+[docs/changes/](changes/README.md) — one file per change, from
+`docs/changes/_TEMPLATE.md`, indexed in `docs/changes/README.md` — with what
+changed, why, the approach and the evidence. `docs/WORK_LOG.md` is a
+read-only archive; do not append to it.
 
 `context` adds `research_frontier`, `open_insight_count`, `unreviewed_results`,
 and `unreviewed_result_count`. Each frontier item carries the observation,

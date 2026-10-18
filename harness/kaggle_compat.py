@@ -210,15 +210,18 @@ class KaggleClient:
     # ------------------------------------------------------------------
 
     def list_kernels(self, user: Optional[str] = None, **kwargs: Any) -> List[Any]:
-        """List kernels; returns normalised objects with snake_case attrs."""
-        if self.sdk == "kaggle":
-            api = self._legacy_api
-            if user is None:
-                kernels = api.kernels_list()
-            else:
-                kernels = api.kernels_list(user=user)
+        """List kernels; returns normalised objects with snake_case attrs.
+
+        Uses the self-contained legacy ``KaggleApi.kernels_list`` for BOTH SDKs
+        (the kagglesdk client exposes only namespaced services —
+        ``client.kernels`` — with no flat ``kernels_list``, so the legacy entry
+        point is the reliable cross-SDK path).
+        """
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        if user is None:
+            kernels = api.kernels_list(**kwargs)
         else:
-            kernels = self._client.kernels_list(user=user, **kwargs) if user else self._client.kernels_list(**kwargs)
+            kernels = api.kernels_list(user=user, **kwargs)
         return [_NormalisedObject(k, self.sdk) for k in kernels]
 
     def list_submissions(self, competition: Optional[str] = None, **kwargs: Any) -> List[Any]:
@@ -325,27 +328,23 @@ class KaggleClient:
             return self._legacy_api.kernels_logs(slug, **kwargs)
         return self._legacy_api_instance().kernels_logs(slug, **kwargs)
 
-    def competition_topics(self, competition: str, **kwargs: Any) -> Any:
-        """List discussion topics for a competition (canonical name)."""
-        if self.sdk == "kaggle":
-            # Legacy KaggleApi uses `competition_topic_fields` or similar;
-            # fall back to raw method lookup.
-            for attr in ("competition_topic_fields", "competition_topics_list",
-                         "competition_topics", "list_competition_topics"):
-                if hasattr(self._legacy_api, attr):
-                    method = getattr(self._legacy_api, attr)
-                    return method(competition, **kwargs) if competition else method(**kwargs)
+    def competition_topics(self, competition: str, **kwargs: Any) -> List[Any]:
+        """List discussion topics for a competition; returns normalised objects.
+
+        Routed through ``KaggleApi.competition_list_topics`` for BOTH SDKs:
+        the kagglesdk client is namespaced (no flat topic method), and the
+        legacy ``competition_topic_fields`` attribute is a class-level constant
+        (field-projection list), not a callable — attribute probing against it
+        used to raise ``TypeError: 'list' object is not callable``.
+        """
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        if not hasattr(api, "competition_list_topics"):
             raise AttributeError(
-                "KaggleApi has no competition topic method; upgrade the `kaggle` package."
+                "KaggleApi has no competition_list_topics method; upgrade the `kaggle` package (>= 2.x)."
             )
-        for attr in ("competition_topic_fields", "competition_topics_list",
-                     "competition_topics", "list_competition_topics"):
-            if hasattr(self._client, attr):
-                method = getattr(self._client, attr)
-                return method(competition, **kwargs) if competition else method(**kwargs)
-        raise AttributeError(
-            "kagglesdk client has no competition topic method; upgrade kagglesdk."
-        )
+        resp = api.competition_list_topics(competition, **kwargs)
+        topics = getattr(resp, "topics", None) or []
+        return [_NormalisedObject(t, self.sdk) for t in topics]
 
     def get(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
         """Generic accessor: look up a method by canonical name on the raw SDK.
