@@ -3,19 +3,20 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
-from types import ModuleType
 import unittest
+from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
-from harness.runner import UniversalRunner
-from tools.agent_bridge_cli import main, _parse_json_arg
-from tests.test_research_continuity import task_document
 import yaml
+
+from harness.runner import UniversalRunner
+from tests.test_research_continuity import task_document
+from tools.agent_bridge_cli import _parse_json_arg, main
 
 
 class FactoryContracts(unittest.TestCase):

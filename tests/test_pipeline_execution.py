@@ -20,7 +20,6 @@ import yaml
 from harness.runner import UniversalRunner
 from tests.test_correctness_contracts import task
 
-
 STAGE1_CODE = """
 import os
 import argparse

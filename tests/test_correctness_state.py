@@ -4,8 +4,10 @@ import multiprocessing
 import tempfile
 import unittest
 from pathlib import Path
+
 import yaml
-from harness.state_store import transaction, save_snapshot
+
+from harness.state_store import save_snapshot, transaction
 from harness.task_spec import load_active_task_spec
 from tests.test_correctness_contracts import task
 

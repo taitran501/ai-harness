@@ -23,7 +23,6 @@ import argparse
 import importlib
 from typing import Any, List, Set, Tuple
 
-
 # ---------------------------------------------------------------------------
 # Curated surface data. Each entry is (name, description). Every target is
 # checked by :func:`validate_reference` so the reference cannot drift.

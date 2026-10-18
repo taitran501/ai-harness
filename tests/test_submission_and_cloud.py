@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 from harness.cloud_inspector import CloudPreflightInspector
 from harness.submission_manager import SubmissionEntry, SubmissionManager
 from harness.templates.kaggle_template import KaggleKernelManager

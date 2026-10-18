@@ -36,7 +36,8 @@ from unittest.mock import patch
 import pandas as pd
 import yaml
 
-from tests.fixtures import make_workspace as _make_workspace, task_document
+from tests.fixtures import make_workspace as _make_workspace
+from tests.fixtures import task_document
 
 _PRB_TASK = task_document(task_id="prb-fixture-task", name="PRB Fixture")
 
@@ -140,8 +141,8 @@ class TestExternalPredictionJournalName(unittest.TestCase):
 class TestRepairBundleContract(_WorkspaceBase):
     def setUp(self):
         super().setUp()
-        from tests.test_repair import _seal_into, task_document
         from harness.task_spec import UniversalTaskSpec
+        from tests.test_repair import _seal_into, task_document
 
         self.spec = UniversalTaskSpec.from_dict(task_document())
         self.folder = _seal_into(self.root / "artifacts" / "exp_rep", self.spec, 0.8)
@@ -406,7 +407,7 @@ class TestFinalizeContract(_WorkspaceBase):
         return journal
 
     def _sub_mgr(self) -> "object":
-        from harness.submission_manager import SubmissionManager, SubmissionEntry
+        from harness.submission_manager import SubmissionEntry, SubmissionManager
 
         mgr = SubmissionManager(submissions_dir=str(self.root / "artifacts" / "submissions"))
         mgr.submissions["sub_safe_1"] = SubmissionEntry(

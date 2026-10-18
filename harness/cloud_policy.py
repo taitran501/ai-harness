@@ -13,9 +13,9 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from harness.data_bundle import _files_under, declared_data_roots
 from harness.io_utils import atomic_write_json
 from harness.project import HarnessProject
-from harness.data_bundle import _files_under, declared_data_roots
 
 _USAGE_CACHE_TTL_SECONDS = 120
 _USAGE_CACHE: Dict[tuple[str, str], tuple[float, Dict[str, Any]]] = {}

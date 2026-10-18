@@ -11,7 +11,6 @@ import yaml
 
 from harness.project import HarnessProject
 
-
 DATA_PATH_KEYS = (
     "train_path",
     "training_path",

@@ -3,8 +3,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
 import pandas as pd
 import yaml
+
 from harness.models import GenericBaselineModel, call_model
 from harness.runner import UniversalRunner
 from tests.test_correctness_contracts import task
@@ -93,7 +95,7 @@ class RuntimeContracts(unittest.TestCase):
             self.assertEqual(
                 len(pd.read_csv(runner.exp_dir / "oof_predictions.csv")), 12
             )
-            from harness.artifacts import validate_run, sha256
+            from harness.artifacts import sha256, validate_run
 
             validate_run(
                 runner.exp_dir, task_spec=runner.task_spec, plugin=runner.task_plugin

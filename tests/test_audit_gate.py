@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from harness.task_spec import UniversalTaskSpec, SubtaskSpec
+from harness.task_spec import SubtaskSpec, UniversalTaskSpec
 from tools.audit_gate import (
     audit_prediction_integrity,
     compute_continuous_significance,

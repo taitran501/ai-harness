@@ -13,8 +13,10 @@ Tests:
 from __future__ import annotations
 
 import unittest
+
 import numpy as np
 import pandas as pd
+
 from harness.ensemble_guard import EnsembleGuard
 
 

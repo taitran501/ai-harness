@@ -105,8 +105,8 @@ class TreeJournal:
             else (self.storage_path.parent if journal_path or storage_path else project.artifacts_dir)
         )
         if task_spec is None:
+            from harness.plugins import TaskPluginContext, load_task_plugin
             from harness.task_spec import load_active_task_spec
-            from harness.plugins import TaskPluginContext,load_task_plugin
             task_spec=load_active_task_spec(project.task_config_path)
             task_plugin=load_task_plugin(project.plugin_id,TaskPluginContext(project.root,project.task_config_path,task_spec,project.plugin_id or "default"))
         self.task_spec = task_spec
@@ -217,8 +217,9 @@ class TreeJournal:
 
     def sync_from_artifacts(self, artifacts_dir: Optional[str | Path] = None) -> int:
         """Scan artifacts/ directory and auto-discover completed experiment runs."""
-        from harness.artifacts import validate_run
         import yaml
+
+        from harness.artifacts import validate_run
         art_path = Path(artifacts_dir) if artifacts_dir is not None else self.artifacts_dir
         count = 0
         if not art_path.exists():
@@ -273,8 +274,9 @@ class TreeJournal:
 
     def save(self) -> None:
         """Save the journal to disk."""
-        from harness.state_store import save_registry
         import dataclasses
+
+        from harness.state_store import save_registry
         valid_fields = {f.name for f in dataclasses.fields(Node)}
         records=save_registry(self.storage_path,"nodes",[asdict(n) for n in self.nodes.values()],getattr(self,"_snapshot",[]))
         self.nodes={r["id"]:Node(**{k: v for k, v in r.items() if k in valid_fields}) for r in records}

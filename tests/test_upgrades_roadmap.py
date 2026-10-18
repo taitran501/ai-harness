@@ -13,17 +13,18 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import yaml
 
-from harness.evaluation import metric_name, evaluate
-from harness.task_spec import UniversalTaskSpec
-from harness.remote_runtime import CORE_RUNTIME_DISTRIBUTIONS
-from harness.templates.modal_template import generate_modal_script
+from harness.agent_bridge import AgentBridge, TypedActionName
+from harness.evaluation import evaluate, metric_name
 from harness.models import GenericBaselineModel
 from harness.project import attach_project
-from harness.agent_bridge import AgentBridge, TypedActionName
+from harness.remote_runtime import CORE_RUNTIME_DISTRIBUTIONS
+from harness.task_spec import UniversalTaskSpec
+from harness.templates.modal_template import generate_modal_script
 from tools.bootstrap_task import bootstrap_competition_task
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent

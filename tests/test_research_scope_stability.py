@@ -23,10 +23,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
-from tests.fixtures import task_document  # noqa: E402
-
 from harness.research_memory import ResearchMemory  # noqa: E402
 from harness.task_spec import UniversalTaskSpec  # noqa: E402
+from tests.fixtures import task_document  # noqa: E402
 
 
 def _make(doc, workspace_dir):

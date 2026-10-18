@@ -1046,8 +1046,9 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
         if payload.get("active"):
             self._claim_active_session(session.session_id)
             payload["active"] = True
-        from harness.io_utils import atomic_write_json
         import copy
+
+        from harness.io_utils import atomic_write_json
         from harness.state_store import save_snapshot
 
         payload = save_snapshot(
@@ -1854,7 +1855,8 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
                     stderr=subprocess.DEVNULL,
                 )
             else:
-                import os, signal
+                import os
+                import signal
 
                 os.killpg(proc.pid, signal.SIGKILL)
             try:
@@ -3002,8 +3004,8 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
         grounding_ok, grounding_errors, grounding_receipt = GroundingGate.verify_config(
             cfg_payload, config_path=cfg_path, raise_on_error=False
         )
-        from harness.state_store import workspace_lock
         from harness.io_utils import atomic_write_text
+        from harness.state_store import workspace_lock
 
         if params.get("insight_id"):
             cfg_payload.setdefault("research", {})["insight_id"] = params["insight_id"]
@@ -3763,7 +3765,7 @@ class AgentBridge(metaclass=_AgentBridgeMeta):
         )
 
         preds_05 = (y_prob >= 0.5).astype(int)
-        from sklearn.metrics import f1_score, cohen_kappa_score, accuracy_score
+        from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score
         m_lower = metric.lower()
         if m_lower in {"kappa", "cohen_kappa"}:
             base_05_score = float(cohen_kappa_score(y_true, preds_05))

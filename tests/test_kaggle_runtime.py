@@ -6,24 +6,29 @@ import copy
 import io
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
 import zipfile
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 import yaml
 
 from harness.artifacts import validate_run
 from harness.cloud_policy import UploadConsentStore, dataset_fingerprint
 from harness.data_bundle import stage_declared_data
-from harness.kaggle_runtime import ensure_dependencies, restore_dataset, export_run, find_dataset_mount
+from harness.kaggle_runtime import (
+    ensure_dependencies,
+    export_run,
+    find_dataset_mount,
+    restore_dataset,
+)
 from harness.project import HarnessProject, attach_project
-from harness.templates.kaggle_template import KaggleKernelManager
 from harness.task_spec import load_active_task_spec
+from harness.templates.kaggle_template import KaggleKernelManager
 from tests.evidence_fixtures import seal_fixture
 from tests.test_research_continuity import config, task_document
 

@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import shutil
 import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 import pandas as pd
 import yaml
 
-from harness.task_spec import UniversalTaskSpec, load_dataframe_file, extract_archives_in_directory
+from harness.task_spec import (
+    UniversalTaskSpec,
+    extract_archives_in_directory,
+    load_dataframe_file,
+)
 from tools.bootstrap_task import (
     bootstrap_competition_task,
     extract_context_from_markdown,

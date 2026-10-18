@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from harness.tree_journal import Node, TreeJournal
 from harness.task_spec import UniversalTaskSpec
+from harness.tree_journal import Node, TreeJournal
 from harness.validator import ExperimentValidator
 
 

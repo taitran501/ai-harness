@@ -10,17 +10,17 @@ Covers:
 
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
 from harness.agent_bridge import AgentBridge
 from harness.environment_detector import EnvironmentDetector
 from harness.submission_manager import SubmissionEntry, SubmissionManager
-from harness.task_spec import UniversalTaskSpec, SubtaskSpec
+from harness.task_spec import SubtaskSpec, UniversalTaskSpec
 from tools.audit_gate import audit_prediction_integrity, compute_diff_metrics
 
 

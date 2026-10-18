@@ -38,7 +38,6 @@ from harness.plugins import TaskPluginContext, load_task_plugin
 from harness.project import HarnessProject, attach_project
 from harness.task_spec import load_active_task_spec
 from harness.tree_journal import TreeJournal
-
 from tests.evidence_fixtures import seal_fixture
 from tests.fixtures import TRAIN_CSV_4ROW, task_document
 

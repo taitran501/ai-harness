@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from importlib import metadata
 import json
-from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
 import tempfile
 import zipfile
-
+from importlib import metadata
+from pathlib import Path, PurePosixPath
 
 BASE_REQUIREMENTS = [
     "numpy>=1.24.0", "pandas>=2.0.0", "scikit-learn>=1.3.0",

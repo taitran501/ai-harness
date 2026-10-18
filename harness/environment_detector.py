@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from harness.env_cache import cached_probe
 from harness.io_utils import get_project_root
+
 PROJECT_ROOT = get_project_root()
 
 KEY_TO_PROVIDER: Dict[str, str] = {

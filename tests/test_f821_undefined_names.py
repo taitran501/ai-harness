@@ -17,11 +17,10 @@ import unittest
 from pathlib import Path
 from typing import get_type_hints
 
-from harness.cloud_inspector import CloudPreflightInspector
 import harness.cloud_runner as cloud_runner
 import harness.status_report as status_report
+from harness.cloud_inspector import CloudPreflightInspector
 from harness.templates.modal_template import push_dataset_to_modal as _template_push
-
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 

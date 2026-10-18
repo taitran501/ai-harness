@@ -32,8 +32,8 @@ import pandas as pd
 import yaml
 
 from harness.artifacts import contract_identity, sha256
-from harness.competition_state import official_primary_value
 from harness.candidates import register_external_prediction
+from harness.competition_state import official_primary_value
 from harness.project import HarnessProject
 from harness.runner import UniversalRunner
 from harness.task_spec import UniversalTaskSpec, load_active_task_spec

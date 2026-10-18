@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from harness.io_utils import get_project_root
+
 PROJECT_ROOT = get_project_root()
 
 _CACHE: Dict[str, Tuple[float, Any]] = {}

@@ -33,6 +33,7 @@ if str(HARNESS_DIR) not in sys.path:
 
 from harness.io_utils import get_project_root
 from harness.project import HarnessProject
+
 PROJECT_ROOT = get_project_root()
 HARNESS_PROJECT = HarnessProject.discover(PROJECT_ROOT)
 ARTIFACTS_DIR = HARNESS_PROJECT.artifacts_dir
@@ -41,17 +42,20 @@ os.environ["HARNESS_TASK_CONFIG"] = str(HARNESS_PROJECT.task_config_path)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from harness.tree_journal import TreeJournal
-from harness.submission_manager import SubmissionManager
+from harness.agent_bridge import AgentBridge
 from harness.cloud_inspector import CloudPreflightInspector
-from harness.templates.kaggle_template import KaggleKernelManager
-from harness.templates.modal_template import generate_modal_script, push_dataset_to_modal
-from harness.environment_detector import EnvironmentDetector
 from harness.cloud_job_runner import CloudJobManager
+from harness.competition_state import CompetitionStateMachine
+from harness.environment_detector import EnvironmentDetector
 from harness.llm_engine import LLMEngine
 from harness.skill_injector import inject_skill_file
-from harness.competition_state import CompetitionStateMachine
-from harness.agent_bridge import AgentBridge
+from harness.submission_manager import SubmissionManager
+from harness.templates.kaggle_template import KaggleKernelManager
+from harness.templates.modal_template import (
+    generate_modal_script,
+    push_dataset_to_modal,
+)
+from harness.tree_journal import TreeJournal
 
 
 def get_next_experiment_id(branch: str = "feat", descriptor: str = "run") -> Dict[str, Any]:
@@ -802,9 +806,9 @@ def generate_prompt_by_template(journal: TreeJournal, template_id: str = "codex"
     except Exception as comp_err:
         print(f"⚠️ Warning: Failed to render competition state context: {comp_err}")
 
+    from harness.plugins import TaskPluginContext, load_task_plugin
     from harness.research_memory import ResearchMemory
     from harness.task_spec import load_active_task_spec
-    from harness.plugins import TaskPluginContext, load_task_plugin
 
     project = HarnessProject.discover(PROJECT_ROOT)
     spec = load_active_task_spec(project.task_config_path)
@@ -1976,7 +1980,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json({"error": "config_path is required."}, status=400)
             return
         gpu = data.get("gpu", "A10" if backend == "modal" else "T4")
-        from harness.cloud_policy import dataset_fingerprint, private_upload_resource_names
+        from harness.cloud_policy import (
+            dataset_fingerprint,
+            private_upload_resource_names,
+        )
         fingerprint = dataset_fingerprint(HARNESS_PROJECT)
         username = KaggleKernelManager.get_authenticated_username()
         resources = private_upload_resource_names(
@@ -2066,8 +2073,11 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         if platform not in {"kaggle", "modal"}:
             self.send_json({"error": f"Unsupported provider: {platform}"}, status=400)
             return
-        from harness.cloud_policy import UploadConsentStore, dataset_fingerprint
-        from harness.cloud_policy import private_upload_resource_names
+        from harness.cloud_policy import (
+            UploadConsentStore,
+            dataset_fingerprint,
+            private_upload_resource_names,
+        )
         fingerprint = dataset_fingerprint(HARNESS_PROJECT)
         if not UploadConsentStore(HARNESS_PROJECT).is_granted(platform, fingerprint["fingerprint"]):
             self.send_json({

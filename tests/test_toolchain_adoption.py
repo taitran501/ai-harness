@@ -19,8 +19,8 @@ from pathlib import Path
 from unittest import mock
 
 from harness.toolchain import (
-    PIN_DISABLE_ENV,
     PIN_DEPTH_ENV,
+    PIN_DISABLE_ENV,
     _needs_pin,
     ensure_pinned_toolchain,
     find_workspace_clone,

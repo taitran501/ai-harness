@@ -1,7 +1,8 @@
 """Explicit synthetic evidence for isolated tests; never upgrades workspace history."""
 
 import json
-from harness.artifacts import contract_identity, sha256, digest
+
+from harness.artifacts import contract_identity, digest, sha256
 
 
 def seal_fixture(folder, spec, score=0.75, **identity):

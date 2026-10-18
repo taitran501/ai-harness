@@ -11,10 +11,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-from harness.models import create_model, RandomForestModel, GenericBaselineModel
+from harness.models import GenericBaselineModel, RandomForestModel, create_model
 from harness.task_spec import UniversalTaskSpec
 from harness.tree_journal import TreeJournal
 

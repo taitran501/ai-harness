@@ -1,6 +1,7 @@
 """Compatibility alias module forwarding to harness.agent_bridge."""
 
 import sys
+
 from harness import agent_bridge
 
 # Forward module attributes

@@ -26,7 +26,7 @@ from harness.host_hooks import (
     write_host_hooks,
 )
 from harness.project import attach_project
-from harness.status_report import _adoption_section, render_markdown, collect_status
+from harness.status_report import _adoption_section, collect_status, render_markdown
 from tests.test_research_continuity import task_document
 
 

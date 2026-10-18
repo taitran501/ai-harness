@@ -141,7 +141,9 @@ class TestAgentUsabilityP7(unittest.TestCase):
     def test_runner_time_series_strategy(self):
         """Verify Runner._resolve_validation_splits executes cleanly with time_series strategy."""
         import argparse
+
         import yaml
+
         from harness.runner import Runner
 
         with tempfile.TemporaryDirectory() as tmp_dir:

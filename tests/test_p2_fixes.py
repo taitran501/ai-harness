@@ -75,7 +75,7 @@ class TestPerSubtaskDirection(unittest.TestCase):
 
         # Build a minimal journal with two completed nodes that differ on
         # the "err" subtask. Lower "err" should be preferred (minimize).
-        from harness.tree_journal import TreeJournal, Node
+        from harness.tree_journal import Node, TreeJournal
 
         journal = TreeJournal(auto_sync=False)
 

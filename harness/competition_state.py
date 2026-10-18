@@ -293,6 +293,7 @@ class CompetitionStateMachine:
 
     def save(self) -> None:
         import copy
+
         from harness.state_store import save_snapshot
 
         # Stamp freshness on every persist: consumers (dashboard, HUD) read

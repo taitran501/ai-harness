@@ -1,5 +1,6 @@
 import unittest
-from tools.agent_bridge_cli import _parse_dynamic_kv_args, _coerce_value
+
+from tools.agent_bridge_cli import _coerce_value, _parse_dynamic_kv_args
 
 
 class TestCliErgonomics(unittest.TestCase):

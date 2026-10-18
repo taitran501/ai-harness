@@ -27,14 +27,21 @@ from typing import Any, Dict, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness.cloud_inspector import CloudPreflightInspector
-from harness.project import HarnessProject
-from harness.templates.kaggle_template import KaggleKernelManager
-from harness.templates.modal_template import generate_modal_script, push_dataset_to_modal
-from harness.cloud_policy import UploadConsentStore, dataset_fingerprint, private_upload_resource_names
-from harness.remote_runtime import resolve_remote_runtime
-from harness.tree_journal import TreeJournal
-from harness.job_state import update_worker_state
+from harness.cloud_policy import (
+    UploadConsentStore,
+    dataset_fingerprint,
+    private_upload_resource_names,
+)
 from harness.data_bundle import declared_data_roots
+from harness.job_state import update_worker_state
+from harness.project import HarnessProject
+from harness.remote_runtime import resolve_remote_runtime
+from harness.templates.kaggle_template import KaggleKernelManager
+from harness.templates.modal_template import (
+    generate_modal_script,
+    push_dataset_to_modal,
+)
+from harness.tree_journal import TreeJournal
 
 
 def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[str | Path] = None) -> Dict[str, Any]:
@@ -114,8 +121,8 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
 
 def _sync_completed_run(project: HarnessProject, exp_id: str) -> Dict[str, Any]:
     from harness.artifacts import validate_run
+    from harness.plugins import TaskPluginContext, load_task_plugin
     from harness.task_spec import load_active_task_spec
-    from harness.plugins import TaskPluginContext,load_task_plugin
     spec=load_active_task_spec(project.task_config_path)
     context=TaskPluginContext(project.root,project.task_config_path,spec,project.plugin_id or "default")
     plugin=load_task_plugin(project.plugin_id,context)

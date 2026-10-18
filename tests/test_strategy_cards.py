@@ -1,10 +1,16 @@
-import unittest
 import json
-import urllib.request
+import socketserver
 import threading
 import time
-import socketserver
-from tools.dashboard_server import DEFAULT_STRATEGY_CARDS, DashboardHandler, get_next_experiment_id
+import unittest
+import urllib.request
+
+from tools.dashboard_server import (
+    DEFAULT_STRATEGY_CARDS,
+    DashboardHandler,
+    get_next_experiment_id,
+)
+
 
 class TestStrategyCardsAndSpawner(unittest.TestCase):
     @classmethod

@@ -152,9 +152,9 @@ class SubmissionManager:
         notes: str = "",
         min_diff_pct: float = 2.0,
     ) -> SubmissionEntry:
+        from harness.plugins import TaskPluginContext, load_task_plugin
         from harness.project import HarnessProject
         from harness.task_spec import load_active_task_spec
-        from harness.plugins import TaskPluginContext, load_task_plugin
 
         project = HarnessProject.discover(self.project_root, self.task_config_path)
         spec = load_active_task_spec(project.task_config_path)

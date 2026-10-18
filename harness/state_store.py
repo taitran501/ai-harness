@@ -1,11 +1,12 @@
 """Short reentrant cross-process JSON transactions; never lock training work."""
 
-from contextlib import contextmanager
 import copy
 import json
 import os
-from pathlib import Path
 import threading
+from contextlib import contextmanager
+from pathlib import Path
+
 from harness.io_utils import atomic_write_json
 
 _locks = {}

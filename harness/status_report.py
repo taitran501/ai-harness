@@ -20,7 +20,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 HARNESS_PACKAGE_CANDIDATES = ("harness", "ai_harness", "ml_harness")
 
 
@@ -126,7 +125,11 @@ def _section(fn, *args) -> Dict[str, Any]:
 
 
 def _project_section(project_root: Optional[str]) -> Dict[str, Any]:
-    from harness.project import HarnessProject, MANIFEST_RELATIVE_PATH, LEGACY_MANIFEST_RELATIVE_PATH
+    from harness.project import (
+        LEGACY_MANIFEST_RELATIVE_PATH,
+        MANIFEST_RELATIVE_PATH,
+        HarnessProject,
+    )
 
     root = Path(project_root or ".").expanduser().resolve()
     attached = (root / MANIFEST_RELATIVE_PATH).is_file() or (root / LEGACY_MANIFEST_RELATIVE_PATH).is_file()
@@ -198,7 +201,11 @@ def _plugins_section(project_root: Optional[str]) -> Dict[str, Any]:
 
 def _session_section(project_root: Optional[str]) -> Dict[str, Any]:
     """Latest agent-bridge session, if any. Cheap: only reads session JSON files."""
-    from harness.project import HarnessProject, MANIFEST_RELATIVE_PATH, LEGACY_MANIFEST_RELATIVE_PATH
+    from harness.project import (
+        LEGACY_MANIFEST_RELATIVE_PATH,
+        MANIFEST_RELATIVE_PATH,
+        HarnessProject,
+    )
 
     root = Path(project_root or ".").expanduser().resolve()
     if not ((root / MANIFEST_RELATIVE_PATH).is_file() or (root / LEGACY_MANIFEST_RELATIVE_PATH).is_file()):
@@ -237,7 +244,11 @@ def _artifact_health_section(project_root: Optional[str]) -> Dict[str, Any]:
 
     Distinguishes the three states so an agent knows when `ai-harness repair`
     will help (drift) versus when it won't (unverifiable)."""
-    from harness.project import HarnessProject, MANIFEST_RELATIVE_PATH, LEGACY_MANIFEST_RELATIVE_PATH
+    from harness.project import (
+        LEGACY_MANIFEST_RELATIVE_PATH,
+        MANIFEST_RELATIVE_PATH,
+        HarnessProject,
+    )
     from harness.repair import scan_artifacts
 
     root = Path(project_root or ".").expanduser().resolve()

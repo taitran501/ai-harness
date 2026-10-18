@@ -1,19 +1,6 @@
 """Explicit, leakage-safe sklearn baseline implementations."""
 
 from __future__ import annotations
-import inspect
-import numpy as np
-import pandas as pd
-from typing import List
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import Ridge, LogisticRegression, Lasso
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-import warnings
 
 # Heavy GBDT libraries are imported LAZILY, on first actual model build.
 # `import harness.models` is on the `ai-harness status` hot path (the
@@ -23,6 +10,20 @@ import warnings
 # answer without executing the package (module execution is where the
 # seconds go - it loads the compiled runtime).
 import importlib.util
+import inspect
+import warnings
+from typing import List
+
+import numpy as np
+import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Lasso, LogisticRegression, Ridge
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
 def _library_present(name: str) -> bool:

@@ -10,11 +10,11 @@ import urllib.request
 from pathlib import Path
 
 from harness.skill_injector import generate_skill_content, inject_skill_file
-from tools.dashboard_server import DashboardHandler
 from tests.workspace_fixtures import (
     cleanup_dashboard_workspace,
     prepare_dashboard_workspace,
 )
+from tools.dashboard_server import DashboardHandler
 
 
 class SkillInjectorTests(unittest.TestCase):

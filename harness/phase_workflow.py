@@ -14,7 +14,6 @@ import yaml
 from harness.io_utils import atomic_write_json
 from harness.project import HarnessProject
 
-
 PHASES = (
     ("setup", "Competition setup"),
     ("understand", "Data and problem understanding"),
@@ -387,9 +386,9 @@ class PhaseWorkflow:
                 lines.append("- Competition state exists but could not be parsed; inspect it before acting.")
         else:
             lines.append("- No competition state has been recorded yet.")
+        from harness.plugins import TaskPluginContext, load_task_plugin
         from harness.research_memory import ResearchMemory
         from harness.task_spec import load_active_task_spec
-        from harness.plugins import TaskPluginContext, load_task_plugin
 
         spec = load_active_task_spec(self.project.task_config_path)
         plugin = load_task_plugin(self.project.plugin_id, TaskPluginContext(

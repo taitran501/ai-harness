@@ -12,7 +12,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 
 def push_dataset_to_modal(
@@ -21,12 +21,16 @@ def push_dataset_to_modal(
     project_root: Optional[Path | str] = None,
 ) -> Dict[str, Any]:
     """Create an isolated task Modal Volume and upload only declared task data and splits."""
-    from harness.project import HarnessProject
     from harness.data_bundle import stage_declared_data
+    from harness.project import HarnessProject
 
     root = Path(project_root or Path.cwd()).expanduser().resolve()
     project = HarnessProject.discover(root)
-    from harness.cloud_policy import UploadConsentStore, dataset_fingerprint, private_upload_resource_names
+    from harness.cloud_policy import (
+        UploadConsentStore,
+        dataset_fingerprint,
+        private_upload_resource_names,
+    )
     fingerprint_data = dataset_fingerprint(project)
     if not UploadConsentStore(project).is_granted("modal", fingerprint_data["fingerprint"]):
         return {
@@ -106,7 +110,9 @@ def generate_modal_script(
 ) -> str:
     """Generate an isolated Modal job that returns identity-checked task artifacts."""
     import hashlib
+
     import yaml
+
     from harness.data_bundle import declared_data_roots
     from harness.project import HarnessProject
 

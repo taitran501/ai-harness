@@ -2,23 +2,31 @@ import hashlib
 import json
 import tempfile
 import unittest
+import zipfile
 from email.message import Message
 from pathlib import Path
 from unittest.mock import Mock, patch
-import zipfile
 
 import yaml
 
 from harness.baseline import validate_baseline_artifact
-from harness.cloud_policy import UploadConsentStore, dataset_fingerprint, private_upload_resource_names, provider_preflight
 from harness.cloud_job_runner import CloudJob, CloudJobManager
+from harness.cloud_policy import (
+    UploadConsentStore,
+    dataset_fingerprint,
+    private_upload_resource_names,
+    provider_preflight,
+)
 from harness.data_bundle import DataBundleError, stage_declared_data
 from harness.eda import run_eda
 from harness.job_state import update_worker_state
 from harness.phase_workflow import PHASE_IDS, PhaseWorkflow, PromptPackError
 from harness.project import HarnessProject, attach_project
 from harness.templates.kaggle_template import KaggleKernelManager
-from harness.templates.modal_template import generate_modal_script, push_dataset_to_modal
+from harness.templates.modal_template import (
+    generate_modal_script,
+    push_dataset_to_modal,
+)
 
 
 class WorkspaceFixture(unittest.TestCase):
@@ -106,8 +114,8 @@ class WorkspaceFixture(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        from tests.evidence_fixtures import seal_fixture
         from harness.task_spec import load_active_task_spec
+        from tests.evidence_fixtures import seal_fixture
         seal_fixture(baseline_dir,load_active_task_spec(self.project.task_config_path))
         validate_baseline_artifact(self.project.artifacts_dir, "exp000", "accuracy")
 
@@ -360,8 +368,8 @@ class WorkspaceFixture(unittest.TestCase):
             "files": {"metrics.json": hashlib.sha256(metrics_bytes).hexdigest()},
         }
         (artifact_dir / "artifact_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        from tests.evidence_fixtures import seal_fixture
         from harness.task_spec import load_active_task_spec
+        from tests.evidence_fixtures import seal_fixture
         metrics=seal_fixture(artifact_dir,load_active_task_spec(self.project.task_config_path),.84,job_id=job_id,task_id=self.project.manifest["task_id"],config_sha256=config_sha,run_id=job_id)
         log_file = self.project.artifacts_dir / "jobs" / f"{job_id}.log"
         log_file.write_text("", encoding="utf-8")
