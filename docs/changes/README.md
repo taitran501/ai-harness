@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-18 | M4 refactor (E): split `AgentBridge` — typed vocabulary to `harness/bridge_common.py`, 30 `_handle_*` methods to `harness/bridge_actions.py` mixin (4098 → 2052 lines) | [#99](https://github.com/taitran501/ai-harness/pull/99) | [agent-bridge-handler-extraction](agent-bridge-handler-extraction.md) |
 | 2026-10-18 | M4 refactor (D): extract dashboard data layer to `tools/dashboard_config.py` | [#98](https://github.com/taitran501/ai-harness/pull/98) | [dashboard-config-extraction](dashboard-config-extraction.md) |
 | 2026-10-18 | Test isolation (journal leak guard in conftest) + research sync cache integrity (per-file fingerprint + contract identity key) | [#95](https://github.com/taitran501/ai-harness/pull/95) | [test-isolation-and-sync-cache](test-isolation-and-sync-cache.md) |
 | 2026-10-18 | Dispatch governance: append-only `dispatch_log.jsonl` + advisory duplicate warning for harness-native Kaggle dispatches | [#97](https://github.com/taitran501/ai-harness/pull/97) | [dispatch-governance](dispatch-governance.md) |
