@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from typing import Any, Dict, List, Optional
 
 from harness.endgame_submission import KaggleLeaderboardTracker
@@ -97,6 +98,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 kernel_version=args.kernel_version,
             )
             _print_payload({"ok": True, "action": "dispatch", **payload})
+            if payload.get("duplicate_warning"):
+                print(f"WARNING: {payload['duplicate_warning']}", file=sys.stderr)
             return 0
 
         if args.action == "status":
