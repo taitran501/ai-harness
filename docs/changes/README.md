@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-18 | §7 field truthfulness + kagglesdk kernel methods fix (live-run frictions F1/F2) | [#91](https://github.com/taitran501/ai-harness/pull/91) | [api-surface-kagglesdk-fix](api-surface-kagglesdk-fix.md) |
 | 2026-10-18 | Journal sync dedup: halve per-action run validation + fix orphan-resurrection bug | [#90](https://github.com/taitran501/ai-harness/pull/90) | [journal-sync-dedupe](journal-sync-dedupe.md) |
 | 2026-10-18 | Dead-code trim: remove unreferenced vendored AIDE journal package | [#90](https://github.com/taitran501/ai-harness/pull/90) | [dead-code-trim](dead-code-trim.md) |
 | 2026-10-18 | Live adoption verification + Submission field reference (§7) | [#89](https://github.com/taitran501/ai-harness/pull/89) | [live-adoption-verified](live-adoption-verified.md) |
