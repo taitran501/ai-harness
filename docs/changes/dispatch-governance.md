@@ -1,10 +1,10 @@
 # Dispatch governance: audit trail + duplicate warning for Kaggle dispatches
 
 - **Date**: 2026-10-18
-- **PR**: — (branch `fix/dispatch-governance-audit`)
+- **PR**: [#97](https://github.com/taitran501/ai-harness/pull/97)
 - **Branch**: `fix/dispatch-governance-audit`
 - **Status**: open
-- **Commits**: —
+- **Commits**: `8332bb3`
 
 ## Why
 
