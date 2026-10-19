@@ -2,9 +2,9 @@
 
 - **Date**: 2026-10-19
 - **PR**: [#107](https://github.com/taitran501/ai-harness/pull/107)
-- **Branch**: `fix/generic-metrics-table-align`
-- **Status**: open
-- **Commits**: `de03d8c`
+- **Branch**: `main` (squash commit `cf63ff5`)
+- **Status**: merged
+- **Commits**: `cf63ff5` (squash)
 
 ## Why
 
