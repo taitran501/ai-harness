@@ -10,12 +10,12 @@ Kết quả audit (bằng chứng: step index trong conversation DB):
 
 | # | Failure | Hậu quả cho agent | Status |
 |---|---------|-------------------|--------|
-| A | `ensure_dependencies` pin exact local (`numpy==1.26.4, pandas==3.0.5, ...`) vs Kaggle image offline | Kernel chết **trước khi train**, lặp exp002/exp005/exp006 (idx 490, 1649, 2139) | ✅ Fix pin `>=` trong PR #109 (chưa verify kernel thật) |
+| A | `ensure_dependencies` pin exact local (`numpy==1.26.4, pandas==3.0.5, ...`) vs Kaggle image offline | Kernel chết **trước khi train**, lặp exp002/exp005/exp006 (idx 490, 1649, 2139) | ✅ Pin `>=` trong PR #109; fail startup do pin framework-derived được fix triệt để bởi G3 (PR #112: mode `requirement_check` + detected versions) |
 | B | `AttributeError: module 'src' has no attribute 'evaluator:evaluate_rhae'` ở `validate_run` remote (idx 653) | Run train xong vẫn chết ở finalization | ✅ Fix hook-parsing trong PR #109 |
-| C | `Kaggle output import failed: No module named 'src'` (idx 726, 1715) | **2 kernel COMPLETE bị mất output** — agent waste cả chu kỳ compute | ⚠️ **Còn risk** (G1) |
-| D | `400 Bad Request` khi `submission dispatch` — chỉ hiện error line, **không có API error body** (idx 2500) | Agent mất thời gian đoán là daily-limit; không thể phân biệt limit/slug/file sai (idx 2500-2557) | ⚠️ **Còn** (G2) |
+| C | `Kaggle output import failed: No module named 'src'` (idx 726, 1715) | **2 kernel COMPLETE bị mất output** — agent waste cả chu kỳ compute | ✅ **Đã fix** (G1 — PR #111: hermetic `project_root` import + diagnostic `RuntimeError`) |
+| D | `400 Bad Request` khi `submission dispatch` — chỉ hiện error line, **không có API error body** (idx 2500) | Agent mất thời gian đoán là daily-limit; không thể phân biệt limit/slug/file sai (idx 2500-2557) | ✅ **Đã fix** (G2 — PR #110: surfacing API error body + URL) |
 | E | CLI `kaggle` unauthenticated (không `kaggle.json`) — "Authentication required" giữa chừng flow | Mọi lệnh CLI trần fail; agent phải tự đi tìm kaggle.json | ⚠️ **Còn** (G4) |
-| F | "Job ID contains unsupported characters" không nói pattern hợp lệ (×3 attempts) | Agent thử sai `test_job`, `job_test`, ... | ⚠️ **Còn** (G5) |
+| F | "Job ID contains unsupported characters" không nói pattern hợp lệ (×3 attempts) | Agent thử sai `test_job`, `job_test`, ... | ✅ **Đã fix** (G5 — PR #110: error kèm `JOB_ID_PATTERN` + ví dụ) |
 | G | Agent **re-dispatch y nguyên config fail** nhiều lần (exp002 ×3, exp005 tới kernel v4) | Waste chu kỳ push+poll (mỗi lần ~phút + quota kernel) | ⚠️ Optional (G6) |
 
 **Correction so với audit lần trước:** bundle code **đã** chứa `src/` + `configs/`
@@ -142,7 +142,7 @@ except Exception as exc:  # noqa: BLE001 - surface Kaggle API errors with body
 
 **docs/changes:** `submission-dispatch-error-body.md`.
 
-### G3 — `ensure_dependencies`: detected versions + mode `requirement_check` (P1)
+### G3 — `ensure_dependencies`: detected versions + mode `requirement_check` (P1 — ✅ đã fix, PR #112)
 
 **Vấn đề:** kernel fail startup chỉ nói requirement thiếu, **không nói image
 đang có version gì** → agent không biết gap là 1 minor hay major (aud: exp006

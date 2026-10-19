@@ -1,10 +1,10 @@
 # Hermetic scorer import on artifact-import paths + actionable diagnostic
 
 - **Date**: 2026-10-19
-- **PR**: #TBD (feat/scorer-import-hermetic)
-- **Branch**: `feat/scorer-import-hermetic`
-- **Status**: open
-- **Commits**: — (pending)
+- **PR**: [#111](https://github.com/taitran501/ai-harness/pull/111)
+- **Branch**: `feat/scorer-import-hermetic` (squash-merged, deleted)
+- **Status**: merged
+- **Commits**: `10e663e` (squash, on `main`)
 
 ## Why
 
@@ -89,6 +89,7 @@ the same hermetic root the child runner used.
 - `tests/test_submission_and_cloud.py` `migrate_downloaded_artifacts`: pass
   (signature change is backward-compatible — `project_root` is keyword-only,
   default `None`).
+- **Full suite `python tools/run_tests.py`: 966 tests, OK (skipped=1), exit 0.**
 - `python tools/run_tests.py --smoke`: 47 tests OK.
 - `ruff check harness/ tools/ tests/`: clean (after moving `os`/`sys`/`Path`
   to module-level to satisfy the F821 undefined-name gate on the annotation).

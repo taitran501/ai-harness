@@ -309,6 +309,7 @@ def _kaggle_dry_run_plan(
         "config_sha256": context.get("config_sha256"),
         "runtime": runtime,
         "enable_internet": bool((context.get("task", {}).get("runtime") or {}).get("enable_internet", False)),
+        "requirement_check": (context.get("task", {}).get("runtime") or {}).get("requirement_check", "strict"),
         "bundle_mode": (context.get("task", {}).get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
         "kernel_metadata": metadata,
         "bundle_files": bundle_files[:50],
@@ -389,6 +390,7 @@ def run_via_kaggle(
         task_id=context["task_id"], job_id=job_id, runtime_manifest=runtime,
         enable_internet=bool((context["task"].get("runtime") or {}).get("enable_internet", False)),
         bundle_mode=(context["task"].get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
+        requirement_check=(context["task"].get("runtime") or {}).get("requirement_check", "strict"),
     )
 
     print("Preparing private Kaggle code bundle input...")

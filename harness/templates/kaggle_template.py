@@ -425,12 +425,17 @@ class KaggleKernelManager:
         runtime_manifest: Optional[Dict[str, Any]] = None,
         enable_internet: bool = False,
         bundle_mode: str = "dataset",
+        requirement_check: str = "strict",
     ) -> Path:
         """Stage a script and code dataset; embedded mode retains the legacy single-file upload."""
         from harness.project import HarnessProject
 
         if bundle_mode not in {"dataset", "embedded"}:
             raise ValueError("Kaggle bundle_mode must be 'dataset' or 'embedded'.")
+        if requirement_check not in ("strict", "warn", "off"):
+            raise ValueError(
+                f"Kaggle requirement_check must be 'strict', 'warn' or 'off'; got {requirement_check!r}."
+            )
         root = Path(project_root or Path.cwd()).expanduser().resolve()
         project = HarnessProject.discover(root, task_config_path)
         config_file = Path(config_path).expanduser()
@@ -500,6 +505,7 @@ class KaggleKernelManager:
                     project.task_config_path.read_bytes(),
                     tree_digest.hexdigest(),
                     bundle_mode,
+                    requirement_check,
                 )
                 # Without a provider dataset the task data ships inside the
                 # code bundle, so its bytes are part of the bundle identity.
@@ -527,6 +533,9 @@ class KaggleKernelManager:
             "requirements": [],
             "bundle_files": [],
         }
+        # Pin the dependency-check gate into the runtime manifest so the kernel
+        # reads the same mode the dispatch side validated.
+        runtime["requirement_check"] = requirement_check
         with tempfile.TemporaryDirectory(prefix="aih-kaggle-code-") as temp_stage:
             if cached_bytes is None:
                 bundle_base = Path(temp_stage) / "code_bundle"
@@ -702,7 +711,7 @@ with tempfile.TemporaryDirectory(prefix="aih-kaggle-work-") as temporary:
         helpers = runpy.run_path(str(workspace / "harness" / "kaggle_runtime.py"))
         runtime_path = Path("ai-harness-runtime.json")
         runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-        helpers["ensure_dependencies"](runtime, enable_internet={enable_internet!r})
+        helpers["ensure_dependencies"](runtime, enable_internet={enable_internet!r}, requirement_check={requirement_check!r})
         if {bool(resolved_dataset)!r}:
             input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
             print(f"[Kaggle Kernel] Using input_root: {{input_root}}", flush=True)

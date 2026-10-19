@@ -147,6 +147,29 @@ Notes:
 - The AgentBridge resolves the backend in order: explicit `--backend` param > `execution.backend` > `local`.
 - With no `execution` block, behavior is unchanged (per-call param, default `local`).
 
+### 2.7 Section 7: Kaggle Runtime Options (Optional)
+
+Kaggle-only knobs for the remote kernel. All optional; defaults preserve the
+strict, offline-safe behavior.
+
+```yaml
+task:
+  runtime:
+    enable_internet: false      # allow pip in the kernel
+    kaggle_bundle_mode: dataset # dataset | embedded
+    requirement_check: strict   # strict | warn | off
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `runtime.enable_internet` | `bool` | No | `false` | When `false`, `ensure_dependencies` fails fast instead of pip-installing unsatisfied pins. |
+| `runtime.kaggle_bundle_mode` | `string` | No | `dataset` | `dataset` mounts the code bundle as a private Kaggle dataset; `embedded` base64-encodes it into the script. |
+| `runtime.requirement_check` | `string` | No | `strict` | Dependency-version gate in the kernel: `strict` (default) raises with the detected image versions when a pin is unsatisfied; `warn` logs a WARNING with detected versions and continues; `off` skips the version gate and any install (detected versions are still logged). |
+
+Notes:
+- The Kaggle script kernels run on the platform image (Python 3.13, pandas 2.x as of 2026-10). Framework-derived pins from a local dev environment (e.g. `pandas==3.0.5`) are usually unsatisfiable offline — either relax the pin, ship the versions in the bundle, or use `requirement_check: warn` deliberately.
+- The mode is validated at dispatch time and pinned into the code bundle (`ai-harness-runtime.json`) so the kernel applies the same gate the dispatch side saw.
+
 ---
 
 ## 3. Reference Implementation Configurations

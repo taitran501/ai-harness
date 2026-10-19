@@ -67,6 +67,35 @@ matching adapter or a harness-created data bundle.
 Sources: [dataset commands](https://github.com/Kaggle/kaggle-cli/blob/main/docs/datasets.md),
 [metadata and license IDs](https://github.com/Kaggle/kaggle-cli/blob/main/docs/datasets_metadata.md).
 
+### Dependency version policy in the kernel
+
+With `enable_internet: false`, the kernel runs `ensure_dependencies` before
+training and checks the bundle's pinned requirements against the platform
+image (Python 3.13, pandas 2.x as of 2026-10). Unsatisfied pins raise with the
+detected image versions, e.g.:
+
+```
+RuntimeError: Kaggle internet is disabled and the image does not satisfy:
+pandas>=3.0.0 (detected: pandas=2.2.2), xgboost==3.2.0 (detected: xgboost=not installed).
+Supply these versions in the image, enable task.runtime.enable_internet,
+or set task.runtime.requirement_check to warn/off.
+```
+
+`task.runtime.requirement_check` selects the gate behavior:
+
+| Mode | Offline, unsatisfied pin | Online |
+|---|---|---|
+| `strict` (default) | Raise with detected versions (fail fast, no wasted kernel) | pip-install missing, then re-verify and raise if still unsatisfied |
+| `warn` | Log a WARNING with detected versions, continue with image versions | Install missing, log a WARNING instead of raising if still unsatisfied |
+| `off` | Skip the version gate and any install (detected versions are logged) | Same — no gate, no install |
+
+Use `warn` when the task code is compatible with the image versions and the
+pins exist only for reproducibility of the local environment; use `off` for
+custom images that vendor their own versions. The mode is validated at
+dispatch and pinned into the bundle's `ai-harness-runtime.json`. The same
+function also runs in local remote-emulation paths; the default `strict`
+behavior is unchanged.
+
 ## Remote execution
 
 1. Packaging emits `kernel-metadata.json`, `run_kaggle.py` (`kernel_type: script`),
