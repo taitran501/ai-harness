@@ -192,5 +192,169 @@ class TestTaskValidate(unittest.TestCase):
         self.assertIn("target_column", warnings_text)
 
 
+    def test_canonical_direction_conflict_warns(self) -> None:
+        """A metric declared against its canonical direction is warned.
+
+        Observed live (ARC-AGI-3 workspace): a subtask declared
+        ``primary_metric: rmse, direction: maximize`` — RMSE is canonically
+        minimized, so the spec is almost certainly wrong.
+        """
+        ws = self._make_ws("tv_dirconflict_")
+        raw = {
+            "task": {
+                "id": "unit_task",
+                "name": "Unit Task",
+                "task_type": "regression",
+                "primary_metric": "rmse",
+                "direction": "maximize",
+                "subtasks": [
+                    {"id": "main", "task_type": "regression", "column": "y",
+                     "primary_metric": "rmse", "direction": "maximize"}
+                ],
+                "execution": {"backend": "local"},
+            }
+        }
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        # Warnings only — the spec is still structurally valid.
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["errors"], [])
+        conflicts = [w for w in result["warnings"] if "canonically minimized" in w]
+        self.assertGreaterEqual(len(conflicts), 2, result["warnings"])
+
+    def test_aggregate_mismatch_without_custom_scorer_errors(self) -> None:
+        """Subtask metric != spec metric with no custom evaluator is an error.
+
+        This is the exact class that failed mid-run on the ARC-AGI-3
+        workspace: spec ``rhae``/maximize vs subtask ``rmse``/maximize —
+        the generic aggregate rejects it at scoring time, after compute.
+        """
+        ws = self._make_ws("tv_agg_mismatch_")
+        raw = {
+            "task": {
+                "id": "unit_task",
+                "name": "Unit Task",
+                "task_type": "interactive_agent",
+                "primary_metric": "rhae",
+                "direction": "maximize",
+                "subtasks": [
+                    {"id": "rhae", "task_type": "regression", "column": "rhae",
+                     "primary_metric": "rmse", "direction": "maximize"}
+                ],
+                "execution": {"backend": "local"},
+            }
+        }
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        self.assertFalse(result["ok"])
+        self.assertTrue(
+            any("does not match the spec" in e and "paths.metrics_evaluator" in e
+                for e in result["errors"]),
+            result["errors"],
+        )
+
+    def test_aggregate_mismatch_with_custom_scorer_warns(self) -> None:
+        """Same mismatch is a warning when paths.metrics_evaluator is declared:
+        the custom hook is the authoritative scorer."""
+        ws = self._make_ws("tv_agg_custom_")
+        raw = {
+            "task": {
+                "id": "unit_task",
+                "name": "Unit Task",
+                "task_type": "interactive_agent",
+                "primary_metric": "rhae",
+                "direction": "maximize",
+                "paths": {"metrics_evaluator": "src.evaluator.evaluate_rhae"},
+                "subtasks": [
+                    {"id": "rhae", "task_type": "regression", "column": "rhae",
+                     "primary_metric": "rmse", "direction": "maximize"}
+                ],
+                "execution": {"backend": "local"},
+            }
+        }
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(
+            any("metrics_evaluator" in w and "rhae" in w for w in result["warnings"]),
+            result["warnings"],
+        )
+
+    def test_mixed_subtask_metrics_require_custom_scorer(self) -> None:
+        ws = self._make_ws("tv_mixed_")
+        raw = {
+            "task": {
+                "id": "unit_task",
+                "name": "Unit Task",
+                "task_type": "binary_classification",
+                "primary_metric": "accuracy",
+                "direction": "maximize",
+                "subtasks": [
+                    {"id": "a", "task_type": "binary_classification",
+                     "column": "label", "primary_metric": "accuracy",
+                     "direction": "maximize"},
+                    {"id": "b", "task_type": "binary_classification",
+                     "column": "label", "primary_metric": "roc_auc",
+                     "direction": "maximize"},
+                ],
+                "execution": {"backend": "local"},
+            }
+        }
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        self.assertFalse(result["ok"])
+        self.assertTrue(
+            any("mix metrics/directions" in e for e in result["errors"]),
+            result["errors"],
+        )
+        # Declaring a custom evaluator downgrades the condition to a warning.
+        raw["task"]["paths"] = {"metrics_evaluator": "src.scorer.official"}
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(
+            any("mix metrics/directions" in w for w in result["warnings"]),
+            result["warnings"],
+        )
+
+
+    def test_custom_metric_under_stock_task_type(self) -> None:
+        """A non-generic metric under a stock task type cannot be scored by
+        the generic aggregate — error without a custom scorer, warning with
+        one (the exact ARC-AGI-3 case: subtask rhae under regression)."""
+        ws = self._make_ws("tv_custom_metric_")
+        raw = {
+            "task": {
+                "id": "unit_task",
+                "name": "Unit Task",
+                "task_type": "interactive_agent",
+                "primary_metric": "rhae",
+                "direction": "maximize",
+                "subtasks": [
+                    {"id": "rhae", "task_type": "regression", "column": "rhae",
+                     "primary_metric": "rhae", "direction": "maximize"}
+                ],
+                "execution": {"backend": "local"},
+            }
+        }
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        self.assertFalse(result["ok"])
+        self.assertTrue(
+            any("is not a generic metric" in e for e in result["errors"]),
+            result["errors"],
+        )
+        # With a custom evaluator the condition is advisory.
+        raw["task"]["paths"] = {"metrics_evaluator": "src.evaluator.evaluate_rhae"}
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(
+            any("is not a generic metric" in w for w in result["warnings"]),
+            result["warnings"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
