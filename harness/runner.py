@@ -240,7 +240,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         if hook:
             if str(self.project_root) not in sys.path:
                 sys.path.insert(0, str(self.project_root))
-            module, name = hook.split(":", 1) if ":" in hook else hook.rsplit(".", 1)
+            from harness.hook_ref import resolve_metrics_hook
+
+            module, name = resolve_metrics_hook(hook)
             self.manifest["custom_scorer_sha256"] = digest(
                 inspect.getsource(getattr(importlib.import_module(module), name))
             )
@@ -268,7 +270,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         if hook:
             if str(self.project_root) not in sys.path:
                 sys.path.insert(0, str(self.project_root))
-            module, name = hook.split(":", 1) if ":" in hook else hook.rsplit(".", 1)
+            from harness.hook_ref import resolve_metrics_hook
+
+            module, name = resolve_metrics_hook(hook)
             result = getattr(importlib.import_module(module), name)(truth, predictions)
             if not isinstance(result, dict):
                 raise TypeError("Custom metrics_evaluator must return a metric mapping")

@@ -138,10 +138,13 @@ def validate_run(directory, *, task_spec=None, plugin=None, expected=None):
 
     import yaml
 
+    from harness.hook_ref import ensure_hook_project_roots_on_sys_path, resolve_metrics_hook
+
     cfg = yaml.safe_load((directory / "run_config.yaml").read_text(encoding="utf-8"))
     hook = cfg.get("paths", {}).get("metrics_evaluator")
     if hook:
-        module, name = hook.rsplit(".", 1)
+        ensure_hook_project_roots_on_sys_path()
+        module, name = resolve_metrics_hook(hook)
         if manifest.get("custom_scorer_sha256") != digest(
             inspect.getsource(getattr(importlib.import_module(module), name))
         ):

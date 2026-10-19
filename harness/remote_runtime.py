@@ -38,10 +38,20 @@ def resolve_remote_runtime(project: HarnessProject) -> Dict[str, Any]:
     except metadata.PackageNotFoundError:
         core_version = "0.2.0"
     core_requirements = []
+    min_versions = {
+        "numpy": ">=1.24.0",
+        "pandas": ">=2.0.0",
+        "scikit-learn": ">=1.2.0",
+        "PyYAML": ">=6.0",
+        "scipy": ">=1.10.0",
+        "lightgbm": ">=4.0.0",
+        "xgboost": ">=2.0.0",
+    }
     for requirement_name, distribution_name in CORE_RUNTIME_DISTRIBUTIONS.items():
         try:
-            installed_version = metadata.version(distribution_name)
-            core_requirements.append(f"{requirement_name}=={installed_version}")
+            metadata.version(distribution_name)
+            bound = min_versions.get(requirement_name, ">=1.0.0")
+            core_requirements.append(f"{requirement_name}{bound}")
         except metadata.PackageNotFoundError as exc:
             if requirement_name == "lightgbm":
                 core_requirements.append("lightgbm>=4.0.0")
