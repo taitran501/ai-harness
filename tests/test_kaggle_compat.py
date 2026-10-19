@@ -306,6 +306,56 @@ class ClientDispatchPathTests(unittest.TestCase):
         self.assertEqual(c._legacy_api.calls[0][3], "KaggleGPU")
         self.assertEqual(resp.ref, 333)
 
+    def test_submit_error_surfaces_response_body_and_url(self):
+        """A 400 (e.g. daily submission limit) must expose Kaggle's JSON body.
+
+        Regression: arc-prize dispatch failed with a bare
+        '400 Client Error: Bad Request for url: ...' — the agent could not tell
+        daily-limit from bad-slug from bad-file without the payload.
+        """
+        c = _make_client("kaggle")
+        exc = Exception(
+            "400 Client Error: Bad Request for url: "
+            "https://www.kaggle.com/competitions/arc-prize/submissions/create"
+        )
+        exc.response = SimpleNamespace(
+            text='{"code":400,"message":"You have reached the daily submission limit"}',
+            url="https://www.kaggle.com/competitions/arc-prize/submissions/create",
+        )
+
+        def boom(*args, **kwargs):
+            raise exc
+
+        c._legacy_api.competition_submit_code = boom
+        with self.assertRaises(RuntimeError) as ctx:
+            c.submit_submission("out.csv", "msg", "comp", kernel="owner/k", kernel_version="2")
+        message = str(ctx.exception)
+        self.assertIn("You have reached the daily submission limit", message)
+        self.assertIn("https://www.kaggle.com/competitions/arc-prize", message)
+        self.assertIsInstance(ctx.exception.__cause__, Exception)
+
+    def test_submit_error_without_response_keeps_fallback(self):
+        c = _make_client("kaggle")
+
+        def boom(*args, **kwargs):
+            raise ConnectionError("kapow")
+
+        c._legacy_api.competition_submit = boom
+        with self.assertRaises(RuntimeError) as ctx:
+            c.submit_submission("sub.csv", "msg", "comp")
+        message = str(ctx.exception)
+        self.assertIn("kapow", message)
+        self.assertIn("response_body=<none>", message)
+
+    def test_describe_api_error_truncates_long_body(self):
+        from harness.kaggle_compat import _describe_api_error
+
+        exc = Exception("400")
+        exc.response = SimpleNamespace(text="z" * 5000, url="https://kaggle.com/a")
+        out = _describe_api_error(exc)
+        self.assertLessEqual(out.count("z"), 2000)
+        self.assertIn("response_body=", out)
+
     def test_legacy_api_instance_returns_configured_api_for_kaggle(self):
         c = _make_client("kaggle")
         self.assertIs(c._legacy_api_instance(), c._legacy_api)

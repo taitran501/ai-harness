@@ -64,6 +64,34 @@ _LEGACY_ALIASES = {
 }
 
 
+def _describe_api_error(exc: BaseException) -> str:
+    """Build an actionable one-line description for a failed Kaggle API call.
+
+    The raw ``requests.HTTPError`` message (``400 Client Error: Bad Request
+    for url: ...``) hides the payload where Kaggle explains *why* (daily
+    submission limit, bad kernel slug, ...). When the exception carries a
+    ``response`` (requests-shaped), surface its body (truncated) and URL so
+    the caller — usually an agent — can act on the error without guessing.
+    """
+    response = getattr(exc, "response", None)
+    body = ""
+    url = ""
+    if response is not None:
+        try:
+            body = (response.text or "")[:2000]
+        except Exception:  # noqa: BLE001 - body is diagnostic, never fatal
+            body = ""
+        try:
+            url = str(getattr(response, "url", "") or "")
+        except Exception:  # noqa: BLE001 - url is diagnostic, never fatal
+            url = ""
+    parts = [f"Kaggle submission dispatch failed ({exc})"]
+    if url:
+        parts.append(f"url={url}")
+    parts.append(f"response_body={body!r}" if body else "response_body=<none>")
+    return " ".join(parts)
+
+
 def _alias_candidates(name: str) -> Tuple[str, ...]:
     """Raw attribute names that may back a requested (normalised) name.
 
@@ -256,16 +284,19 @@ class KaggleClient:
         ``message``.
         """
         api = self._legacy_api_instance()
-        if kernel:
-            resp = api.competition_submit_code(
-                file_name,
-                message,
-                competition,
-                kernel=kernel,
-                kernel_version=kernel_version,
-            )
-        else:
-            resp = api.competition_submit(file_name, message, competition)
+        try:
+            if kernel:
+                resp = api.competition_submit_code(
+                    file_name,
+                    message,
+                    competition,
+                    kernel=kernel,
+                    kernel_version=kernel_version,
+                )
+            else:
+                resp = api.competition_submit(file_name, message, competition)
+        except Exception as exc:  # noqa: BLE001 - surface Kaggle API errors with body
+            raise RuntimeError(_describe_api_error(exc)) from exc
         return _NormalisedObject(resp, self.sdk)
 
     def kernels_push(

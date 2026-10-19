@@ -15,7 +15,11 @@ WORKER_STATUS_VALUES = {"PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"
 
 def worker_state_path(project: HarnessProject, job_id: str) -> Path:
     if not JOB_ID_PATTERN.fullmatch(job_id):
-        raise ValueError("Job ID contains unsupported characters.")
+        raise ValueError(
+            f"Job ID contains unsupported characters: {job_id!r}. "
+            f"Expected pattern: {JOB_ID_PATTERN.pattern} "
+            "(e.g. 'job_exp001_full', 'job_exp002-smoke-0')."
+        )
     return project.artifacts_dir / "jobs" / f"{job_id}.worker.json"
 
 
