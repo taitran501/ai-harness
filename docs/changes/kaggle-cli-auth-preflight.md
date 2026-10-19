@@ -3,8 +3,8 @@
 - **Date**: 2026-10-19
 - **PR**: [#113](https://github.com/taitran501/ai-harness/pull/113)
 - **Branch**: `feat/cli-auth-probe`
-- **Status**: open
-- **Commits**: —
+- **Status**: merged
+- **Commits**: `4076c4f` (squash, on `main`) 
 
 ## Why
 
