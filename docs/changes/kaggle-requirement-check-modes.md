@@ -1,7 +1,7 @@
 # `requirement_check` modes (strict | warn | off) + detected versions in `ensure_dependencies`
 
 - **Date**: 2026-10-19
-- **PR**: TBD (this change)
+- **PR**: [#112](https://github.com/taitran501/ai-harness/pull/112)
 - **Branch**: `feat/requirement-check-modes`
 - **Status**: open
 - **Commits**: —
