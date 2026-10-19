@@ -3,8 +3,8 @@
 - **Date**: 2026-10-19
 - **PR**: [#112](https://github.com/taitran501/ai-harness/pull/112)
 - **Branch**: `feat/requirement-check-modes`
-- **Status**: open
-- **Commits**: —
+- **Status**: merged
+- **Commits**: `c2067b9` (squash, on `main`) 
 
 ## Why
 
