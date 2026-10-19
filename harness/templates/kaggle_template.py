@@ -53,6 +53,10 @@ class KaggleKernelManager:
     # Cached `kaggle --version` from ensure_cli_ready(); None until probed.
     _cli_version_cache: Optional[str] = None
 
+    # Case-insensitive keywords that identify an unauthenticated CLI
+    # response in the advisory auth probe output.
+    _CLI_AUTH_ERROR_KEYWORDS = ("auth", "login", "credential", "kaggle.json")
+
     @staticmethod
     def get_authenticated_username() -> str:
         """Detect current Kaggle username from kaggle.json, env, or CLI."""
@@ -262,7 +266,9 @@ class KaggleKernelManager:
         }
 
     @classmethod
-    def ensure_cli_ready(cls, *, check_python: bool = True) -> str:
+    def ensure_cli_ready(
+        cls, *, check_python: bool = True, check_auth: bool = True
+    ) -> str:
         """Fail fast when the Kaggle CLI is missing or broken.
 
         Runs before any upload/push so environment problems surface with
@@ -270,6 +276,16 @@ class KaggleKernelManager:
         kernel died in ``wait_for_dataset`` with an empty error surface
         when the CLI failed silently). The version probe is cached per
         process so repeated calls are free.
+
+        With ``check_auth`` (default) an additional **advisory** probe
+        (``kaggle kernels list --mine -v 1``) detects an unauthenticated
+        CLI up front — a present CLI with no usable credentials only
+        fails mid-push otherwise ("Authentication required to call the
+        Kaggle API"). The probe is advisory by design: the SDK-based
+        dispatch path may be authenticated even when the CLI is not, so a
+        detected auth failure prints a WARNING instead of blocking, and
+        probe timeouts/exceptions are skipped silently (preflight must
+        never become a new failure mode).
         """
         if cls._cli_version_cache is not None:
             return cls._cli_version_cache
@@ -302,6 +318,8 @@ class KaggleKernelManager:
                 "reproduce on the kernel image.",
                 file=sys.stderr, flush=True,
             )
+        if check_auth:
+            cls._warn_if_cli_unauthenticated()
         version = output.splitlines()[-1].strip() if output else "unknown"
         cls._cli_version_cache = version
         print(
@@ -309,6 +327,40 @@ class KaggleKernelManager:
             f"(python {sys.version.split()[0]})", flush=True
         )
         return version
+
+    @classmethod
+    def _warn_if_cli_unauthenticated(cls) -> None:
+        """Advisory auth probe: warn when the CLI reports no usable credentials.
+
+        Runs once per process as part of ``ensure_cli_ready``. A non-zero
+        exit whose output mentions authentication prints a WARNING to
+        stderr; anything else (probe timeout, unexpected exception,
+        non-auth failure) is skipped silently — preflight must not become
+        a new failure mode, and the SDK dispatch path may work fine
+        either way.
+        """
+        try:
+            proc = subprocess.run(
+                ["kaggle", "kernels", "list", "--mine", "-v", "1"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except Exception:
+            return
+        if proc.returncode == 0:
+            return
+        blob = ((proc.stdout or "") + (proc.stderr or "")).lower()
+        if any(keyword in blob for keyword in cls._CLI_AUTH_ERROR_KEYWORDS):
+            print(
+                "[kaggle preflight] WARNING: Kaggle CLI reports no usable "
+                "authentication. Kernel push/submission via CLI will fail "
+                "with 'Authentication required'. Fix: `kaggle auth login` "
+                "or place ~/.kaggle/kaggle.json. (SDK-based dispatch may "
+                "still work.)",
+                file=sys.stderr,
+                flush=True,
+            )
 
     @staticmethod
     def wait_for_dataset(

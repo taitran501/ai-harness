@@ -14,7 +14,7 @@ Kết quả audit (bằng chứng: step index trong conversation DB):
 | B | `AttributeError: module 'src' has no attribute 'evaluator:evaluate_rhae'` ở `validate_run` remote (idx 653) | Run train xong vẫn chết ở finalization | ✅ Fix hook-parsing trong PR #109 |
 | C | `Kaggle output import failed: No module named 'src'` (idx 726, 1715) | **2 kernel COMPLETE bị mất output** — agent waste cả chu kỳ compute | ✅ **Đã fix** (G1 — PR #111: hermetic `project_root` import + diagnostic `RuntimeError`) |
 | D | `400 Bad Request` khi `submission dispatch` — chỉ hiện error line, **không có API error body** (idx 2500) | Agent mất thời gian đoán là daily-limit; không thể phân biệt limit/slug/file sai (idx 2500-2557) | ✅ **Đã fix** (G2 — PR #110: surfacing API error body + URL) |
-| E | CLI `kaggle` unauthenticated (không `kaggle.json`) — "Authentication required" giữa chừng flow | Mọi lệnh CLI trần fail; agent phải tự đi tìm kaggle.json | ⚠️ **Còn** (G4) |
+| E | CLI `kaggle` unauthenticated (không `kaggle.json`) — "Authentication required" giữa chừng flow | Mọi lệnh CLI trần fail; agent phải tự đi tìm kaggle.json | ✅ **Đã fix** (G4 — PR TBD: advisory auth probe trong preflight) |
 | F | "Job ID contains unsupported characters" không nói pattern hợp lệ (×3 attempts) | Agent thử sai `test_job`, `job_test`, ... | ✅ **Đã fix** (G5 — PR #110: error kèm `JOB_ID_PATTERN` + ví dụ) |
 | G | Agent **re-dispatch y nguyên config fail** nhiều lần (exp002 ×3, exp005 tới kernel v4) | Waste chu kỳ push+poll (mỗi lần ~phút + quota kernel) | ⚠️ Optional (G6) |
 
@@ -178,7 +178,7 @@ agent biết ngay "image 2.2.x không chạy code pandas-3").
 
 **docs/changes:** `kaggle-requirement-check-modes.md`.
 
-### G4 — CLI auth probe advisory trong `ensure_cli_ready` (P1)
+### G4 — CLI auth probe advisory trong `ensure_cli_ready` (P1 — ✅ đã fix, PR TBD)
 
 **Vấn đề:** preflight (PR #109) chỉ probe `kaggle --version` — CLI present nhưng
 **unauthenticated** vẫn trượt tới giữa push mới fail ("Authentication required",
