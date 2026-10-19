@@ -1,7 +1,7 @@
 # Align GENERIC_ALLOWED_METRICS with evaluate() capability
 
 - **Date**: 2026-10-19
-- **PR**: — (pending push)
+- **PR**: [#107](https://github.com/taitran501/ai-harness/pull/107)
 - **Branch**: `fix/generic-metrics-table-align`
 - **Status**: open
 - **Commits**: `de03d8c`
