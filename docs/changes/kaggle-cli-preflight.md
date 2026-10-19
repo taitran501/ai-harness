@@ -1,10 +1,10 @@
 # Kaggle dispatch preflight: verify the CLI before uploading anything
 
 - **Date**: 2026-10-19
-- **PR**: — (pending; uncommitted working-tree change)
-- **Branch**: `—`
-- **Status**: open (uncommitted)
-- **Commits**: — (uncommitted)
+- **PR**: [#109](https://github.com/taitran501/ai-harness/pull/109)
+- **Branch**: `fix/arc-prize-audit-remediation`
+- **Status**: open
+- **Commits**: `09ccfe6`
 
 ## Why
 
