@@ -1,10 +1,10 @@
 # Submission dispatch errors surface the Kaggle API response body
 
 - **Date**: 2026-10-19
-- **PR**: #TBD (feat/kaggle-error-surface)
+- **PR**: [#110](https://github.com/taitran501/ai-harness/pull/110)
 - **Branch**: `feat/kaggle-error-surface`
 - **Status**: open
-- **Commits**: — (pending)
+- **Commits**: `d5509fa`
 
 ## Why
 
