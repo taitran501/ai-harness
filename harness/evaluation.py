@@ -149,47 +149,56 @@ MAXIMIZE_METRICS = {
 }
 
 #: Stock task types the generic aggregate can score, and the metric names
-#: available for each. Task types not listed here (segmentation, ASR,
-#: detection, NER, interactive/agent tasks, ...) are not generically
-#: scorable; a custom ``paths.metrics_evaluator`` is required for them.
+#: available for each. This table is the single source of truth and is kept
+#: in sync with the ``available`` dicts computed in ``evaluate()``: it lists
+#: exactly the metric names the generic path can score for each stock task
+#: type. Task types not listed here (segmentation, ASR, detection, NER,
+#: interactive/agent tasks, ...) are not generically scorable; a custom
+#: ``paths.metrics_evaluator`` is required for them.
+#: All of these task types share the regression scoring branch in
+#: ``evaluate()`` and therefore score the same metric set.
+_REGRESSION_METRICS = {
+    "rmse",
+    "mae",
+    "r2",
+    "rmsle",
+    "smape",
+    "wape",
+    "pinball_loss",
+    "medae",
+    "pearson",
+    "mape",
+    "spearman",
+    "ndcg",
+    "mrr",
+    "qwk",
+}
+#: Classification metrics the generic path can score. Binary and multiclass
+#: additionally support ``qwk`` and ``brier_score`` (the latter needs a
+#: probability column); multilabel swaps those for ``ndcg``.
+_CLASSIFICATION_METRICS = {
+    "accuracy",
+    "macro_f1",
+    "micro_f1",
+    "weighted_f1",
+    "balanced_accuracy",
+    "mcc",
+    "roc_auc",
+    "logloss",
+    "pr_auc",
+    "brier_score",
+    "qwk",
+}
 GENERIC_ALLOWED_METRICS = {
-    "regression": {
-        "rmse",
-        "mae",
-        "r2",
-        "mape",
-        "spearman",
-        "ndcg",
-        "qwk",
-    },
-    "binary_classification": {
-        "accuracy",
-        "macro_f1",
-        "micro_f1",
-        "roc_auc",
-        "logloss",
-        "qwk",
-    },
-    "multiclass_classification": {
-        "accuracy",
-        "macro_f1",
-        "micro_f1",
-        "roc_auc",
-        "logloss",
-        "qwk",
-    },
-    "multilabel_classification": {
-        "accuracy",
-        "macro_f1",
-        "micro_f1",
-        "ndcg",
-    },
-    "ranking": {
-        "ndcg",
-        "spearman",
-        "rmse",
-        "mae",
-    },
+    "regression": _REGRESSION_METRICS,
+    "ranking": _REGRESSION_METRICS,
+    "time_series_forecasting": _REGRESSION_METRICS,
+    "forecasting": _REGRESSION_METRICS,
+    "time_series": _REGRESSION_METRICS,
+    "multi_output_regression": _REGRESSION_METRICS,
+    "binary_classification": _CLASSIFICATION_METRICS,
+    "multiclass_classification": _CLASSIFICATION_METRICS,
+    "multilabel_classification": _CLASSIFICATION_METRICS - {"qwk", "brier_score"} | {"ndcg"},
 }
 
 
