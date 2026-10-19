@@ -11,9 +11,10 @@ CLI is missing or broken, before any upload or push.
 """
 
 import io
+import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -97,7 +98,97 @@ class EnsureCliReadyTests(unittest.TestCase):
             version = KaggleKernelManager.ensure_cli_ready()
             self.assertEqual(version, "Kaggle CLI 2.2.4")
             KaggleKernelManager.ensure_cli_ready()  # served from cache
+        # version probe + one auth probe on the first call only
+        self.assertEqual(mock_run.call_count, 2)
+
+
+class CliAuthProbeTests(unittest.TestCase):
+    """G4: advisory CLI auth probe in ``ensure_cli_ready``.
+
+    Live origin: an unauthenticated CLI (no ``~/.kaggle/kaggle.json``)
+    failed only mid-push with "Authentication required to call the Kaggle
+    API" (arc-prize-2026 conversation, exp005 push stage). The preflight
+    now detects it up front and warns — advisory only, never fatal, because
+    the SDK-based dispatch path may be authenticated while the CLI is not.
+    """
+
+    def setUp(self):
+        self._saved_version = KaggleKernelManager._cli_version_cache
+        KaggleKernelManager._cli_version_cache = None
+        self.stderr = io.StringIO()
+
+    def tearDown(self):
+        KaggleKernelManager._cli_version_cache = self._saved_version
+
+    @staticmethod
+    def _good_version():
+        return MagicMock(returncode=0, stdout="Kaggle CLI 2.2.4", stderr="")
+
+    def test_unauthenticated_cli_warns_without_raising(self):
+        auth_fail = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="Authentication required to call the Kaggle API",
+        )
+        with patch(
+            "subprocess.run", side_effect=[self._good_version(), auth_fail]
+        ) as mock_run:
+            with redirect_stderr(self.stderr):
+                version = KaggleKernelManager.ensure_cli_ready()
+        self.assertEqual(version, "Kaggle CLI 2.2.4")
+        self.assertIn(
+            "WARNING: Kaggle CLI reports no usable", self.stderr.getvalue()
+        )
+        self.assertIn("kaggle auth login", self.stderr.getvalue())
+        self.assertEqual(mock_run.call_count, 2)
+
+    def test_authenticated_cli_prints_no_auth_warning(self):
+        auth_ok = MagicMock(returncode=0, stdout='{"kernels": []}', stderr="")
+        with patch(
+            "subprocess.run", side_effect=[self._good_version(), auth_ok]
+        ):
+            with redirect_stderr(self.stderr):
+                KaggleKernelManager.ensure_cli_ready()
+        self.assertNotIn("WARNING", self.stderr.getvalue())
+
+    def test_auth_probe_timeout_is_skipped_safely(self):
+        with patch(
+            "subprocess.run",
+            side_effect=[
+                self._good_version(),
+                subprocess.TimeoutExpired("kaggle", 60),
+            ],
+        ):
+            with redirect_stderr(self.stderr):
+                version = KaggleKernelManager.ensure_cli_ready()
+        self.assertEqual(version, "Kaggle CLI 2.2.4")
+        self.assertNotIn("WARNING", self.stderr.getvalue())
+
+    def test_non_auth_probe_failure_does_not_warn(self):
+        other_fail = MagicMock(returncode=1, stdout="", stderr="quota exceeded")
+        with patch(
+            "subprocess.run", side_effect=[self._good_version(), other_fail]
+        ):
+            with redirect_stderr(self.stderr):
+                KaggleKernelManager.ensure_cli_ready()
+        self.assertNotIn("WARNING", self.stderr.getvalue())
+
+    def test_auth_probe_can_be_disabled(self):
+        with patch("subprocess.run", return_value=self._good_version()) as mock_run:
+            KaggleKernelManager.ensure_cli_ready(check_auth=False)
         self.assertEqual(mock_run.call_count, 1)
+
+    def test_auth_probe_runs_once_per_process(self):
+        auth_fail = MagicMock(
+            returncode=1, stdout="", stderr="Authentication required"
+        )
+        with patch(
+            "subprocess.run", side_effect=[self._good_version(), auth_fail]
+        ) as mock_run:
+            with redirect_stderr(self.stderr):
+                KaggleKernelManager.ensure_cli_ready()
+                KaggleKernelManager.ensure_cli_ready()  # served from cache
+        self.assertEqual(mock_run.call_count, 2)  # no second auth probe
 
 
 class DirtyCheckoutWarningTests(unittest.TestCase):
