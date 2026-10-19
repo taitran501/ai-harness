@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -110,24 +110,121 @@ def metric_name(value: str) -> str:
     return aliases.get(name, value)
 
 
-def default_metric_direction(metric: str) -> str:
-    """Infer whether an evaluation metric should be minimized or maximized."""
-    m = metric_name(metric)
-    minimize_metrics = {
+MINIMIZE_METRICS = {
+    "rmse",
+    "mae",
+    "rmsle",
+    "mape",
+    "smape",
+    "wape",
+    "medae",
+    "pinball_loss",
+    "logloss",
+    "brier_score",
+    "wer",
+    "cer",
+}
+
+MAXIMIZE_METRICS = {
+    "accuracy",
+    "balanced_accuracy",
+    "macro_f1",
+    "micro_f1",
+    "weighted_f1",
+    "f1",
+    "roc_auc",
+    "pr_auc",
+    "qwk",
+    "mcc",
+    "ndcg",
+    "spearman",
+    "r2",
+    "dice_score",
+    "iou_score",
+    "exact_match",
+    "bleu",
+    "mrr",
+    "pearson",
+    "token_accuracy",
+}
+
+#: Stock task types the generic aggregate can score, and the metric names
+#: available for each. Task types not listed here (segmentation, ASR,
+#: detection, NER, interactive/agent tasks, ...) are not generically
+#: scorable; a custom ``paths.metrics_evaluator`` is required for them.
+GENERIC_ALLOWED_METRICS = {
+    "regression": {
         "rmse",
         "mae",
-        "rmsle",
+        "r2",
         "mape",
-        "smape",
-        "wape",
-        "medae",
-        "pinball_loss",
+        "spearman",
+        "ndcg",
+        "qwk",
+    },
+    "binary_classification": {
+        "accuracy",
+        "macro_f1",
+        "micro_f1",
+        "roc_auc",
         "logloss",
-        "brier_score",
-        "wer",
-        "cer",
-    }
-    return "minimize" if m in minimize_metrics else "maximize"
+        "qwk",
+    },
+    "multiclass_classification": {
+        "accuracy",
+        "macro_f1",
+        "micro_f1",
+        "roc_auc",
+        "logloss",
+        "qwk",
+    },
+    "multilabel_classification": {
+        "accuracy",
+        "macro_f1",
+        "micro_f1",
+        "ndcg",
+    },
+    "ranking": {
+        "ndcg",
+        "spearman",
+        "rmse",
+        "mae",
+    },
+}
+
+
+def default_metric_direction(metric: str) -> str:
+    """Infer whether an evaluation metric should be minimized or maximized.
+
+    Unknown/custom metrics default to ``maximize``; only the canonical sets
+    above carry a strong prior, so direction-consistency checks should treat
+    any other metric as declared-direction-is-trusted.
+    """
+    m = metric_name(metric)
+    return "minimize" if m in MINIMIZE_METRICS else "maximize"
+
+
+def canonical_direction_conflicts(metric: str, direction: str) -> Optional[str]:
+    """Return a human-readable conflict note when a canonical metric is
+    declared with the opposite direction, else ``None``.
+
+    Metrics outside both canonical sets (custom scorers) never conflict:
+    the declared direction is trusted.
+    """
+    m = metric_name(metric)
+    if direction not in {"maximize", "minimize"}:
+        return None
+    if m in MINIMIZE_METRICS and direction == "maximize":
+        return (
+            f"{m} is canonically minimized but direction is 'maximize' — "
+            "check the declared direction"
+        )
+    if m in MAXIMIZE_METRICS and direction == "minimize":
+        return (
+            f"{m} is canonically maximized but direction is 'minimize' — "
+            "check the declared direction"
+        )
+    return None
 
 
 def compute_rmsle(y_true, y_pred) -> float:
@@ -470,15 +567,27 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
     active = [s for s in spec.subtasks.values() if s.weight > 0]
     if not active:
         raise ValueError("At least one positive target weight is required")
-    if len({(metric_name(s.primary_metric), s.direction) for s in active}) > 1:
-        raise ValueError("Mixed metrics/directions require a custom scorer")
+    pairs = {(metric_name(s.primary_metric), s.direction) for s in active}
+    if len(pairs) > 1:
+        raise ValueError(
+            "Mixed metrics/directions require a custom scorer: "
+            f"subtasks declare {sorted(pairs)} — the generic aggregate can only "
+            "score a single (metric, direction) pair. Declare one consistent "
+            "subtask metric matching the spec, or configure "
+            "paths.metrics_evaluator in the run config."
+        )
     if any(not np.isfinite(s.weight) or s.weight < 0 for s in spec.subtasks.values()):
         raise ValueError("Invalid target weights")
-    if (metric_name(active[0].primary_metric), active[0].direction) != (
-        metric_name(spec.primary_metric),
-        spec.direction,
-    ):
-        raise ValueError("Primary metric/direction must match the generic aggregate")
+    sub_pair = (metric_name(active[0].primary_metric), active[0].direction)
+    spec_pair = (metric_name(spec.primary_metric), spec.direction)
+    if sub_pair != spec_pair:
+        raise ValueError(
+            f"Primary metric/direction must match the generic aggregate: "
+            f"subtask declares {sub_pair} but the spec declares {spec_pair}. "
+            "Align the subtask primary_metric/direction with the spec's "
+            "primary_metric/direction, or configure paths.metrics_evaluator "
+            "in the run config so a custom scorer is authoritative."
+        )
     masks = spec.compute_evaluation_masks(truth)
     results, weighted, total = {}, 0.0, 0.0
     for key, st in spec.subtasks.items():

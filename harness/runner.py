@@ -143,50 +143,15 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
         self.logger = __import__("logging").getLogger("ai-harness.runner")
         (self.exp_dir / "run.log").write_text("Starting run\n", encoding="utf-8")
+        # Shared generic-metric allow-list (single source of truth in
+        # harness.evaluation; see GENERIC_ALLOWED_METRICS).
+        from harness.evaluation import GENERIC_ALLOWED_METRICS as allowed, metric_name
+
         if not self.task_plugin.capabilities().get("custom_metrics") and not cfg.get(
             "paths", {}
-        ).get("metrics_evaluator"):
-            from harness.evaluation import metric_name
-
-            allowed = {
-                "regression": {
-                    "rmse",
-                    "mae",
-                    "r2",
-                    "mape",
-                    "spearman",
-                    "ndcg",
-                    "qwk",
-                },
-                "binary_classification": {
-                    "accuracy",
-                    "macro_f1",
-                    "micro_f1",
-                    "roc_auc",
-                    "logloss",
-                    "qwk",
-                },
-                "multiclass_classification": {
-                    "accuracy",
-                    "macro_f1",
-                    "micro_f1",
-                    "roc_auc",
-                    "logloss",
-                    "qwk",
-                },
-                "multilabel_classification": {
-                    "accuracy",
-                    "macro_f1",
-                    "micro_f1",
-                    "ndcg",
-                },
-                "ranking": {
-                    "ndcg",
-                    "spearman",
-                    "rmse",
-                    "mae",
-                },
-            }
+        ).get("metrics_evaluator") and str(
+            self.task_spec.task_type or ""
+        ) != "interactive_agent":
             if not self.task_spec.subtasks:
                 raise ValueError("Task must declare targets")
             for st in self.task_spec.subtasks.values():
@@ -194,6 +159,81 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                     st.task_type, set()
                 ):
                     raise ValueError("Unsupported task metric at preflight")
+        # Aggregate-coverage preflight (runs for generic and custom-hook paths):
+        # the generic aggregate scores exactly one (metric, direction) pair and
+        # requires it to equal the spec's primary metric/direction. Without a
+        # custom metrics_evaluator a mismatch only surfaces after compute, so
+        # fail fast here; with a custom hook the hook is authoritative and the
+        # same conditions degrade to warnings.
+        from harness.evaluation import canonical_direction_conflicts
+
+        _spec_conflict = canonical_direction_conflicts(
+            str(self.task_spec.primary_metric or ""),
+            str(self.task_spec.direction or ""),
+        )
+        if _spec_conflict:
+            print(f"[ai-harness] WARNING: spec: {_spec_conflict}")
+        _active_pairs = {
+            (metric_name(st.primary_metric), st.direction)
+            for st in self.task_spec.subtasks.values()
+            if st.weight > 0
+        }
+        _spec_pair = (
+            metric_name(self.task_spec.primary_metric),
+            self.task_spec.direction,
+        )
+        _mismatch = None
+        if len(_active_pairs) > 1:
+            _mismatch = (
+                f"subtasks mix metrics/directions {sorted(_active_pairs)}; the "
+                "generic aggregate can only score a single pair"
+            )
+        elif _active_pairs and next(iter(_active_pairs)) != _spec_pair:
+            _mismatch = (
+                f"subtask metric/direction {next(iter(_active_pairs))} does not "
+                f"match the spec's primary metric/direction {_spec_pair}"
+            )
+        # The generic available-metrics table above also covers the "custom
+        # metric under a stock task type" case: evaluate() raises
+        # "Unsupported metric ... for ..." before scoring. Known at preflight,
+        # so it joins the same mismatch handling.
+        _unsupported = [
+            f"{st.id}: {metric_name(st.primary_metric)} is not a generic metric "
+            f"for {st.task_type!r}"
+            for st in self.task_spec.subtasks.values()
+            if st.weight > 0
+            and st.task_type in allowed
+            and metric_name(st.primary_metric) not in allowed[st.task_type]
+        ]
+        if _unsupported:
+            _unsupported_msg = "; ".join(_unsupported)
+            _mismatch = (
+                f"{_mismatch}; {_unsupported_msg}" if _mismatch else _unsupported_msg
+            )
+        self._skip_generic_base_eval = False
+        if _mismatch:
+            _generic_scoring = not self.task_plugin.capabilities().get(
+                "custom_metrics"
+            )
+            if cfg.get("paths", {}).get("metrics_evaluator") or not _generic_scoring:
+                # The generic aggregate provably cannot score this spec: its
+                # pair gate raises before any metric is computed, so a custom
+                # metrics_evaluator is the authoritative scorer. Skip the base
+                # evaluation instead of warning "official evaluation failed"
+                # on every fold.
+                self._skip_generic_base_eval = bool(
+                    cfg.get("paths", {}).get("metrics_evaluator")
+                )
+                print(
+                    f"[ai-harness] WARNING: {_mismatch}; the official score "
+                    "will come from the configured custom scorer"
+                )
+            else:
+                raise ValueError(
+                    f"{_mismatch} — align the subtask metric with the spec's "
+                    "primary_metric/direction, or declare "
+                    "paths.metrics_evaluator in the task spec"
+                )
         self.seed = self.task_spec.resolve_seed(cfg.get("runtime", {}).get("seed", 42))
         self.estimator_metadata = []
         hook = cfg.get("paths", {}).get("metrics_evaluator")
@@ -232,22 +272,35 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             result = getattr(importlib.import_module(module), name)(truth, predictions)
             if not isinstance(result, dict):
                 raise TypeError("Custom metrics_evaluator must return a metric mapping")
-            try:
-                base_result = self.task_plugin.evaluate_predictions(
-                    self.plugin_context, truth, predictions
-                )
-                result = {**base_result, **result}
-            except Exception as exc:
-                # A custom metrics_evaluator is configured but the official
-                # plugin scorer failed. Keep the custom result, but surface
-                # the failure — it must not be silently swallowed.
-                result.setdefault("_evaluation_warnings", []).append(
-                    f"official evaluation failed: {exc.__class__.__name__}: {exc}"
-                )
-                print(
-                    f"[ai-harness] WARNING: official plugin evaluation failed: "
-                    f"{exc.__class__.__name__}: {exc}"
-                )
+            if getattr(self, "_skip_generic_base_eval", False):
+                # Determined at preflight (set in __init__): the generic
+                # aggregate cannot score this spec (pair gate raises before
+                # any metric is computed), so the custom hook above is the
+                # official scorer. Skipping the base call keeps
+                # _evaluation_warnings clean instead of logging "official
+                # evaluation failed" on every fold.
+                pass
+            else:
+                try:
+                    base_result = self.task_plugin.evaluate_predictions(
+                        self.plugin_context, truth, predictions
+                    )
+                    result = {**base_result, **result}
+                except Exception as exc:
+                    # A custom metrics_evaluator is configured but the official
+                    # plugin scorer failed. Keep the custom result, but surface
+                    # the failure — it must not be silently swallowed. Such
+                    # failures are deterministic for the spec (metric/pair/task
+                    # type gates), so warn once and skip the base evaluation
+                    # on later folds instead of re-raising per fold.
+                    self._skip_generic_base_eval = True
+                    result.setdefault("_evaluation_warnings", []).append(
+                        f"official evaluation failed: {exc.__class__.__name__}: {exc}"
+                    )
+                    print(
+                        f"[ai-harness] WARNING: official plugin evaluation failed: "
+                        f"{exc.__class__.__name__}: {exc}"
+                    )
         else:
             result = self.task_plugin.evaluate_predictions(
                 self.plugin_context, truth, predictions

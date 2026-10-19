@@ -8,6 +8,12 @@ Failure modes that currently surface only mid-run (minutes to hours in):
   (observed live: ``Null validation folds``),
 - constant target/fold columns,
 - unknown task types or directions,
+- metric/direction spec inconsistencies that the generic aggregate would
+  reject only at scoring time (observed live: a subtask declared
+  ``primary_metric: rmse, direction: maximize`` under a spec-level
+  ``rhae``/maximize — every official evaluation failed with
+  ``Primary metric/direction must match the generic aggregate`` after the
+  compute had already run),
 - hygiene allow-lists that whitelist genuine run-output dirs (observed
   live: ``kernel_output_*``/``kaggle_results`` hidden from the adoption
   scan for months),
@@ -30,6 +36,7 @@ KNOWN_TASK_TYPES = {
     "multi_task_classification",
     "regression",
     "ranking",
+    "interactive_agent",
 }
 KNOWN_DIRECTIONS = {"maximize", "minimize"}
 KNOWN_BACKENDS = {"local", "kaggle", "modal"}
@@ -142,6 +149,101 @@ def validate_task(config_path: Path, root: Path) -> Dict[str, Any]:
         st_dir = str(getattr(st, "direction", "") or "")
         if st_dir and st_dir not in KNOWN_DIRECTIONS:
             warnings.append(f"subtask {sid}: unknown direction {st_dir!r}")
+
+    # ---- metric direction consistency + generic-aggregate feasibility ----
+    # The generic aggregate scores one (metric, direction) pair that must
+    # equal the spec's primary metric/direction, and refuses metrics declared
+    # against their canonical direction. Catch these at spec time instead of
+    # after an expensive run has scored.
+    from harness.evaluation import (
+        GENERIC_ALLOWED_METRICS,
+        canonical_direction_conflicts,
+        metric_name,
+    )
+
+    spec_metric = str(getattr(spec, "primary_metric", "") or "")
+    spec_dir = str(getattr(spec, "direction", "") or "")
+    spec_conflict = canonical_direction_conflicts(spec_metric, spec_dir)
+    if spec_conflict:
+        warnings.append(
+            f"spec primary_metric {spec_metric!r}: {spec_conflict}"
+        )
+
+    active_pairs = []
+    unsupported = []
+    for sid, st in subtasks.items():
+        st_metric = str(getattr(st, "primary_metric", "") or "")
+        st_dir = str(getattr(st, "direction", "") or "")
+        st_type = str(getattr(st, "task_type", "") or "")
+        conflict = canonical_direction_conflicts(st_metric, st_dir)
+        if conflict:
+            warnings.append(f"subtask {sid}: {conflict}")
+        try:
+            weight = float(getattr(st, "weight", 1.0) or 0.0)
+        except (TypeError, ValueError):
+            weight = 1.0
+        if weight > 0 and st_metric:
+            active_pairs.append((metric_name(st_metric), st_dir or "maximize"))
+            # The generic aggregate cannot score a metric that is not in its
+            # available set for the subtask's task type (e.g. a custom
+            # competition metric under a stock task type). Flag it at spec
+            # time; it is only fatal when no custom scorer is declared.
+            if st_type in GENERIC_ALLOWED_METRICS and metric_name(
+                st_metric
+            ) not in GENERIC_ALLOWED_METRICS[st_type]:
+                unsupported.append(
+                    f"subtask {sid}: {metric_name(st_metric)} is not a generic "
+                    f"metric for {st_type!r}"
+                )
+
+    paths_cfg = dict((getattr(spec, "metadata", {}) or {}).get("paths", {}) or {})
+    custom_scorer = str(paths_cfg.get("metrics_evaluator", "") or "")
+    spec_pair = (metric_name(spec_metric), spec_dir) if spec_metric else None
+    if len(set(active_pairs)) > 1:
+        msg = (
+            f"subtasks mix metrics/directions {sorted(set(active_pairs))} — "
+            "the generic aggregate cannot score them"
+        )
+        if custom_scorer:
+            warnings.append(
+                msg + f"; the official score will come from "
+                f"paths.metrics_evaluator {custom_scorer!r}"
+            )
+        else:
+            errors.append(
+                msg + " — declare one consistent subtask metric matching the "
+                "spec, or configure paths.metrics_evaluator in the task spec"
+            )
+    elif active_pairs and spec_pair and active_pairs[0] != spec_pair:
+        msg = (
+            f"subtask {active_pairs[0]} does not match the spec's "
+            f"primary_metric/direction {spec_pair} — the generic aggregate "
+            "refuses to score this spec"
+        )
+        if custom_scorer:
+            warnings.append(
+                msg + f"; the official score will come from "
+                f"paths.metrics_evaluator {custom_scorer!r} (make sure it "
+                f"returns the spec's primary metric {spec_pair[0]!r})"
+            )
+        else:
+            errors.append(
+                msg + " — align the subtask primary_metric/direction with "
+                "the spec, or declare paths.metrics_evaluator"
+            )
+    if unsupported:
+        _unsupported_msg = "; ".join(unsupported)
+        if custom_scorer:
+            warnings.append(
+                f"{_unsupported_msg} — the generic aggregate cannot score "
+                "this subtask; the official score will come from "
+                f"paths.metrics_evaluator {custom_scorer!r}"
+            )
+        else:
+            errors.append(
+                f"{_unsupported_msg} — use a generic metric for that task "
+                "type, or declare paths.metrics_evaluator"
+            )
 
     # ---- execution backend --------------------------------------------
     exec_cfg = dict(getattr(spec, "execution_config", {}) or {})

@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-19 | Spec-time metric/direction coverage for custom evaluators — canonical direction sets, actionable aggregate gates, preflight fail-fast, interactive_agent support, subtask metric inheritance | — (uncommitted) | [spec-metric-coverage](spec-metric-coverage.md) |
 | 2026-10-18 | Consolidate dependency source of truth in `pyproject.toml` (new `test` extra; delete drifted unreferenced `requirements.txt`) | [#105](https://github.com/taitran501/ai-harness/pull/105) | [consolidate-dependency-source](consolidate-dependency-source.md) |
 | 2026-10-18 | Minimal CI gate for main — built + verified green, **removed before merge** at operator decision (runner overhead); lands net: pyproject dep declarations (pyarrow/lightgbm/xgboost) + environment-independent dashboard/sync tests | [#104](https://github.com/taitran501/ai-harness/pull/104) | [minimal-ci-gate](minimal-ci-gate.md) |
 | 2026-10-18 | pytest-only tests → unittest: 17 module-level functions in `test_recursive_sealing` + `test_repair_integrity` converted to `TestCase` so the official runner (was 908, now 925) actually executes them; `run_tests.py` and `pytest` now agree | [#103](https://github.com/taitran501/ai-harness/pull/103) | [pytest-only-tests-unittest](pytest-only-tests-unittest.md) |

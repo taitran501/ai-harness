@@ -551,7 +551,18 @@ class UniversalTaskSpec:
         st_configs = task_cfg.get("subtasks", task_cfg.get("metrics", []))
         if isinstance(st_configs, dict):
             st_configs = [{"id": key, **value} for key, value in st_configs.items()]
+        # A subtask that does not declare its own metric inherits the spec's
+        # primary metric/direction. The generic aggregate scores subtask
+        # (metric, direction) against the spec's pair, so a silent default
+        # (macro_f1) under a different spec metric would be rejected at
+        # scoring time; inheriting makes single-target specs work as intended.
+        spec_primary_metric = metric_name(task_cfg.get("primary_metric", "macro_f1"))
+        spec_direction = str(task_cfg.get("direction", "maximize") or "maximize")
         for st in st_configs:
+            st = dict(st)
+            if st.get("primary_metric") is None and st.get("metric") is None:
+                st["primary_metric"] = spec_primary_metric
+                st["direction"] = spec_direction
             spec = SubtaskSpec.from_dict(st)
             subtasks_dict[spec.id] = spec
 
