@@ -691,6 +691,11 @@ with tempfile.TemporaryDirectory(prefix="aih-kaggle-work-") as temporary:
     with zipfile.ZipFile(io.BytesIO(bundle_bytes)) as archive:
         archive.extractall(workspace)
     os.chdir(workspace)
+    # Defense-in-depth for parent-process artifact export (export_run ->
+    # validate_run): make the workspace the hermetic project root so the
+    # scorer hook (src.*) imports even if the sys.path insertion above is
+    # ever removed.
+    os.environ["HARNESS_PROJECT_ROOT"] = str(workspace)
     sys.path.insert(0, str(workspace))
     try:
         # Loading by path avoids importing harness.__init__ before dependencies exist.
@@ -1082,7 +1087,8 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                                     "raw_output": "Downloaded Kaggle artifact failed its SHA-256 identity check.",
                                 }
                 migrated = cls.migrate_downloaded_artifacts(
-                    download_dir, target_artifacts_dir
+                    download_dir, target_artifacts_dir,
+                    project_root=project_root,
                 )
                 metrics_path = target_artifacts_dir / "metrics.json"
                 metrics_data = None
@@ -1121,10 +1127,20 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
     def migrate_downloaded_artifacts(
         download_dir: Path | str,
         target_artifacts_dir: Path | str,
+        *,
+        project_root: Optional[Path | str] = None,
     ) -> List[str]:
-        """Import one verified run, preserving every sealed artifact byte."""
-        from harness.artifacts import validate_run
+        """Import one verified run, preserving every sealed artifact byte.
 
+        ``project_root`` (the workspace owning the run's scorer hook) is put
+        on ``sys.path`` before ``validate_run`` so that artifact imports from
+        detached processes (journal sync, repair, output import CLI) resolve
+        ``src.*`` scorers hermetically instead of relying on ambient cwd/env.
+        """
+        from harness.artifacts import validate_run
+        from harness.hook_ref import ensure_hook_project_roots_on_sys_path
+
+        ensure_hook_project_roots_on_sys_path(project_root)
         source = Path(download_dir)
         manifests = list(source.rglob("artifact_manifest.json"))
         if len(manifests) != 1:
