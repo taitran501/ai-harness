@@ -16,13 +16,59 @@ BASE_REQUIREMENTS = [
     "pyyaml>=6.0", "scipy>=1.11.0",
 ]
 
+REQUIREMENT_CHECK_MODES = ("strict", "warn", "off")
 
-def ensure_dependencies(runtime, *, enable_internet=False):
-    """Check distribution versions without importing native extensions; fail early."""
+
+def _requirement_check_mode(requirement_check, runtime):
+    """Resolve the dependency-check mode: explicit arg > runtime manifest > strict."""
+    mode = requirement_check
+    if mode is None:
+        mode = (runtime or {}).get("requirement_check") or "strict"
+    if mode not in REQUIREMENT_CHECK_MODES:
+        raise ValueError(
+            f"Invalid requirement_check mode: {mode!r}. "
+            f"Expected one of {', '.join(REQUIREMENT_CHECK_MODES)}."
+        )
+    return mode
+
+
+def _detected_version(name):
+    """Installed distribution version for diagnostics; never imports the module."""
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return "not installed"
+
+
+def _requirement_cls():
+    """Lazy import so kaggle_runtime loads before the harness dependencies exist."""
     try:
         from packaging.requirements import Requirement
     except ImportError:
         from pip._vendor.packaging.requirements import Requirement
+    return Requirement
+
+
+def _describe_requirements(requirement_values, requirement_cls):
+    """Render requirements with detected versions: 'pandas>=3.0.0 (detected: pandas=2.2.2)'."""
+    parts = []
+    for value in requirement_values:
+        name = requirement_cls(value).name
+        parts.append(f"{value} (detected: {name}={_detected_version(name)})")
+    return ", ".join(parts)
+
+
+def ensure_dependencies(runtime, *, enable_internet=False, requirement_check=None):
+    """Check distribution versions without importing native extensions; fail early.
+
+    requirement_check controls what happens when the image does not satisfy the
+    pinned versions: "strict" (default) raises, "warn" logs a WARNING with the
+    detected image versions and continues, "off" skips the version gate (and any
+    install) after logging the detected versions. Setting it in the runtime
+    manifest (`task.runtime.requirement_check`) has the same effect.
+    """
+    Requirement = _requirement_cls()
+    mode = _requirement_check_mode(requirement_check, runtime)
 
     def satisfied(value):
         req = Requirement(value)
@@ -42,12 +88,28 @@ def ensure_dependencies(runtime, *, enable_internet=False):
         if plugin.get("distribution") and plugin.get("version") else None
     )
     plugin_ready = bool(plugin_requirement and satisfied(plugin_requirement))
+    if mode == "off":
+        detected = requirements + ([plugin_requirement] if plugin_requirement else [])
+        print(
+            f"[requirement_check=off] skipping dependency version gate; "
+            f"detected: {_describe_requirements(detected, Requirement)}",
+            flush=True,
+        )
+        return
     if not enable_internet and (missing or install.get("type") == "index" and not plugin_ready):
         needed = missing + ([install["requirement"]] if install.get("type") == "index" and not plugin_ready else [])
-        raise RuntimeError(
-            "Kaggle internet is disabled and the image does not satisfy: " + ", ".join(needed)
-            + ". Supply these versions in the image or explicitly enable task.runtime.enable_internet."
+        if mode == "strict":
+            raise RuntimeError(
+                "Kaggle internet is disabled and the image does not satisfy: " + _describe_requirements(needed, Requirement)
+                + ". Supply these versions in the image, enable task.runtime.enable_internet, "
+                + "or set task.runtime.requirement_check to warn/off."
+            )
+        print(
+            f"[requirement_check={mode}] WARNING: Kaggle internet is disabled and the image does "
+            f"not satisfy: {_describe_requirements(needed, Requirement)}. Continuing with the image versions.",
+            flush=True,
         )
+        return
     if missing:
         # Include all constraints so a newly installed dependency cannot invalidate a pin.
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", *requirements], check=True, timeout=600)
@@ -63,7 +125,10 @@ def ensure_dependencies(runtime, *, enable_internet=False):
     if plugin_requirement and not satisfied(plugin_requirement):
         remaining.append(plugin_requirement)
     if remaining:
-        raise RuntimeError("Kaggle dependency versions remain unsatisfied: " + ", ".join(remaining))
+        message = "Kaggle dependency versions remain unsatisfied: " + _describe_requirements(remaining, Requirement)
+        if mode == "strict":
+            raise RuntimeError(message)
+        print(f"[requirement_check={mode}] WARNING: {message}", flush=True)
 
 
 def _relative(value):

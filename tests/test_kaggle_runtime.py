@@ -2,6 +2,7 @@
 
 import ast
 import base64
+import contextlib
 import copy
 import io
 import json
@@ -98,6 +99,82 @@ class KaggleRuntimeTests(unittest.TestCase):
                 ensure_dependencies(runtime, enable_internet=True)
             self.assertIn("numpy==1.24.0", run.call_args.args[0])
 
+    def _image_versions(self, versions, missing=()):
+        importlib_metadata = __import__("harness.kaggle_runtime", fromlist=["metadata"]).metadata
+
+        def version(name):
+            if name in missing:
+                raise importlib_metadata.PackageNotFoundError(name)
+            return versions.get(name, "99.0")
+
+        return version
+
+    def test_strict_offline_reports_detected_image_versions(self):
+        runtime = copy.deepcopy(self.runtime)
+        runtime["requirements"] = ["pandas>=3.0.0", "xgboost==3.2.0"]
+        with patch(
+            "harness.kaggle_runtime.metadata.version",
+            side_effect=self._image_versions({"pandas": "2.2.2"}, missing=("xgboost",)),
+        ), patch("harness.kaggle_runtime.subprocess.run") as run:
+            with self.assertRaisesRegex(RuntimeError, "internet is disabled") as cm:
+                ensure_dependencies(runtime)
+            self.assertIn("pandas>=3.0.0 (detected: pandas=2.2.2)", str(cm.exception))
+            self.assertIn("xgboost==3.2.0 (detected: xgboost=not installed)", str(cm.exception))
+            run.assert_not_called()
+
+    def test_warn_offline_continues_with_warning_and_no_install(self):
+        runtime = copy.deepcopy(self.runtime)
+        runtime["requirements"] = ["pandas>=3.0.0"]
+        buffer = io.StringIO()
+        with patch("harness.kaggle_runtime.metadata.version", return_value="2.2.2"), patch(
+            "harness.kaggle_runtime.subprocess.run") as run, contextlib.redirect_stdout(buffer):
+            ensure_dependencies(runtime, requirement_check="warn")
+        output = buffer.getvalue()
+        self.assertIn("[requirement_check=warn] WARNING", output)
+        self.assertIn("detected: pandas=2.2.2", output)
+        run.assert_not_called()
+
+    def test_off_skips_version_gate_and_install_but_logs_detected_versions(self):
+        runtime = copy.deepcopy(self.runtime)
+        runtime["requirements"] = ["pandas>=3.0.0"]
+        buffer = io.StringIO()
+        with patch("harness.kaggle_runtime.metadata.version", return_value="2.2.2"), patch(
+            "harness.kaggle_runtime.subprocess.run") as run, contextlib.redirect_stdout(buffer):
+            ensure_dependencies(runtime, requirement_check="off")
+        output = buffer.getvalue()
+        self.assertIn("[requirement_check=off] skipping dependency version gate", output)
+        self.assertIn("detected: pandas=2.2.2", output)
+        run.assert_not_called()
+
+    def test_requirement_check_mode_resolution_and_validation(self):
+        runtime = copy.deepcopy(self.runtime)
+        runtime["requirements"] = ["pandas>=3.0.0"]
+        runtime["requirement_check"] = "warn"
+        with patch("harness.kaggle_runtime.metadata.version", return_value="2.2.2"), patch(
+            "harness.kaggle_runtime.subprocess.run") as run:
+            ensure_dependencies(runtime)  # manifest value applies when no explicit arg
+        run.assert_not_called()
+        with patch("harness.kaggle_runtime.metadata.version", return_value="2.2.2"), patch(
+            "harness.kaggle_runtime.subprocess.run"):
+            with self.assertRaisesRegex(RuntimeError, "internet is disabled"):
+                ensure_dependencies(runtime, requirement_check="strict")  # explicit overrides manifest
+        with self.assertRaisesRegex(ValueError, "Invalid requirement_check mode"):
+            ensure_dependencies(runtime, requirement_check="loud")
+        broken = copy.deepcopy(self.runtime)
+        broken["requirement_check"] = "loud"
+        with self.assertRaisesRegex(ValueError, "Invalid requirement_check mode"):
+            ensure_dependencies(broken)
+
+    def test_warn_online_downgrades_remaining_gate_to_warning(self):
+        runtime = copy.deepcopy(self.runtime)
+        runtime["requirements"] = ["numpy==1.24.0"]
+        buffer = io.StringIO()
+        with patch("harness.kaggle_runtime.metadata.version", return_value="99.0"), patch(
+            "harness.kaggle_runtime.subprocess.run") as run, contextlib.redirect_stdout(buffer):
+            ensure_dependencies(runtime, enable_internet=True, requirement_check="warn")
+        self.assertIn("numpy==1.24.0", run.call_args.args[0])
+        self.assertIn("remain unsatisfied", buffer.getvalue())
+
     def test_directory_archives_restore_only_manifest_files_and_missing_mount_fails(self):
         mount = self.root / "mount"
         stage_declared_data(self.project, mount)
@@ -152,6 +229,21 @@ class KaggleRuntimeTests(unittest.TestCase):
         runner's own env setup (arc-prize audit gap G1)."""
         source = (self.package() / "run_kaggle.py").read_text(encoding="utf-8")
         self.assertIn('os.environ["HARNESS_PROJECT_ROOT"] = str(workspace)', source)
+
+    def test_requirement_check_mode_is_pinned_into_generated_script_and_manifest(self):
+        """G3: the dependency-check gate travels with the bundle so the kernel
+        applies the mode the dispatch side validated (arc-prize audit: kernels
+        died on strict pins unsatisfiable in the offline image)."""
+        package = self.package(requirement_check="warn")
+        source = (package / "run_kaggle.py").read_text(encoding="utf-8")
+        self.assertIn("requirement_check='warn'", source)
+        bundle = json.loads((package / "code-bundle.json").read_text())
+        archive_path = package / bundle["directory"] / bundle["filename"]
+        with zipfile.ZipFile(archive_path) as archive:
+            runtime_json = json.loads(archive.read("ai-harness-runtime.json"))
+        self.assertEqual(runtime_json["requirement_check"], "warn")
+        with self.assertRaisesRegex(ValueError, "requirement_check must be"):
+            self.package(requirement_check="loud")
 
     def test_generated_script_runs_full_validation_and_exports_one_manifest(self):
         package = self.package(job_id="job-fixture")
