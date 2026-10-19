@@ -355,6 +355,92 @@ class TestTaskValidate(unittest.TestCase):
             result["warnings"],
         )
 
+    def test_scorable_metrics_not_flagged_as_unsupported(self) -> None:
+        """Metrics the generic aggregate *can* score must not be flagged.
+
+        Guards against the allow-list being narrower than ``evaluate()``:
+        ``rmsle`` (regression) and ``weighted_f1`` (binary) are scorable, so a
+        spec declaring them is valid and must not raise an "unsupported
+        metric" error (this was a live false-positive before the table was
+        kept in sync with ``evaluate()``).
+        """
+        ws = self._make_ws("tv_scorable_")
+        raw = {
+            "task": {
+                "id": "unit_task",
+                "name": "Unit Task",
+                "task_type": "regression",
+                "primary_metric": "rmsle",
+                "direction": "minimize",
+                "subtasks": [
+                    {"id": "main", "task_type": "regression", "column": "target",
+                     "primary_metric": "rmsle", "direction": "minimize"}
+                ],
+                "execution": {"backend": "local"},
+            }
+        }
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        self.assertTrue(result["ok"], result)
+        self.assertFalse(
+            any("is not a generic metric" in e for e in result["errors"]),
+            result["errors"],
+        )
+        self.assertFalse(
+            any("is not a generic metric" in w for w in result["warnings"]),
+            result["warnings"],
+        )
+
+        # Same guard for a scorable classification metric.
+        raw["task"]["task_type"] = "binary_classification"
+        raw["task"]["primary_metric"] = "weighted_f1"
+        raw["task"]["direction"] = "maximize"
+        raw["task"]["subtasks"] = [
+            {"id": "main", "task_type": "binary_classification", "column": "label",
+             "primary_metric": "weighted_f1", "direction": "maximize"}
+        ]
+        cfg = _write_task(ws, raw)
+        result = validate_task(cfg, ws)
+        self.assertFalse(
+            any("is not a generic metric" in m for m in result["errors"] + result["warnings"]),
+            result,
+        )
+
+    def test_allowed_table_matches_evaluate_for_regression(self) -> None:
+        """GENERIC_ALLOWED_METRICS['regression'] must equal the metrics the
+        generic aggregate can actually score: no false rejections (narrow
+        table) and no false passes (wide table)."""
+        import pandas as pd
+
+        from harness.evaluation import GENERIC_ALLOWED_METRICS, evaluate
+        from harness.task_spec import UniversalTaskSpec
+
+        truth = pd.DataFrame({"id": [1, 2, 3, 4], "target": [10.0, 20.0, 30.0, 40.0]})
+        preds = {"target": [11.0, 19.0, 31.0, 39.0]}
+
+        def scores(metric: str) -> bool:
+            spec = UniversalTaskSpec.from_dict({
+                "name": "t", "task_type": "regression",
+                "primary_metric": metric, "direction": "minimize",
+                "id_column": "id",
+                "subtasks": [{"id": "target", "task_type": "regression",
+                              "primary_metric": metric, "direction": "minimize",
+                              "weight": 1.0}],
+            })
+            try:
+                evaluate(spec, truth, preds)
+                return True
+            except ValueError as exc:
+                return "Unsupported metric" not in str(exc)
+
+        allowed = GENERIC_ALLOWED_METRICS["regression"]
+        for metric in sorted(allowed):
+            self.assertTrue(scores(metric), f"{metric} is in the table but evaluate() rejects it")
+        # A metric that evaluate() genuinely cannot score for regression must
+        # not be in the table (guards against a too-wide table).
+        self.assertFalse(scores("accuracy"))
+        self.assertNotIn("accuracy", allowed)
+
 
 if __name__ == "__main__":
     unittest.main()

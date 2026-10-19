@@ -1,10 +1,10 @@
 # Spec-time metric/direction coverage for custom evaluators
 
 - **Date**: 2026-10-19
-- **PR**: — (uncommitted; working branch `main`)
-- **Branch**: `main` (working tree; not yet committed)
-- **Status**: open
-- **Commits**: — (pending)
+- **PR**: [#106](https://github.com/taitran501/ai-harness/pull/106)
+- **Branch**: `main` (squash commit `dd0e09f`)
+- **Status**: merged
+- **Commits**: `dd0e09f` (squash)
 
 ## Why
 
