@@ -1,7 +1,7 @@
 # Advisory CLI auth probe in `ensure_cli_ready`
 
 - **Date**: 2026-10-19
-- **PR**: TBD (this change)
+- **PR**: [#113](https://github.com/taitran501/ai-harness/pull/113)
 - **Branch**: `feat/cli-auth-probe`
 - **Status**: open
 - **Commits**: —
