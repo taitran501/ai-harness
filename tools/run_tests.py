@@ -6,7 +6,15 @@ Usage:
     python tools/run_tests.py --fast          # fast tier: skip slow modules
     python tools/run_tests.py --list-slow     # show which modules are slow
     python tools/run_tests.py --list-smoke    # show which modules are smoke
+    python tools/run_tests.py --no-lock       # disable the concurrency guard
     python tools/run_tests.py test_x test_y   # run specific modules
+
+Concurrency guard: a suite acquires an advisory lock scoped to this checkout
+so two ``run_tests.py`` invocations can never run at once on the same tree.
+Concurrent suites contend for ``__pycache__`` / cache files and produce
+spurious ``PermissionError`` / flaky failures that are not real regressions.
+The guard fails fast (exit 3) when another suite holds the lock; pass
+``--no-lock`` to bypass (not recommended).
 
 The slow tier holds the modules that exercise full pipelines / heavy
 subprocess work (Kaggle packaging, sync CLI against throwaway git clones,
@@ -23,8 +31,13 @@ is chosen from per-module timing measurement, not by feel.
 
 from __future__ import annotations
 
+import atexit
+import hashlib
+import json
 import os
+import platform
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -85,6 +98,120 @@ def _stem(module: str) -> str:
     return module.rsplit(".", 1)[-1]
 
 
+# ---------------------------------------------------------------------------
+# Concurrency guard: prevent two run_tests.py suites on the same checkout.
+# ---------------------------------------------------------------------------
+
+
+class _ConcurrentSuiteError(RuntimeError):
+    """Raised when another suite already holds the per-checkout lock."""
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort liveness check. Fails safe (returns True) when it cannot
+    determine, so a live lock is never stolen by mistake."""
+    if pid is None or pid <= 0:
+        return False
+    if os.name == "posix":
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+    # Windows
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, int(pid))
+        if not handle:
+            return False
+        kernel32.CloseHandle(handle)
+        return True
+    except Exception:  # noqa: BLE001 - fail safe on any ctypes/platform quirk
+        return True
+
+
+class _SuiteLock:
+    """Advisory lock preventing concurrent suites on the same checkout.
+
+    The lock lives in the OS temp dir (never the working tree) and is scoped
+    to the checkout by a hash of the repo root. It is claimed with an atomic
+    exclusive create; a crashed/finished holder is detected via its recorded
+    PID + age and its lock is stolen, so a stuck run can never wedge the
+    suite permanently.
+    """
+
+    MAX_AGE_SECONDS = 60 * 60  # any legitimate run is far shorter than 1 h
+    RETRIES = 5
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def acquire(self) -> None:
+        for _ in range(self.RETRIES):
+            if self._try_claim():
+                return
+            time.sleep(0.2)
+        self._raise_if_live()
+
+    def _try_claim(self) -> bool:
+        try:
+            with self.path.open("x", encoding="utf-8") as fd:  # atomic create
+                fd.write(json.dumps({
+                    "pid": os.getpid(),
+                    "ts": time.time(),
+                    "host": platform.node(),
+                }))
+            atexit.register(self.release)
+            return True
+        except FileExistsError:
+            self._maybe_steal()  # remove a dead/stale lock so we can re-claim
+            return False
+
+    def _read(self) -> dict:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:  # noqa: BLE001 - unreadable/corrupt lock is treated as stale
+            return {}
+
+    def _maybe_steal(self) -> None:
+        data = self._read()
+        pid = data.get("pid")
+        age = time.time() - float(data.get("ts", 0.0))
+        if (not _pid_alive(pid)) or age > self.MAX_AGE_SECONDS:
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _raise_if_live(self) -> None:
+        data = self._read()
+        pid = data.get("pid")
+        age = int(time.time() - float(data.get("ts", 0.0)))
+        raise _ConcurrentSuiteError(
+            f"Another run_tests.py suite is already running on this checkout "
+            f"(pid {pid}, ~{age}s ago, host {data.get('host', '?')}; lock: {self.path}). "
+            f"Concurrent suites cause file-lock contention and corrupt results. "
+            f"Wait for it to finish, or pass --no-lock to bypass this guard."
+        )
+
+    def release(self) -> None:
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _suite_lock_path() -> Path:
+    sig = hashlib.sha1(str(REPO_ROOT).encode("utf-8")).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"ai-harness-run-tests-{sig}.lock"
+
+
 def main(argv: list[str]) -> int:
     # Isolate the test environment: drop ANY globally-set HARNESS_* / AI_HARNESS_*
     # var so the suite runs in a clean environment. The suite is written to run in
@@ -101,6 +228,8 @@ def main(argv: list[str]) -> int:
     args = [a for a in args if a != "--fast"]
     smoke = "--smoke" in args
     args = [a for a in args if a != "--smoke"]
+    no_lock = "--no-lock" in args
+    args = [a for a in args if a != "--no-lock"]
 
     if "--list-slow" in args:
         for name in SLOW_MODULES:
@@ -111,6 +240,15 @@ def main(argv: list[str]) -> int:
         for name in SMOKE_MODULES:
             print(name)
         return 0
+
+    # Guard against concurrent suites on this checkout (file-lock contention
+    # corrupts results). --no-lock disables the guard.
+    if not no_lock:
+        try:
+            _SuiteLock(_suite_lock_path()).acquire()
+        except _ConcurrentSuiteError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 3
 
     if args:
         # Accept "test_x", "tests.test_x", "tests/test_x.py",
