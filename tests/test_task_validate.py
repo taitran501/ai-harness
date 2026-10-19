@@ -441,6 +441,83 @@ class TestTaskValidate(unittest.TestCase):
         self.assertFalse(scores("accuracy"))
         self.assertNotIn("accuracy", allowed)
 
+    def _binary_classification_fixture(self):
+        """Binary-classification fixture with hard labels plus per-class
+        probabilities, so probability metrics (roc_auc, logloss, pr_auc,
+        brier_score) are genuinely scored rather than skipped."""
+        import pandas as pd
+
+        truth = pd.DataFrame(
+            {"id": [1, 2, 3, 4, 5, 6], "label": [0, 1, 0, 1, 0, 1]}
+        )
+        preds = {
+            "label": [0, 1, 1, 1, 0, 1],
+            "proba_label": [
+                [0.9, 0.1],
+                [0.2, 0.8],
+                [0.6, 0.4],
+                [0.1, 0.9],
+                [0.7, 0.3],
+                [0.3, 0.7],
+            ],
+            "classes_label": [0, 1],
+        }
+        return truth, preds
+
+    def test_allowed_table_matches_evaluate_for_binary_classification(self) -> None:
+        """GENERIC_ALLOWED_METRICS['binary_classification'] must equal the
+        metrics the generic aggregate can actually score: no false
+        rejections (narrow table) and no false passes (wide table).
+
+        Mirrors the regression drift guard but for the classification
+        family. The fixture carries per-class probabilities so the
+        probability-dependent metrics are exercised end-to-end.
+        """
+        from harness.evaluation import GENERIC_ALLOWED_METRICS, evaluate
+        from harness.task_spec import UniversalTaskSpec
+
+        truth, preds = self._binary_classification_fixture()
+
+        def scores(metric: str) -> bool:
+            spec = UniversalTaskSpec.from_dict({
+                "name": "t", "task_type": "binary_classification",
+                "primary_metric": metric, "direction": "maximize",
+                "id_column": "id",
+                "subtasks": [{"id": "label", "task_type": "binary_classification",
+                              "column": "label", "primary_metric": metric,
+                              "direction": "maximize", "weight": 1.0,
+                              "classes": ["0", "1"]}],
+            })
+            try:
+                evaluate(spec, truth, preds)
+                return True
+            except ValueError as exc:
+                return "Unsupported metric" not in str(exc)
+
+        allowed = GENERIC_ALLOWED_METRICS["binary_classification"]
+        for metric in sorted(allowed):
+            self.assertTrue(
+                scores(metric), f"{metric} is in the table but evaluate() rejects it"
+            )
+        # A regression-only metric must not be offered for classification
+        # (guards against a too-wide table).
+        self.assertFalse(scores("rmse"))
+        self.assertNotIn("rmse", allowed)
+
+    def test_multilabel_table_differs_from_binary_only_by_ndcg(self) -> None:
+        """The multilabel allow-list is the classification set with
+        qwk/brier_score swapped for ndcg — the exact contract evaluated by
+        ``evaluate()``. Locks the table against drift from the binary family.
+        """
+        from harness.evaluation import GENERIC_ALLOWED_METRICS
+
+        binary = GENERIC_ALLOWED_METRICS["binary_classification"]
+        multilabel = GENERIC_ALLOWED_METRICS["multilabel_classification"]
+        self.assertEqual(multilabel, binary - {"qwk", "brier_score"} | {"ndcg"})
+        self.assertIn("ndcg", multilabel)
+        self.assertNotIn("qwk", multilabel)
+        self.assertNotIn("brier_score", multilabel)
+
 
 if __name__ == "__main__":
     unittest.main()

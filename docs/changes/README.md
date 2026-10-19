@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-19 | Test hygiene — concurrency guard in `run_tests.py` (advisory temp-dir lock, fail-fast exit 3, `--no-lock`) + extended `GENERIC_ALLOWED_METRICS` drift guards for binary/multilabel classification against `evaluate()` | [#108](https://github.com/taitran501/ai-harness/pull/108) | [test-hygiene-concurrency](test-hygiene-concurrency.md) |
 | 2026-10-19 | Align `GENERIC_ALLOWED_METRICS` with `evaluate()` capability — table mirrored the scoring branches (regression 7→14, classification 6→11, multilabel 4→10, ranking + regression-family aliases), eliminating false-positive preflight rejections of scorable metrics (`rmsle`, `smape`, `weighted_f1`, ...) | [#107](https://github.com/taitran501/ai-harness/pull/107) | [generic-metrics-table-align](generic-metrics-table-align.md) |
 | 2026-10-19 | Spec-time metric/direction coverage for custom evaluators — canonical direction sets, actionable aggregate gates, preflight fail-fast, interactive_agent support, subtask metric inheritance | [#106](https://github.com/taitran501/ai-harness/pull/106) | [spec-metric-coverage](spec-metric-coverage.md) |
 | 2026-10-18 | Consolidate dependency source of truth in `pyproject.toml` (new `test` extra; delete drifted unreferenced `requirements.txt`) | [#105](https://github.com/taitran501/ai-harness/pull/105) | [consolidate-dependency-source](consolidate-dependency-source.md) |
