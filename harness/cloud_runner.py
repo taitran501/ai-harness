@@ -44,6 +44,41 @@ from harness.templates.modal_template import (
 from harness.tree_journal import TreeJournal
 
 
+def _warn_if_framework_checkout_dirty() -> None:
+    """Warn when the canonical framework checkout is dirty at dispatch time.
+
+    Remote bundles are built from the installed (canonical) framework
+    source. Uncommitted edits there diverge from any committed identity
+    the kernel records and will not survive ``ai-harness sync`` — most
+    often they are an agent patching the checkout in place instead of
+    fixing the framework repo.
+    """
+    import harness
+
+    framework_dir = Path(harness.__file__).resolve().parent.parent
+    if not (framework_dir / ".git").exists():
+        return
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(framework_dir), capture_output=True, text=True, timeout=15,
+        )
+    except Exception:
+        return
+    if proc.returncode != 0:
+        return
+    dirty = [line for line in proc.stdout.splitlines() if line.strip()]
+    if dirty:
+        print(
+            "[dispatch preflight] WARNING: framework checkout is dirty "
+            f"({len(dirty)} uncommitted change(s) at {framework_dir}). The "
+            "remote bundle ships these uncommitted edits, and they will not "
+            "match any committed framework identity. Commit or stash them "
+            "before dispatching for reproducible remote runs.",
+            flush=True,
+        )
+
+
 def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[str | Path] = None) -> Dict[str, Any]:
     if os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1":
         raise RuntimeError(
@@ -52,6 +87,7 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
             "Run the experiment locally with the runner CLI instead."
         )
     project = HarnessProject.discover(project_root)
+    _warn_if_framework_checkout_dirty()
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     config = Path(config_path).expanduser()
@@ -310,6 +346,8 @@ def run_via_kaggle(
     context = _prepare_remote_run(config_path, "kaggle", project_root)
     project = context["project"]
     exp_id = context["exp_id"]
+    # Fail fast on a missing/broken kaggle CLI before any upload or push.
+    KaggleKernelManager.ensure_cli_ready()
     managed_job_id = job_id
     job_id = job_id or f"kaggle_{exp_id}_{uuid.uuid4().hex[:10]}"
     if managed_job_id:
@@ -320,7 +358,9 @@ def run_via_kaggle(
 
     # Upload task data only after the task/provider/fingerprint consent check.
     dataset_slug = context["external_kaggle_dataset"]
-    if not dataset_slug:
+    if dataset_slug and str(dataset_slug).lower() == "none":
+        dataset_slug = None
+    elif not dataset_slug:
         username = KaggleKernelManager.get_authenticated_username()
         resources = private_upload_resource_names(
             project, fingerprint_data=context["fingerprint"], kaggle_username=username
@@ -367,9 +407,17 @@ def run_via_kaggle(
             project.root, managed_job_id, status="RUNNING", provider_status="PUSHING",
             exp_id=exp_id, config_sha256=context["config_sha256"],
         )
-    ret = subprocess.run(cmd, cwd=str(project.root))
-    if ret.returncode != 0:
-        raise RuntimeError(f"Kaggle push failed with code {ret.returncode}")
+    from harness.kaggle_compat import retry_with_backoff
+
+    def _do_push():
+        p = subprocess.run(cmd, cwd=str(project.root), capture_output=True, text=True)
+        if p.returncode != 0:
+            out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
+            print(f"[Kaggle push retry notice]: {out}", flush=True)
+            raise RuntimeError(f"Kaggle push failed with code {p.returncode}: {out}")
+        return p
+
+    retry_with_backoff(_do_push, max_attempts=4, base_delay=2.0, max_delay=15.0)
 
     # Use the ID actually submitted; title normalization and job suffixes may change it.
     kernel_slug = json.loads((stage_dir / "kernel-metadata.json").read_text(encoding="utf-8"))["id"]

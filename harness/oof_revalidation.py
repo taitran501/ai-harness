@@ -108,8 +108,9 @@ def _custom_hook(run_config: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     hook = run_config.get("paths", {}).get("metrics_evaluator")
     if not hook:
         return None
-    hook = str(hook)
-    return hook.split(":", 1) if ":" in hook else tuple(hook.rsplit(".", 1))
+    from harness.hook_ref import resolve_metrics_hook
+
+    return resolve_metrics_hook(str(hook))
 
 
 def _score_variant(

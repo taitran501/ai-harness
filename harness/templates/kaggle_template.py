@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -48,6 +49,9 @@ def _is_critical_identity_mismatch(key: str, mismatch: Dict[str, Any]) -> bool:
 
 class KaggleKernelManager:
     """Manages Kaggle Dataset sync, Kernel dispatch, status monitoring, and output pulling."""
+
+    # Cached `kaggle --version` from ensure_cli_ready(); None until probed.
+    _cli_version_cache: Optional[str] = None
 
     @staticmethod
     def get_authenticated_username() -> str:
@@ -257,6 +261,55 @@ class KaggleKernelManager:
             "logs": "\n".join(logs),
         }
 
+    @classmethod
+    def ensure_cli_ready(cls, *, check_python: bool = True) -> str:
+        """Fail fast when the Kaggle CLI is missing or broken.
+
+        Runs before any upload/push so environment problems surface with
+        install guidance instead of empty mid-dispatch errors (a live
+        kernel died in ``wait_for_dataset`` with an empty error surface
+        when the CLI failed silently). The version probe is cached per
+        process so repeated calls are free.
+        """
+        if cls._cli_version_cache is not None:
+            return cls._cli_version_cache
+        try:
+            proc = subprocess.run(
+                ["kaggle", "--version"], capture_output=True, text=True, timeout=30
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Kaggle CLI not found on PATH. Install it "
+                "(see docs/kaggle_execution.md) and run `kaggle auth login` "
+                "before dispatching remote kernels."
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                "Kaggle CLI version probe timed out after 30s; check network "
+                "or antivirus interference and retry."
+            ) from exc
+        output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"Kaggle CLI failed on startup (exit {proc.returncode}): "
+                f"{output or '<no output>'}"
+            )
+        if check_python and sys.version_info < (3, 11):
+            print(
+                "[kaggle preflight] WARNING: docs/kaggle_execution.md requires "
+                f"Python 3.11+; this process runs {sys.version.split()[0]}. "
+                "A mismatched local runtime may produce CLI errors that do not "
+                "reproduce on the kernel image.",
+                file=sys.stderr, flush=True,
+            )
+        version = output.splitlines()[-1].strip() if output else "unknown"
+        cls._cli_version_cache = version
+        print(
+            f"[kaggle preflight] kaggle CLI ready: {version} "
+            f"(python {sys.version.split()[0]})", flush=True
+        )
+        return version
+
     @staticmethod
     def wait_for_dataset(
         dataset_slug,
@@ -281,9 +334,14 @@ class KaggleKernelManager:
             if proc.returncode != 0:
                 consecutive_errors += 1
                 last_error = output
-                # Tolerate transient HTTP 403/404/500 or connection errors during initial asynchronous propagation
-                if consecutive_errors < max_consecutive_errors and any(
-                    code in output.lower()
+                lowered = output.lower()
+                # Tolerate transient HTTP 403/404/500 or connection errors during
+                # initial asynchronous propagation. An empty CLI failure is
+                # treated as transient too: surfacing it immediately produced
+                # useless "status failed" errors with no detail (live incident
+                # job_20261019_095919), so retry until the budget is spent.
+                transient = (not lowered.strip()) or any(
+                    code in lowered
                     for code in [
                         "403",
                         "404",
@@ -295,10 +353,15 @@ class KaggleKernelManager:
                         "connection",
                         "timeout",
                     ]
-                ):
+                )
+                if transient and consecutive_errors < max_consecutive_errors:
                     time.sleep(max(2.0, poll_interval))
                     continue
-                raise RuntimeError(f"Kaggle dataset status failed: {output}")
+                raise RuntimeError(
+                    f"Kaggle dataset status failed (exit {proc.returncode}) "
+                    f"after {consecutive_errors} attempt(s): "
+                    f"{output or '<no CLI output>'}"
+                )
 
             consecutive_errors = 0
             last = (proc.stdout or "").strip().strip('"').rsplit(".", 1)[-1].upper()
@@ -308,7 +371,9 @@ class KaggleKernelManager:
                 raise RuntimeError(f"Kaggle dataset processing failed: {output}")
             time.sleep(max(0.0, poll_interval))
         raise TimeoutError(
-            f"Kaggle dataset did not become ready before timeout (last status: {last}, last error: {last_error})"
+            f"Kaggle dataset did not become ready before timeout "
+            f"(last status: {last}, last error: {last_error or '<none>'}). "
+            f"Check manually: kaggle datasets status {dataset_slug}"
         )
 
     @classmethod
@@ -319,6 +384,7 @@ class KaggleKernelManager:
         enable_gpu: bool = True,
         enable_internet: bool = True,
         dataset_sources: Optional[List[str]] = None,
+        competition_sources: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Generate kernel-metadata.json configuration dictionary."""
         username = cls.get_authenticated_username()
@@ -327,6 +393,7 @@ class KaggleKernelManager:
             owner, kernel_slug = kernel_slug.split("/", 1)
         kernel_slug = cls._bounded_slug(kernel_slug)
         full_kernel_id = f"{owner}/{kernel_slug}"
+        clean_datasets = [s for s in (dataset_sources or []) if s and s.lower() != "none"]
         return {
             "id": full_kernel_id,
             "title": full_kernel_id.split("/")[-1].replace("-", " ").title(),
@@ -337,8 +404,8 @@ class KaggleKernelManager:
             "enable_gpu": "true" if enable_gpu else "false",
             "enable_tpu": "false",
             "enable_internet": "true" if enable_internet else "false",
-            "dataset_sources": dataset_sources or [],
-            "competition_sources": [],
+            "dataset_sources": clean_datasets,
+            "competition_sources": competition_sources or [],
             "kernel_sources": [],
             "model_sources": [],
         }
@@ -383,8 +450,21 @@ class KaggleKernelManager:
         if job_id:
             # Polling 'latest' must refer to this dispatch, not an older run of the same experiment.
             slug += "-" + hashlib.sha256(job_id.encode()).hexdigest()[:10]
+        competition_sources = []
+        try:
+            import yaml
+            task_dict = yaml.safe_load(project.task_config_path.read_text(encoding="utf-8")) or {}
+            task_info = task_dict.get("task", task_dict)
+            comp_id = task_info.get("competition_id")
+            if comp_id:
+                competition_sources.append(comp_id)
+        except Exception:
+            pass
+
         resolved_dataset = dataset_slug
-        if not resolved_dataset or resolved_dataset == "antigravity/dataset":
+        if resolved_dataset and resolved_dataset.lower() == "none":
+            resolved_dataset = None
+        elif not resolved_dataset or resolved_dataset == "antigravity/dataset":
             from harness.cloud_policy import private_upload_resource_names
 
             resources = private_upload_resource_names(project, kaggle_username=username)
@@ -421,6 +501,13 @@ class KaggleKernelManager:
                     tree_digest.hexdigest(),
                     bundle_mode,
                 )
+                # Without a provider dataset the task data ships inside the
+                # code bundle, so its bytes are part of the bundle identity.
+                if not resolved_dataset:
+                    train_file = root / "dataset" / "train.csv"
+                    bundle_cache_key = bundle_cache_key + (
+                        train_file.read_bytes() if train_file.is_file() else b"",
+                    )
             except Exception:
                 bundle_cache_key = None
         cached_bytes = _BUNDLE_BYTES_CACHE.get(bundle_cache_key) if bundle_cache_key else None
@@ -448,6 +535,14 @@ class KaggleKernelManager:
                     source = root / rel
                     if source.is_dir():
                         shutil.copytree(source, bundle_base / rel, dirs_exist_ok=True)
+                if not resolved_dataset:
+                    # No separate provider dataset: the kernel has no data
+                    # mount, so the task data ships inside the code bundle.
+                    train_file = root / "dataset" / "train.csv"
+                    if train_file.is_file():
+                        dest = bundle_base / "dataset" / "train.csv"
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(train_file, dest)
                 # Bundle the exact installed harness source tree, not a workspace-local fork.
                 harness_source = Path(__file__).resolve().parents[1]
                 shutil.copytree(
@@ -565,6 +660,7 @@ if hashlib.sha256(bundle_bytes).hexdigest() != {bundle_sha256!r}:
         (stage / "code-bundle.json").write_text(json.dumps(bundle_info, indent=2), encoding="utf-8")
         meta = cls.generate_kernel_metadata(
             kernel_slug=slug, code_file="run_kaggle.py", dataset_sources=sources,
+            competition_sources=competition_sources,
             enable_internet=enable_internet,
         )
         (stage / "kernel-metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -602,9 +698,10 @@ with tempfile.TemporaryDirectory(prefix="aih-kaggle-work-") as temporary:
         runtime_path = Path("ai-harness-runtime.json")
         runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
         helpers["ensure_dependencies"](runtime, enable_internet={enable_internet!r})
-        input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
-        print(f"[Kaggle Kernel] Using input_root: {{input_root}}", flush=True)
-        helpers["restore_dataset"](input_root, workspace)
+        if {bool(resolved_dataset)!r}:
+            input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
+            print(f"[Kaggle Kernel] Using input_root: {{input_root}}", flush=True)
+            helpers["restore_dataset"](input_root, workspace)
         # Tell the runner it is already inside the dispatched kernel so the
         # task contract's cloud backend is not re-applied (no nested dispatch).
         os.environ["AI_HARNESS_REMOTE_KERNEL"] = "1"
@@ -632,6 +729,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
     @classmethod
     def push_code_bundle(cls, package_dir: Path | str) -> Dict[str, Any]:
         """Upload a private, content-addressed code dataset before the kernel push."""
+        cls.ensure_cli_ready()
         stage = Path(package_dir)
         bundle = json.loads((stage / "code-bundle.json").read_text(encoding="utf-8"))
         if bundle["mode"] == "embedded":

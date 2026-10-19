@@ -331,6 +331,7 @@ class KaggleRuntimeTests(unittest.TestCase):
             KaggleKernelManager, "get_authenticated_username", return_value="fixture-user"), patch(
             "harness.cloud_runner.subprocess.run", side_effect=kernel_push) as push, patch.object(
             KaggleKernelManager, "push_code_bundle", side_effect=code_upload), patch.object(
+            KaggleKernelManager, "ensure_cli_ready", return_value="Kaggle CLI 2.2.4"), patch.object(
             KaggleKernelManager, "wait_for_kernel", return_value={"status": "COMPLETED"}) as wait, patch.object(
             KaggleKernelManager, "pull_kernel_output", return_value={"success": True}) as pull, patch(
             "harness.cloud_runner._sync_completed_run", return_value={}), patch.dict(sys.modules, {"kaggle": None}):

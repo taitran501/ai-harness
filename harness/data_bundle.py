@@ -23,7 +23,16 @@ DATA_PATH_KEYS = (
     "dataset_path",
     "data_path",
 )
-BLOCKED_PATH_PARTS = {".git", ".env", ".kaggle", ".modal", ".ai-harness", "artifacts", "submissions"}
+#: Parts that must never be uploaded as task data (credentials, harness
+#: evidence, provider state). Declaring or finding these anywhere in a
+#: bundle aborts staging.
+PROTECTED_PATH_PARTS = {".env", ".kaggle", ".ai-harness", ".modal", "artifacts", "submissions"}
+#: Directory metadata that may legitimately live *inside* a declared data
+#: directory (e.g. a dataset cloned from GitHub carries a ``.git/``). Such
+#: files are skipped, not uploaded, and do not fail the bundle. Declaring
+#: one directly as task data is still refused.
+METADATA_SKIP_PARTS = {".git"}
+BLOCKED_PATH_PARTS = PROTECTED_PATH_PARTS | METADATA_SKIP_PARTS
 DATA_MANIFEST_NAME = "aih-data-bundle.json"
 
 
@@ -109,6 +118,7 @@ def _files_under(project_root: Path, roots: List[Tuple[Path, str]]) -> List[Tupl
         source_files = [source] if source.is_file() else sorted(path for path in source.rglob("*") if path.is_file())
         if not source_files:
             raise DataBundleError(f"Declared task data directory contains no files: {relative}")
+        kept = 0
         for path in source_files:
             actual = path.resolve()
             try:
@@ -116,9 +126,19 @@ def _files_under(project_root: Path, roots: List[Tuple[Path, str]]) -> List[Tupl
             except ValueError as exc:
                 raise DataBundleError(f"Task data symlink points outside the workspace: {path}") from exc
             parts = {part.casefold() for part in Path(file_rel).parts}
-            if parts.intersection(BLOCKED_PATH_PARTS):
+            if parts.intersection(PROTECTED_PATH_PARTS):
                 raise DataBundleError(f"Refusing to include a protected task data file: {file_rel}")
+            if parts.intersection(METADATA_SKIP_PARTS):
+                # Version-control metadata inside a cloned dataset is not
+                # competition data; drop it instead of failing the bundle.
+                continue
             files.append((actual, file_rel))
+            kept += 1
+        if kept == 0:
+            raise DataBundleError(
+                f"Declared task data directory has no uploadable files "
+                f"(everything is skipped metadata): {relative}"
+            )
     deduplicated = {relative: path for path, relative in files}
     return [(deduplicated[key], key) for key in sorted(deduplicated)]
 
