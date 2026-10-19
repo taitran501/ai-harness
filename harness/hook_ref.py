@@ -13,6 +13,9 @@ invalidate sealed runs.
 
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
 from typing import Tuple
 
 
@@ -39,18 +42,17 @@ def resolve_metrics_hook(hook: str) -> Tuple[str, str]:
     return module, name
 
 
-def ensure_hook_project_roots_on_sys_path() -> None:
+def ensure_hook_project_roots_on_sys_path(project_root: str | os.PathLike | None = None) -> None:
     """Put the task workspace on ``sys.path`` before custom scorer imports.
 
     ``validate_run`` executes outside the runner on journal sync, repair
     and artifact-import paths, where the runner's own ``sys.path``
-    insertion is absent. Remote kernels set ``HARNESS_PROJECT_ROOT``;
-    attached workspaces resolve through ``harness.project``.
+    insertion is absent. An explicit ``project_root`` (known by the
+    caller, e.g. the dispatch/pull context) takes precedence and is
+    inserted first; without it, remote kernels rely on
+    ``HARNESS_PROJECT_ROOT`` and attached workspaces resolve through
+    ``harness.project``.
     """
-    import os
-
-    import sys
-
     candidates = [os.environ.get("HARNESS_PROJECT_ROOT") or ""]
     try:
         from harness.project import resolve_project_root
@@ -58,6 +60,8 @@ def ensure_hook_project_roots_on_sys_path() -> None:
         candidates.append(str(resolve_project_root()))
     except Exception:
         pass
+    if project_root is not None:
+        candidates.append(str(Path(project_root).expanduser()))
     for root in candidates:
         if root and root not in sys.path:
             sys.path.insert(0, root)

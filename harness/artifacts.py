@@ -145,9 +145,24 @@ def validate_run(directory, *, task_spec=None, plugin=None, expected=None):
     if hook:
         ensure_hook_project_roots_on_sys_path()
         module, name = resolve_metrics_hook(hook)
-        if manifest.get("custom_scorer_sha256") != digest(
-            inspect.getsource(getattr(importlib.import_module(module), name))
-        ):
+        try:
+            scorer_func = getattr(importlib.import_module(module), name)
+        except (ModuleNotFoundError, AttributeError) as exc:
+            import os
+
+            import sys
+
+            raise RuntimeError(
+                f"metrics_evaluator hook {hook!r} is not importable "
+                f"(module={module!r}, name={name!r}). "
+                f"project_root={os.environ.get('HARNESS_PROJECT_ROOT', '<unset>')}; "
+                f"sys.path[:5]={sys.path[:5]!r}. "
+                "Verify the scorer module exists in the task workspace (and in "
+                "the Kaggle code bundle for remote runs); callers that import "
+                "artifacts outside the workspace (journal sync, repair, Kaggle "
+                "output import) should pass the workspace root explicitly."
+            ) from exc
+        if manifest.get("custom_scorer_sha256") != digest(inspect.getsource(scorer_func)):
             raise ValueError("Custom scorer implementation changed")
     if sha256(directory / "run_config.yaml") != manifest["resolved_config_sha256"]:
         raise ValueError("Resolved configuration identity mismatch")

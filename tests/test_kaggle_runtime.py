@@ -145,6 +145,14 @@ class KaggleRuntimeTests(unittest.TestCase):
         source = (self.package(exp_id="exp'quoted", job_id=None) / "run_kaggle.py").read_text()
         compile(source, "run_kaggle.py", "exec")
 
+    def test_generated_script_pins_project_root_env_for_parent_process(self):
+        """Parent-process artifact export (export_run -> validate_run) imports
+        the scorer hook in the same process that ran the kernel; pinning
+        HARNESS_PROJECT_ROOT keeps that import hermetic even without the
+        runner's own env setup (arc-prize audit gap G1)."""
+        source = (self.package() / "run_kaggle.py").read_text(encoding="utf-8")
+        self.assertIn('os.environ["HARNESS_PROJECT_ROOT"] = str(workspace)', source)
+
     def test_generated_script_runs_full_validation_and_exports_one_manifest(self):
         package = self.package(job_id="job-fixture")
         source = (package / "run_kaggle.py").read_text()
