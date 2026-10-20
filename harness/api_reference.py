@@ -64,7 +64,9 @@ FACADE_METHODS: List[Tuple[str, str]] = [
     ("submit_submission", "Submit a file or a code-comp kernel output; returns a normalised ref."),
     ("kernels_push", "Push a kernel folder (kernel-metadata.json + code) to Kaggle."),
     ("list_kernels", "List kernels (normalised)."),
+    ("kernels_list", "List kernels (normalised; alias for list_kernels)."),
     ("kernel_output", "Download a kernel's output."),
+    ("kernels_output", "Download a kernel's output (alias for kernel_output)."),
     ("kernels_status", "Query a kernel's status."),
     ("kernels_logs", "Fetch a kernel's logs."),
 ]

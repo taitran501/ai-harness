@@ -29,6 +29,7 @@ Usage::
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Callable, List, Optional, Tuple, TypeVar
 
@@ -52,6 +53,8 @@ _LEGACY_ALIASES = {
     "total_bytes": ("totalBytes",),
     "file_name": ("fileName",),
     "team_name": ("teamName",),
+    "failure_message": ("failureMessage",),
+    "error_message": ("errorMessage",),
     # Method-name aliases (used by KaggleClient.get): the SDK sometimes
     # exposes camelCase where the facade is snake_case.
     "kernels_output": ("kernelOutput",),
@@ -98,15 +101,25 @@ def _alias_candidates(name: str) -> Tuple[str, ...]:
     Forward: the normalised name maps to its ordered raw candidates.
     Reverse: a legacy name requested on an object that holds the normalised
     attribute resolves back to the normalised key.
+    Also dynamically generates camelCase and snake_case candidates.
     """
-    cands = _LEGACY_ALIASES.get(name)
-    cands = tuple(cands) if cands else ()
-    reverse = tuple(
+    cands = list(_LEGACY_ALIASES.get(name, ()))
+    reverse = [
         canonical
         for canonical, raws in _LEGACY_ALIASES.items()
         if canonical != name and name in raws
-    )
-    return cands + reverse
+    ]
+    # Dynamic camelCase candidate if name is snake_case
+    if "_" in name:
+        parts = name.split("_")
+        camel = parts[0] + "".join(p.capitalize() for p in parts[1:])
+        if camel not in cands:
+            cands.append(camel)
+    # Dynamic snake_case candidate if name is camelCase
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    if snake != name and snake not in cands and snake not in reverse:
+        reverse.append(snake)
+    return tuple(cands + reverse)
 
 
 def _try_import_kagglesdk():
@@ -143,6 +156,13 @@ class _NormalisedObject:
 
     def __getattr__(self, name: str) -> Any:
         raw = object.__getattribute__(self, "_raw")
+        # 0. Dict lookup if raw is dict
+        if isinstance(raw, dict):
+            if name in raw:
+                return self._wrap(raw[name])
+            for alias in _alias_candidates(name):
+                if alias in raw:
+                    return self._wrap(raw[alias])
         # 1. Direct attribute
         if hasattr(raw, name):
             value = getattr(raw, name)
@@ -163,11 +183,37 @@ class _NormalisedObject:
             data = raw.dict()
             if name in data:
                 return self._wrap(data[name])
+            for alias in _alias_candidates(name):
+                if alias in data:
+                    return self._wrap(data[alias])
         raise AttributeError(
             f"'{type(raw).__name__}' object has no attribute '{name}'"
         )
 
+    def __getitem__(self, name: str) -> Any:
+        try:
+            return getattr(self, name)
+        except AttributeError as exc:
+            raise KeyError(name) from exc
+
+    def get(self, name: str, default: Any = None) -> Any:
+        try:
+            return getattr(self, name)
+        except AttributeError:
+            return default
+
+    def __contains__(self, name: str) -> bool:
+        try:
+            getattr(self, name)
+            return True
+        except AttributeError:
+            return False
+
     def _wrap(self, value: Any) -> Any:
+        if hasattr(value, "name") and not isinstance(value, type):
+            name_val = getattr(value, "name")
+            if isinstance(name_val, str):
+                return name_val
         if isinstance(value, (str, int, float, bool, bytes)) or value is None:
             return value
         return _NormalisedObject(value, object.__getattribute__(self, "_sdk"))
@@ -251,6 +297,8 @@ class KaggleClient:
         else:
             kernels = api.kernels_list(user=user, **kwargs)
         return [_NormalisedObject(k, self.sdk) for k in kernels]
+
+    kernels_list = list_kernels
 
     def list_submissions(self, competition: Optional[str] = None, **kwargs: Any) -> List[Any]:
         """List submissions for a competition; returns normalised objects.
@@ -348,10 +396,20 @@ class KaggleClient:
         return self.kernel_output(slug, path=path, **kwargs)
 
     def kernels_status(self, slug: str, **kwargs: Any) -> Any:
-        """Query kernel status."""
-        if self.sdk == "kaggle":
-            return self._legacy_api.kernels_status(slug, **kwargs)
-        return self._legacy_api_instance().kernels_status(slug, **kwargs)
+        """Query kernel status, returning a normalised object with dict-like access."""
+        try:
+            if self.sdk == "kaggle":
+                raw = self._legacy_api.kernels_status(slug, **kwargs)
+            else:
+                raw = self._legacy_api_instance().kernels_status(slug, **kwargs)
+        except Exception as exc:
+            # Handle transient 404 when kernel was newly pushed and session status is initializing
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code == 404 or "404" in str(exc):
+                return _NormalisedObject({"status": "QUEUED", "failureMessage": None}, self.sdk)
+            raise
+        return _NormalisedObject(raw, self.sdk)
 
     def kernels_logs(self, slug: str, **kwargs: Any) -> Any:
         """Fetch kernel logs."""

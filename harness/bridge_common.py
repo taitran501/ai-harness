@@ -212,3 +212,266 @@ class BridgeSession:
 
 
 _TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName)
+
+
+TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "search_research_memory": {
+        "summary": "Search persistent research insights and hypotheses by semantic query.",
+        "required": ["query"],
+        "optional": {"limit": 8},
+        "description": "Searches research_memory.jsonl for matches against past observations, mechanisms, and hypotheses.",
+    },
+    "record_research_insight": {
+        "summary": "Record an empirical research insight into persistent task memory.",
+        "required": ["title", "observation", "mechanism", "next_action"],
+        "optional": {"evidence": None, "parent_insight_id": None},
+        "description": "Registers an empirical observation and its underlying mechanism, creating a tracked insight ID.",
+    },
+    "plan_research_probe": {
+        "summary": "Plan a bounded discriminating probe for a specific insight.",
+        "required": [
+            "insight_id",
+            "control",
+            "intervention",
+            "expected_observation",
+            "alternative_explanation",
+            "decision_rule",
+            "budget",
+            "stop_rule",
+        ],
+        "optional": {},
+        "description": "Defines an atomic hypothesis-testing probe with expected observation and decision rules before executing compute.",
+    },
+    "trace_research_insight": {
+        "summary": "Trace the lineage, probe results, and decisions associated with an insight.",
+        "required": ["insight_id"],
+        "optional": {"offset": 0, "limit": 20},
+        "description": "Recovers the full audit history and downstream decisions derived from an insight ID.",
+    },
+    "record_research_decision": {
+        "summary": "Record an evidence-based decision (keep/discard/pivot) after an experiment.",
+        "required": ["outcome", "conclusion"],
+        "optional": {"evidence": None, "next_action": "", "insight_id": None, "lesson": "", "revisit_when": ""},
+        "description": "Documents an empirical decision outcome with takeaway lesson and next step.",
+    },
+    "record_research_checkpoint": {
+        "summary": "Record a research checkpoint with current summary, next action, and open questions.",
+        "required": ["summary", "next_action"],
+        "optional": {"open_questions": [], "insight_ids": None},
+        "description": "Saves state to research_frontier for seamless resumption after context compaction or restart.",
+    },
+    "review_hypothesis": {
+        "summary": "Review a proposed experiment config against the research memory before running.",
+        "required": [],
+        "optional": {"config": None, "config_path": None, "revisit_reason": ""},
+        "description": "Validates novelty against past experiments to prevent redundant or circular iterations.",
+    },
+    "suggest_next_interventions": {
+        "summary": "Generate un-tried candidate interventions based on diagnostics and past branches.",
+        "required": [],
+        "optional": {"limit": 5},
+        "description": "Recommends untried hypothesis interventions when search stagnates.",
+    },
+    "establish_baseline_anchor": {
+        "summary": "Lock the official baseline candidate anchor and verify its OOF artifacts.",
+        "required": [],
+        "optional": {"baseline_id": "exp_id of baseline run (defaults to configured baseline or best run)"},
+        "description": "Locks the official baseline anchor in CompetitionState against which all treatments are compared.",
+    },
+    "create_experiment": {
+        "summary": "Create a new scaffolded experiment configuration file under configs/.",
+        "required": [],
+        "optional": {
+            "branch": "feat",
+            "descriptor": "iteration",
+            "parent_id": None,
+            "insight_id": None,
+            "hypothesis": None,
+            "target_variable": None,
+            "model_name": None,
+            "model_params": None,
+            "input_variants": None,
+        },
+        "description": "Generates a fully grounded experiment config yaml with linked insight and assumption register.",
+    },
+    "get_next_experiment_id": {
+        "summary": "Compute the next sequential experiment ID for a given branch and descriptor.",
+        "required": [],
+        "optional": {"branch": "feat", "descriptor": "iteration"},
+        "description": "Returns the next available exp_id without creating a file.",
+    },
+    "run_smoke_test": {
+        "summary": "Execute a fast single-fold smoke test on fold 0.",
+        "required": ["config_path"],
+        "optional": {"fold": 0},
+        "description": "Runs a single-fold probe to verify pipeline syntax and grounding before full runs.",
+    },
+    "run_probe": {
+        "summary": "Execute a sub-sampled data probe.",
+        "required": ["config_path"],
+        "optional": {"fold": 0, "probe_samples": 500},
+        "description": "Validates hypothesis on a small subsample of data.",
+    },
+    "run_full_validation": {
+        "summary": "Execute full multi-fold cross-validation (local or remote).",
+        "required": ["config_path"],
+        "optional": {"backend": "local", "force": False, "auto_audit": True},
+        "description": "Runs complete CV evaluation, writes immutable artifacts, and seals hashes.",
+    },
+    "inspect_experiment": {
+        "summary": "Inspect performance, metrics, and manifest of a completed experiment.",
+        "required": ["exp_id"],
+        "optional": {},
+        "description": "Retrieves verified scores and fold breakdown for a given exp_id.",
+    },
+    "inspect_diagnostics": {
+        "summary": "Inspect current error distributions, residual diagnostics, and metric breakdowns.",
+        "required": [],
+        "optional": {"exp_id": None},
+        "description": "Provides diagnostic insights into model weaknesses and error clusters.",
+    },
+    "optimize_blend": {
+        "summary": "Optimize ensemble weights across multiple candidate predictions.",
+        "required": [],
+        "optional": {"components": None, "blend_mode": "nelder_mead", "name": "blend_v1"},
+        "description": "Finds metric-optimal blending weights using out-of-fold predictions.",
+    },
+    "optimize_threshold": {
+        "summary": "Optimize decision thresholds on validation probabilities for F1 / Kappa / etc.",
+        "required": [],
+        "optional": {"exp_id": None, "metric": None, "num_thresholds": 100},
+        "description": "Tunes classification thresholds to maximize the competition metric.",
+    },
+    "prepare_submission": {
+        "summary": "Package candidate predictions into competition-ready submission format.",
+        "required": [],
+        "optional": {"exp_id": None, "candidate_csv": None, "notes": ""},
+        "description": "Validates format, columns, and row counts against submission requirements.",
+    },
+    "inspect_cloud_job": {
+        "summary": "Query status and logs of a remote cloud execution job.",
+        "required": ["job_id"],
+        "optional": {},
+        "description": "Checks remote job execution state and extracts recent logs.",
+    },
+    "wait_cloud_job": {
+        "summary": "Wait and poll until a remote cloud job completes.",
+        "required": ["job_id"],
+        "optional": {"poll_interval": 30, "timeout_seconds": 3600},
+        "description": "Blocks until the remote job finishes, importing artifacts on completion.",
+    },
+    "confirm_task_spec": {
+        "summary": "Confirm task specification and schema alignment.",
+        "required": [],
+        "optional": {},
+        "description": "Marks the task specification gate as confirmed.",
+    },
+    "inspect_data_readiness": {
+        "summary": "Inspect raw data formats, leakage risks, and splits.",
+        "required": [],
+        "optional": {"config": None},
+        "description": "Verifies data files and split integrity.",
+    },
+    "confirm_data_risks": {
+        "summary": "Confirm that data leakages and risks have been audited.",
+        "required": [],
+        "optional": {},
+        "description": "Marks the data risks gate as confirmed.",
+    },
+    "run_eda": {
+        "summary": "Run automated exploratory data analysis.",
+        "required": [],
+        "optional": {"data_path": None},
+        "description": "Executes standard exploratory data analysis on target dataset.",
+    },
+    "update_task_contract": {
+        "summary": "Update task contract fields.",
+        "required": ["task"],
+        "optional": {},
+        "description": "Modifies task contract specification.",
+    },
+    "update_workspace_settings": {
+        "summary": "Update workspace settings and feature flags.",
+        "required": [],
+        "optional": {"mode": None, "manual_phase_override": None, "agent_context_config": None},
+        "description": "Updates workspace configuration.",
+    },
+    "bootstrap_task": {
+        "summary": "Bootstrap a new task workspace.",
+        "required": [],
+        "optional": {"project_root": None, "dataset_dir": None, "output_config": None, "context_file": None},
+        "description": "Scaffolds a new competition workspace.",
+    },
+    "record_phase_output": {
+        "summary": "Record output of a competition phase.",
+        "required": [],
+        "optional": {"phase_id": None, "response": None, "response_file": None, "artifacts": None, "sources": None, "metadata": None},
+        "description": "Records phase output in competition state.",
+    },
+    "synthesize_candidate": {
+        "summary": "Synthesize a new ensemble candidate.",
+        "required": ["exp_id"],
+        "optional": {"mode": None, "name": None, "revisit_reason": None, "source_map": None},
+        "description": "Synthesizes an ensemble candidate from component models.",
+    },
+    "promote_candidate": {
+        "summary": "Promote a candidate run to active pool.",
+        "required": ["exp_id"],
+        "optional": {},
+        "description": "Promotes an experiment to the candidate pool.",
+    },
+    "build_ensemble": {
+        "summary": "Build an ensemble model from verified candidates.",
+        "required": ["exp_id"],
+        "optional": {},
+        "description": "Constructs an ensemble artifact.",
+    },
+    "register_external_prediction": {
+        "summary": "Register external prediction files.",
+        "required": [],
+        "optional": {"name": None, "oof_path": None, "test_path": None, "source": None, "author": None, "notes": None},
+        "description": "Imports external predictions into candidate pool.",
+    },
+    "generate_microdose_probe": {
+        "summary": "Generate a microdose probe blending baseline with candidate.",
+        "required": [],
+        "optional": {"base_exp_id": None, "probe_exp_id": None, "alpha": None, "space": None},
+        "description": "Creates a conservative blend probe.",
+    },
+    "record_external_score": {
+        "summary": "Record external leaderboard score.",
+        "required": ["primary_score"],
+        "optional": {"sub_id": None, "split_type": None, "notes": None, "custom_scores": None},
+        "description": "Records score from external competition platform.",
+    },
+    "freeze_candidate": {
+        "summary": "Freeze final submission candidates.",
+        "required": [],
+        "optional": {"slot_1_id": None, "slot_2_id": None, "notes": ""},
+        "description": "Locks selected candidates for final submission.",
+    },
+    "emergency_unfreeze": {
+        "summary": "Unfreeze candidates in emergency situation.",
+        "required": [],
+        "optional": {"reason": ""},
+        "description": "Unlocks candidate freeze with justification.",
+    },
+    "finalize_competition": {
+        "summary": "Finalize competition and generate endgame report.",
+        "required": [],
+        "optional": {},
+        "description": "Concludes competition lifecycle.",
+    },
+    "write_experiment_config": {
+        "summary": "Write an experiment configuration file.",
+        "required": ["path", "content", "insight_id"],
+        "optional": {},
+        "description": "Writes an experiment configuration with insight tracking.",
+    },
+}
+
+
+def get_action_schema(action: str) -> Optional[Dict[str, Any]]:
+    """Return schema definition for a Typed Action, if registered."""
+    return TYPED_ACTION_SCHEMAS.get(action)
+
