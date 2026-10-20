@@ -19,6 +19,11 @@ Deep forensic analysis across >300 conversation transcripts in 8 competitive ML 
 
 - **`harness/templates/kaggle_template.py`**:
   - Removed erroneous `not` in `critical_mismatches = {k: v for k, v in mismatches.items() if _is_critical_identity_mismatch(k, v)}`. Now accurately classifies `core_version` drift and missing remote `job_id` as non-critical, while strictly blocking real conflicts (`task_sha256`, `config_sha256`).
+  - Added resolution for `data_config.kaggle_dataset_slug: "none"` to suppress redundant private dataset upload requirements when competition datasets are already mounted.
+- **`harness/tree_journal.py` & `harness/state_store.py` & `harness/import_local.py`**:
+  - Hardened `TreeJournal.load()` to parse list-structured files gracefully without throwing `AttributeError`.
+  - In `state_store.py`, updated `transaction()` to gracefully handle legacy list-structured payloads by packaging them under `"events"` instead of crashing on revision updates.
+  - In `import_local.py`, updated `_append_journal` to seamlessly record audit events into `journal.json` whether it is a list or dictionary, ensuring bidirectional compatibility.
 - **`harness/io_utils.py`**:
   - Added `safe_relpath(path, start)` helper function that safely resolves both paths and handles Windows drive letters and relative/absolute mixtures.
 - **`harness/competition_state.py` & `harness/candidates.py`**:

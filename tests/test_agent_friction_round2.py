@@ -179,6 +179,22 @@ class TestTreeJournalListCompatibility(unittest.TestCase):
         tj = TreeJournal(jp)
         self.assertEqual(tj.nodes, {})
 
+    def test_tree_journal_save_with_list_data_preserves_events(self):
+        import tempfile
+        import json
+        from harness.tree_journal import TreeJournal, Node
+
+        tmp = Path(tempfile.mkdtemp())
+        jp = tmp / "journal.json"
+        jp.write_text(json.dumps([{"event": "import", "target": "test"}]))
+        tj = TreeJournal(jp)
+        tj.nodes["test_node"] = Node(id="test_node")
+        tj.save()
+        saved = json.loads(jp.read_text(encoding="utf-8"))
+        self.assertIn("events", saved)
+        self.assertEqual(saved["events"][0]["event"], "import")
+        self.assertEqual(len(saved["nodes"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
