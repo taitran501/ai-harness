@@ -164,5 +164,21 @@ class TestTaskDatasetSlugPolicy(unittest.TestCase):
         self.assertEqual(resolved, "none")
 
 
+
+class TestTreeJournalListCompatibility(unittest.TestCase):
+    """TreeJournal.load must handle list-based journal files gracefully without crashing."""
+
+    def test_list_data_handled(self):
+        import tempfile
+        import json
+        from harness.tree_journal import TreeJournal
+
+        tmp = Path(tempfile.mkdtemp())
+        jp = tmp / "journal.json"
+        jp.write_text(json.dumps([{"event": "import", "target": "test"}]))
+        tj = TreeJournal(jp)
+        self.assertEqual(tj.nodes, {})
+
+
 if __name__ == "__main__":
     unittest.main()

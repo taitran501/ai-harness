@@ -256,7 +256,7 @@ def _append_journal(project, target: Path, quarantine: bool) -> None:
     try:
         import os
 
-        journal_path = project.artifacts_dir / "journal.json"
+        journal_path = project.artifacts_dir / "import_journal.json"
         entries: List[Dict[str, Any]] = []
         if journal_path.is_file():
             loaded = json.loads(journal_path.read_text(encoding="utf-8"))
