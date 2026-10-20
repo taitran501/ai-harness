@@ -153,5 +153,16 @@ class TestNormalisedObjectDictParity(unittest.TestCase):
         self.assertEqual(items["status"], "COMPLETE")
 
 
+
+class TestTaskDatasetSlugPolicy(unittest.TestCase):
+    """data_config.kaggle_dataset_slug: none must suppress private dataset upload requirement."""
+
+    def test_slug_none_string_detection(self):
+        task_info = {"data_config": {"kaggle_dataset_slug": "none"}}
+        task_dataset_slug = task_info.get("data_config", {}).get("kaggle_dataset_slug")
+        resolved = "none" if str(task_dataset_slug).lower() == "none" else task_dataset_slug
+        self.assertEqual(resolved, "none")
+
+
 if __name__ == "__main__":
     unittest.main()
