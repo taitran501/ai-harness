@@ -979,3 +979,5 @@ def validate_prediction_contract(spec, truth, predictions):
                 )
     return batch
 
+# Ergonomic alias for evaluate
+evaluate_predictions = evaluate

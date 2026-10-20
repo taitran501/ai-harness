@@ -1095,7 +1095,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                     critical_mismatches = {
                         k: v
                         for k, v in mismatches.items()
-                        if not _is_critical_identity_mismatch(k, v)
+                        if _is_critical_identity_mismatch(k, v)
                     }
                     if mismatches:
                         if force_import:

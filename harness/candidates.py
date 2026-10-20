@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from harness.io_utils import safe_relpath
+
 import json
 import uuid
 from pathlib import Path
@@ -325,7 +327,7 @@ def build_candidate(project, name, mode, source_map):
             exp: sha256(project.artifacts_dir / exp / "artifact_manifest.json")
             for exp in ids
         },
-        "oof_path": str((folder / "oof_predictions.csv").relative_to(project.root)),
+        "oof_path": safe_relpath(folder / "oof_predictions.csv", project.root),
         "rows": len(merged),
         "details": source_map,
         **result,
@@ -343,7 +345,7 @@ def build_candidate(project, name, mode, source_map):
         manifest_data["prediction_splits"] = {"test_predictions.csv": "test"}
         entry["test_prediction_sha256"] = test_sha
         entry["prediction_splits"] = {"test_predictions.csv": "test"}
-        entry["test_predictions_path"] = str((folder / "test_predictions.csv").relative_to(project.root))
+        entry["test_predictions_path"] = safe_relpath(folder / "test_predictions.csv", project.root)
     (folder / "candidate_manifest.json").write_text(
         json.dumps(manifest_data, indent=2)
     )
@@ -781,5 +783,5 @@ def register_external_prediction(
         "metric": spec.primary_metric,
         "rows": len(aligned),
         "has_test_predictions": test_file is not None,
-        "artifact_dir": str(exp_dir.relative_to(project.root)).replace("\\", "/"),
+        "artifact_dir": safe_relpath(exp_dir, project.root),
     }

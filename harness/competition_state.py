@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import yaml
 
+from harness.io_utils import safe_relpath
 from harness.submission_manager import SubmissionManager
 from harness.tree_journal import TreeJournal
 
@@ -753,7 +754,7 @@ class CompetitionStateMachine:
                 "fold_std": fold_std,
                 "has_oof": oof_csv.exists(),
                 "oof_path": (
-                    str(oof_csv.relative_to(self.project_root)).replace("\\", "/")
+                    safe_relpath(oof_csv, self.project_root)
                     if oof_csv.exists()
                     else None
                 ),
@@ -1391,7 +1392,7 @@ class CompetitionStateMachine:
                 "target_phase": 1,
                 "action_id": "CONFIRM_TASK_SPEC",
                 "title": "Review and confirm the selected task contract",
-                "detail": f"Task config: `{self.project.task_config_path.relative_to(self.project_root)}`; plugin: `{self.project.plugin_id or 'default'}`.",
+                "detail": f"Task config: `{safe_relpath(self.project.task_config_path, self.project_root)}`; plugin: `{self.project.plugin_id or 'default'}`.",
                 "cta_label": "Confirm task contract",
                 "agent_plan": [
                     "Inspect the selected task specification and adapter capabilities",

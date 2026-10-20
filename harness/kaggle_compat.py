@@ -209,6 +209,24 @@ class _NormalisedObject:
         except AttributeError:
             return False
 
+    def keys(self) -> List[str]:
+        raw = object.__getattribute__(self, "_raw")
+        if isinstance(raw, dict):
+            return list(raw.keys())
+        if hasattr(raw, "model_dump"):
+            return list(raw.model_dump().keys())
+        if hasattr(raw, "dict"):
+            return list(raw.dict().keys())
+        if hasattr(raw, "__dict__"):
+            return [k for k in raw.__dict__.keys() if not k.startswith("_")]
+        return []
+
+    def values(self) -> List[Any]:
+        return [self.get(k) for k in self.keys()]
+
+    def items(self) -> List[Tuple[str, Any]]:
+        return [(k, self.get(k)) for k in self.keys()]
+
     def _wrap(self, value: Any) -> Any:
         if hasattr(value, "name") and not isinstance(value, type):
             name_val = getattr(value, "name")
