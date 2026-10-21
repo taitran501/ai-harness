@@ -1,9 +1,9 @@
 # Codabench Platform Integration and Enhanced Discussion Viewer
 
 - **Date**: 2026-10-21
-- **PR**: —
-- **Branch**: `main`
-- **Status**: merged
+- **PR**: [#114](https://github.com/taitran501/ai-harness/pull/114)
+- **Branch**: `feat/agent-friction-and-platform-integrations`
+- **Status**: open
 - **Commits**: `<sha>`
 
 ## Why

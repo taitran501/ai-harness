@@ -1,7 +1,7 @@
 # Kaggle facade normalisation, transient 404 handling, grounding whitelist, and action parameter discovery
 
 - **Date**: 2026-10-20
-- **PR**: —
+- **PR**: [#114](https://github.com/taitran501/ai-harness/pull/114)
 - **Branch**: `feat/agent-friction-remediation`
 - **Status**: open
 - **Commits**: —

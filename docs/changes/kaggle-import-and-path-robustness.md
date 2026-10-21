@@ -1,8 +1,8 @@
 # Kaggle remote artifact import critical mismatch policy, safe path resolution, and task spec string compatibility
 
 - **Date**: 2026-10-20
-- **PR**: —
-- **Branch**: `main`
+- **PR**: [#114](https://github.com/taitran501/ai-harness/pull/114)
+- **Branch**: `feat/agent-friction-and-platform-integrations`
 - **Status**: open
 - **Commits**: pending
 
