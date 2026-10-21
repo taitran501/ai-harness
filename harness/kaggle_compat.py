@@ -466,7 +466,10 @@ class KaggleClient:
         page_size = kwargs.pop("page_size", None)
         valid_kwargs: Dict[str, Any] = {}
         if "sort_by" in kwargs and kwargs["sort_by"] is not None:
-            valid_kwargs["sort_by"] = kwargs["sort_by"]
+            s_val = str(kwargs["sort_by"]).lower()
+            if s_val == "hotness":
+                s_val = "hot"
+            valid_kwargs["sort_by"] = s_val
         if "page" in kwargs and kwargs["page"] is not None:
             valid_kwargs["page"] = kwargs["page"]
         resp = api.competition_list_topics(competition, **valid_kwargs)
