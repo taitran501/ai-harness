@@ -1,10 +1,10 @@
 # Anti-Stagnation, Quota Utilization, and Proactive Discussion Mining
 
 - **Date**: 2026-10-21
-- **PR**: pending
+- **PR**: [#115](https://github.com/taitran501/ai-harness/pull/115)
 - **Branch**: `feat/anti-stagnation-proactive-discussion-and-quota`
-- **Status**: open
-- **Commits**: pending
+- **Status**: merged
+- **Commits**: `ec5288f` (squash, on `main`)
 
 ## Why
 
