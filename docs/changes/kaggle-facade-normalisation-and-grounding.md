@@ -3,8 +3,8 @@
 - **Date**: 2026-10-20
 - **PR**: [#114](https://github.com/taitran501/ai-harness/pull/114)
 - **Branch**: `feat/agent-friction-remediation`
-- **Status**: open
-- **Commits**: —
+- **Status**: merged
+- **Commits**: `966a561` (squash, on `main`)
 
 ## Why
 

@@ -3,8 +3,8 @@
 - **Date**: 2026-10-21
 - **PR**: [#114](https://github.com/taitran501/ai-harness/pull/114)
 - **Branch**: `feat/agent-friction-and-platform-integrations`
-- **Status**: open
-- **Commits**: `<sha>`
+- **Status**: merged
+- **Commits**: `966a561` (squash, on `main`)
 
 ## Why
 
