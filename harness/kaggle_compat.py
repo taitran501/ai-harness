@@ -47,9 +47,20 @@ _LEGACY_ALIASES = {
     #     (public_score, date, total_bytes)
     "public_score": ("publicScore",),
     "private_score": ("privateScore",),
-    "total_votes": ("totalVotes",),
-    "created_at": ("createdAt", "submittedDate", "date", "creationDate"),
-    "date": ("submittedDate", "createdAt"),
+    "total_votes": ("totalVotes", "votes", "vote_count", "score"),
+    "votes": ("total_votes", "totalVotes", "vote_count", "score"),
+    "score": ("votes", "total_votes", "totalVotes", "vote_count"),
+    "created_at": ("createdAt", "submittedDate", "date", "creationDate", "post_date", "postDate", "submitted_date"),
+    "date": ("submittedDate", "createdAt", "post_date", "postDate", "submitted_date", "created_at"),
+    "submitted_date": ("submittedDate", "date", "createdAt", "post_date"),
+    "post_date": ("date", "created_at", "createdAt", "submittedDate"),
+    "author": ("author_name", "authorName", "user", "userName", "username"),
+    "author_name": ("author", "authorName", "user", "userName", "username"),
+    "content": ("message", "body", "raw_markdown", "rawMarkdown"),
+    "message": ("content", "body", "raw_markdown", "rawMarkdown"),
+    "body": ("content", "message", "raw_markdown", "rawMarkdown"),
+    "comment_count": ("commentCount", "comments", "total_comments"),
+    "comments": ("comment_count", "commentCount", "total_comments"),
     "total_bytes": ("totalBytes",),
     "file_name": ("fileName",),
     "team_name": ("teamName",),
@@ -228,6 +239,9 @@ class _NormalisedObject:
         return [(k, self.get(k)) for k in self.keys()]
 
     def _wrap(self, value: Any) -> Any:
+        import datetime
+        if isinstance(value, (datetime.date, datetime.datetime, datetime.time)):
+            return value
         if hasattr(value, "name") and not isinstance(value, type):
             name_val = getattr(value, "name")
             if isinstance(name_val, str):
@@ -450,8 +464,38 @@ class KaggleClient:
                 "KaggleApi has no competition_list_topics method; upgrade the `kaggle` package (>= 2.x)."
             )
         resp = api.competition_list_topics(competition, **kwargs)
-        topics = getattr(resp, "topics", None) or []
-        return [_NormalisedObject(t, self.sdk) for t in topics]
+        raw_topics = getattr(resp, "topics", None)
+        if raw_topics is None:
+            raw_topics = resp if isinstance(resp, list) else []
+        return [_NormalisedObject(t, self.sdk) for t in raw_topics]
+
+    def competition_topic_messages(
+        self, topic_id: int, competition: Optional[str] = None, **kwargs: Any
+    ) -> List[Any]:
+        """Fetch messages/comments for a topic; returns normalised objects."""
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        resp = None
+        if competition and hasattr(api, "competition_list_topic_messages"):
+            try:
+                resp = api.competition_list_topic_messages(competition, topic_id, **kwargs)
+            except Exception:
+                resp = None
+        if resp is None and hasattr(api, "forums_topic_show"):
+            try:
+                resp = api.forums_topic_show(topic_id, **kwargs)
+            except Exception:
+                resp = None
+        if resp is None and hasattr(api, "competition_list_topic_messages") and not competition:
+            try:
+                resp = api.competition_list_topic_messages(topic_id, **kwargs)
+            except Exception:
+                pass
+        raw_msgs = getattr(resp, "messages", None)
+        if raw_msgs is None:
+            raw_msgs = getattr(resp, "comments", None)
+        if raw_msgs is None:
+            raw_msgs = resp if isinstance(resp, list) else []
+        return [_NormalisedObject(m, self.sdk) for m in raw_msgs]
 
     def get(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
         """Generic accessor: look up a method by canonical name on the raw SDK.

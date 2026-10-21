@@ -85,6 +85,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_latest = sub.add_parser("latest", help="Best scored submission for a competition.")
     p_latest.add_argument("competition", help="Kaggle competition slug.")
 
+    p_list = sub.add_parser("list", help="List recent submissions for a competition.")
+    p_list.add_argument("competition", help="Kaggle competition slug.")
+    p_list.add_argument("--limit", "-n", type=int, default=20, help="Max submissions to list.")
+
     args = parser.parse_args(argv)
     tracker = KaggleLeaderboardTracker()
 
@@ -119,6 +123,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if args.action == "latest":
             _print_payload({"action": "latest", **tracker.latest(args.competition)})
+            return 0
+
+        if args.action == "list":
+            subs = tracker.list_submissions(args.competition, limit=args.limit)
+            _print_payload({"action": "list", "competition": args.competition, "count": len(subs), "submissions": subs})
             return 0
     except Exception as exc:  # noqa: BLE001 - surface any dispatch/poll failure as JSON.
         _print_payload({"ok": False, "action": args.action, "error": str(exc)})
