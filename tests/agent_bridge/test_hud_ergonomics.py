@@ -163,6 +163,29 @@ class TestResearchContinuityHudRendering(unittest.TestCase):
         # Both long fields must be truncated, not embedded at full length.
         self.assertLess(len(text), 1500)
 
+    def test_stagnation_advisory_in_hud(self):
+        from harness.agent_bridge import _research_continuity_hud_lines
+
+        memory = {
+            "entry_count": 5,
+            "verified_run_count": 4,
+            "insight_count": 2,
+            "open_insight_count": 1,
+            "consecutive_non_improvements": 3,
+            "reassess_recommended": True,
+            "latest_checkpoint": None,
+            "recent_decisions": [],
+            "research_frontier": [],
+            "unreviewed_result_count": 0,
+            "progress_path": None,
+            "progress_warning": None,
+        }
+        lines = _research_continuity_hud_lines(memory)
+        text = "\n".join(lines)
+        self.assertIn("STAGNATION / PLATEAU ADVISORY", text)
+        self.assertIn("Do NOT freeze or stop submissions", text)
+        self.assertIn("ai-harness discussion list", text)
+
     def test_empty_memory_renders_without_error(self):
         from harness.agent_bridge import _research_continuity_hud_lines
 

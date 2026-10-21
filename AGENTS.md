@@ -44,6 +44,7 @@ Assistant / Engineer (Layer 1)  ──>  Agent Bridge (Layer 2)  ──>  Harnes
 7. **Written Progress**: Record research notes after meaningful observations/results and before stopping. The harness generates task-level `RESEARCH_PROGRESS.md`; its path is in the context HUD. Read its resume section after restart, then retrieve only the relevant insight history. For framework-repo code changes, document them in `docs/changes/` (one file per change, from `docs/changes/_TEMPLATE.md`) and add a row to the `docs/changes/README.md` index before committing. `docs/WORK_LOG.md` is now a read-only archive (no new entries).
 8. **Execution Backend Policy**: A task contract may declare `execution: {backend: kaggle, locked: true}`. `run_full_validation` resolves the backend as explicit `--backend` param > `execution.backend` > `local`; when locked, other backends are rejected (`Backend lock violation`). Smoke tests/probes always run locally. When updating a competition workspace after a framework release, use `ai-harness sync` instead of hand-written multi-step sync prompts.
 9. **Single-Install Framework**: All workspaces share ONE canonical framework checkout located by `HARNESS_FRAMEWORK_DIR` (falling back to a legacy per-workspace `<workspace>/ai-harness` clone only until migrated). `import harness` therefore always resolves to the same code, eliminating cross-workspace drift and the re-exec tax. Under single-install, `ai-harness sync` pulls the shared checkout but does **not** retarget the global editable install per workspace; `ai-harness status` reports a `framework` section (`single_install` flag + stale-install advisory). Remote dispatch bundles `harness/` from the installed (canonical) source, so cloud runs are unaffected.
+10. **Anti-Defeatism, Quota Utilization & Proactive Mining**: A metric plateau or diminishing delta NEVER authorizes premature freezing or stopping submissions while daily quota or compute remains. When plateaued or approaching deadlines, actively mine community discussions (`ai-harness discussion list <comp>` & `ai-harness discussion view <topic_id>`), formulate orthogonal hypotheses (alternative model families, novel feature interactions, structural post-processing, risk-hedging blends), and execute bounded probes. Never pass passive decision lists or questions back to the human operator—take autonomous scientific initiative.
 
 ---
 
@@ -70,6 +71,15 @@ ai-harness-run --project-root . --config configs/<exp_config>.yaml
 
 # Export Kaggle Code Competition offline submission notebook
 ai-harness export-kaggle-notebook --exp-dir .ai-harness/artifacts/<task>/<exp_id> --output submission.ipynb
+
+# Community discussions & submission auditing
+ai-harness discussion list <competition> --sort-by hot
+ai-harness discussion view <topic_id>
+ai-harness submission list <competition> --limit 5
+
+# Codabench benchmark integration
+ai-harness codabench status <submission_id>
+ai-harness codabench download <submission_id> --output ./codabench_downloads
 
 # Web dashboard
 ai-harness-dashboard --project-root .
