@@ -38,8 +38,40 @@ HARNESS_DIR = Path(__file__).resolve().parent.parent
 if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
-from harness.agent_bridge import AgentBridge
+from harness.agent_bridge import (
+    AgentBridge,
+    TYPED_ACTION_SCHEMAS,
+    _TYPED_ACTION_NAMES,
+    get_action_schema,
+)
 from harness.project import HarnessProject
+
+
+def _format_action_schema(name: str, schema: Dict[str, Any]) -> str:
+    """Format action parameter schema for human or agent inspection."""
+    lines = [
+        f"Action: {name}",
+        f"Summary: {schema.get('summary', '')}",
+        f"Description: {schema.get('description', '')}",
+    ]
+    req = schema.get("required", [])
+    if req:
+        lines.append("Required Parameters:")
+        for p in req:
+            lines.append(f"  --{p} <value> (or in --params '{{\"{p}\": ...}}')")
+    else:
+        lines.append("Required Parameters: (none)")
+    opt = schema.get("optional", {})
+    if opt:
+        lines.append("Optional Parameters:")
+        for p, default_val in opt.items():
+            def_str = f" [default: {default_val!r}]" if default_val is not None else ""
+            lines.append(f"  --{p} <value>{def_str}")
+    sample_params = {p: f"<{p}_value>" for p in req}
+    json_sample = json.dumps(sample_params) if sample_params else "{}"
+    lines.append("Example Invocation:")
+    lines.append(f"  ai-harness-agent act --action {name} --params '{json_sample}'")
+    return "\n".join(lines)
 
 
 def _json_serial(obj: Any) -> Any:
@@ -214,9 +246,52 @@ def main(argv: list[str] | None = None) -> int:
     # 6. list
     subparsers.add_parser("list", help="List recent BridgeSessions")
 
+    # 7. schema
+    schema_p = subparsers.add_parser("schema", help="Inspect parameter schema for typed harness actions")
+    schema_p.add_argument("--action", default=None, help="Specific action to inspect (lists all if omitted)")
+    schema_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format (default: text)")
+
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if "act" in raw_argv and ("--help" in raw_argv or "-h" in raw_argv) and "--action" in raw_argv:
+        try:
+            act_idx = raw_argv.index("--action")
+            if act_idx + 1 < len(raw_argv):
+                act_name = raw_argv[act_idx + 1]
+                schema = get_action_schema(act_name)
+                if schema:
+                    print(_format_action_schema(act_name, schema))
+                    return 0
+        except (IndexError, ValueError):
+            pass
+
     args, extra_argv = parser.parse_known_args(argv)
     if args.command != "act" and extra_argv:
         parser.error(f"Unrecognized arguments: {' '.join(extra_argv)}")
+
+    if args.command == "schema":
+        if args.action:
+            schema = get_action_schema(args.action)
+            if not schema:
+                print(
+                    f"Unknown action: '{args.action}'. Valid actions:\n  "
+                    + "\n  ".join(sorted(_TYPED_ACTION_NAMES)),
+                    file=sys.stderr,
+                )
+                return 1
+            if args.format == "json":
+                print(json.dumps({args.action: schema}, indent=2))
+            else:
+                print(_format_action_schema(args.action, schema))
+        else:
+            if args.format == "json":
+                print(json.dumps(TYPED_ACTION_SCHEMAS, indent=2))
+            else:
+                print(f"{'Action Name':<32} | {'Summary'}")
+                print("-" * 88)
+                for name, s in sorted(TYPED_ACTION_SCHEMAS.items()):
+                    print(f"{name:<32} | {s.get('summary', '')}")
+                print("\nRun 'ai-harness-agent schema --action <name>' or 'ai-harness-agent act --action <name> --help' for details.")
+        return 0
 
     project = HarnessProject.discover(args.project_root, args.task_config)
     from harness.toolchain import ensure_pinned_toolchain
@@ -264,6 +339,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2, ensure_ascii=False, default=_json_serial))
 
     elif args.command == "act":
+        if args.action not in _TYPED_ACTION_NAMES:
+            print(
+                f"Unknown action: '{args.action}'. Run 'ai-harness-agent schema' to list all valid actions.",
+                file=sys.stderr,
+            )
+            return 1
         raw = args.params
         if args.param_file:
             path = Path(args.param_file)

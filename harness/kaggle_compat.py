@@ -29,8 +29,9 @@ Usage::
 
 from __future__ import annotations
 
+import re
 import time
-from typing import Any, Callable, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 T = TypeVar("T")
 
@@ -46,12 +47,25 @@ _LEGACY_ALIASES = {
     #     (public_score, date, total_bytes)
     "public_score": ("publicScore",),
     "private_score": ("privateScore",),
-    "total_votes": ("totalVotes",),
-    "created_at": ("createdAt", "submittedDate", "date", "creationDate"),
-    "date": ("submittedDate", "createdAt"),
+    "total_votes": ("totalVotes", "votes", "vote_count", "score"),
+    "votes": ("total_votes", "totalVotes", "vote_count", "score"),
+    "score": ("votes", "total_votes", "totalVotes", "vote_count"),
+    "created_at": ("createdAt", "submittedDate", "date", "creationDate", "post_date", "postDate", "submitted_date"),
+    "date": ("submittedDate", "createdAt", "post_date", "postDate", "submitted_date", "created_at"),
+    "submitted_date": ("submittedDate", "date", "createdAt", "post_date"),
+    "post_date": ("date", "created_at", "createdAt", "submittedDate"),
+    "author": ("author_name", "authorName", "user", "userName", "username"),
+    "author_name": ("author", "authorName", "user", "userName", "username"),
+    "content": ("message", "body", "raw_markdown", "rawMarkdown"),
+    "message": ("content", "body", "raw_markdown", "rawMarkdown"),
+    "body": ("content", "message", "raw_markdown", "rawMarkdown"),
+    "comment_count": ("commentCount", "comments", "total_comments"),
+    "comments": ("comment_count", "commentCount", "total_comments"),
     "total_bytes": ("totalBytes",),
     "file_name": ("fileName",),
     "team_name": ("teamName",),
+    "failure_message": ("failureMessage",),
+    "error_message": ("errorMessage",),
     # Method-name aliases (used by KaggleClient.get): the SDK sometimes
     # exposes camelCase where the facade is snake_case.
     "kernels_output": ("kernelOutput",),
@@ -98,15 +112,25 @@ def _alias_candidates(name: str) -> Tuple[str, ...]:
     Forward: the normalised name maps to its ordered raw candidates.
     Reverse: a legacy name requested on an object that holds the normalised
     attribute resolves back to the normalised key.
+    Also dynamically generates camelCase and snake_case candidates.
     """
-    cands = _LEGACY_ALIASES.get(name)
-    cands = tuple(cands) if cands else ()
-    reverse = tuple(
+    cands = list(_LEGACY_ALIASES.get(name, ()))
+    reverse = [
         canonical
         for canonical, raws in _LEGACY_ALIASES.items()
         if canonical != name and name in raws
-    )
-    return cands + reverse
+    ]
+    # Dynamic camelCase candidate if name is snake_case
+    if "_" in name:
+        parts = name.split("_")
+        camel = parts[0] + "".join(p.capitalize() for p in parts[1:])
+        if camel not in cands:
+            cands.append(camel)
+    # Dynamic snake_case candidate if name is camelCase
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    if snake != name and snake not in cands and snake not in reverse:
+        reverse.append(snake)
+    return tuple(cands + reverse)
 
 
 def _try_import_kagglesdk():
@@ -143,6 +167,13 @@ class _NormalisedObject:
 
     def __getattr__(self, name: str) -> Any:
         raw = object.__getattribute__(self, "_raw")
+        # 0. Dict lookup if raw is dict
+        if isinstance(raw, dict):
+            if name in raw:
+                return self._wrap(raw[name])
+            for alias in _alias_candidates(name):
+                if alias in raw:
+                    return self._wrap(raw[alias])
         # 1. Direct attribute
         if hasattr(raw, name):
             value = getattr(raw, name)
@@ -163,11 +194,58 @@ class _NormalisedObject:
             data = raw.dict()
             if name in data:
                 return self._wrap(data[name])
+            for alias in _alias_candidates(name):
+                if alias in data:
+                    return self._wrap(data[alias])
         raise AttributeError(
             f"'{type(raw).__name__}' object has no attribute '{name}'"
         )
 
+    def __getitem__(self, name: str) -> Any:
+        try:
+            return getattr(self, name)
+        except AttributeError as exc:
+            raise KeyError(name) from exc
+
+    def get(self, name: str, default: Any = None) -> Any:
+        try:
+            return getattr(self, name)
+        except AttributeError:
+            return default
+
+    def __contains__(self, name: str) -> bool:
+        try:
+            getattr(self, name)
+            return True
+        except AttributeError:
+            return False
+
+    def keys(self) -> List[str]:
+        raw = object.__getattribute__(self, "_raw")
+        if isinstance(raw, dict):
+            return list(raw.keys())
+        if hasattr(raw, "model_dump"):
+            return list(raw.model_dump().keys())
+        if hasattr(raw, "dict"):
+            return list(raw.dict().keys())
+        if hasattr(raw, "__dict__"):
+            return [k for k in raw.__dict__.keys() if not k.startswith("_")]
+        return []
+
+    def values(self) -> List[Any]:
+        return [self.get(k) for k in self.keys()]
+
+    def items(self) -> List[Tuple[str, Any]]:
+        return [(k, self.get(k)) for k in self.keys()]
+
     def _wrap(self, value: Any) -> Any:
+        import datetime
+        if isinstance(value, (datetime.date, datetime.datetime, datetime.time)):
+            return value
+        if hasattr(value, "name") and not isinstance(value, type):
+            name_val = getattr(value, "name")
+            if isinstance(name_val, str):
+                return name_val
         if isinstance(value, (str, int, float, bool, bytes)) or value is None:
             return value
         return _NormalisedObject(value, object.__getattribute__(self, "_sdk"))
@@ -251,6 +329,8 @@ class KaggleClient:
         else:
             kernels = api.kernels_list(user=user, **kwargs)
         return [_NormalisedObject(k, self.sdk) for k in kernels]
+
+    kernels_list = list_kernels
 
     def list_submissions(self, competition: Optional[str] = None, **kwargs: Any) -> List[Any]:
         """List submissions for a competition; returns normalised objects.
@@ -348,10 +428,20 @@ class KaggleClient:
         return self.kernel_output(slug, path=path, **kwargs)
 
     def kernels_status(self, slug: str, **kwargs: Any) -> Any:
-        """Query kernel status."""
-        if self.sdk == "kaggle":
-            return self._legacy_api.kernels_status(slug, **kwargs)
-        return self._legacy_api_instance().kernels_status(slug, **kwargs)
+        """Query kernel status, returning a normalised object with dict-like access."""
+        try:
+            if self.sdk == "kaggle":
+                raw = self._legacy_api.kernels_status(slug, **kwargs)
+            else:
+                raw = self._legacy_api_instance().kernels_status(slug, **kwargs)
+        except Exception as exc:
+            # Handle transient 404 when kernel was newly pushed and session status is initializing
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code == 404 or "404" in str(exc):
+                return _NormalisedObject({"status": "QUEUED", "failureMessage": None}, self.sdk)
+            raise
+        return _NormalisedObject(raw, self.sdk)
 
     def kernels_logs(self, slug: str, **kwargs: Any) -> Any:
         """Fetch kernel logs."""
@@ -373,9 +463,146 @@ class KaggleClient:
             raise AttributeError(
                 "KaggleApi has no competition_list_topics method; upgrade the `kaggle` package (>= 2.x)."
             )
-        resp = api.competition_list_topics(competition, **kwargs)
-        topics = getattr(resp, "topics", None) or []
-        return [_NormalisedObject(t, self.sdk) for t in topics]
+        page_size = kwargs.pop("page_size", None)
+        valid_kwargs: Dict[str, Any] = {}
+        if "sort_by" in kwargs and kwargs["sort_by"] is not None:
+            s_val = str(kwargs["sort_by"]).lower()
+            if s_val == "hotness":
+                s_val = "hot"
+            valid_kwargs["sort_by"] = s_val
+        if "page" in kwargs and kwargs["page"] is not None:
+            valid_kwargs["page"] = kwargs["page"]
+        resp = api.competition_list_topics(competition, **valid_kwargs)
+        raw_topics = getattr(resp, "topics", None)
+        if raw_topics is None:
+            raw_topics = resp if isinstance(resp, list) else []
+        if page_size is not None and isinstance(raw_topics, list):
+            raw_topics = raw_topics[:page_size]
+        return [_NormalisedObject(t, self.sdk) for t in raw_topics]
+
+    def competition_topic_messages(
+        self, topic_id: int, competition: Optional[str] = None, **kwargs: Any
+    ) -> List[Any]:
+        """Fetch messages/comments for a topic; returns normalised objects."""
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        page_size = kwargs.get("page_size")
+        resp = None
+        if competition and hasattr(api, "competition_list_topic_messages"):
+            try:
+                c_kwargs: Dict[str, Any] = {}
+                if "sort_by" in kwargs:
+                    c_kwargs["sort_by"] = kwargs["sort_by"]
+                if "page_size" in kwargs:
+                    c_kwargs["page_size"] = kwargs["page_size"]
+                resp = api.competition_list_topic_messages(competition, topic_id, **c_kwargs)
+            except Exception:
+                resp = None
+        if resp is None and hasattr(api, "forums_topic_show"):
+            try:
+                f_kwargs: Dict[str, Any] = {}
+                if "page_size" in kwargs:
+                    f_kwargs["page_size"] = kwargs["page_size"]
+                if "page_token" in kwargs:
+                    f_kwargs["page_token"] = kwargs["page_token"]
+                resp = api.forums_topic_show(topic_id, **f_kwargs)
+            except Exception:
+                resp = None
+        if resp is None and hasattr(api, "competition_list_topic_messages") and not competition:
+            try:
+                resp = api.competition_list_topic_messages(topic_id)
+            except Exception:
+                pass
+        raw_msgs = getattr(resp, "messages", None)
+        if raw_msgs is None:
+            raw_msgs = getattr(resp, "comments", None)
+        if raw_msgs is None:
+            raw_msgs = resp if isinstance(resp, list) else []
+        if page_size is not None and isinstance(raw_msgs, list):
+            raw_msgs = raw_msgs[:page_size]
+        return [_NormalisedObject(m, self.sdk) for m in raw_msgs]
+
+    def get_topic(self, topic_id: int, competition: Optional[str] = None) -> Dict[str, Any]:
+        """Fetch complete topic details including title, author, content, and all comments."""
+        def _clean_text(html: str) -> str:
+            if not html:
+                return ""
+            return re.sub(r"<[^>]+>", "", html).strip()
+
+        # 1. Try modern kagglesdk discussions API client if available
+        try:
+            from kagglesdk.discussions.types.discussions_api_service import (
+                ApiGetTopicRequest,
+                ApiListCommentsRequest,
+            )
+
+            disc_client = getattr(
+                getattr(self._client, "discussions", None),
+                "discussion_api_client",
+                None,
+            )
+            if disc_client is not None:
+                req = ApiGetTopicRequest()
+                req.id = topic_id
+                res = disc_client.get_topic(req)
+                t_obj = res.topic
+
+                comments_list = []
+                try:
+                    req_c = ApiListCommentsRequest()
+                    req_c.topic_id = topic_id
+                    comms = disc_client.list_comments(req_c)
+                    comments_list = getattr(comms, "comments", []) or []
+                except Exception:
+                    pass
+
+                return {
+                    "id": topic_id,
+                    "title": getattr(t_obj, "title", ""),
+                    "author": getattr(t_obj, "author_name", "") or "",
+                    "date": str(getattr(t_obj, "post_date", "") or ""),
+                    "votes": getattr(t_obj, "votes", 0) or 0,
+                    "content": _clean_text(getattr(t_obj, "content", "") or ""),
+                    "content_raw": getattr(t_obj, "content", "") or "",
+                    "comments_count": len(comments_list),
+                    "comments": [
+                        {
+                            "id": getattr(c, "id", None),
+                            "author": getattr(c, "author_name", "") or "",
+                            "date": str(getattr(c, "post_date", "") or ""),
+                            "votes": getattr(c, "votes", 0) or 0,
+                            "content": _clean_text(getattr(c, "content", "") or ""),
+                            "content_raw": getattr(c, "content", "") or "",
+                        }
+                        for c in comments_list
+                    ],
+                }
+        except Exception:
+            pass
+
+        # 2. Fallback to competition_topic_messages
+        msgs = self.competition_topic_messages(topic_id, competition=competition)
+        first_content = msgs[0].content if msgs else ""
+        return {
+            "id": topic_id,
+            "title": f"Topic {topic_id}",
+            "author": getattr(msgs[0], "author", "") if msgs else "",
+            "date": str(getattr(msgs[0], "date", "")) if msgs else "",
+            "votes": getattr(msgs[0], "votes", 0) if msgs else 0,
+            "content": _clean_text(first_content),
+            "content_raw": first_content,
+            "comments_count": max(0, len(msgs) - 1),
+            "comments": [
+                {
+                    "id": getattr(m, "id", None),
+                    "author": getattr(m, "author", "") or getattr(m, "author_name", ""),
+                    "date": str(getattr(m, "date", "") or getattr(m, "post_date", "")),
+                    "votes": getattr(m, "votes", 0) or getattr(m, "total_votes", 0),
+                    "content": _clean_text(getattr(m, "content", "") or getattr(m, "message", "")),
+                    "content_raw": getattr(m, "content", "") or getattr(m, "message", ""),
+                }
+                for m in msgs[1:]
+            ],
+        }
 
     def get(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
         """Generic accessor: look up a method by canonical name on the raw SDK.

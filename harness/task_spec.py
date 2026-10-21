@@ -531,7 +531,8 @@ class UniversalTaskSpec:
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> UniversalTaskSpec:
         from harness.evaluation import metric_name
-        task_cfg = cfg.get("task", cfg)
+        task_entry = cfg.get("task")
+        task_cfg = task_entry if isinstance(task_entry, dict) else cfg
         inputs_list = []
         inputs_raw = task_cfg.get("inputs", [])
         if isinstance(inputs_raw, dict):
@@ -570,7 +571,12 @@ class UniversalTaskSpec:
         val_spec = ValidationSpec.from_dict(val_cfg)
 
         return cls(
-            name=task_cfg.get("name", task_cfg.get("task_name", "universal_task")),
+            name=(
+                task_cfg.get("name")
+                or task_cfg.get("task_name")
+                or (task_entry if isinstance(task_entry, str) and task_entry else None)
+                or "universal_task"
+            ),
             task_type={"Tabular Regression":"regression","Tabular Binary Classification":"classification","Multi-Task Text Classification":"multi_task_classification","multi_label":"multilabel_classification"}.get(task_cfg.get("task_type",task_cfg.get("type")),task_cfg.get("task_type", task_cfg.get("type", "classification"))),
             primary_metric=metric_name(task_cfg.get("primary_metric", "macro_f1")),
             direction=task_cfg.get("direction", "maximize"),

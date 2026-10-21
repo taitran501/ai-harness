@@ -33,6 +33,10 @@ class GroundingGate:
         "paperswithcode",
         "empirical_journal",
         "verified_baseline",
+        "kaggle_public_lb",
+        "kaggle_discussion",
+        "kaggle_notebook",
+        "kaggle_dataset",
     }
 
     VALID_UNCERTAINTY_LEVELS = {"low", "medium", "high"}
@@ -43,10 +47,10 @@ class GroundingGate:
     # requirements and ship an ungrounded, recycled-default hypothesis.
     #
     # Methods include both the *channels* used to verify (web search, reading a
-    # URL, MCP doc tools) and the *registries* that count as a verified local
-    # source (local_registry, verified_baseline, and a Hugging Face Hub model
-    # that the agent actually loaded/inspected). Empty or the sentinel
-    # "not_verified" are explicitly rejected below.
+    # URL, MCP doc tools, Kaggle API/LB/discussions) and the *registries* that
+    # count as a verified local source (local_registry, verified_baseline, and a
+    # Hugging Face Hub model that the agent actually loaded/inspected). Empty or
+    # the sentinel "not_verified" are explicitly rejected below.
     VALID_VERIFIED_VIA = {
         "search_web",
         "read_url_content",
@@ -54,6 +58,10 @@ class GroundingGate:
         "local_registry",
         "verified_baseline",
         "huggingface_hub",
+        "kaggle_public_lb",
+        "kaggle_api",
+        "kaggle_discussion",
+        "kaggle_notebook",
     }
 
     # Sentinel values that mean "the source was never actually verified".

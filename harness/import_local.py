@@ -255,25 +255,36 @@ def _append_journal(project, target: Path, quarantine: bool) -> None:
     """Append an audit-journal entry for the import (best effort)."""
     try:
         import os
+        from harness.io_utils import atomic_write_json
 
         journal_path = project.artifacts_dir / "journal.json"
-        entries: List[Dict[str, Any]] = []
+        entry = {
+            "event": "local_artifact_import",
+            "at": _utc_now(),
+            "exp_id": target.name,
+            "quarantined": quarantine,
+            "target": str(target),
+            "pid": os.getpid(),
+        }
         if journal_path.is_file():
-            loaded = json.loads(journal_path.read_text(encoding="utf-8"))
+            try:
+                loaded = json.loads(journal_path.read_text(encoding="utf-8"))
+            except Exception:
+                loaded = None
             if isinstance(loaded, list):
-                entries = loaded
-        entries.append(
-            {
-                "event": "local_artifact_import",
-                "at": _utc_now(),
-                "exp_id": target.name,
-                "quarantined": quarantine,
-                "target": str(target),
-                "pid": os.getpid(),
-            }
-        )
+                loaded.append(entry)
+                payload: Any = loaded
+            elif isinstance(loaded, dict):
+                events = loaded.setdefault("events", [])
+                events.append(entry)
+                payload = loaded
+            else:
+                payload = [entry]
+        else:
+            payload = [entry]
+
         journal_path.parent.mkdir(parents=True, exist_ok=True)
-        journal_path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        atomic_write_json(journal_path, payload, indent=2, ensure_ascii=False)
     except Exception:  # noqa: BLE001 - journal is advisory; import already verified
         pass
 

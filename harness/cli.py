@@ -52,7 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
     kaggle.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|log|output + flags")
 
     submission = subparsers.add_parser("submission", help="Kaggle submission dispatch + score polling (harness-native)")
-    submission.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: dispatch|status|watch|latest + flags")
+    submission.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: dispatch|status|watch|latest|list + flags")
+
+    discussion = subparsers.add_parser("discussion", help="Inspect Kaggle competition discussions/topics and read messages (harness-native)")
+    discussion.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: list|view + flags")
+
+    codabench = subparsers.add_parser("codabench", help="Codabench platform integration (status, logs, artifact download)")
+    codabench.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|download + flags")
 
     dispatch_kernel_cmd = subparsers.add_parser("dispatch-kernel", help="Wrap a local notebook into a Kaggle kernel and push it")
     dispatch_kernel_cmd.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: notebook + flags")
@@ -284,6 +290,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "submission":
         from harness.submission_dispatch import main as submission_main
         return submission_main(list(args.args))
+
+    if args.command == "discussion":
+        from harness.discussion_cli import main as discussion_main
+        return discussion_main(list(args.args))
+
+    if args.command == "codabench":
+        from harness.codabench_cli import main as codabench_main
+        return codabench_main(list(args.args))
 
     if args.command == "dispatch-kernel":
         from harness.kernel_dispatch import main as kernel_dispatch_main

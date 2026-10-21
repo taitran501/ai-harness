@@ -57,11 +57,20 @@ def workspace_lock(directory):
 def transaction(path, default=None):
     path = Path(path)
     with workspace_lock(path.parent):
-        value = (
-            json.loads(path.read_text(encoding="utf-8"))
-            if path.is_file()
-            else copy.deepcopy(default or {})
-        )
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                loaded = None
+            if isinstance(loaded, dict):
+                value = loaded
+            elif isinstance(loaded, list):
+                value = copy.deepcopy(default or {})
+                value["events"] = loaded
+            else:
+                value = copy.deepcopy(default or {})
+        else:
+            value = copy.deepcopy(default or {})
         yield value
         value["revision"] = int(value.get("revision", 0)) + 1
         atomic_write_json(path, value, indent=2, ensure_ascii=False)

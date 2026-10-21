@@ -518,9 +518,21 @@ class KaggleKernelManager:
         except Exception:
             pass
 
+        task_dataset_slug = None
+        try:
+            data_cfg = task_info.get("data_config", {})
+            if isinstance(data_cfg, dict):
+                task_dataset_slug = data_cfg.get("kaggle_dataset_slug")
+        except Exception:
+            pass
+
         resolved_dataset = dataset_slug
-        if resolved_dataset and resolved_dataset.lower() == "none":
+        if (resolved_dataset and str(resolved_dataset).lower() == "none") or (
+            task_dataset_slug and str(task_dataset_slug).lower() == "none"
+        ):
             resolved_dataset = None
+        elif task_dataset_slug and not resolved_dataset:
+            resolved_dataset = task_dataset_slug
         elif not resolved_dataset or resolved_dataset == "antigravity/dataset":
             from harness.cloud_policy import private_upload_resource_names
 
@@ -1095,7 +1107,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                     critical_mismatches = {
                         k: v
                         for k, v in mismatches.items()
-                        if not _is_critical_identity_mismatch(k, v)
+                        if _is_critical_identity_mismatch(k, v)
                     }
                     if mismatches:
                         if force_import:

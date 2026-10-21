@@ -50,6 +50,8 @@ from harness.bridge_common import (
     TypedActionCall,
     TypedActionName,
     _TYPED_ACTION_NAMES,
+    TYPED_ACTION_SCHEMAS as TYPED_ACTION_SCHEMAS,
+    get_action_schema as get_action_schema,
 )
 
 

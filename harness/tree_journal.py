@@ -206,11 +206,19 @@ class TreeJournal:
         try:
             with open(target_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if isinstance(data, list):
+                nodes_list = [item for item in data if isinstance(item, dict) and "id" in item]
+            elif isinstance(data, dict):
+                raw_nodes = data.get("nodes", [])
+                nodes_list = list(raw_nodes.values()) if isinstance(raw_nodes, dict) else raw_nodes
+            else:
+                nodes_list = []
             node_fields = Node.__dataclass_fields__.keys()
-            for item in data.get("nodes", []):
-                filtered = {k: v for k, v in item.items() if k in node_fields}
-                node = Node(**filtered)
-                self.nodes[node.id] = node
+            for item in nodes_list:
+                if isinstance(item, dict):
+                    filtered = {k: v for k, v in item.items() if k in node_fields}
+                    node = Node(**filtered)
+                    self.nodes[node.id] = node
         except Exception as e:
             print(f"[TreeJournal] Warning: Failed to load {target_path}: {e}")
         return self

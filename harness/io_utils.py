@@ -42,6 +42,19 @@ def atomic_write_text(
         raise
 
 
+def safe_relpath(path: Path | str, start: Path | str = ".") -> str:
+    """Safely compute a relative POSIX path, tolerating relative/absolute mismatches and drive variations."""
+    p = Path(path)
+    s = Path(start)
+    try:
+        return str(p.resolve().relative_to(s.resolve())).replace("\\", "/")
+    except ValueError:
+        try:
+            return os.path.relpath(p.resolve(), s.resolve()).replace("\\", "/")
+        except ValueError:
+            return str(p).replace("\\", "/")
+
+
 def json_default_serializer(obj: Any) -> Any:
     """Fallback serializer handling NumPy types, Path objects, and common non-JSON types."""
     import pathlib

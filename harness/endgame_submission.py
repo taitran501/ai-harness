@@ -272,10 +272,12 @@ class KaggleLeaderboardTracker:
         """Project a normalised submission object into a flat dict."""
         pub = getattr(sub, "public_score", "") or ""
         priv = getattr(sub, "private_score", "") or ""
+        date_val = getattr(sub, "date", None) or getattr(sub, "created_at", None)
         return {
             "found": True,
             "ref": getattr(sub, "ref", None),
             "status": self._status_str(getattr(sub, "status", "")),
+            "date": str(date_val) if date_val is not None else "",
             "public_score": pub,
             "public_score_f": self._score(pub),
             "private_score": priv,
@@ -284,6 +286,15 @@ class KaggleLeaderboardTracker:
             "description": getattr(sub, "description", "") or "",
             "file_name": getattr(sub, "file_name", "") or "",
         }
+
+    def list_submissions(
+        self, competition: str, limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """List submissions for a competition as projection dicts."""
+        subs = self._client.list_submissions(competition)
+        if limit is not None:
+            subs = subs[:limit]
+        return [self._submission_dict(s) for s in subs]
 
     def wait_for_score(
         self,
