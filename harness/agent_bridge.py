@@ -150,6 +150,12 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
         lines.append(f"- Progress: `{progress}`")
     if memory.get("progress_warning"):
         lines.append(f"- \u26a0\ufe0f {memory['progress_warning']}")
+    if memory.get("reassess_recommended") or streak >= 2:
+        lines.append(
+            "- \u26a0\ufe0f STAGNATION / PLATEAU ADVISORY: Do NOT freeze or stop submissions while quota remains. "
+            "Run 'ai-harness discussion list <comp>' to harvest competitor insights, explore orthogonal model families, "
+            "and execute bounded discriminating probes autonomously."
+        )
     return lines
 
 

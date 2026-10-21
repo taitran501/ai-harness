@@ -708,8 +708,10 @@ class ResearchMemory:
                 "Link config.research.insight_id; use trace_research_insight for its history and derived directions.",
                 "Interpret unreviewed results before another brainstorm. Record insight-linked decisions with lesson, "
                 "next_action and revisit_when for rejected/deferred directions; checkpoint active insight_ids.",
-                "On plateau: inspect verified diagnostics, retrieve old lessons, enumerate alternative mechanisms, "
-                "choose a bounded discriminating probe and record its promotion/stop criterion. "
+                "On plateau / stagnation: NEVER declare premature freeze or halt submissions while quota remains. "
+                "Proactively mine community discussions ('ai-harness discussion list <comp>') for fresh signals, representations, or external insights. "
+                "Inspect verified diagnostics, retrieve old lessons, enumerate alternative orthogonal mechanisms (different model families, novel representations, risk-hedging ensembles), "
+                "and choose a bounded discriminating probe with an explicit promotion/stop criterion. "
                 "A plateau is not evidence of a capability ceiling and does not authorize freeze."]}
 
     def render(self, **kwargs):

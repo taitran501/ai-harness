@@ -108,6 +108,23 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("swin", content)
         self.assertIn("Mixup", content)
 
+    def test_generate_skill_anti_defeatism_and_cli(self):
+        """Verify dynamic skill generation includes anti-defeatism and new discussion/codabench commands."""
+        task_cfg = {
+            "task_name": "Test Benchmark",
+            "platform": "kaggle",
+            "modality": "tabular",
+            "primary_metric": "ROC-AUC",
+            "direction": "maximize",
+        }
+        content = generate_skill_content(task_cfg)
+        self.assertIn("3.7 Anti-Defeatism, Quota Utilization & Proactive Discussion Mining", content)
+        self.assertIn("ai-harness discussion list", content)
+        self.assertIn("ai-harness discussion view", content)
+        self.assertIn("ai-harness submission list", content)
+        self.assertIn("ai-harness codabench status", content)
+        self.assertIn("NO PREMATURE FREEZING", content)
+
     def test_inject_skill_file(self):
         """Verify writing skill file to disk in a temporary directory."""
         with tempfile.TemporaryDirectory() as tmp_dir:
