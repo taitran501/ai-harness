@@ -463,10 +463,18 @@ class KaggleClient:
             raise AttributeError(
                 "KaggleApi has no competition_list_topics method; upgrade the `kaggle` package (>= 2.x)."
             )
-        resp = api.competition_list_topics(competition, **kwargs)
+        page_size = kwargs.pop("page_size", None)
+        valid_kwargs: Dict[str, Any] = {}
+        if "sort_by" in kwargs and kwargs["sort_by"] is not None:
+            valid_kwargs["sort_by"] = kwargs["sort_by"]
+        if "page" in kwargs and kwargs["page"] is not None:
+            valid_kwargs["page"] = kwargs["page"]
+        resp = api.competition_list_topics(competition, **valid_kwargs)
         raw_topics = getattr(resp, "topics", None)
         if raw_topics is None:
             raw_topics = resp if isinstance(resp, list) else []
+        if page_size is not None and isinstance(raw_topics, list):
+            raw_topics = raw_topics[:page_size]
         return [_NormalisedObject(t, self.sdk) for t in raw_topics]
 
     def competition_topic_messages(
@@ -474,20 +482,31 @@ class KaggleClient:
     ) -> List[Any]:
         """Fetch messages/comments for a topic; returns normalised objects."""
         api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        page_size = kwargs.get("page_size")
         resp = None
         if competition and hasattr(api, "competition_list_topic_messages"):
             try:
-                resp = api.competition_list_topic_messages(competition, topic_id, **kwargs)
+                c_kwargs: Dict[str, Any] = {}
+                if "sort_by" in kwargs:
+                    c_kwargs["sort_by"] = kwargs["sort_by"]
+                if "page_size" in kwargs:
+                    c_kwargs["page_size"] = kwargs["page_size"]
+                resp = api.competition_list_topic_messages(competition, topic_id, **c_kwargs)
             except Exception:
                 resp = None
         if resp is None and hasattr(api, "forums_topic_show"):
             try:
-                resp = api.forums_topic_show(topic_id, **kwargs)
+                f_kwargs: Dict[str, Any] = {}
+                if "page_size" in kwargs:
+                    f_kwargs["page_size"] = kwargs["page_size"]
+                if "page_token" in kwargs:
+                    f_kwargs["page_token"] = kwargs["page_token"]
+                resp = api.forums_topic_show(topic_id, **f_kwargs)
             except Exception:
                 resp = None
         if resp is None and hasattr(api, "competition_list_topic_messages") and not competition:
             try:
-                resp = api.competition_list_topic_messages(topic_id, **kwargs)
+                resp = api.competition_list_topic_messages(topic_id)
             except Exception:
                 pass
         raw_msgs = getattr(resp, "messages", None)
@@ -495,6 +514,8 @@ class KaggleClient:
             raw_msgs = getattr(resp, "comments", None)
         if raw_msgs is None:
             raw_msgs = resp if isinstance(resp, list) else []
+        if page_size is not None and isinstance(raw_msgs, list):
+            raw_msgs = raw_msgs[:page_size]
         return [_NormalisedObject(m, self.sdk) for m in raw_msgs]
 
     def get(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
