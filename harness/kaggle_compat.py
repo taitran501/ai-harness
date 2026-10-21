@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Any, Callable, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 T = TypeVar("T")
 
