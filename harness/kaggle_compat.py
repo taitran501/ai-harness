@@ -521,6 +521,89 @@ class KaggleClient:
             raw_msgs = raw_msgs[:page_size]
         return [_NormalisedObject(m, self.sdk) for m in raw_msgs]
 
+    def get_topic(self, topic_id: int, competition: Optional[str] = None) -> Dict[str, Any]:
+        """Fetch complete topic details including title, author, content, and all comments."""
+        def _clean_text(html: str) -> str:
+            if not html:
+                return ""
+            return re.sub(r"<[^>]+>", "", html).strip()
+
+        # 1. Try modern kagglesdk discussions API client if available
+        try:
+            from kagglesdk.discussions.types.discussions_api_service import (
+                ApiGetTopicRequest,
+                ApiListCommentsRequest,
+            )
+
+            disc_client = getattr(
+                getattr(self._client, "discussions", None),
+                "discussion_api_client",
+                None,
+            )
+            if disc_client is not None:
+                req = ApiGetTopicRequest()
+                req.id = topic_id
+                res = disc_client.get_topic(req)
+                t_obj = res.topic
+
+                comments_list = []
+                try:
+                    req_c = ApiListCommentsRequest()
+                    req_c.topic_id = topic_id
+                    comms = disc_client.list_comments(req_c)
+                    comments_list = getattr(comms, "comments", []) or []
+                except Exception:
+                    pass
+
+                return {
+                    "id": topic_id,
+                    "title": getattr(t_obj, "title", ""),
+                    "author": getattr(t_obj, "author_name", "") or "",
+                    "date": str(getattr(t_obj, "post_date", "") or ""),
+                    "votes": getattr(t_obj, "votes", 0) or 0,
+                    "content": _clean_text(getattr(t_obj, "content", "") or ""),
+                    "content_raw": getattr(t_obj, "content", "") or "",
+                    "comments_count": len(comments_list),
+                    "comments": [
+                        {
+                            "id": getattr(c, "id", None),
+                            "author": getattr(c, "author_name", "") or "",
+                            "date": str(getattr(c, "post_date", "") or ""),
+                            "votes": getattr(c, "votes", 0) or 0,
+                            "content": _clean_text(getattr(c, "content", "") or ""),
+                            "content_raw": getattr(c, "content", "") or "",
+                        }
+                        for c in comments_list
+                    ],
+                }
+        except Exception:
+            pass
+
+        # 2. Fallback to competition_topic_messages
+        msgs = self.competition_topic_messages(topic_id, competition=competition)
+        first_content = msgs[0].content if msgs else ""
+        return {
+            "id": topic_id,
+            "title": f"Topic {topic_id}",
+            "author": getattr(msgs[0], "author", "") if msgs else "",
+            "date": str(getattr(msgs[0], "date", "")) if msgs else "",
+            "votes": getattr(msgs[0], "votes", 0) if msgs else 0,
+            "content": _clean_text(first_content),
+            "content_raw": first_content,
+            "comments_count": max(0, len(msgs) - 1),
+            "comments": [
+                {
+                    "id": getattr(m, "id", None),
+                    "author": getattr(m, "author", "") or getattr(m, "author_name", ""),
+                    "date": str(getattr(m, "date", "") or getattr(m, "post_date", "")),
+                    "votes": getattr(m, "votes", 0) or getattr(m, "total_votes", 0),
+                    "content": _clean_text(getattr(m, "content", "") or getattr(m, "message", "")),
+                    "content_raw": getattr(m, "content", "") or getattr(m, "message", ""),
+                }
+                for m in msgs[1:]
+            ],
+        }
+
     def get(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
         """Generic accessor: look up a method by canonical name on the raw SDK.
 

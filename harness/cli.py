@@ -57,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
     discussion = subparsers.add_parser("discussion", help="Inspect Kaggle competition discussions/topics and read messages (harness-native)")
     discussion.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: list|view + flags")
 
+    codabench = subparsers.add_parser("codabench", help="Codabench platform integration (status, logs, artifact download)")
+    codabench.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|download + flags")
+
     dispatch_kernel_cmd = subparsers.add_parser("dispatch-kernel", help="Wrap a local notebook into a Kaggle kernel and push it")
     dispatch_kernel_cmd.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: notebook + flags")
 
@@ -291,6 +294,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "discussion":
         from harness.discussion_cli import main as discussion_main
         return discussion_main(list(args.args))
+
+    if args.command == "codabench":
+        from harness.codabench_cli import main as codabench_main
+        return codabench_main(list(args.args))
 
     if args.command == "dispatch-kernel":
         from harness.kernel_dispatch import main as kernel_dispatch_main

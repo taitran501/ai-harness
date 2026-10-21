@@ -42,13 +42,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_list.add_argument("--page", "-p", type=int, default=1, help="Page number (default: 1).")
     p_list.add_argument("--page-size", type=int, default=20, help="Page size (default: 20).")
 
-    p_view = sub.add_parser("view", help="Read messages/comments for a discussion topic.")
+    p_view = sub.add_parser("view", help="Read topic details and all comments.")
     p_view.add_argument("topic_id", type=int, help="Numeric topic ID.")
     p_view.add_argument(
         "--competition", "-c", default=None,
-        help="Kaggle competition slug (optional but recommended).",
+        help="Kaggle competition slug (optional).",
     )
-    p_view.add_argument("--page-size", type=int, default=50, help="Page size (default: 50).")
+    p_view.add_argument("--raw", action="store_true", help="Include raw HTML content.")
 
     args = parser.parse_args(argv)
     client = KaggleClient()
@@ -87,30 +87,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if args.action == "view":
-            kwargs = {}
-            if args.page_size != 50:
-                kwargs["page_size"] = args.page_size
-            msgs_raw = client.competition_topic_messages(
-                args.topic_id, competition=args.competition, **kwargs
-            )
-            messages = []
-            for m in msgs_raw:
-                messages.append(
-                    {
-                        "id": getattr(m, "id", None),
-                        "author": getattr(m, "author", "") or getattr(m, "author_name", ""),
-                        "date": str(getattr(m, "date", "") or getattr(m, "post_date", "") or ""),
-                        "votes": getattr(m, "votes", 0) or getattr(m, "total_votes", 0) or 0,
-                        "content": getattr(m, "content", "") or getattr(m, "message", "") or "",
-                    }
-                )
+            topic_data = client.get_topic(args.topic_id, competition=args.competition)
+            if not args.raw:
+                topic_data.pop("content_raw", None)
+                for c in topic_data.get("comments", []):
+                    c.pop("content_raw", None)
             _print_payload(
                 {
                     "action": "view",
-                    "topic_id": args.topic_id,
                     "competition": args.competition,
-                    "count": len(messages),
-                    "messages": messages,
+                    **topic_data,
                 }
             )
             return 0

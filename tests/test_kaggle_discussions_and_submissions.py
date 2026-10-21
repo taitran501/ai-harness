@@ -107,20 +107,24 @@ class TestDiscussionCLI(unittest.TestCase):
         from unittest.mock import patch
         from harness.discussion_cli import main
 
-        mock_msg = MagicMock()
-        mock_msg.id = 501
-        mock_msg.author = "bob"
-        mock_msg.date = "2026-10-21"
-        mock_msg.votes = 3
-        mock_msg.content = "Insightful response"
+        mock_topic_payload = {
+            "id": 101,
+            "title": "Topic Title",
+            "author": "bob",
+            "date": "2026-10-21",
+            "votes": 3,
+            "content": "Insightful response",
+            "comments_count": 0,
+            "comments": [],
+        }
 
         with patch("harness.discussion_cli.KaggleClient") as mock_cls:
             mock_inst = MagicMock()
-            mock_inst.competition_topic_messages.return_value = [mock_msg]
+            mock_inst.get_topic.return_value = mock_topic_payload
             mock_cls.return_value = mock_inst
             ret = main(["view", "101", "--competition", "test-comp"])
             self.assertEqual(ret, 0)
-            mock_inst.competition_topic_messages.assert_called_once_with(101, competition="test-comp")
+            mock_inst.get_topic.assert_called_once_with(101, competition="test-comp")
 
 
 class TestSubmissionDispatchCLI(unittest.TestCase):
