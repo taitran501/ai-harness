@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional
 import zipfile
 
@@ -25,7 +26,8 @@ class CodabenchClient:
         self.base_url = base_url.rstrip("/")
         self.session_id = session_id or self._resolve_session_id(project_root)
 
-    def _resolve_session_id(self, project_root: Optional[str | Path] = None) -> Optional[str]:
+    @staticmethod
+    def _resolve_session_id(project_root: Optional[str | Path] = None) -> Optional[str]:
         # 1. Env var
         env_val = os.environ.get("CODABENCH_SESSION_ID")
         if env_val:
@@ -40,9 +42,42 @@ class CodabenchClient:
         for cand in candidates:
             if cand.is_file():
                 try:
-                    return cand.read_text(encoding="utf-8").strip()
+                    val = cand.read_text(encoding="utf-8").strip()
+                    if val:
+                        return val
                 except Exception:
                     pass
+
+        # 3. User home directory ~/.codabench/session or token
+        home_candidates = [
+            Path.home() / ".codabench" / "session",
+            Path.home() / ".codabench" / "token",
+            Path.home() / ".codabench_session",
+        ]
+        for hc in home_candidates:
+            if hc.is_file():
+                try:
+                    val = hc.read_text(encoding="utf-8").strip()
+                    if val:
+                        return val
+                except Exception:
+                    pass
+
+        # 4. Fallback discovery: scan scratch/ and scripts/ for session_id = "..."
+        search_dirs = [Path("scratch"), Path("scripts")]
+        if project_root:
+            p_root = Path(project_root)
+            search_dirs.extend([p_root / "scratch", p_root / "scripts"])
+        for sdir in search_dirs:
+            if sdir.is_dir():
+                for py_file in sdir.glob("*.py"):
+                    try:
+                        content = py_file.read_text(encoding="utf-8", errors="ignore")
+                        match = re.search(r"""session_id\s*=\s*['"]([a-zA-Z0-9_-]{20,})['"]""", content)
+                        if match:
+                            return match.group(1).strip()
+                    except Exception:
+                        pass
         return None
 
     def _get_headers(self) -> Dict[str, str]:

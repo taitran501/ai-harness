@@ -68,7 +68,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p_watch = sub.add_parser("watch", help="Poll until the score lands or timeout.")
     p_watch.add_argument("competition", help="Kaggle competition slug.")
-    p_watch.add_argument("ref", help="Submission ref.")
+    p_watch.add_argument("refs", nargs="+", help="One or more submission refs (comma-separated or separate arguments).")
     p_watch.add_argument(
         "--timeout", type=float, default=1800.0,
         help="Max seconds to wait (default 1800).",
@@ -111,14 +111,29 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if args.action == "watch":
-            payload = tracker.wait_for_score(
-                args.competition,
-                args.ref,
-                timeout_s=args.timeout,
-                poll_interval_s=args.poll,
-                max_poll_interval_s=args.max_poll,
-            )
-            _print_payload({"action": "watch", **payload})
+            raw_refs = []
+            for item in args.refs:
+                raw_refs.extend(str(item).split(","))
+            clean_refs = [r.strip() for r in raw_refs if r.strip()]
+            if len(clean_refs) <= 1:
+                ref = clean_refs[0] if clean_refs else ""
+                payload = tracker.wait_for_score(
+                    args.competition,
+                    ref,
+                    timeout_s=args.timeout,
+                    poll_interval_s=args.poll,
+                    max_poll_interval_s=args.max_poll,
+                )
+                _print_payload({"action": "watch", **payload})
+            else:
+                payload = tracker.wait_for_scores(
+                    args.competition,
+                    clean_refs,
+                    timeout_s=args.timeout,
+                    poll_interval_s=args.poll,
+                    max_poll_interval_s=args.max_poll,
+                )
+                _print_payload({"action": "watch", "competition": args.competition, **payload})
             return 0
 
         if args.action == "latest":
