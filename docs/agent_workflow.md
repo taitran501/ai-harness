@@ -131,6 +131,21 @@ ai-harness-agent act --action freeze_candidate --user-approved --slot-1-id candi
 
 ---
 
+### Binary threshold recommendations
+
+`optimize_threshold --exp-id <exp> --metric f1` reads a verified completed full
+run's selected input variant. It requires a single binary target, declared
+classes, and `proba_<target>` / `classes_<target>` metadata. Supported metrics
+are `f1`, `accuracy` (`acc`), and `kappa` (`cohen_kappa`). Other metrics and
+regression/multiclass tasks are rejected rather than converted to another task.
+
+The positive class is the last declared class; the action locates its actual
+probability column by label, even if the model's column order differs. The
+observation includes `target`, `positive_class`, `selection_variant`, and
+`n_samples`. Apply `best_threshold` to that positive-class probability in a new
+prediction artifact. This action only recommends a threshold and does not edit
+completed evidence or replace the task's official validation metric.
+
 ## 5. Model Execution and Probes
 
 Experiment pipelines are executed using `harness.runner` (`ai-harness-run`):

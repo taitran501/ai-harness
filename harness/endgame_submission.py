@@ -457,24 +457,33 @@ class ThresholdOptimizer:
             fn = cohen_kappa_score
         elif metric_lower in {"accuracy", "acc"}:
             fn = accuracy_score
+        elif metric_lower == "f1":
+            def fn(y, pred):
+                return f1_score(y, pred, zero_division=0)
         else:
-            fn = f1_score
+            raise ValueError("Unsupported threshold metric: " + str(metric))
 
         best_th = 0.5
         best_score = float("-inf")
         y_true_clean = np.asarray(y_true).ravel()
-        y_prob_clean = np.asarray(y_prob).ravel()
+        y_prob_clean = np.asarray(y_prob, dtype=float).ravel()
+        if (not len(y_true_clean) or len(y_true_clean) != len(y_prob_clean)
+                or not np.isin(y_true_clean, [0, 1]).all()
+                or not np.isfinite(y_prob_clean).all()
+                or (y_prob_clean < 0).any() or (y_prob_clean > 1).any()):
+            raise ValueError("Threshold search requires aligned binary labels and finite probabilities in [0, 1]")
+        if int(num_thresholds) < 2:
+            raise ValueError("num_thresholds must be at least 2")
 
-        for th in np.linspace(0.05, 0.95, num_thresholds):
+        for th in np.unique(np.r_[0.5, np.linspace(0.05, 0.95, int(num_thresholds))]):
             preds = (y_prob_clean >= th).astype(int)
-            try:
-                score = float(fn(y_true_clean, preds))
-                if score > best_score:
-                    best_score = score
-                    best_th = float(th)
-            except Exception:
-                continue
+            score = float(fn(y_true_clean, preds))
+            if np.isfinite(score) and score > best_score:
+                best_score = score
+                best_th = float(th)
 
+        if not np.isfinite(best_score):
+            raise ValueError("No finite threshold score could be computed")
         return best_th, best_score
 
 

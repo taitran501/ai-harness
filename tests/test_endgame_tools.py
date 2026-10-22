@@ -239,14 +239,15 @@ class TestEndgameCandidatesAndBridge(unittest.TestCase):
     def test_agent_bridge_endgame_actions(self):
         sess = self.bridge.start_session(goal="Test endgame actions")
 
-        # 1. Action: optimize_threshold
+        # 1. A regression task must not be silently median-binarized for a
+        # binary classification threshold recommendation.
         sess, obs_th = self.bridge.execute_action(
             action=TypedActionName.OPTIMIZE_THRESHOLD.value,
             params={"exp_id": "exp001", "metric": "f1"},
             session_id=sess.session_id,
         )
-        self.assertEqual(obs_th.status, "SUCCESS")
-        self.assertIn("best_threshold", obs_th.data)
+        self.assertEqual(obs_th.status, "FAILED")
+        self.assertIn("binary", obs_th.summary.lower())
 
         # 2. Action: generate_microdose_probe
         base_p = self.root / "artifacts" / "exp001" / "test_predictions.csv"
