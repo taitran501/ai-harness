@@ -244,5 +244,67 @@ class TestSubmissionDispatchCLI(unittest.TestCase):
             self.assertEqual(mock_inst.wait_for_scores.call_args[0][0], "test-comp")
             self.assertEqual(mock_inst.wait_for_scores.call_args[0][1], ["111", "222"])
 
+    def test_submission_dispatch_quota_cli(self):
+        from unittest.mock import patch
+        from harness.submission_dispatch import main
+
+        with patch("harness.submission_dispatch.KaggleLeaderboardTracker") as mock_cls:
+            mock_inst = MagicMock()
+            mock_inst.get_quota.return_value = {
+                "competition": "test-comp",
+                "num_today": 2,
+                "num_allowed_now": 3,
+                "num_total": 33,
+                "has_remaining_quota": True,
+                "daily_quota": 5,
+            }
+            mock_cls.return_value = mock_inst
+            ret = main(["quota", "test-comp"])
+            self.assertEqual(ret, 0)
+            mock_inst.get_quota.assert_called_once_with("test-comp")
+
+            # Also verify alias limits
+            ret2 = main(["limits", "test-comp"])
+            self.assertEqual(ret2, 0)
+            self.assertEqual(mock_inst.get_quota.call_count, 2)
+
+    def test_tracker_get_quota_and_caching(self):
+        import tempfile
+        import shutil
+        import json
+        from pathlib import Path
+        from harness.endgame_submission import KaggleLeaderboardTracker
+
+        tmp_dir = Path(tempfile.mkdtemp())
+        try:
+            dot_ai = tmp_dir / ".ai-harness"
+            dot_ai.mkdir()
+
+            mock_client = MagicMock()
+            mock_client.get_submission_limits.return_value = {
+                "competition": "test-comp",
+                "num_today": 1,
+                "num_allowed_now": 4,
+                "num_total": 10,
+                "has_remaining_quota": True,
+                "daily_quota": 5,
+            }
+
+            tracker = KaggleLeaderboardTracker(client=mock_client)
+            quota = tracker.get_quota("test-comp", project_root=tmp_dir)
+
+            self.assertEqual(quota["num_today"], 1)
+            self.assertEqual(quota["num_allowed_now"], 4)
+            self.assertTrue(quota["has_remaining_quota"])
+
+            # Verify cached file written
+            cached_file = dot_ai / "submission_limits.json"
+            self.assertTrue(cached_file.is_file())
+            cached_data = json.loads(cached_file.read_text(encoding="utf-8"))
+            self.assertEqual(cached_data["num_allowed_now"], 4)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

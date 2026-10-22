@@ -88,6 +88,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_list = sub.add_parser("list", help="List recent submissions for a competition.")
     p_list.add_argument("competition", help="Kaggle competition slug.")
     p_list.add_argument("--limit", "-n", type=int, default=20, help="Max submissions to list.")
+    p_quota = sub.add_parser("quota", aliases=["limits"], help="Check live daily submission limits and remaining quota.")
+    p_quota.add_argument("competition", help="Kaggle competition slug.")
+
 
     args = parser.parse_args(argv)
     tracker = KaggleLeaderboardTracker()
@@ -134,6 +137,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                     max_poll_interval_s=args.max_poll,
                 )
                 _print_payload({"action": "watch", "competition": args.competition, **payload})
+            return 0
+
+
+        if args.action in ("quota", "limits"):
+            quota = tracker.get_quota(args.competition)
+            _print_payload({"action": "quota", **quota})
             return 0
 
         if args.action == "latest":

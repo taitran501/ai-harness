@@ -1269,6 +1269,19 @@ class CompetitionStateMachine:
         today_prefix = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         subs_today = sum(1 for s in subs if str(s.created_at).startswith(today_prefix))
 
+        # Check cached live submission limits from Kaggle API
+        cached_limits_file = self.project_root / ".ai-harness" / "submission_limits.json"
+        num_allowed_now = None
+        if cached_limits_file.is_file():
+            try:
+                limits_data = json.loads(cached_limits_file.read_text(encoding="utf-8"))
+                if limits_data.get("num_allowed_now") is not None:
+                    subs_today = int(limits_data.get("num_today") or 0)
+                    num_allowed_now = int(limits_data.get("num_allowed_now") or 0)
+                    daily_quota = int(limits_data.get("daily_quota") or (subs_today + num_allowed_now))
+            except Exception:
+                pass
+
         overall_best = pool.get("overall_best")
         primary_metric = str(self.spec.get("primary_metric") or "score")
         scored_subs = [
@@ -1363,7 +1376,8 @@ class CompetitionStateMachine:
                     "message": "External evaluation score dropped by > 0.05 compared to local CV.",
                 }
             )
-        if has_public_lb and subs_today >= daily_quota:
+        limit_reached = (num_allowed_now == 0) if num_allowed_now is not None else (subs_today >= daily_quota)
+        if has_public_lb and limit_reached:
             blockers.append(
                 {
                     "code": "DAILY_QUOTA_REACHED",
@@ -1371,7 +1385,7 @@ class CompetitionStateMachine:
                     "severity": "warning",
                     "phase": 6,
                     "action_label": "View submission history",
-                    "message": f"Used {subs_today}/{daily_quota} submissions today. Continue iterating locally.",
+                    "message": f"Used {subs_today}/{daily_quota} submissions today (0 remaining). Continue iterating locally.",
                 }
             )
         if not gates.get("freeze_locked") and baseline_ready:
@@ -1544,6 +1558,7 @@ class CompetitionStateMachine:
                     ),
                     "quota_used_today": subs_today,
                     "daily_quota": daily_quota,
+                    "remaining_quota_today": num_allowed_now if num_allowed_now is not None else max(0, daily_quota - subs_today),
                 },
                 "private_frozen": {
                     "label": eval_proto.get("final_eval_label", "Private Evaluation"),
