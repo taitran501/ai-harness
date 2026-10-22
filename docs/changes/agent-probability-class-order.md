@@ -3,7 +3,8 @@
 - **Date**: 2026-10-22
 - **PR**: [#119](https://github.com/taitran501/ai-harness/pull/119)
 - **Branch**: `fix/agent-probability-class-order`
-- **Status**: reviewed
+- **Status**: merged
+- **Merge commit**: `d79d6c1abc4651f6fe3d1a23bfb80acb50b550ca`
 
 ## Why
 
