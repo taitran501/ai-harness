@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-22 | Preserve model class ordering through script and pipeline prediction transport | [#119](https://github.com/taitran501/ai-harness/pull/119) | [agent-probability-class-order](agent-probability-class-order.md) |
 | 2026-10-22 | Preserve official scorer through candidate promotion and blend optimization | [#118](https://github.com/taitran501/ai-harness/pull/118) | [agent-official-scorer](agent-official-scorer.md) |
 | 2026-10-22 | Live Kaggle submission limits & quota discovery (`ai-harness submission quota`), Context HUD quota integration, interactive gateway keepalive daemon (`GatewayKeepaliveDaemon`), and autonomous discussion mining mandate | [#117](https://github.com/taitran501/ai-harness/pull/117) | [submission-quota-and-gateway-keepalive](submission-quota-and-gateway-keepalive.md) |
 | 2026-10-22 | Multi-ref concurrent submission watch (`ai-harness submission watch <comp> <ref1> [<ref2> ...]`), submission metadata parity (`url`, `submitted_by`, `team_name`), Codabench token discovery & auth CLI (`ai-harness codabench auth`), and interactive gateway watchdog guideline | [#116](https://github.com/taitran501/ai-harness/pull/116) | [submission-multi-watch-and-traceability](submission-multi-watch-and-traceability.md) |

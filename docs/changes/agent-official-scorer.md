@@ -3,7 +3,8 @@
 - **Date**: 2026-10-22
 - **PR**: [#118](https://github.com/taitran501/ai-harness/pull/118)
 - **Branch**: `fix/agent-official-scorer`
-- **Status**: reviewed; ready for squash merge
+- **Status**: merged
+- **Merge commit**: `19d144da040b331a17c9565ef52b03cab4ec976b`
 
 ## Why
 
