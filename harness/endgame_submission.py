@@ -284,7 +284,10 @@ class KaggleLeaderboardTracker:
             "private_score_f": self._score(priv),
             "error_description": getattr(sub, "error_description", "") or "",
             "description": getattr(sub, "description", "") or "",
-            "file_name": getattr(sub, "file_name", "") or "",
+            "file_name": getattr(sub, "file_name", "") or getattr(sub, "filename", "") or "",
+            "submitted_by": getattr(sub, "submitted_by", "") or "",
+            "team_name": getattr(sub, "team_name", "") or "",
+            "url": getattr(sub, "url", "") or "",
         }
 
     def list_submissions(
@@ -327,6 +330,59 @@ class KaggleLeaderboardTracker:
             if time.monotonic() >= deadline:
                 info.update(final=False, outcome="timeout", attempts=attempts)
                 return info
+            self._sleep(interval)
+            interval = min(interval * 1.5, max_poll_interval_s)
+
+    def wait_for_scores(
+        self,
+        competition: str,
+        refs: List[Any],
+        timeout_s: float = 1800.0,
+        poll_interval_s: float = 15.0,
+        max_poll_interval_s: float = 60.0,
+    ) -> Dict[str, Any]:
+        """Poll until all submissions in ``refs`` reach COMPLETE/ERROR or timeout elapses.
+
+        Uses single ``list_submissions`` calls per round to avoid rate-limiting.
+        """
+        clean_refs = [str(r).strip() for r in refs if str(r).strip()]
+        deadline = time.monotonic() + timeout_s
+        interval = poll_interval_s
+        attempts = 0
+        final_results: Dict[str, Dict[str, Any]] = {}
+
+        while True:
+            attempts += 1
+            all_subs = {
+                str(getattr(s, "ref", "")): self._submission_dict(s)
+                for s in self._client.list_submissions(competition)
+            }
+            pending: List[str] = []
+            for r in clean_refs:
+                if r in final_results and final_results[r].get("final"):
+                    continue
+                info = all_subs.get(r, {"found": False, "ref": r, "status": "NOT_FOUND"})
+                status = str(info.get("status", "")).upper()
+                if self._COMPLETE in status:
+                    info.update(final=True, outcome="scored", attempts=attempts)
+                    final_results[r] = info
+                elif self._ERROR in status:
+                    info.update(final=True, outcome="error", attempts=attempts)
+                    final_results[r] = info
+                else:
+                    pending.append(r)
+
+            if not pending or time.monotonic() >= deadline:
+                for r in pending:
+                    info = all_subs.get(r, {"found": False, "ref": r, "status": "TIMEOUT"})
+                    info.update(final=False, outcome="timeout", attempts=attempts)
+                    final_results[r] = info
+                return {
+                    "all_final": len(pending) == 0,
+                    "attempts": attempts,
+                    "count": len(clean_refs),
+                    "submissions": [final_results[r] for r in clean_refs if r in final_results],
+                }
             self._sleep(interval)
             interval = min(interval * 1.5, max_poll_interval_s)
 

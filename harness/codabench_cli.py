@@ -39,10 +39,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_download.add_argument("--session", default=None, help="Codabench sessionid cookie value.")
     p_download.add_argument("--base-url", default="https://www.codabench.org", help="Codabench base URL.")
 
+    p_auth = sub.add_parser("auth", help="Save session token to .codabench_session.")
+    p_auth.add_argument("session", help="Codabench sessionid cookie value.")
+
     args = parser.parse_args(argv)
-    client = CodabenchClient(session_id=args.session, base_url=args.base_url)
+
+    if args.action == "auth":
+        token = str(args.session).strip()
+        from pathlib import Path
+        Path(".codabench_session").write_text(token, encoding="utf-8")
+        _print_payload({"action": "auth", "saved": True, "file": ".codabench_session", "token_length": len(token)})
+        return 0
+
+    base_url = getattr(args, "base_url", "https://www.codabench.org")
+    client = CodabenchClient(session_id=args.session, base_url=base_url)
 
     try:
+
         if args.action == "status":
             info = client.get_submission(args.sub_id)
             _print_payload({"action": "status", **info})

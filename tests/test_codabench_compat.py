@@ -96,6 +96,37 @@ class TestCodabenchCompat(unittest.TestCase):
         ret = codabench_cli_main(["status", "1007196", "--session", "test_sess"])
         self.assertEqual(ret, 0)
 
+    def test_resolve_session_id_scratch_fallback(self):
+        scratch_dir = self.tmp / "scratch"
+        scratch_dir.mkdir(parents=True)
+        py_file = scratch_dir / "probe.py"
+        py_file.write_text('session_id = "test_scanned_token_abc1234567890"\nprint("ok")', encoding="utf-8")
+
+        resolved = CodabenchClient._resolve_session_id(project_root=self.tmp)
+        self.assertEqual(resolved, "test_scanned_token_abc1234567890")
+
+    def test_resolve_session_id_home_dir(self):
+        home_dir = self.tmp / "fake_home"
+        home_dir.mkdir(parents=True)
+        token_file = home_dir / ".codabench_session"
+        token_file.write_text("home_token_xyz987654321", encoding="utf-8")
+
+        with patch("pathlib.Path.home", return_value=home_dir):
+            resolved = CodabenchClient._resolve_session_id(project_root=self.tmp)
+            self.assertEqual(resolved, "home_token_xyz987654321")
+
+    def test_codabench_cli_auth(self):
+        import os
+        orig_cwd = os.getcwd()
+        try:
+            os.chdir(self.tmp)
+            ret = codabench_cli_main(["auth", "my_secret_token_12345"])
+            self.assertEqual(ret, 0)
+            self.assertTrue((self.tmp / ".codabench_session").is_file())
+            self.assertEqual((self.tmp / ".codabench_session").read_text(encoding="utf-8"), "my_secret_token_12345")
+        finally:
+            os.chdir(orig_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()
