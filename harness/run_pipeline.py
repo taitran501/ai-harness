@@ -273,7 +273,7 @@ class RunPipelineMixin:
             t_df = pd.read_csv(test_pred_path)
             from harness.script_predictions import extract_test_predictions
 
-            cand_test = extract_test_predictions(t_df, self.task_spec)
+            cand_test = extract_test_predictions(t_df, self.task_spec, expected_ids=test_df[id_col])
             fold_test_preds.append(cand_test)
 
         self.estimator_metadata.append({

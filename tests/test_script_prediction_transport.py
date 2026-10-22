@@ -11,7 +11,7 @@ import pandas as pd
 
 from harness.artifacts import validate_test_prediction
 from harness.runner import UniversalRunner
-from harness.script_predictions import extract_test_predictions
+from harness.script_predictions import align_prediction_ids, extract_test_predictions
 from tests.fixtures import make_workspace
 from tests.test_correctness_contracts import task
 
@@ -73,3 +73,38 @@ class ScriptPredictionTransportTests(unittest.TestCase):
         frame = pd.DataFrame({"classes_target": ["[0, 1]", "[1, 0]"]})
         with self.assertRaisesRegex(ValueError, "Class order changed"):
             extract_test_predictions(frame, task())
+
+    def test_reordered_test_predictions_are_joined_by_id(self):
+        script = PREDICTION_SCRIPT.replace("    p1 = df.x.to_numpy()", "    if split == 'test': df = df.iloc[::-1]\n    p1 = df.x.to_numpy()")
+        for mode in ("script", "pipeline"):
+            with self.subTest(mode=mode):
+                runner = self.make_runner(mode, script=script)
+                runner.run()
+                output = pd.read_csv(runner.exp_dir / "test_predictions.csv")
+                self.assertEqual(output.id.tolist(), [100, 101])
+                self.assertEqual(output.pred_target.tolist(), [0, 1])
+                self.assertEqual([json.loads(v)[0] for v in output.proba_target], [.1, .9])
+                validate_test_prediction(runner.exp_dir / "test_predictions.csv",
+                                         task_spec=runner.task_spec, plugin=runner.task_plugin)
+
+    def test_invalid_prediction_id_sets_fail_closed(self):
+        cases = [pd.DataFrame({"pred_target": [1, 2]}),
+                 pd.DataFrame({"id": [1, 1]}), pd.DataFrame({"id": [1, None]}),
+                 pd.DataFrame({"id": [1]}), pd.DataFrame({"id": [1, 2, 3]}),
+                 pd.DataFrame({"id": [1, 3]})]
+        for frame in cases:
+            with self.subTest(frame=frame.to_dict()):
+                with self.assertRaises(ValueError):
+                    align_prediction_ids(frame, [1, 2], "id")
+
+    def test_duplicate_test_ids_cannot_be_sealed_as_completed_evidence(self):
+        script = PREDICTION_SCRIPT.replace("    p1 = df.x.to_numpy()", "    if split == 'test': df['id'] = 100\n    p1 = df.x.to_numpy()")
+        for mode in ("script", "pipeline"):
+            with self.subTest(mode=mode):
+                runner = self.make_runner(mode, script=script)
+                with self.assertRaisesRegex(ValueError, "unique, non-null IDs"):
+                    runner.run()
+                self.assertEqual(runner.manifest["status"], "FAILED")
+                with self.assertRaises(ValueError):
+                    validate_test_prediction(runner.exp_dir / "test_predictions.csv",
+                                             task_spec=runner.task_spec, plugin=runner.task_plugin)
