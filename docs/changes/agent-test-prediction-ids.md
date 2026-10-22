@@ -3,7 +3,8 @@
 - **Date**: 2026-10-22
 - **PR**: [#120](https://github.com/taitran501/ai-harness/pull/120)
 - **Branch**: `fix/agent-test-prediction-ids`
-- **Status**: open
+- **Status**: merged
+- **Merge commit**: `12d4b3bb4ba4e88369978585b410bc80b90abcb0`
 
 ## Why
 
@@ -24,3 +25,9 @@ Subprocess tests reverse test row order in both execution modes and check final 
 ## Impact & follow-ups
 
 Custom scripts must provide test IDs, including when their row count matches the dataset. Completed artifacts are untouched.
+
+## Pre-merge review
+
+Reviewed the shared one-to-one ID alignment and both adapter call sites. Regression coverage verifies shuffled rows retain the correct probability/label mapping and duplicate IDs cannot be sealed as completed evidence. No blocking findings.
+
+A fresh integration run passed: 1,053 tests, 2 skipped, no failures/errors. Ruff and diff whitespace checks passed.
