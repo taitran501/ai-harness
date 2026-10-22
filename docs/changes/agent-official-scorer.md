@@ -1,7 +1,7 @@
 # Preserve the official scorer throughout candidate selection
 
 - **Date**: 2026-10-22
-- **PR**: pending creation
+- **PR**: [#118](https://github.com/taitran501/ai-harness/pull/118)
 - **Branch**: `fix/agent-official-scorer`
 - **Status**: open
 
