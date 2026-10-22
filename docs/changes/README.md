@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-23 | Enforce candidate probability class-order contracts before blend optimization | [#124](https://github.com/taitran501/ai-harness/pull/124) | [agent-blend-optimizer-contract](agent-blend-optimizer-contract.md) |
 | 2026-10-22 | Preserve model-to-weight mapping in duplicate candidate detection | [#123](https://github.com/taitran501/ai-harness/pull/123) | [agent-blend-recipe-identity](agent-blend-recipe-identity.md) |
 | 2026-10-22 | Normalize imported external predictions for candidate promotion | [#122](https://github.com/taitran501/ai-harness/pull/122) | [agent-external-candidate-metadata](agent-external-candidate-metadata.md) |
 | 2026-10-22 | Bound custom scripts and pipelines to selected validation partitions and probes | [#121](https://github.com/taitran501/ai-harness/pull/121) | [agent-script-validation-scope](agent-script-validation-scope.md) |
