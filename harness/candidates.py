@@ -417,8 +417,10 @@ def find_optimal_blend_weights(
     if isinstance(project, (str, Path)):
         project = HarnessProject.discover(project)
 
-    if not component_ids or len(component_ids) < 2:
+    if not component_ids or len(component_ids) < 2 or len(set(component_ids)) != len(component_ids):
         raise ValueError("Blend optimization requires at least 2 distinct component IDs")
+    if blend_mode is not None and blend_mode not in {"weighted_blend", "probability_blend", "ensemble_vote"}:
+        raise ValueError("Unsupported blend mode: " + str(blend_mode))
 
     spec = load_active_task_spec(project.task_config_path)
     context = TaskPluginContext(
@@ -477,6 +479,8 @@ def find_optimal_blend_weights(
                 else f["classes_" + target].iloc[0]
                 for f in frames
             ]
+            if any(order != orders[0] for order in orders):
+                raise ValueError("Probability class orders differ")
             class_order = orders[0]
             proba_arrays = [np.asarray(predictions(f)["proba_" + target], float) for f in frames]
             subtask_data[target] = {
