@@ -387,22 +387,41 @@ class KaggleLeaderboardTracker:
             self._sleep(interval)
             interval = min(interval * 1.5, max_poll_interval_s)
 
-    def latest(self, competition: str) -> Dict[str, Any]:
-        """Summarise a competition's submissions: count + best scored entry."""
+    def latest(self, competition: str, *, direction: Optional[str] = None) -> Dict[str, Any]:
+        """Return the best finite score using the task direction or an override.
+
+        Outside a configured task, retain the legacy maximize default and
+        report that choice so callers can pass the competition's direction.
+        """
+        direction_source = "explicit"
+        if direction is None:
+            from harness.project import HarnessProject
+            from harness.task_spec import load_active_task_spec
+
+            project = HarnessProject.discover()
+            if project.manifest or project.task_config_path.is_file():
+                direction = load_active_task_spec(project.task_config_path).direction
+                direction_source = "task"
+            else:
+                direction = "maximize"
+                direction_source = "default"
+        direction = str(direction).lower()
+        if direction not in {"maximize", "minimize"}:
+            raise ValueError("Leaderboard direction must be maximize or minimize")
         subs = list(self._client.list_submissions(competition))
         scored = [
-            s for s in subs
-            if self._score(getattr(s, "public_score", "")) is not None
+            (score, s) for s in subs
+            if (score := self._score(getattr(s, "public_score", ""))) is not None
+            and np.isfinite(score)
         ]
-        scored.sort(
-            key=lambda s: self._score(getattr(s, "public_score", "")) or 0.0,
-            reverse=True,
-        )
+        scored.sort(key=lambda pair: pair[0], reverse=direction == "maximize")
         return {
             "competition": competition,
+            "direction": direction,
+            "direction_source": direction_source,
             "total": len(subs),
             "scored": len(scored),
-            "best": self._submission_dict(scored[0]) if scored else None,
+            "best": self._submission_dict(scored[0][1]) if scored else None,
         }
 
     def get_quota(self, competition: str, project_root: Optional[Any] = None) -> Dict[str, Any]:

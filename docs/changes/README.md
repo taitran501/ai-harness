@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-23 | Select best Kaggle submissions using the task metric direction | [#127](https://github.com/taitran501/ai-harness/pull/127) | [agent-leaderboard-direction](agent-leaderboard-direction.md) |
 | 2026-10-23 | Resolve threshold recommendations from verified selected binary evidence | [#126](https://github.com/taitran501/ai-harness/pull/126) | [agent-threshold-evidence](agent-threshold-evidence.md) |
 | 2026-10-23 | Require real, ID-aligned predictions in exported Kaggle notebooks | [#125](https://github.com/taitran501/ai-harness/pull/125) | [agent-notebook-prediction-integrity](agent-notebook-prediction-integrity.md) |
 | 2026-10-23 | Enforce candidate probability class-order contracts before blend optimization | [#124](https://github.com/taitran501/ai-harness/pull/124) | [agent-blend-optimizer-contract](agent-blend-optimizer-contract.md) |

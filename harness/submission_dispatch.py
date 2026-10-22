@@ -84,6 +84,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p_latest = sub.add_parser("latest", help="Best scored submission for a competition.")
     p_latest.add_argument("competition", help="Kaggle competition slug.")
+    p_latest.add_argument("--direction", choices=("maximize", "minimize"), default=None,
+                          help="Metric direction (defaults to the active task, otherwise maximize).")
 
     p_list = sub.add_parser("list", help="List recent submissions for a competition.")
     p_list.add_argument("competition", help="Kaggle competition slug.")
@@ -146,7 +148,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if args.action == "latest":
-            _print_payload({"action": "latest", **tracker.latest(args.competition)})
+            options = {"direction": args.direction} if args.direction else {}
+            _print_payload({"action": "latest", **tracker.latest(args.competition, **options)})
             return 0
 
         if args.action == "list":

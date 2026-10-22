@@ -146,6 +146,15 @@ observation includes `target`, `positive_class`, `selection_variant`, and
 prediction artifact. This action only recommends a threshold and does not edit
 completed evidence or replace the task's official validation metric.
 
+### Best leaderboard submission
+
+`ai-harness submission latest <competition>` selects the best finite public
+score using the active task's `direction`. For a different competition, pass
+`--direction minimize` or `--direction maximize` explicitly. The Python API
+accepts the same override: `tracker.latest(competition, direction="minimize")`.
+The JSON reports `direction` and `direction_source`; without a configured task,
+the compatibility default is maximize.
+
 ## 5. Model Execution and Probes
 
 Experiment pipelines are executed using `harness.runner` (`ai-harness-run`):
