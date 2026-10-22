@@ -1,7 +1,7 @@
 # Preserve source-to-weight mapping in candidate recipe identity
 
 - **Date**: 2026-10-22
-- **PR**: pending creation
+- **PR**: [#123](https://github.com/taitran501/ai-harness/pull/123)
 - **Branch**: `fix/agent-blend-recipe-identity`
 - **Status**: open
 
