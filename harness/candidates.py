@@ -651,15 +651,16 @@ def register_external_prediction(
     if len(aligned) != len(truth):
         raise ValueError(f"OOF predictions match {len(aligned)} rows out of {len(truth)} ground truth rows")
 
-    # Ensure pred_ columns exist (read from the aligned frame so rows are in
-    # ground-truth order)
-    preds_dict = {}
-    for target in spec.subtasks.keys():
-        col = f"pred_{target}" if f"pred_{target}" in aligned.columns else target
-        if col in aligned.columns:
-            preds_dict[f"pred_{target}"] = aligned[col].values
-        if f"proba_{target}" in aligned.columns:
-            preds_dict[f"proba_{target}"] = aligned[f"proba_{target}"].values
+    # Normalize the managed artifact schema, independently of the external
+    # exporter's optional metadata. Preserve genuine fold assignments; -1 is
+    # explicitly unknown, not a claim that the exporter trained fold zero.
+    aligned["input_variant"] = "external"
+    if "fold" not in aligned:
+        aligned["fold"] = -1
+    for target in spec.subtasks:
+        if f"pred_{target}" not in aligned and target in aligned:
+            aligned[f"pred_{target}"] = aligned[target]
+    preds_dict = predictions(aligned)
 
     # 3. Official evaluation
     evaluation = plugin.evaluate_predictions(context, truth, preds_dict)
