@@ -18,8 +18,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict
 
-import numpy as np
-import pandas as pd
 import yaml
 
 from harness.bridge_common import ActionObservation, TypedActionName
@@ -1522,49 +1520,11 @@ class ActionHandlerMixin:
             or "baseline"
         )
         exp_id = params.get("exp_id", default_exp)
-        exp_dir = self.artifacts_dir / exp_id
-        if not exp_dir.is_dir():
-            raise ValueError(f"Experiment artifact folder not found: {exp_dir}")
+        from harness.threshold_data import load_binary_threshold_data
 
-        oof_csv = exp_dir / "oof_predictions.csv"
-        truth_csv = exp_dir / "evaluation_truth.csv"
-        if not oof_csv.is_file() or not truth_csv.is_file():
-            raise ValueError(f"OOF predictions or truth missing in {exp_dir}")
-
-        oof_df = pd.read_csv(oof_csv)
-        truth_df = pd.read_csv(truth_csv)
-        id_col = self.task_spec.id_column
-
-        merged = oof_df.merge(truth_df, on=id_col, suffixes=("_pred", "_truth"))
-
-        target_col = None
-        for st_name, st in self.task_spec.subtasks.items():
-            target_col = st.column or st_name
-            break
-        if not target_col:
-            target_col = [c for c in truth_df.columns if c != id_col][0]
-
-        y_raw = merged[target_col].values
-        unique_vals = np.unique(y_raw)
-        if len(unique_vals) == 2 and set(unique_vals).issubset({0, 1}):
-            y_true = y_raw.astype(int)
-        else:
-            med = np.median(y_raw)
-            y_true = (y_raw > med).astype(int)
-
-        proba_col = f"proba_{target_col}"
-        if proba_col in merged.columns:
-            raw_p = merged[proba_col].values
-            if isinstance(raw_p[0], str) and raw_p[0].startswith("["):
-                y_prob = np.asarray([json.loads(p)[1] if len(json.loads(p)) > 1 else json.loads(p)[0] for p in raw_p], float)
-            else:
-                y_prob = raw_p.astype(float)
-        elif f"pred_{target_col}" in merged.columns:
-            y_prob = merged[f"pred_{target_col}"].values.astype(float)
-        elif target_col + "_pred" in merged.columns:
-            y_prob = merged[target_col + "_pred"].values.astype(float)
-        else:
-            raise ValueError(f"Could not locate probability column for target '{target_col}'.")
+        y_true, y_prob, source_metadata = load_binary_threshold_data(
+            self.project, self.task_spec, self.task_plugin, exp_id
+        )
 
         metric = params.get("metric", "f1")
         num_th = int(params.get("num_thresholds", 181))
@@ -1596,10 +1556,11 @@ class ActionHandlerMixin:
             data={
                 "exp_id": exp_id,
                 "metric": metric,
-                "best_threshold": round(best_th, 4),
+                "best_threshold": best_th,
                 "best_score": round(best_score, 5),
                 "baseline_score_at_05": round(base_05_score, 5),
                 "gain": delta,
+                **source_metadata,
             },
             elapsed_seconds=round(time.time() - t0, 3),
         )
