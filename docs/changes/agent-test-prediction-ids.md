@@ -3,7 +3,8 @@
 - **Date**: 2026-10-22
 - **PR**: [#120](https://github.com/taitran501/ai-harness/pull/120)
 - **Branch**: `fix/agent-test-prediction-ids`
-- **Status**: reviewed
+- **Status**: merged
+- **Merge commit**: `12d4b3bb4ba4e88369978585b410bc80b90abcb0`
 
 ## Why
 

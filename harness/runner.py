@@ -434,12 +434,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             raise FileNotFoundError(f"Custom script entrypoint '{script_path}' not found")
 
         # 1. Resolve validation splits and audit expected validation IDs
-        splits = self._resolve_validation_splits(df, val_strategy)
-        if "fold" not in df.columns:
-            df = df.copy()
-            df["fold"] = 0
-            for fold, _, dev in splits:
-                df.loc[dev.index, "fold"] = fold
+        truth, validation_env = self._prepare_script_validation(df, val_strategy)
 
         # 2. Resolve test dataframe if test_path declared
         test_df = None
@@ -456,10 +451,10 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         # 3. Export splits
         splits_file = self.exp_dir / "splits.tsv"
         id_col = self.task_spec.id_column
-        df[[id_col, "fold"]].to_csv(splits_file, sep="\t", index=False)
 
         # 3. Environment & command setup
         child_env = os.environ.copy()
+        child_env.update(validation_env)
         python_bin = str(Path(sys.executable).parent)
         child_env["PATH"] = python_bin + os.pathsep + child_env.get("PATH", "")
         child_env["HARNESS_EXP_ID"] = self.exp_id
@@ -509,10 +504,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             raise ValueError(f"OOF predictions file missing ID column '{id_col}'")
 
         # 5. Extract predictions and align with evaluation truth
-        truth = df.drop_duplicates(id_col).copy()
-        merged_oof = truth[[id_col]].merge(oof_df, on=id_col, how="inner")
-        if len(merged_oof) != len(truth):
-            raise ValueError(f"OOF predictions cover {len(merged_oof)} rows, expected {len(truth)}")
+        from harness.script_predictions import align_prediction_ids
+
+        merged_oof = align_prediction_ids(oof_df, truth[id_col], id_col, kind="OOF")
 
         variant = "script"
         self.selection_variant = variant
@@ -521,7 +515,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             row = merged_oof.iloc[i]
             rec = {
                 id_col: row[id_col],
-                "fold": int(row.get("fold", 0)) if "fold" in row and pd.notna(row["fold"]) else 0,
+                "fold": self._script_fold_by_id[row[id_col]],
                 "input_variant": variant,
             }
             for target in self.task_spec.subtasks.keys():
@@ -538,8 +532,8 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         details = [{
             "input_variant": variant,
             "dev_fold": "all",
-            "train_rows": len(df),
-            "dev_rows": len(df),
+            "train_rows": self._script_training_rows,
+            "dev_rows": len(truth),
             "fit_time_seconds": elapsed,
         }]
         rows = [{
