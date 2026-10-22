@@ -51,18 +51,41 @@ def _candidate_recipe_fingerprint(mode, ids, source_map):
     normalized = {
         "mode": mode,
         "source_ids": sorted(ids),
-        "weights": sorted([float(w) for w in source_map.get("weights", [])])
-        if source_map.get("weights")
-        else None,
-        "routing": (
-            {k: sorted(v) if isinstance(v, list) else v
-             for k, v in sorted((source_map.get("routing") or source_map.get("target_routing") or {}).items())}
-            if (source_map.get("routing") or source_map.get("target_routing"))
-            else None
-        ),
+        "routing": source_map.get("routing") or source_map.get("target_routing") or None,
     }
+    if mode in {"weighted_blend", "probability_blend", "ensemble_vote"}:
+        from fractions import Fraction
+
+        raw = source_map.get("weights")
+        weights = np.asarray([1.0] * len(ids) if raw is None else raw, dtype=float)
+        if (weights.ndim != 1 or len(weights) != len(ids) or not np.isfinite(weights).all()
+                or (weights < 0).any() or not weights.any()):
+            raise ValueError("Invalid blend weights")
+        # Keep each weight attached to its source. Decimal fractions make
+        # scaled equivalents (including default equal weights) canonical
+        # without rounding distinct recipes into a false duplicate.
+        fractions = [Fraction(str(value)) for value in weights.tolist()]
+        total = sum(fractions)
+        normalized["source_weights"] = sorted(
+            (source, str(weight / total)) for source, weight in zip(ids, fractions)
+        )
     payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+
+def _stored_recipe_fingerprint(entry):
+    """Read legacy recipes without trusting the old lossy weight fingerprint.
+
+    Recompute from stored recipe details; never rewrite an immutable candidate
+    manifest merely to migrate duplicate detection.
+    """
+    if entry.get("mode") and entry.get("source_ids") and isinstance(entry.get("details"), dict):
+        try:
+            return _candidate_recipe_fingerprint(entry["mode"], entry["source_ids"], entry["details"])
+        except (TypeError, ValueError):
+            pass
+    return entry.get("recipe_fingerprint")
 
 
 def build_candidate(project, name, mode, source_map):
