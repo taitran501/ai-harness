@@ -288,6 +288,9 @@ class RunDataMixin:
                 raise ValueError(
                     "Validation does not cover each training ID exactly once"
                 )
+        # Script adapters also need the complete legacy fold map, even when
+        # the execution below selects just one fold for a probe.
+        self._all_validation_splits = result
         requested = getattr(self.args, "fold", None)
         if requested is not None:
             result = [x for x in result if str(x[0]) == str(requested)]
@@ -320,3 +323,54 @@ class RunDataMixin:
             ]
         )
         return result
+
+    def _prepare_script_validation(self, df, strategy):
+        """Export explicit execution partitions and return only evaluation truth.
+
+        Child scripts own their model/data code. This manifest is the shared
+        contract for selected folds and probe bounds; output coverage is checked
+        against the same IDs when the child returns.
+        """
+        import json
+
+        from harness.io_utils import save_json
+
+        splits = self._resolve_validation_splits(df, strategy)
+        limit = self._probe_sample_limit()
+        selected = []
+        for fold, train, dev in splits:
+            if limit:
+                train = train.sample(n=min(len(train), limit), random_state=self.seed)
+                dev = dev.head(limit)
+            selected.append((fold, train, dev))
+        key = self.task_spec.id_column
+        truth = pd.concat([dev for _, _, dev in selected])
+        if truth[key].duplicated().any():
+            raise ValueError("Script validation partitions must contain each evaluation ID once")
+        self.expected_validation_ids = set(truth[key])
+        self._script_training_rows = len({value for _, train, _ in selected for value in train[key]})
+        self._script_fold_by_id = {value: fold for fold, _, dev in selected for value in dev[key]}
+        self.manifest["split_sha256"] = digest([
+            (str(fold), train[key].tolist(), dev[key].tolist()) for fold, train, dev in selected
+        ])
+        manifest_path = self.exp_dir / "validation_partitions.json"
+        save_json(manifest_path, {
+            "schema_version": 1, "run_kind": self.run_kind, "id_column": key,
+            "sample_limit": limit,
+            "partitions": [{"fold": fold, "train_ids": train[key].tolist(),
+                            "validation_ids": dev[key].tolist()} for fold, train, dev in selected],
+        })
+        # Keep a complete fold map for existing full-CV scripts. -1 identifies
+        # training-only rows (holdout/time-series); the JSON manifest remains
+        # authoritative for which partitions are actually executed.
+        all_splits = self._all_validation_splits
+        fold_map = {value: fold for fold, _, dev in all_splits for value in dev[key]}
+        rows = pd.concat([df[[key]], *[dev[[key]] for _, _, dev in all_splits]]).drop_duplicates(key)
+        rows["fold"] = rows[key].map(lambda value: fold_map.get(value, -1))
+        rows.to_csv(self.exp_dir / "splits.tsv", sep="\t", index=False)
+        return truth, {
+            "HARNESS_VALIDATION_MANIFEST": str(manifest_path),
+            "HARNESS_RUN_KIND": self.run_kind,
+            "HARNESS_SELECTED_FOLDS": json.dumps([fold for fold, _, _ in selected]),
+            "HARNESS_SAMPLE_LIMIT": str(limit) if limit is not None else "",
+        }

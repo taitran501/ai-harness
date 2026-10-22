@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-22 | Bound custom scripts and pipelines to selected validation partitions and probes | pending | [agent-script-validation-scope](agent-script-validation-scope.md) |
 | 2026-10-22 | Align script and pipeline test predictions by exact sample IDs | [#120](https://github.com/taitran501/ai-harness/pull/120) | [agent-test-prediction-ids](agent-test-prediction-ids.md) |
 | 2026-10-22 | Preserve model class ordering through script and pipeline prediction transport | [#119](https://github.com/taitran501/ai-harness/pull/119) | [agent-probability-class-order](agent-probability-class-order.md) |
 | 2026-10-22 | Preserve official scorer through candidate promotion and blend optimization | [#118](https://github.com/taitran501/ai-harness/pull/118) | [agent-official-scorer](agent-official-scorer.md) |

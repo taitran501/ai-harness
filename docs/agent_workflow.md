@@ -142,6 +142,22 @@ ai-harness-run --project-root . --config configs/exp001_feat_stemming_clean.yaml
 ```
 This runs a fast check on fold 0 with a capped subsample to verify syntax, pipeline transformations, and loss stability. Probe outputs are stored under `probes/<exp_id>/` and never pollute the official leaderboard.
 
+### Custom script and pipeline scope
+
+Each child reads `harness.script_validation.load_validation_manifest()` (the path is
+also in `HARNESS_VALIDATION_MANIFEST`). Its `partitions` list the exact `fold`,
+`train_ids` and `validation_ids` to execute. Probe sampling is already applied.
+Train only on these training IDs and output exactly one OOF row per validation ID.
+This applies to single-fold smoke, bounded probes, full CV, external holdout and
+expanding time-series validation. Load task-specific training/dev data as declared
+by the task; a holdout dev dataset may be separate from train.
+
+`HARNESS_RUN_KIND`, `HARNESS_SELECTED_FOLDS` (JSON) and `HARNESS_SAMPLE_LIMIT`
+provide summary scope. `splits.tsv` retains the complete fold map for full-CV
+compatibility; `-1` marks training-only rows. Do not use all its fold values as a
+probe execution loop. Scripts that return full-CV output for a single-fold probe
+are rejected rather than recorded as a successful smoke test.
+
 ### Full Cross-Validation
 Once the probe passes cleanly, run full multi-fold validation:
 ```bash
