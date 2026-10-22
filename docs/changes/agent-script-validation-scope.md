@@ -1,7 +1,7 @@
 # Make custom execution honor the resolved validation scope
 
 - **Date**: 2026-10-22
-- **PR**: pending creation
+- **PR**: [#121](https://github.com/taitran501/ai-harness/pull/121)
 - **Branch**: `fix/agent-script-validation-scope`
 - **Status**: open
 
