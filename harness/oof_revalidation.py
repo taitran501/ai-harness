@@ -113,13 +113,15 @@ def _custom_hook(run_config: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     return resolve_metrics_hook(str(hook))
 
 
-def _score_variant(
+def score_predictions(
     task_spec: Any,
     plugin: Any,
     plugin_context: Any,
     run_config: Dict[str, Any],
     truth: pd.DataFrame,
     predictions: Dict[str, Any],
+    *,
+    skip_generic_base_eval: bool = False,
 ) -> dict:
     """Score one variant through the runner's exact evaluation path."""
     import importlib
@@ -137,16 +139,24 @@ def _score_variant(
         result = getattr(importlib.import_module(module), name)(truth, predictions)
         if not isinstance(result, dict):
             raise TypeError("Custom metrics_evaluator must return a metric mapping")
-        try:
-            base_result = plugin.evaluate_predictions(plugin_context, truth, predictions)
-            result = {**base_result, **result}
-        except Exception as exc:  # noqa: BLE001 — mirror runner: surface, keep custom
-            result.setdefault("_evaluation_warnings", []).append(
-                f"official evaluation failed: {exc.__class__.__name__}: {exc}"
-            )
+        # Normalize the hook before adding generic diagnostics: a generic
+        # primary_score must never shadow the hook's named official metric.
+        result = resolve_evaluation(task_spec, result, len(truth))
+        if not skip_generic_base_eval:
+            try:
+                base_result = plugin.evaluate_predictions(plugin_context, truth, predictions)
+                result = {**base_result, **result}
+            except Exception as exc:  # noqa: BLE001 — custom hook remains authoritative
+                result.setdefault("_evaluation_warnings", []).append(
+                    f"official evaluation failed: {exc.__class__.__name__}: {exc}"
+                )
     else:
         result = plugin.evaluate_predictions(plugin_context, truth, predictions)
     return resolve_evaluation(task_spec, result, len(truth))
+
+
+# Compatibility for callers of the former repair-only helper.
+_score_variant = score_predictions
 
 
 def rederive_primary_score(

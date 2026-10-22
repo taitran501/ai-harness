@@ -63,9 +63,8 @@ from harness.artifacts import (
     seal_file_map,
     sha256,
 )
-from harness.evaluation import resolve_evaluation
 from harness.models import call_model
-from harness.oof_revalidation import build_variant_predictions
+from harness.oof_revalidation import build_variant_predictions, score_predictions
 
 
 class UniversalRunner(RunDataMixin, RunPipelineMixin):
@@ -263,53 +262,16 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         return int(limit) if limit else None
 
     def _evaluate(self, truth, predictions):
-        from harness.evaluation import validate_prediction_contract
-
-        validate_prediction_contract(self.task_spec, truth, predictions)
-        hook = self.cfg.get("paths", {}).get("metrics_evaluator")
-        if hook:
-            if str(self.project_root) not in sys.path:
-                sys.path.insert(0, str(self.project_root))
-            from harness.hook_ref import resolve_metrics_hook
-
-            module, name = resolve_metrics_hook(hook)
-            result = getattr(importlib.import_module(module), name)(truth, predictions)
-            if not isinstance(result, dict):
-                raise TypeError("Custom metrics_evaluator must return a metric mapping")
-            if getattr(self, "_skip_generic_base_eval", False):
-                # Determined at preflight (set in __init__): the generic
-                # aggregate cannot score this spec (pair gate raises before
-                # any metric is computed), so the custom hook above is the
-                # official scorer. Skipping the base call keeps
-                # _evaluation_warnings clean instead of logging "official
-                # evaluation failed" on every fold.
-                pass
-            else:
-                try:
-                    base_result = self.task_plugin.evaluate_predictions(
-                        self.plugin_context, truth, predictions
-                    )
-                    result = {**base_result, **result}
-                except Exception as exc:
-                    # A custom metrics_evaluator is configured but the official
-                    # plugin scorer failed. Keep the custom result, but surface
-                    # the failure — it must not be silently swallowed. Such
-                    # failures are deterministic for the spec (metric/pair/task
-                    # type gates), so warn once and skip the base evaluation
-                    # on later folds instead of re-raising per fold.
-                    self._skip_generic_base_eval = True
-                    result.setdefault("_evaluation_warnings", []).append(
-                        f"official evaluation failed: {exc.__class__.__name__}: {exc}"
-                    )
-                    print(
-                        f"[ai-harness] WARNING: official plugin evaluation failed: "
-                        f"{exc.__class__.__name__}: {exc}"
-                    )
-        else:
-            result = self.task_plugin.evaluate_predictions(
-                self.plugin_context, truth, predictions
-            )
-        return resolve_evaluation(self.task_spec, result, len(truth))
+        result = score_predictions(
+            self.task_spec, self.task_plugin, self.plugin_context, self.cfg,
+            truth, predictions,
+            skip_generic_base_eval=getattr(self, "_skip_generic_base_eval", False),
+        )
+        if result.get("_evaluation_warnings"):
+            self._skip_generic_base_eval = True
+            for warning in result["_evaluation_warnings"]:
+                print(f"[ai-harness] WARNING: {warning}")
+        return result
 
     def run(self):
         try:
