@@ -1,7 +1,7 @@
 # Align custom test predictions by sample identity
 
 - **Date**: 2026-10-22
-- **PR**: pending creation
+- **PR**: [#120](https://github.com/taitran501/ai-harness/pull/120)
 - **Branch**: `fix/agent-test-prediction-ids`
 - **Status**: open
 
