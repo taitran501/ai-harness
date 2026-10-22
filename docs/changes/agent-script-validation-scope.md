@@ -3,7 +3,7 @@
 - **Date**: 2026-10-22
 - **PR**: [#121](https://github.com/taitran501/ai-harness/pull/121)
 - **Branch**: `fix/agent-script-validation-scope`
-- **Status**: open
+- **Status**: reviewed
 
 ## Why
 
@@ -24,3 +24,9 @@ Real subprocess matrix covers both adapters with full CV, generated/preset singl
 ## Impact & follow-ups
 
 Existing full-CV scripts retain splits.tsv. Probe/holdout scripts must consume the explicit partition contract. The harness checks output scope; task code remains responsible for actually fitting only on the supplied training partition.
+
+## Pre-merge review
+
+Traced split resolution, scope export, child environment, OOF alignment and final artifact rows for both adapters. Synthetic subprocess coverage includes full CV, generated/preset single-fold smoke tests, bounded probes, ratio/separate holdout and temporal CV; extra OOF rows fail. Agent guidance and the pipeline template use the same manifest. The child remains responsible for training on the supplied train IDs, as documented. No blocking findings.
+
+A fresh integration run passed: 1,053 tests, 2 skipped, no failures/errors. Ruff and diff whitespace checks passed.
