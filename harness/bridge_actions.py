@@ -1323,11 +1323,11 @@ class ActionHandlerMixin:
         # or pad the candidate pool. Reject an identical recipe unless the
         # agent explicitly justifies a revisit (the recipe is otherwise
         # byte-identical, so a new name adds no scientific signal).
-        from harness.candidates import _candidate_recipe_fingerprint
+        from harness.candidates import _candidate_recipe_fingerprint, _stored_recipe_fingerprint
 
         new_fp = _candidate_recipe_fingerprint(mode, self._candidate_source_ids(mode, source_map), source_map)
         existing_fps = {
-            c.get("recipe_fingerprint"): c["id"]
+            _stored_recipe_fingerprint(c): c["id"]
             for c in self.comp_state.state["candidate_pool"].get("synthesized_candidates", [])
             if c.get("recipe_fingerprint")
         }
