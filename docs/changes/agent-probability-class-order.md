@@ -1,7 +1,7 @@
 # Preserve probability class order in custom execution
 
 - **Date**: 2026-10-22
-- **PR**: pending creation
+- **PR**: [#119](https://github.com/taitran501/ai-harness/pull/119)
 - **Branch**: `fix/agent-probability-class-order`
 - **Status**: open
 
