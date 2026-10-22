@@ -1,7 +1,7 @@
 # Normalize imported prediction artifacts for candidate selection
 
 - **Date**: 2026-10-22
-- **PR**: pending creation
+- **PR**: [#122](https://github.com/taitran501/ai-harness/pull/122)
 - **Branch**: `fix/agent-external-candidate-metadata`
 - **Status**: open
 
