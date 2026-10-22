@@ -3,8 +3,8 @@
 - **Date**: 2026-10-22
 - **PR**: [#117](https://github.com/taitran501/ai-harness/pull/117)
 - **Branch**: `feat/submission-quota-and-gateway-keepalive`
-- **Status**: open
-- **Commits**: TBD
+- **Status**: merged
+- **Commits**: `aa29970` (squash)
 
 ## Why
 
