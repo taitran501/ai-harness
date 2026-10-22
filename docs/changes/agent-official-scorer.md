@@ -3,7 +3,7 @@
 - **Date**: 2026-10-22
 - **PR**: [#118](https://github.com/taitran501/ai-harness/pull/118)
 - **Branch**: `fix/agent-official-scorer`
-- **Status**: open
+- **Status**: reviewed; ready for squash merge
 
 ## Why
 
@@ -24,3 +24,7 @@ Regression tests exercise real runner output -> Bridge promotion, custom-metric 
 ## Impact & follow-ups
 
 Custom-hook runs can enter candidate selection without replacing their metric with a generic proxy. External import metadata and script prediction transport are addressed separately.
+
+## Pre-merge review
+
+Self-review found no blocking issue in this diff. A fresh full run of the complete six-fix integration tree passed: 1,053 tests, 2 skipped, no failures/errors; Ruff and diff whitespace checks passed. Regression tests cover official-scorer continuity, immutable source evidence and mismatched scorer rejection.
