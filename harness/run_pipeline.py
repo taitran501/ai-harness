@@ -249,6 +249,8 @@ class RunPipelineMixin:
                     rec[f"pred_{target}"] = row[col_name]
                 if f"proba_{target}" in row:
                     rec[f"proba_{target}"] = row[f"proba_{target}"]
+                if f"classes_{target}" in row:
+                    rec[f"classes_{target}"] = row[f"classes_{target}"]
             records.append(rec)
 
         total_duration = sum(s["duration_seconds"] for s in stage_manifest)
@@ -269,13 +271,9 @@ class RunPipelineMixin:
         test_pred_path = self.exp_dir / "test_predictions.csv"
         if test_pred_path.exists() and test_df is not None:
             t_df = pd.read_csv(test_pred_path)
-            cand_test = {}
-            for target in self.task_spec.subtasks.keys():
-                col_name = f"pred_{target}" if f"pred_{target}" in t_df.columns else target
-                if col_name in t_df.columns:
-                    cand_test[f"pred_{target}"] = t_df[col_name].values
-                if f"proba_{target}" in t_df.columns:
-                    cand_test[f"proba_{target}"] = t_df[f"proba_{target}"].values
+            from harness.script_predictions import extract_test_predictions
+
+            cand_test = extract_test_predictions(t_df, self.task_spec)
             fold_test_preds.append(cand_test)
 
         self.estimator_metadata.append({
