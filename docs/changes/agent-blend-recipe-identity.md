@@ -3,7 +3,7 @@
 - **Date**: 2026-10-22
 - **PR**: [#123](https://github.com/taitran501/ai-harness/pull/123)
 - **Branch**: `fix/agent-blend-recipe-identity`
-- **Status**: open
+- **Status**: reviewed
 
 ## Why
 
@@ -24,3 +24,9 @@ Unit cases cover swapped weights, reordered sources, scaled/default weights and 
 ## Impact & follow-ups
 
 Agents can explore genuinely different blend weights without supplying a misleading revisit reason. Existing duplicate protection remains effective across the migration.
+
+## Pre-merge review
+
+Reviewed fingerprint canonicalization and the AgentBridge duplicate guard, including invalid weights and legacy stored fingerprints. Regression coverage accepts distinct blends and rejects reordered/scaled equivalents while checking that old candidate manifests are unchanged. No blocking findings.
+
+A fresh integration run passed: 1,053 tests, 2 skipped, no failures/errors. Ruff and diff whitespace checks passed.

@@ -3,7 +3,8 @@
 - **Date**: 2026-10-22
 - **PR**: [#122](https://github.com/taitran501/ai-harness/pull/122)
 - **Branch**: `fix/agent-external-candidate-metadata`
-- **Status**: open
+- **Status**: merged
+- **Merge commit**: `27cd1d87c843c2ce7629cf381ec407301e9e01b3`
 
 ## Why
 
@@ -24,3 +25,9 @@ Bridge integration tests register and promote shuffled minimal CSVs, NumPy expor
 ## Impact & follow-ups
 
 Import success now produces a candidate-readable artifact even when an external exporter knows nothing about harness-internal metadata. External provenance remains explicitly labeled.
+
+## Pre-merge review
+
+Reviewed registration -> immutable run validation -> AgentBridge promotion for shuffled CSV target aliases, NumPy exports and reversed probability class order. Managed metadata is normalized without rewriting the source export or completed evidence. No blocking findings.
+
+A fresh integration run passed: 1,053 tests, 2 skipped, no failures/errors. Ruff and diff whitespace checks passed.
