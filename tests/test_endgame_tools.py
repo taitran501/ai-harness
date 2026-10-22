@@ -198,6 +198,12 @@ class TestEndgameCandidatesAndBridge(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_find_optimal_blend_weights(self):
+        from harness.task_spec import load_active_task_spec
+        from tests.evidence_fixtures import seal_fixture
+
+        spec = load_active_task_spec(self.root / "configs/task.yaml")
+        for exp_id in ("exp001", "exp002"):
+            seal_fixture(self.root / "artifacts" / exp_id, spec, score=.5)
         opt = find_optimal_blend_weights(
             project=self.root,
             component_ids=["exp001", "exp002"],

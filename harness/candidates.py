@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from harness.artifacts import (
     digest,
@@ -22,6 +23,7 @@ from harness.artifacts import (
 from harness.ensemble_guard import EnsembleGuard
 from harness.evaluation import resolve_evaluation
 from harness.plugins import TaskPluginContext, load_task_plugin
+from harness.oof_revalidation import score_predictions
 from harness.task_spec import load_active_task_spec
 
 
@@ -109,8 +111,8 @@ def build_candidate(project, name, mode, source_map):
         )
         scores.append(metrics["utility"])
     for manifest in manifests[1:]:
-        for field in ("task_sha256", "scorer_sha256", "split_sha256", "data_sha256"):
-            if manifest[field] != manifests[0][field]:
+        for field in ("task_sha256", "scorer_sha256", "custom_scorer_sha256", "split_sha256", "data_sha256"):
+            if manifest.get(field) != manifests[0].get(field):
                 raise ValueError("Source contract/split mismatch: " + field)
     has_test_preds = all(
         (project.artifacts_dir / exp / "test_predictions.csv").is_file()
@@ -296,11 +298,10 @@ def build_candidate(project, name, mode, source_map):
     if set(truth[key]) != set(merged[key]):
         raise ValueError("Incomplete evaluation coverage")
     truth = merged[[key]].merge(truth, on=key, validate="one_to_one")
-    result = resolve_evaluation(
-        spec,
-        plugin.evaluate_predictions(context, truth, predictions(merged)),
-        len(merged),
-    )
+    source_config = yaml.safe_load(
+        (project.artifacts_dir / ids[0] / "run_config.yaml").read_text(encoding="utf-8")
+    ) or {}
+    result = score_predictions(spec, plugin, context, source_config, truth, predictions(merged))
     if len(ids) > 1 and result["utility"] <= max(scores):
         raise ValueError("Superiority guard: ensemble must improve best constituent")
     candidate_id = "cand_" + uuid.uuid4().hex
@@ -405,8 +406,12 @@ def find_optimal_blend_weights(
 
     frames = []
     scores = []
+    manifests = []
+    source_configs = []
     for exp in component_ids:
         folder = project.artifacts_dir / exp
+        manifests.append(validate_run(folder, task_spec=spec, plugin=plugin, expected={"exp_id": exp}))
+        source_configs.append(yaml.safe_load((folder / "run_config.yaml").read_text(encoding="utf-8")) or {})
         metrics = json.loads((folder / "metrics.json").read_text(encoding="utf-8"))
         frame = pd.read_csv(folder / "oof_predictions.csv")
         frame = frame[frame.input_variant == metrics["selection_variant"]].copy()
@@ -416,6 +421,11 @@ def find_optimal_blend_weights(
             .reset_index()
         )
         scores.append(float(metrics.get("utility", metrics.get("primary_score", 0.0))))
+
+    for manifest in manifests[1:]:
+        for field in ("task_sha256", "scorer_sha256", "custom_scorer_sha256", "data_sha256", "split_sha256"):
+            if manifest.get(field) != manifests[0].get(field):
+                raise ValueError("Source contract/split mismatch: " + field)
 
     truth = pd.read_csv(project.artifacts_dir / component_ids[0] / "evaluation_truth.csv")
     truth = frames[0][[key]].merge(truth, on=key, validate="one_to_one")
@@ -496,8 +506,7 @@ def find_optimal_blend_weights(
                 )
                 pred_dict[col] = np.asarray(s_info["order_raw"] or s_info["order"])[vote_mat.argmax(axis=0)].tolist()
 
-        eval_out = plugin.evaluate_predictions(context, truth, pred_dict)
-        res = resolve_evaluation(spec, eval_out, len(truth))
+        res = score_predictions(spec, plugin, context, source_configs[0], truth, pred_dict)
         return float(res["utility"]), res
 
     def _objective(w: np.ndarray) -> float:
