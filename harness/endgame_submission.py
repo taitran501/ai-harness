@@ -9,6 +9,7 @@ Guarantees 100% submission integrity before dispatching to Kaggle/Remote:
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from dataclasses import dataclass
@@ -403,6 +404,30 @@ class KaggleLeaderboardTracker:
             "scored": len(scored),
             "best": self._submission_dict(scored[0]) if scored else None,
         }
+
+    def get_quota(self, competition: str, project_root: Optional[Any] = None) -> Dict[str, Any]:
+        """Fetch live daily submission quota for a competition."""
+        if hasattr(self._client, "get_submission_limits"):
+            quota = self._client.get_submission_limits(competition)
+            try:
+                root = Path(project_root) if project_root else Path.cwd()
+                dot_ai = root / ".ai-harness"
+                if dot_ai.is_dir() and quota.get("num_allowed_now") is not None:
+                    (dot_ai / "submission_limits.json").write_text(
+                        json.dumps(quota, indent=2), encoding="utf-8"
+                    )
+            except Exception:
+                pass
+            return quota
+        return {
+            "competition": competition,
+            "num_today": None,
+            "num_allowed_now": None,
+            "num_total": None,
+            "has_remaining_quota": None,
+            "error": "Client does not support get_submission_limits",
+        }
+
 
 class ThresholdOptimizer:
     """Optimizes classification decision thresholds on Out-Of-Fold probabilities."""

@@ -1384,6 +1384,20 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             )
             lines.append(f"- **Execution Backend**: `{contract_backend.upper()}`{suffix}")
 
+        ext_eval = (hud.get("what_am_i_working_on") or {}).get("external_evaluation") or {}
+        quota_used = ext_eval.get("quota_used_today")
+        daily_quota = ext_eval.get("daily_quota")
+        rem_quota = ext_eval.get("remaining_quota_today")
+        if quota_used is not None and daily_quota is not None:
+            rem_str = f" ({rem_quota} remaining today)" if rem_quota is not None else ""
+            lines.append(f"- **Daily Submission Quota**: `{quota_used}/{daily_quota}` used{rem_str}")
+            if rem_quota and rem_quota > 0:
+                lines.append(
+                    f"> ⚡ **QUOTA REMAINING ({rem_quota} slot{'s' if rem_quota != 1 else ''} today)**: "
+                    "Per Principle 10 & Rule 3.7, you MUST NOT stop while quota remains. "
+                    "Formulate orthogonal probes or test risk-hedging blends!"
+                )
+
         subs = pkt.get("recent_submissions") or []
         lines.extend(["", "## 📦 Submissions (last {})".format(len(subs))])
         if not subs:
@@ -1472,6 +1486,17 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         lines.extend(f"- {step}" for step in memory["resume_protocol"])
 
         from harness.hygiene import hygiene_hud_lines
+
+        if sess and sess.get("consecutive_rejections", 0) >= 2:
+            lines.extend(
+                [
+                    "",
+                    "> [!IMPORTANT]",
+                    "> 🔍 **AUTONOMOUS DISCUSSION MINING MANDATE (Stagnation Countermeasure)**:",
+                    "> Consecutive validation rejections detected. You are strictly forbidden from micro-tuning hyperparameters or passively returning decision lists to the user.",
+                    "> You must immediately run `ai-harness discussion list <comp> --sort-by hot`, inspect the top topics with `ai-harness discussion view <id>`, and formulate an orthogonal hypothesis.",
+                ]
+            )
 
         hygiene_lines = hygiene_hud_lines(pkt.get("workspace_hygiene"))
         if hygiene_lines:

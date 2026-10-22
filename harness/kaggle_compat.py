@@ -347,6 +347,54 @@ class KaggleClient:
             subs = api.competition_submissions()
         return [_NormalisedObject(s, self.sdk) for s in subs]
 
+    def get_submission_limits(self, competition: str) -> Dict[str, Any]:
+        """Fetch live daily submission limits for a competition.
+
+        Returns a dictionary with keys:
+        - num_today: number of submissions made today (UTC)
+        - num_allowed_now: number of submissions remaining today
+        - num_total: total lifetime submissions made
+        - limited_by_total: boolean whether blocked by lifetime limit
+        - has_remaining_quota: boolean (num_allowed_now > 0)
+        - daily_quota: total daily quota (num_today + num_allowed_now)
+        """
+        api = self._legacy_api_instance()
+        try:
+            raw = api.competition_get_submission_limits(competition)
+            if isinstance(raw, str):
+                import json
+                data = json.loads(raw)
+            elif isinstance(raw, dict):
+                data = raw
+            elif hasattr(raw, "to_dict"):
+                data = raw.to_dict()
+            else:
+                data = {}
+            today = int(data.get("numToday") or 0)
+            allowed = int(data.get("numAllowedNow") or 0)
+            total = int(data.get("numTotal") or 0)
+            limited = bool(data.get("limitedByTotal", False))
+            return {
+                "competition": competition,
+                "num_today": today,
+                "num_allowed_now": allowed,
+                "num_total": total,
+                "limited_by_total": limited,
+                "has_remaining_quota": allowed > 0 and not limited,
+                "daily_quota": today + allowed,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "competition": competition,
+                "num_today": None,
+                "num_allowed_now": None,
+                "num_total": None,
+                "limited_by_total": False,
+                "has_remaining_quota": None,
+                "error": str(exc),
+            }
+
+
     def submit_submission(
         self,
         file_name: str,
