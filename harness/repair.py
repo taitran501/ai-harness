@@ -358,6 +358,10 @@ def repair_run_dir(
     )
 
 
+repair_run = repair_run_dir
+repair_folder = repair_run_dir
+
+
 def scan_artifacts(artifacts_dir: Path) -> Dict[str, Any]:
     """Classify every run folder. Used by `repair --check` and by status."""
     verified: List[str] = []

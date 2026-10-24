@@ -33,6 +33,9 @@ CLI_COMMANDS: List[Tuple[str, str]] = [
     ("attach", "Attach the installed harness to a task workspace."),
     ("status", "Single-command install + workspace health report (default JSON)."),
     ("sync", "Update the shared framework, reinstall, and re-attach."),
+    ("competition", "Inspect competition metadata, deadlines, metrics, and active status."),
+    ("leaderboard", "Fetch and display public/private competition leaderboard."),
+    ("discussion", "List and view competition discussion topics and comments."),
     ("kaggle", "Inspect a Kaggle kernel's status/log/output without re-dispatching."),
     ("submission", "Kaggle submission dispatch + score polling (harness-native)."),
     ("dispatch-kernel", "Wrap a local notebook into a Kaggle kernel and push it."),
@@ -45,6 +48,7 @@ CLI_COMMANDS: List[Tuple[str, str]] = [
     ("eda", "General-purpose exploratory data analysis (eda run)."),
     ("cloud", "Cloud readiness + task-scoped upload consent (preflight/consent/status/pull)."),
     ("export-kaggle-notebook", "Export a standalone offline Kaggle submission notebook."),
+    ("codabench", "Query Codabench benchmark submissions and download artifacts."),
 ]
 
 #: Console entry points (``pyproject.toml`` ``[project.scripts]``).
@@ -62,7 +66,15 @@ ENTRY_POINTS: List[Tuple[str, str]] = [
 FACADE_METHODS: List[Tuple[str, str]] = [
     ("list_submissions", "List competition submissions (normalised: .public_score, .date, .status, …)."),
     ("submit_submission", "Submit a file or a code-comp kernel output; returns a normalised ref."),
+    ("get_competition", "Fetch competition details (deadline, metric, rules, rank, is_code_competition)."),
+    ("list_competitions", "List competitions (normalised: .ref, .category, .deadline, .reward)."),
+    ("get_leaderboard", "Fetch competition leaderboard entries (rank, team, score)."),
+    ("leaderboard", "Fetch competition leaderboard entries (alias for get_leaderboard)."),
+    ("competition_topics", "List discussion topics with vote count and comment count."),
+    ("competition_topic_messages", "List messages and replies in a discussion topic."),
+    ("get_topic", "Fetch discussion topic details with comments."),
     ("kernels_push", "Push a kernel folder (kernel-metadata.json + code) to Kaggle."),
+    ("kernels_pull", "Pull notebook/script and metadata for a Kaggle kernel."),
     ("list_kernels", "List kernels (normalised)."),
     ("kernels_list", "List kernels (normalised; alias for list_kernels)."),
     ("kernel_output", "Download a kernel's output."),
@@ -97,6 +109,9 @@ PYTHON_SYMBOLS: List[Tuple[str, str]] = [
     ("harness.kaggle_compat.KaggleClient", "Unified Kaggle SDK facade (use this, not the raw SDK)."),
     ("harness.kaggle_compat.detect_sdk", "Which SDK is present: kagglesdk / kaggle / none."),
     ("harness.endgame_submission.KaggleLeaderboardTracker", "Submission tracker; latest uses the task metric direction or an explicit direction override."),
+    ("harness.research_memory.ResearchMemory.load", "Load research memory directly from project root."),
+    ("harness.competition_state.CompetitionStateMachine.load", "Load competition state machine from project root."),
+    ("harness.repair.repair_run_dir", "Re-seal drifted artifact files in a run directory."),
     ("harness.kernel_dispatch.build_kernel_metadata", "Build kernel-metadata.json content."),
     ("harness.kernel_dispatch.dispatch_kernel", "Stage + push a notebook as a Kaggle kernel."),
     ("harness.submission_dispatch.main", "The ``ai-harness submission`` CLI (dispatch/status/watch/latest)."),

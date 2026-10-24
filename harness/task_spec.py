@@ -802,3 +802,6 @@ def load_active_task_spec(
         subtasks={},
         metadata={},
     )
+
+
+load_task_spec = load_active_task_spec

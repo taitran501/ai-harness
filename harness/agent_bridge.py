@@ -55,6 +55,8 @@ from harness.bridge_common import (
 )
 
 typed_actions = [a.value for a in TypedActionName]
+HANDLERS = typed_actions
+_ACTION_REGISTRY = typed_actions
 
 
 class _AgentBridgeMeta(type):
@@ -220,6 +222,8 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
     _EXEC_RESERVED_KEYWORDS = (
         "rationale", "session_id", "goal", "budget", "user_approved",
     )
+    _ACTION_REGISTRY = typed_actions
+    HANDLERS = typed_actions
 
     def __getattr__(self, name: str):
         """Expose every registered Typed Action as a direct method.
@@ -230,7 +234,8 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         single execution path through :meth:`execute_action` (session state,
         approval tiers, and audit all still apply).
         """
-        if name.startswith("__") or name not in _TYPED_ACTION_NAMES:
+        real_action = name[len("_action_"):] if name.startswith("_action_") else name
+        if name.startswith("__") or real_action not in _TYPED_ACTION_NAMES:
             raise AttributeError(f"'AgentBridge' object has no attribute '{name}'")
 
         def _invoke(*args, **kwargs):
@@ -248,7 +253,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
                 for key in list(params)
                 if key in self._EXEC_RESERVED_KEYWORDS
             }
-            _, observation = self.execute_action(name, params=params, **reserved)
+            _, observation = self.execute_action(real_action, params=params, **reserved)
             return observation
 
         _invoke.__name__ = name
