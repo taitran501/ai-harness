@@ -1250,6 +1250,34 @@ class ActionHandlerMixin:
         deadline = time.monotonic() + wait_seconds
         job = manager.get_job(str(job_id))
         if not job:
+            if "/" in str(job_id) or str(job_id).startswith("kernel-"):
+                from harness.templates.kaggle_template import KaggleKernelManager
+
+                slug = str(job_id)
+                effective_timeout = wait_seconds if wait_seconds > 0 else 3600.0
+                if act == TypedActionName.WAIT_CLOUD_JOB.value:
+                    k_res = KaggleKernelManager.wait_for_kernel(
+                        exp_id="",
+                        kernel_slug=slug,
+                        poll_interval=poll_seconds,
+                        timeout_seconds=effective_timeout,
+                    )
+                else:
+                    k_res = KaggleKernelManager.get_kernel_status(exp_id="", kernel_slug=slug)
+
+                status = k_res.get("status", "UNKNOWN")
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status=(
+                        "SUCCESS"
+                        if status not in {"FAILED", "CANCELLED", "ERROR", "TIMEOUT"}
+                        else "FAILED"
+                    ),
+                    summary=f"Cloud kernel `{slug}` is {status}.",
+                    data={"job": {"job_id": slug, "kernel_slug": slug, "provider": "kaggle", "status": status, **k_res}},
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
             raise ValueError(
                 f"Cloud job `{job_id}` was not found in this task workspace."
             )

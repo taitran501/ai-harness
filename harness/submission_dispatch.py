@@ -90,6 +90,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_list.add_argument("--limit", "-n", type=int, default=20, help="Max submissions to list.")
     p_quota = sub.add_parser("quota", aliases=["limits"], help="Check live daily submission limits and remaining quota.")
     p_quota.add_argument("competition", help="Kaggle competition slug.")
+    p_lb = sub.add_parser("leaderboard", aliases=["lb"], help="View Kaggle competition public leaderboard.")
+    p_lb.add_argument("competition", help="Kaggle competition slug.")
+    p_lb.add_argument("--top", "-n", type=int, default=20, help="Number of leaderboard entries to display (default: 20).")
 
 
     args = parser.parse_args(argv)
@@ -152,6 +155,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.action == "list":
             subs = tracker.list_submissions(args.competition, limit=args.limit)
             _print_payload({"action": "list", "competition": args.competition, "count": len(subs), "submissions": subs})
+            return 0
+
+        if args.action in ("leaderboard", "lb"):
+            entries = tracker.get_leaderboard(args.competition, top=args.top)
+            _print_payload({
+                "action": "leaderboard",
+                "competition": args.competition,
+                "count": len(entries),
+                "leaderboard": entries,
+            })
             return 0
     except Exception as exc:  # noqa: BLE001 - surface any dispatch/poll failure as JSON.
         _print_payload({"ok": False, "action": args.action, "error": str(exc)})

@@ -405,6 +405,27 @@ class KaggleLeaderboardTracker:
             "best": self._submission_dict(scored[0]) if scored else None,
         }
 
+    def get_leaderboard(self, competition: str, top: int = 20) -> List[Dict[str, Any]]:
+        """Return top leaderboard entries formatted as clean dicts."""
+        if hasattr(self._client, "get_leaderboard"):
+            raw_entries = self._client.get_leaderboard(competition, page_size=top)
+        else:
+            api = getattr(self._client, "_legacy_api", None) or (
+                self._client._legacy_api_instance() if hasattr(self._client, "_legacy_api_instance") else None
+            )
+            raw_entries = api.competition_leaderboard_view(competition, page_size=top) if api else []
+        results = []
+        for rank, entry in enumerate(raw_entries or [], 1):
+            score_val = getattr(entry, "score", None)
+            results.append({
+                "rank": rank,
+                "team_id": getattr(entry, "team_id", None),
+                "team_name": getattr(entry, "team_name", None),
+                "score": str(score_val) if score_val is not None else None,
+                "submission_date": str(getattr(entry, "submission_date", "")),
+            })
+        return results
+
     def get_quota(self, competition: str, project_root: Optional[Any] = None) -> Dict[str, Any]:
         """Fetch live daily submission quota for a competition."""
         if hasattr(self._client, "get_submission_limits"):
