@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from harness.artifacts import (
     digest,
@@ -22,6 +23,7 @@ from harness.artifacts import (
 from harness.ensemble_guard import EnsembleGuard
 from harness.evaluation import resolve_evaluation
 from harness.plugins import TaskPluginContext, load_task_plugin
+from harness.oof_revalidation import score_predictions
 from harness.task_spec import load_active_task_spec
 
 
@@ -49,18 +51,41 @@ def _candidate_recipe_fingerprint(mode, ids, source_map):
     normalized = {
         "mode": mode,
         "source_ids": sorted(ids),
-        "weights": sorted([float(w) for w in source_map.get("weights", [])])
-        if source_map.get("weights")
-        else None,
-        "routing": (
-            {k: sorted(v) if isinstance(v, list) else v
-             for k, v in sorted((source_map.get("routing") or source_map.get("target_routing") or {}).items())}
-            if (source_map.get("routing") or source_map.get("target_routing"))
-            else None
-        ),
+        "routing": source_map.get("routing") or source_map.get("target_routing") or None,
     }
+    if mode in {"weighted_blend", "probability_blend", "ensemble_vote"}:
+        from fractions import Fraction
+
+        raw = source_map.get("weights")
+        weights = np.asarray([1.0] * len(ids) if raw is None else raw, dtype=float)
+        if (weights.ndim != 1 or len(weights) != len(ids) or not np.isfinite(weights).all()
+                or (weights < 0).any() or not weights.any()):
+            raise ValueError("Invalid blend weights")
+        # Keep each weight attached to its source. Decimal fractions make
+        # scaled equivalents (including default equal weights) canonical
+        # without rounding distinct recipes into a false duplicate.
+        fractions = [Fraction(str(value)) for value in weights.tolist()]
+        total = sum(fractions)
+        normalized["source_weights"] = sorted(
+            (source, str(weight / total)) for source, weight in zip(ids, fractions)
+        )
     payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+
+def _stored_recipe_fingerprint(entry):
+    """Read legacy recipes without trusting the old lossy weight fingerprint.
+
+    Recompute from stored recipe details; never rewrite an immutable candidate
+    manifest merely to migrate duplicate detection.
+    """
+    if entry.get("mode") and entry.get("source_ids") and isinstance(entry.get("details"), dict):
+        try:
+            return _candidate_recipe_fingerprint(entry["mode"], entry["source_ids"], entry["details"])
+        except (TypeError, ValueError):
+            pass
+    return entry.get("recipe_fingerprint")
 
 
 def build_candidate(project, name, mode, source_map):
@@ -109,8 +134,8 @@ def build_candidate(project, name, mode, source_map):
         )
         scores.append(metrics["utility"])
     for manifest in manifests[1:]:
-        for field in ("task_sha256", "scorer_sha256", "split_sha256", "data_sha256"):
-            if manifest[field] != manifests[0][field]:
+        for field in ("task_sha256", "scorer_sha256", "custom_scorer_sha256", "split_sha256", "data_sha256"):
+            if manifest.get(field) != manifests[0].get(field):
                 raise ValueError("Source contract/split mismatch: " + field)
     has_test_preds = all(
         (project.artifacts_dir / exp / "test_predictions.csv").is_file()
@@ -296,11 +321,10 @@ def build_candidate(project, name, mode, source_map):
     if set(truth[key]) != set(merged[key]):
         raise ValueError("Incomplete evaluation coverage")
     truth = merged[[key]].merge(truth, on=key, validate="one_to_one")
-    result = resolve_evaluation(
-        spec,
-        plugin.evaluate_predictions(context, truth, predictions(merged)),
-        len(merged),
-    )
+    source_config = yaml.safe_load(
+        (project.artifacts_dir / ids[0] / "run_config.yaml").read_text(encoding="utf-8")
+    ) or {}
+    result = score_predictions(spec, plugin, context, source_config, truth, predictions(merged))
     if len(ids) > 1 and result["utility"] <= max(scores):
         raise ValueError("Superiority guard: ensemble must improve best constituent")
     candidate_id = "cand_" + uuid.uuid4().hex
@@ -393,8 +417,10 @@ def find_optimal_blend_weights(
     if isinstance(project, (str, Path)):
         project = HarnessProject.discover(project)
 
-    if not component_ids or len(component_ids) < 2:
+    if not component_ids or len(component_ids) < 2 or len(set(component_ids)) != len(component_ids):
         raise ValueError("Blend optimization requires at least 2 distinct component IDs")
+    if blend_mode is not None and blend_mode not in {"weighted_blend", "probability_blend", "ensemble_vote"}:
+        raise ValueError("Unsupported blend mode: " + str(blend_mode))
 
     spec = load_active_task_spec(project.task_config_path)
     context = TaskPluginContext(
@@ -405,8 +431,12 @@ def find_optimal_blend_weights(
 
     frames = []
     scores = []
+    manifests = []
+    source_configs = []
     for exp in component_ids:
         folder = project.artifacts_dir / exp
+        manifests.append(validate_run(folder, task_spec=spec, plugin=plugin, expected={"exp_id": exp}))
+        source_configs.append(yaml.safe_load((folder / "run_config.yaml").read_text(encoding="utf-8")) or {})
         metrics = json.loads((folder / "metrics.json").read_text(encoding="utf-8"))
         frame = pd.read_csv(folder / "oof_predictions.csv")
         frame = frame[frame.input_variant == metrics["selection_variant"]].copy()
@@ -416,6 +446,11 @@ def find_optimal_blend_weights(
             .reset_index()
         )
         scores.append(float(metrics.get("utility", metrics.get("primary_score", 0.0))))
+
+    for manifest in manifests[1:]:
+        for field in ("task_sha256", "scorer_sha256", "custom_scorer_sha256", "data_sha256", "split_sha256"):
+            if manifest.get(field) != manifests[0].get(field):
+                raise ValueError("Source contract/split mismatch: " + field)
 
     truth = pd.read_csv(project.artifacts_dir / component_ids[0] / "evaluation_truth.csv")
     truth = frames[0][[key]].merge(truth, on=key, validate="one_to_one")
@@ -444,6 +479,8 @@ def find_optimal_blend_weights(
                 else f["classes_" + target].iloc[0]
                 for f in frames
             ]
+            if any(order != orders[0] for order in orders):
+                raise ValueError("Probability class orders differ")
             class_order = orders[0]
             proba_arrays = [np.asarray(predictions(f)["proba_" + target], float) for f in frames]
             subtask_data[target] = {
@@ -496,8 +533,7 @@ def find_optimal_blend_weights(
                 )
                 pred_dict[col] = np.asarray(s_info["order_raw"] or s_info["order"])[vote_mat.argmax(axis=0)].tolist()
 
-        eval_out = plugin.evaluate_predictions(context, truth, pred_dict)
-        res = resolve_evaluation(spec, eval_out, len(truth))
+        res = score_predictions(spec, plugin, context, source_configs[0], truth, pred_dict)
         return float(res["utility"]), res
 
     def _objective(w: np.ndarray) -> float:
@@ -642,15 +678,16 @@ def register_external_prediction(
     if len(aligned) != len(truth):
         raise ValueError(f"OOF predictions match {len(aligned)} rows out of {len(truth)} ground truth rows")
 
-    # Ensure pred_ columns exist (read from the aligned frame so rows are in
-    # ground-truth order)
-    preds_dict = {}
-    for target in spec.subtasks.keys():
-        col = f"pred_{target}" if f"pred_{target}" in aligned.columns else target
-        if col in aligned.columns:
-            preds_dict[f"pred_{target}"] = aligned[col].values
-        if f"proba_{target}" in aligned.columns:
-            preds_dict[f"proba_{target}"] = aligned[f"proba_{target}"].values
+    # Normalize the managed artifact schema, independently of the external
+    # exporter's optional metadata. Preserve genuine fold assignments; -1 is
+    # explicitly unknown, not a claim that the exporter trained fold zero.
+    aligned["input_variant"] = "external"
+    if "fold" not in aligned:
+        aligned["fold"] = -1
+    for target in spec.subtasks:
+        if f"pred_{target}" not in aligned and target in aligned:
+            aligned[f"pred_{target}"] = aligned[target]
+    preds_dict = predictions(aligned)
 
     # 3. Official evaluation
     evaluation = plugin.evaluate_predictions(context, truth, preds_dict)

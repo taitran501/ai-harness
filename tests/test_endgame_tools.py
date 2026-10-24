@@ -198,6 +198,12 @@ class TestEndgameCandidatesAndBridge(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_find_optimal_blend_weights(self):
+        from harness.task_spec import load_active_task_spec
+        from tests.evidence_fixtures import seal_fixture
+
+        spec = load_active_task_spec(self.root / "configs/task.yaml")
+        for exp_id in ("exp001", "exp002"):
+            seal_fixture(self.root / "artifacts" / exp_id, spec, score=.5)
         opt = find_optimal_blend_weights(
             project=self.root,
             component_ids=["exp001", "exp002"],
@@ -233,14 +239,15 @@ class TestEndgameCandidatesAndBridge(unittest.TestCase):
     def test_agent_bridge_endgame_actions(self):
         sess = self.bridge.start_session(goal="Test endgame actions")
 
-        # 1. Action: optimize_threshold
+        # 1. A regression task must not be silently median-binarized for a
+        # binary classification threshold recommendation.
         sess, obs_th = self.bridge.execute_action(
             action=TypedActionName.OPTIMIZE_THRESHOLD.value,
             params={"exp_id": "exp001", "metric": "f1"},
             session_id=sess.session_id,
         )
-        self.assertEqual(obs_th.status, "SUCCESS")
-        self.assertIn("best_threshold", obs_th.data)
+        self.assertEqual(obs_th.status, "FAILED")
+        self.assertIn("binary", obs_th.summary.lower())
 
         # 2. Action: generate_microdose_probe
         base_p = self.root / "artifacts" / "exp001" / "test_predictions.csv"

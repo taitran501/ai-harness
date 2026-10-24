@@ -93,9 +93,10 @@ SUBMISSION_FIELDS: List[Tuple[str, str]] = [
 
 #: Python entry points the agent may reach for. Dotted path = module[.attr[.attr…]].
 PYTHON_SYMBOLS: List[Tuple[str, str]] = [
+    ("harness.script_validation.load_validation_manifest", "Selected fold train/validation IDs and sample bounds for custom scripts/pipelines."),
     ("harness.kaggle_compat.KaggleClient", "Unified Kaggle SDK facade (use this, not the raw SDK)."),
     ("harness.kaggle_compat.detect_sdk", "Which SDK is present: kagglesdk / kaggle / none."),
-    ("harness.endgame_submission.KaggleLeaderboardTracker", "In-process submission tracker (dispatch / get_submission / wait_for_score / latest)."),
+    ("harness.endgame_submission.KaggleLeaderboardTracker", "Submission tracker; latest uses the task metric direction or an explicit direction override."),
     ("harness.kernel_dispatch.build_kernel_metadata", "Build kernel-metadata.json content."),
     ("harness.kernel_dispatch.dispatch_kernel", "Stage + push a notebook as a Kaggle kernel."),
     ("harness.submission_dispatch.main", "The ``ai-harness submission`` CLI (dispatch/status/watch/latest)."),

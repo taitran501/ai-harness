@@ -63,9 +63,8 @@ from harness.artifacts import (
     seal_file_map,
     sha256,
 )
-from harness.evaluation import resolve_evaluation
 from harness.models import call_model
-from harness.oof_revalidation import build_variant_predictions
+from harness.oof_revalidation import build_variant_predictions, score_predictions
 
 
 class UniversalRunner(RunDataMixin, RunPipelineMixin):
@@ -263,53 +262,16 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         return int(limit) if limit else None
 
     def _evaluate(self, truth, predictions):
-        from harness.evaluation import validate_prediction_contract
-
-        validate_prediction_contract(self.task_spec, truth, predictions)
-        hook = self.cfg.get("paths", {}).get("metrics_evaluator")
-        if hook:
-            if str(self.project_root) not in sys.path:
-                sys.path.insert(0, str(self.project_root))
-            from harness.hook_ref import resolve_metrics_hook
-
-            module, name = resolve_metrics_hook(hook)
-            result = getattr(importlib.import_module(module), name)(truth, predictions)
-            if not isinstance(result, dict):
-                raise TypeError("Custom metrics_evaluator must return a metric mapping")
-            if getattr(self, "_skip_generic_base_eval", False):
-                # Determined at preflight (set in __init__): the generic
-                # aggregate cannot score this spec (pair gate raises before
-                # any metric is computed), so the custom hook above is the
-                # official scorer. Skipping the base call keeps
-                # _evaluation_warnings clean instead of logging "official
-                # evaluation failed" on every fold.
-                pass
-            else:
-                try:
-                    base_result = self.task_plugin.evaluate_predictions(
-                        self.plugin_context, truth, predictions
-                    )
-                    result = {**base_result, **result}
-                except Exception as exc:
-                    # A custom metrics_evaluator is configured but the official
-                    # plugin scorer failed. Keep the custom result, but surface
-                    # the failure — it must not be silently swallowed. Such
-                    # failures are deterministic for the spec (metric/pair/task
-                    # type gates), so warn once and skip the base evaluation
-                    # on later folds instead of re-raising per fold.
-                    self._skip_generic_base_eval = True
-                    result.setdefault("_evaluation_warnings", []).append(
-                        f"official evaluation failed: {exc.__class__.__name__}: {exc}"
-                    )
-                    print(
-                        f"[ai-harness] WARNING: official plugin evaluation failed: "
-                        f"{exc.__class__.__name__}: {exc}"
-                    )
-        else:
-            result = self.task_plugin.evaluate_predictions(
-                self.plugin_context, truth, predictions
-            )
-        return resolve_evaluation(self.task_spec, result, len(truth))
+        result = score_predictions(
+            self.task_spec, self.task_plugin, self.plugin_context, self.cfg,
+            truth, predictions,
+            skip_generic_base_eval=getattr(self, "_skip_generic_base_eval", False),
+        )
+        if result.get("_evaluation_warnings"):
+            self._skip_generic_base_eval = True
+            for warning in result["_evaluation_warnings"]:
+                print(f"[ai-harness] WARNING: {warning}")
+        return result
 
     def run(self):
         try:
@@ -472,12 +434,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             raise FileNotFoundError(f"Custom script entrypoint '{script_path}' not found")
 
         # 1. Resolve validation splits and audit expected validation IDs
-        splits = self._resolve_validation_splits(df, val_strategy)
-        if "fold" not in df.columns:
-            df = df.copy()
-            df["fold"] = 0
-            for fold, _, dev in splits:
-                df.loc[dev.index, "fold"] = fold
+        truth, validation_env = self._prepare_script_validation(df, val_strategy)
 
         # 2. Resolve test dataframe if test_path declared
         test_df = None
@@ -494,10 +451,10 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         # 3. Export splits
         splits_file = self.exp_dir / "splits.tsv"
         id_col = self.task_spec.id_column
-        df[[id_col, "fold"]].to_csv(splits_file, sep="\t", index=False)
 
         # 3. Environment & command setup
         child_env = os.environ.copy()
+        child_env.update(validation_env)
         python_bin = str(Path(sys.executable).parent)
         child_env["PATH"] = python_bin + os.pathsep + child_env.get("PATH", "")
         child_env["HARNESS_EXP_ID"] = self.exp_id
@@ -547,10 +504,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             raise ValueError(f"OOF predictions file missing ID column '{id_col}'")
 
         # 5. Extract predictions and align with evaluation truth
-        truth = df.drop_duplicates(id_col).copy()
-        merged_oof = truth[[id_col]].merge(oof_df, on=id_col, how="inner")
-        if len(merged_oof) != len(truth):
-            raise ValueError(f"OOF predictions cover {len(merged_oof)} rows, expected {len(truth)}")
+        from harness.script_predictions import align_prediction_ids
+
+        merged_oof = align_prediction_ids(oof_df, truth[id_col], id_col, kind="OOF")
 
         variant = "script"
         self.selection_variant = variant
@@ -559,7 +515,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             row = merged_oof.iloc[i]
             rec = {
                 id_col: row[id_col],
-                "fold": int(row.get("fold", 0)) if "fold" in row and pd.notna(row["fold"]) else 0,
+                "fold": self._script_fold_by_id[row[id_col]],
                 "input_variant": variant,
             }
             for target in self.task_spec.subtasks.keys():
@@ -568,14 +524,16 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                     rec[f"pred_{target}"] = row[col_name]
                 if f"proba_{target}" in row:
                     rec[f"proba_{target}"] = row[f"proba_{target}"]
+                if f"classes_{target}" in row:
+                    rec[f"classes_{target}"] = row[f"classes_{target}"]
             records.append(rec)
 
         elapsed = time.monotonic() - start_time
         details = [{
             "input_variant": variant,
             "dev_fold": "all",
-            "train_rows": len(df),
-            "dev_rows": len(df),
+            "train_rows": self._script_training_rows,
+            "dev_rows": len(truth),
             "fit_time_seconds": elapsed,
         }]
         rows = [{
@@ -588,13 +546,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         test_pred_path = self.exp_dir / "test_predictions.csv"
         if test_pred_path.exists() and test_df is not None:
             t_df = pd.read_csv(test_pred_path)
-            cand_test = {}
-            for target in self.task_spec.subtasks.keys():
-                col_name = f"pred_{target}" if f"pred_{target}" in t_df.columns else target
-                if col_name in t_df.columns:
-                    cand_test[f"pred_{target}"] = t_df[col_name].values
-                if f"proba_{target}" in t_df.columns:
-                    cand_test[f"proba_{target}"] = t_df[f"proba_{target}"].values
+            from harness.script_predictions import extract_test_predictions
+
+            cand_test = extract_test_predictions(t_df, self.task_spec, expected_ids=test_df[id_col])
             fold_test_preds.append(cand_test)
 
         self.estimator_metadata.append({

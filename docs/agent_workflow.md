@@ -131,6 +131,30 @@ ai-harness-agent act --action freeze_candidate --user-approved --slot-1-id candi
 
 ---
 
+### Binary threshold recommendations
+
+`optimize_threshold --exp-id <exp> --metric f1` reads a verified completed full
+run's selected input variant. It requires a single binary target, declared
+classes, and `proba_<target>` / `classes_<target>` metadata. Supported metrics
+are `f1`, `accuracy` (`acc`), and `kappa` (`cohen_kappa`). Other metrics and
+regression/multiclass tasks are rejected rather than converted to another task.
+
+The positive class is the last declared class; the action locates its actual
+probability column by label, even if the model's column order differs. The
+observation includes `target`, `positive_class`, `selection_variant`, and
+`n_samples`. Apply `best_threshold` to that positive-class probability in a new
+prediction artifact. This action only recommends a threshold and does not edit
+completed evidence or replace the task's official validation metric.
+
+### Best leaderboard submission
+
+`ai-harness submission latest <competition>` selects the best finite public
+score using the active task's `direction`. For a different competition, pass
+`--direction minimize` or `--direction maximize` explicitly. The Python API
+accepts the same override: `tracker.latest(competition, direction="minimize")`.
+The JSON reports `direction` and `direction_source`; without a configured task,
+the compatibility default is maximize.
+
 ## 5. Model Execution and Probes
 
 Experiment pipelines are executed using `harness.runner` (`ai-harness-run`):
@@ -141,6 +165,22 @@ Always run a debug probe before launching full validation:
 ai-harness-run --project-root . --config configs/exp001_feat_stemming_clean.yaml --debug --fold 0
 ```
 This runs a fast check on fold 0 with a capped subsample to verify syntax, pipeline transformations, and loss stability. Probe outputs are stored under `probes/<exp_id>/` and never pollute the official leaderboard.
+
+### Custom script and pipeline scope
+
+Each child reads `harness.script_validation.load_validation_manifest()` (the path is
+also in `HARNESS_VALIDATION_MANIFEST`). Its `partitions` list the exact `fold`,
+`train_ids` and `validation_ids` to execute. Probe sampling is already applied.
+Train only on these training IDs and output exactly one OOF row per validation ID.
+This applies to single-fold smoke, bounded probes, full CV, external holdout and
+expanding time-series validation. Load task-specific training/dev data as declared
+by the task; a holdout dev dataset may be separate from train.
+
+`HARNESS_RUN_KIND`, `HARNESS_SELECTED_FOLDS` (JSON) and `HARNESS_SAMPLE_LIMIT`
+provide summary scope. `splits.tsv` retains the complete fold map for full-CV
+compatibility; `-1` marks training-only rows. Do not use all its fold values as a
+probe execution loop. Scripts that return full-CV output for a single-fold probe
+are rejected rather than recorded as a successful smoke test.
 
 ### Full Cross-Validation
 Once the probe passes cleanly, run full multi-fold validation:

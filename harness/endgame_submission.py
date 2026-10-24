@@ -387,22 +387,41 @@ class KaggleLeaderboardTracker:
             self._sleep(interval)
             interval = min(interval * 1.5, max_poll_interval_s)
 
-    def latest(self, competition: str) -> Dict[str, Any]:
-        """Summarise a competition's submissions: count + best scored entry."""
+    def latest(self, competition: str, *, direction: Optional[str] = None) -> Dict[str, Any]:
+        """Return the best finite score using the task direction or an override.
+
+        Outside a configured task, retain the legacy maximize default and
+        report that choice so callers can pass the competition's direction.
+        """
+        direction_source = "explicit"
+        if direction is None:
+            from harness.project import HarnessProject
+            from harness.task_spec import load_active_task_spec
+
+            project = HarnessProject.discover()
+            if project.manifest or project.task_config_path.is_file():
+                direction = load_active_task_spec(project.task_config_path).direction
+                direction_source = "task"
+            else:
+                direction = "maximize"
+                direction_source = "default"
+        direction = str(direction).lower()
+        if direction not in {"maximize", "minimize"}:
+            raise ValueError("Leaderboard direction must be maximize or minimize")
         subs = list(self._client.list_submissions(competition))
         scored = [
-            s for s in subs
-            if self._score(getattr(s, "public_score", "")) is not None
+            (score, s) for s in subs
+            if (score := self._score(getattr(s, "public_score", ""))) is not None
+            and np.isfinite(score)
         ]
-        scored.sort(
-            key=lambda s: self._score(getattr(s, "public_score", "")) or 0.0,
-            reverse=True,
-        )
+        scored.sort(key=lambda pair: pair[0], reverse=direction == "maximize")
         return {
             "competition": competition,
+            "direction": direction,
+            "direction_source": direction_source,
             "total": len(subs),
             "scored": len(scored),
-            "best": self._submission_dict(scored[0]) if scored else None,
+            "best": self._submission_dict(scored[0][1]) if scored else None,
         }
 
     def get_leaderboard(self, competition: str, top: int = 20) -> List[Dict[str, Any]]:
@@ -478,24 +497,33 @@ class ThresholdOptimizer:
             fn = cohen_kappa_score
         elif metric_lower in {"accuracy", "acc"}:
             fn = accuracy_score
+        elif metric_lower == "f1":
+            def fn(y, pred):
+                return f1_score(y, pred, zero_division=0)
         else:
-            fn = f1_score
+            raise ValueError("Unsupported threshold metric: " + str(metric))
 
         best_th = 0.5
         best_score = float("-inf")
         y_true_clean = np.asarray(y_true).ravel()
-        y_prob_clean = np.asarray(y_prob).ravel()
+        y_prob_clean = np.asarray(y_prob, dtype=float).ravel()
+        if (not len(y_true_clean) or len(y_true_clean) != len(y_prob_clean)
+                or not np.isin(y_true_clean, [0, 1]).all()
+                or not np.isfinite(y_prob_clean).all()
+                or (y_prob_clean < 0).any() or (y_prob_clean > 1).any()):
+            raise ValueError("Threshold search requires aligned binary labels and finite probabilities in [0, 1]")
+        if int(num_thresholds) < 2:
+            raise ValueError("num_thresholds must be at least 2")
 
-        for th in np.linspace(0.05, 0.95, num_thresholds):
+        for th in np.unique(np.r_[0.5, np.linspace(0.05, 0.95, int(num_thresholds))]):
             preds = (y_prob_clean >= th).astype(int)
-            try:
-                score = float(fn(y_true_clean, preds))
-                if score > best_score:
-                    best_score = score
-                    best_th = float(th)
-            except Exception:
-                continue
+            score = float(fn(y_true_clean, preds))
+            if np.isfinite(score) and score > best_score:
+                best_score = score
+                best_th = float(th)
 
+        if not np.isfinite(best_score):
+            raise ValueError("No finite threshold score could be computed")
         return best_th, best_score
 
 

@@ -1,7 +1,7 @@
 # Kaggle kernel watch & list, dispatch --watch, Agent Bridge slug fallback, and live public leaderboard discovery
 
 - **Date**: 2026-10-24
-- **PR**: [#118](https://github.com/taitran501/ai-harness/pull/118)
+- **PR**: [#128](https://github.com/taitran501/ai-harness/pull/128)
 - **Branch**: `feat/kaggle-kernel-watch-dispatch-and-leaderboard`
 - **Status**: in-review
 - **Commits**: pending

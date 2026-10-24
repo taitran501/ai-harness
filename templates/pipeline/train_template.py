@@ -12,7 +12,7 @@ marker. The harness invokes each pipeline stage as a subprocess:
 Env vars the harness sets for every stage:
     HARNESS_EXP_ID, HARNESS_EXP_DIR, HARNESS_PROJECT_ROOT, HARNESS_SEED,
     HARNESS_STAGE_NAME, HARNESS_STAGE_INDEX, HARNESS_STAGE_TOTAL,
-    HARNESS_STAGE_DIR
+    HARNESS_STAGE_DIR, HARNESS_VALIDATION_MANIFEST
 
 Contract (the harness verifies AFTER the whole pipeline):
     - The LAST stage must write  oof_predictions.csv  into --exp-dir, with
@@ -29,6 +29,8 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+from harness.script_validation import load_validation_manifest
+
 
 def _arg(name: str) -> str:
     if name not in sys.argv:
@@ -41,8 +43,9 @@ config = yaml.safe_load(Path(_arg("--config")).read_text(encoding="utf-8"))
 stage = os.environ.get("HARNESS_STAGE_NAME", "train")
 print(f"[{stage}] exp_dir={exp_dir}", flush=True)
 
-task = config["task"]
-data_cfg = task["data_config"]
+task_doc = yaml.safe_load(Path(os.environ["HARNESS_TASK_CONFIG"]).read_text(encoding="utf-8"))
+task = task_doc.get("task", task_doc)
+data_cfg = task.get("data_config") or task.get("data") or {}
 project_root = Path(os.environ.get("HARNESS_PROJECT_ROOT", "."))
 
 # --- [CUSTOMIZE] Load your data ------------------------------------------
@@ -52,24 +55,25 @@ if str(train_path).endswith(".parquet"):
 else:
     df = pd.read_csv(train_path)
 
-# --- [CUSTOMIZE] Build features + train your model -----------------------
-# Replace with the modeling code for your hypothesis. Example:
-#   import numpy as np
-#   from sklearn.linear_model import LogisticRegression
-#   X = df[FEATURES].fillna(0.0)
-#   y = df[TARGET_COL]
-#   model = LogisticRegression(C=0.01, max_iter=1000).fit(X, y)
-#   oof_pred = model.predict(X)
-oof_pred = df.iloc[:, 0]  # [CUSTOMIZE] replace with real out-of-fold predictions
-
-# --- Write OOF predictions (verified by the harness) ---------------------
-# If this is the LAST stage, write to "oof_predictions.csv" (the harness
-# verifies that exact file). If a later blend stage combines your predictions,
-# write to a stage-specific name (e.g. "train_a_oof.csv") instead.
-OUT_NAME = "oof_predictions.csv"  # [CUSTOMIZE] or e.g. "train_a_oof.csv"
+# --- [CUSTOMIZE] Load a separate dev dataset here when the task declares one.
+# All training stages must honor this resolved execution scope.
+scope = load_validation_manifest()
+id_col = data_cfg["id_column"]
 subtask_id = task["subtasks"][0]["id"]
-oof = pd.DataFrame(
-    {data_cfg["id_column"]: df[data_cfg["id_column"]], f"pred_{subtask_id}": oof_pred}
-)
-oof.to_csv(exp_dir / OUT_NAME, index=False)
-print(f"[{stage}] wrote {len(oof)} rows -> {OUT_NAME}", flush=True)
+records = []
+for part in scope["partitions"]:
+    train = df.set_index(id_col).loc[part["train_ids"]]
+    dev = df.set_index(id_col).loc[part["validation_ids"]]
+    # --- [CUSTOMIZE] Fit your model on train, then predict dev ---------------
+    # model.fit(train[FEATURES], train[TARGET_COL])
+    # prediction = model.predict(dev[FEATURES])
+    raise NotImplementedError("[CUSTOMIZE] Implement fold training and validation inference")
+    # records.extend({id_col: sample_id, f"pred_{subtask_id}": value,
+    #                 "fold": part["fold"]}
+    #                for sample_id, value in zip(dev.index, prediction))
+
+# --- Write predictions for exactly the selected validation IDs ------------
+# Earlier stages can use a stage-specific OUT_NAME (e.g. train_a_oof.csv).
+OUT_NAME = "oof_predictions.csv"  # [CUSTOMIZE]
+pd.DataFrame(records).to_csv(exp_dir / OUT_NAME, index=False)
+print(f"[{stage}] wrote {len(records)} rows -> {OUT_NAME}", flush=True)
