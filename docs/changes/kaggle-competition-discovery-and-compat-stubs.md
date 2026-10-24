@@ -3,8 +3,8 @@
 - **Date**: 2026-10-24
 - **PR**: [#129](https://github.com/taitran501/ai-harness/pull/129)
 - **Branch**: `feat/kaggle-competition-discovery-and-compat-stubs`
-- **Status**: in-review
-- **Commits**: pending
+- **Status**: merged
+- **Commits**: e499dd8
 
 ## Why
 
