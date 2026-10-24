@@ -3,8 +3,8 @@
 - **Date**: 2026-10-24
 - **PR**: [#128](https://github.com/taitran501/ai-harness/pull/128)
 - **Branch**: `feat/kaggle-kernel-watch-dispatch-and-leaderboard`
-- **Status**: in-review
-- **Commits**: pending
+- **Status**: merged
+- **Commits**: `e7be82d` (squash)
 
 ## Why
 
