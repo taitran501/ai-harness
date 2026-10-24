@@ -96,6 +96,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_lb.add_argument("competition", help="Kaggle competition slug.")
     p_lb.add_argument("--top", "-n", type=int, default=20, help="Number of leaderboard entries to display (default: 20).")
 
+    p_info = sub.add_parser("info", aliases=["details"], help="View Kaggle competition metadata (deadline, metric, rules, rank).")
+    p_info.add_argument("competition", help="Kaggle competition slug.")
+
 
     args = parser.parse_args(argv)
     tracker = KaggleLeaderboardTracker()
@@ -167,6 +170,19 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "competition": args.competition,
                 "count": len(entries),
                 "leaderboard": entries,
+            })
+            return 0
+
+        if args.action in ("info", "details"):
+            client = getattr(tracker, "client", None) or getattr(tracker, "_client", None)
+            if client is None or not hasattr(client, "get_competition"):
+                from harness.kaggle_compat import KaggleClient
+                client = KaggleClient()
+            info = client.get_competition(args.competition)
+            _print_payload({
+                "action": "info",
+                "competition": args.competition,
+                "info": info,
             })
             return 0
     except Exception as exc:  # noqa: BLE001 - surface any dispatch/poll failure as JSON.

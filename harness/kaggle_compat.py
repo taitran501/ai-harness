@@ -59,11 +59,21 @@ _LEGACY_ALIASES = {
     "content": ("message", "body", "raw_markdown", "rawMarkdown"),
     "message": ("content", "body", "raw_markdown", "rawMarkdown"),
     "body": ("content", "message", "raw_markdown", "rawMarkdown"),
-    "comment_count": ("commentCount", "comments", "total_comments"),
-    "comments": ("comment_count", "commentCount", "total_comments"),
-    "total_bytes": ("totalBytes",),
+    "comment_count": ("commentCount", "comments", "total_comments", "total_replies"),
+    "comments": ("comment_count", "commentCount", "total_comments", "total_replies"),
+    "total_replies": ("comment_count", "commentCount", "comments", "total_comments"),
+    "total_bytes": ("totalBytes", "size", "bytes"),
+    "size": ("total_bytes", "totalBytes", "bytes"),
     "file_name": ("fileName",),
+    "team_id": ("teamId",),
     "team_name": ("teamName",),
+    "is_code_competition": ("isKernelsSubmissionsOnly", "is_kernels_submissions_only"),
+    "submissions_disabled": ("submissionsDisabled", "submissions_disabled"),
+    "max_daily_submissions": ("maxDailySubmissions", "max_daily_submissions"),
+    "evaluation_metric": ("evaluationMetric", "evaluation_metric"),
+    "team_count": ("teamCount", "team_count"),
+    "user_rank": ("userRank", "user_rank"),
+    "user_has_entered": ("userHasEntered", "user_has_entered"),
     "failure_message": ("failureMessage",),
     "error_message": ("errorMessage",),
     # Method-name aliases (used by KaggleClient.get): the SDK sometimes
@@ -112,7 +122,7 @@ def _alias_candidates(name: str) -> Tuple[str, ...]:
     Forward: the normalised name maps to its ordered raw candidates.
     Reverse: a legacy name requested on an object that holds the normalised
     attribute resolves back to the normalised key.
-    Also dynamically generates camelCase and snake_case candidates.
+    Also dynamically generates camelCase and snake_case candidates for all.
     """
     cands = list(_LEGACY_ALIASES.get(name, ()))
     reverse = [
@@ -120,17 +130,19 @@ def _alias_candidates(name: str) -> Tuple[str, ...]:
         for canonical, raws in _LEGACY_ALIASES.items()
         if canonical != name and name in raws
     ]
-    # Dynamic camelCase candidate if name is snake_case
-    if "_" in name:
-        parts = name.split("_")
-        camel = parts[0] + "".join(p.capitalize() for p in parts[1:])
-        if camel not in cands:
-            cands.append(camel)
-    # Dynamic snake_case candidate if name is camelCase
-    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-    if snake != name and snake not in cands and snake not in reverse:
-        reverse.append(snake)
-    return tuple(cands + reverse)
+    expanded: List[str] = []
+    for cand in cands + reverse + [name]:
+        if cand not in expanded and cand != name:
+            expanded.append(cand)
+        if "_" in cand:
+            parts = cand.split("_")
+            camel = parts[0] + "".join(p.capitalize() for p in parts[1:])
+            if camel not in expanded and camel != name:
+                expanded.append(camel)
+        snake = re.sub(r"(?<!^)(?=[A-Z])", "_", cand).lower()
+        if snake not in expanded and snake != name:
+            expanded.append(snake)
+    return tuple(expanded)
 
 
 def _try_import_kagglesdk():
@@ -201,11 +213,51 @@ class _NormalisedObject:
             f"'{type(raw).__name__}' object has no attribute '{name}'"
         )
 
-    def __getitem__(self, name: str) -> Any:
+    def __getitem__(self, name: Any) -> Any:
+        if isinstance(name, int):
+            raw = object.__getattribute__(self, "_raw")
+            for attr in ("competitions", "topics", "messages", "submissions", "kernels", "dataset_files", "files"):
+                if hasattr(raw, attr):
+                    sublist = getattr(raw, attr)
+                    if isinstance(sublist, (list, tuple)):
+                        return self._wrap(sublist[name])
+            if isinstance(raw, (list, tuple)):
+                return self._wrap(raw[name])
+            raise IndexError(f"'{type(raw).__name__}' object is not indexable")
         try:
-            return getattr(self, name)
+            return getattr(self, str(name))
         except AttributeError as exc:
             raise KeyError(name) from exc
+
+    def __iter__(self):
+        raw = object.__getattribute__(self, "_raw")
+        if isinstance(raw, (list, tuple)):
+            for item in raw:
+                yield self._wrap(item)
+            return
+        for attr in ("competitions", "topics", "messages", "submissions", "kernels", "dataset_files", "files"):
+            if hasattr(raw, attr):
+                sublist = getattr(raw, attr)
+                if isinstance(sublist, (list, tuple)):
+                    for item in sublist:
+                        yield self._wrap(item)
+                    return
+        if hasattr(raw, "__iter__") and not isinstance(raw, (str, bytes, dict)):
+            for item in raw:
+                yield self._wrap(item)
+            return
+        raise TypeError(f"'{type(raw).__name__}' object is not iterable")
+
+    def __len__(self) -> int:
+        raw = object.__getattribute__(self, "_raw")
+        if hasattr(raw, "__len__"):
+            return len(raw)
+        for attr in ("competitions", "topics", "messages", "submissions", "kernels", "dataset_files", "files"):
+            if hasattr(raw, attr):
+                sublist = getattr(raw, attr)
+                if hasattr(sublist, "__len__"):
+                    return len(sublist)
+        raise TypeError(f"object of type '{type(raw).__name__}' has no len()")
 
     def get(self, name: str, default: Any = None) -> Any:
         try:
@@ -346,6 +398,88 @@ class KaggleClient:
         else:
             subs = api.competition_submissions()
         return [_NormalisedObject(s, self.sdk) for s in subs]
+
+    competition_submissions = list_submissions
+
+    def get_competition(self, competition: str) -> Optional[Dict[str, Any]]:
+        """Fetch comprehensive metadata for a competition.
+
+        Returns a dictionary with canonical keys:
+        - ref: competition slug
+        - slug: normalized slug
+        - title: human-readable title
+        - url: competition URL
+        - description: short description
+        - deadline: submission deadline
+        - is_ongoing: boolean whether competition is still active
+        - category: competition category
+        - reward: prize / reward description
+        - team_count: total participating teams
+        - user_rank: user's current rank (or None)
+        - user_has_entered: boolean
+        - max_daily_submissions: allowed daily submissions
+        - evaluation_metric: official competition evaluation metric
+        - is_code_competition: boolean (notebook submission only)
+        - submissions_disabled: boolean
+        """
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        slug = competition.strip().split("/")[-1]
+        try:
+            resp = api.competitions_list(search=slug)
+            comps = getattr(resp, "competitions", resp) if resp else []
+            target = None
+            for c in (comps or []):
+                c_ref = getattr(c, "ref", "") or getattr(c, "url", "")
+                if slug.lower() in str(c_ref).lower() or getattr(c, "id", None) == slug:
+                    target = c
+                    break
+            if target is None and comps:
+                target = comps[0]
+            if target is None:
+                return None
+            norm = _NormalisedObject(target, self.sdk)
+            deadline_str = str(norm.get("deadline", ""))
+            return {
+                "id": norm.get("id"),
+                "ref": slug,
+                "slug": slug,
+                "title": norm.get("title"),
+                "url": norm.get("url") or f"https://www.kaggle.com/competitions/{slug}",
+                "description": norm.get("description"),
+                "deadline": deadline_str,
+                "is_ongoing": not bool(norm.get("submissions_disabled")),
+                "category": norm.get("category"),
+                "reward": norm.get("reward"),
+                "team_count": norm.get("team_count") or norm.get("teamCount"),
+                "user_rank": norm.get("user_rank") or norm.get("userRank"),
+                "user_has_entered": norm.get("user_has_entered") or norm.get("userHasEntered"),
+                "max_daily_submissions": norm.get("max_daily_submissions") or norm.get("maxDailySubmissions"),
+                "evaluation_metric": norm.get("evaluation_metric") or norm.get("evaluationMetric"),
+                "is_code_competition": bool(norm.get("is_kernels_submissions_only") or norm.get("isKernelsSubmissionsOnly")),
+                "submissions_disabled": bool(norm.get("submissions_disabled") or norm.get("submissionsDisabled")),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ref": slug, "slug": slug, "error": str(exc)}
+
+    competition_view = get_competition
+
+    def list_competitions(
+        self,
+        search: Optional[str] = None,
+        category: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        page_size: int = 20,
+        **kwargs: Any,
+    ) -> List[Any]:
+        """List competitions; returns normalised objects with snake_case attrs."""
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        resp = api.competitions_list(
+            search=search, category=category, sort_by=sort_by, page_size=page_size, **kwargs
+        )
+        comps = getattr(resp, "competitions", resp) if resp else []
+        return [_NormalisedObject(c, self.sdk) for c in (comps or [])]
+
+    competitions_list = list_competitions
 
     def get_leaderboard(
         self, competition: str, page_size: int = 20, **kwargs: Any
@@ -508,6 +642,9 @@ class KaggleClient:
         if self.sdk == "kaggle":
             return self._legacy_api.kernels_logs(slug, **kwargs)
         return self._legacy_api_instance().kernels_logs(slug, **kwargs)
+
+    kernel_status = kernels_status
+    kernel_logs = kernels_logs
 
     def competition_topics(self, competition: str, **kwargs: Any) -> List[Any]:
         """List discussion topics for a competition; returns normalised objects.
