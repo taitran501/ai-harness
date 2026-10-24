@@ -33,6 +33,8 @@ import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
+from harness.endgame_submission import KaggleLeaderboardTracker
+
 T = TypeVar("T")
 
 
@@ -815,6 +817,56 @@ class KaggleClient:
                 return getattr(target, alias)(*args, **kwargs)
         raise AttributeError(f"No method '{method_name}' on {type(target).__name__}")
 
+    @property
+    def api(self) -> Any:
+        """Underlying legacy KaggleApi instance for direct operations."""
+        return self._legacy_api_instance()
+
+    @property
+    def _api(self) -> Any:
+        """Alias for :attr:`api`."""
+        return self._legacy_api_instance()
+
+    def kernels_pull(
+        self,
+        kernel: str,
+        path: Optional[str] = None,
+        metadata: bool = False,
+        quiet: bool = True,
+    ) -> Any:
+        """Pull notebook/script and metadata for a Kaggle kernel."""
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        return api.kernels_pull(kernel, path=path or ".", metadata=metadata, quiet=quiet)
+
+    kernel_pull = kernels_pull
+    pull_kernel = kernels_pull
+
+    def get_kernel(self, kernel: str) -> Optional[Any]:
+        """Get metadata for a specific kernel (by 'username/slug' or 'slug')."""
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        search_term = kernel.split("/", 1)[-1] if "/" in kernel else kernel
+        user_name = kernel.split("/", 1)[0] if "/" in kernel else None
+        try:
+            results = api.kernels_list(search=search_term, user=user_name, page_size=20)
+            for item in (results or []):
+                item_ref = getattr(item, "ref", "") or getattr(item, "slug", "")
+                if item_ref == kernel or item_ref.endswith(f"/{search_term}"):
+                    return _NormalisedObject(item, self.sdk)
+            if results:
+                return _NormalisedObject(results[0], self.sdk)
+        except Exception:
+            pass
+        return None
+
+    # Discussion & Leaderboard aliases
+    leaderboard = get_leaderboard
+    list_topics = competition_topics
+    topics = competition_topics
+    discussions = competition_topics
+    list_discussions = competition_topics
+    topic_messages = competition_topic_messages
+    list_topic_messages = competition_topic_messages
+
 
 # Backwards compatibility: agents sometimes import `KaggleApi` directly.
 KaggleApi = KaggleClient
@@ -882,6 +934,7 @@ def retry_with_backoff(
 __all__ = [
     "KaggleClient",
     "KaggleApi",
+    "KaggleLeaderboardTracker",
     "detect_sdk",
     "retry_with_backoff",
     "_is_transient_error",

@@ -15,6 +15,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -59,9 +60,59 @@ class _EntryList(list):
         return self
 
 
+class _FrontierDescriptor:
+    """Descriptor enabling both instance property and classmethod frontier access."""
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            def _class_frontier(project_root: str | Path = ".") -> _EntryList:
+                return owner.load(project_root).frontier
+            return _class_frontier
+        ctx = instance.context()
+        return _EntryList(ctx.get("research_frontier", []))
+
+
 class ResearchMemory:
-    def __init__(self, project_root, artifacts_dir, task_spec, plugin=None):
-        self.root = Path(project_root)
+    frontier = _FrontierDescriptor()
+    research_frontier = _FrontierDescriptor()
+
+    def __init__(
+        self,
+        project_root: str | Path = ".",
+        artifacts_dir: Optional[str | Path] = None,
+        task_spec: Optional[Dict[str, Any]] = None,
+        plugin: Any = None,
+    ):
+        self.root = Path(project_root).resolve()
+        if task_spec is None:
+            task_path = self.root / "configs" / "task.yaml"
+            if task_path.exists():
+                try:
+                    from harness.task_spec import load_task_spec
+
+                    task_spec = load_task_spec(task_path)
+                except Exception:
+                    task_spec = {}
+            else:
+                task_spec = {}
+        if artifacts_dir is None:
+            meta = getattr(task_spec, "metadata", None) if isinstance(task_spec, dict) else getattr(task_spec, "metadata", None)
+            task_id = ""
+            if isinstance(meta, dict):
+                task_id = str(meta.get("id") or meta.get("task_name") or "").strip()
+            art_base = self.root / ".ai-harness" / "artifacts"
+            found = None
+            if task_id and (art_base / task_id).is_dir():
+                found = art_base / task_id
+            elif art_base.is_dir():
+                for child in art_base.iterdir():
+                    if child.is_dir() and (child / "research_memory.json").exists():
+                        found = child
+                        break
+                    elif child.is_dir() and not found:
+                        found = child
+            artifacts_dir = found or (art_base / task_id if task_id else art_base)
+
         self.artifacts = Path(artifacts_dir)
         self.path = self.artifacts / "research_memory.json"
         self.progress_path = self.artifacts / "RESEARCH_PROGRESS.md"
@@ -89,6 +140,17 @@ class ResearchMemory:
         # in the same process (same artifacts dir) must never be served the
         # first contract's cached "verified_full" claim.
         self._sync_identity_key = digest(self.identity)
+
+    @classmethod
+    def load(
+        cls,
+        project_root: str | Path = ".",
+        artifacts_dir: Optional[str | Path] = None,
+        task_spec: Optional[Dict[str, Any]] = None,
+        plugin: Any = None,
+    ) -> "ResearchMemory":
+        """Load research memory directly from a project root or artifacts directory."""
+        return cls(project_root, artifacts_dir=artifacts_dir, task_spec=task_spec, plugin=plugin)
 
     def _read(self):
         if not self.path.exists():

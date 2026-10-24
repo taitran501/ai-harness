@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from sklearn import metrics
 
+from harness.artifacts import validate_run  # noqa: F401
+
 
 def metric_name(value: str) -> str:
     name = re.sub(r"[^a-z0-9]", "", value.lower())

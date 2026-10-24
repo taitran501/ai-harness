@@ -85,10 +85,32 @@ def contract_identity(task_spec, plugin=None):
             )
     except (OSError, TypeError):
         raise ValueError("Scorer implementation cannot be identified")
+    meta = getattr(task_spec, "metadata", None)
+    if meta is None and isinstance(task_spec, dict):
+        meta = task_spec.get("metadata", task_spec)
+    elif meta is None:
+        meta = {}
     return {
-        "task_sha256": digest(task_spec.metadata),
+        "task_sha256": digest(meta),
         "scorer_sha256": digest(implementation),
     }
+
+
+def repair_run_dir(*args, **kwargs):
+    """Re-export of :func:`harness.repair.repair_run_dir`."""
+    from harness.repair import repair_run_dir as _impl
+
+    return _impl(*args, **kwargs)
+
+
+repair_run = repair_run_dir
+
+
+def run_repair(*args, **kwargs):
+    """Re-export of :func:`harness.repair.run_repair`."""
+    from harness.repair import run_repair as _impl
+
+    return _impl(*args, **kwargs)
 
 
 def validate_run(directory, *, task_spec=None, plugin=None, expected=None):

@@ -73,6 +73,15 @@ class AgentContextConfig:
 class CompetitionStateMachine:
     """Task-agnostic 8-Phase Competition Journey Engine driven by CompetitionSpec."""
 
+    @classmethod
+    def load(
+        cls,
+        project_root: Path | str = ".",
+        task_config_path: Optional[Path | str] = None,
+    ) -> "CompetitionStateMachine":
+        """Load or instantiate the state machine for the specified project root."""
+        return cls(project_root=project_root, task_config_path=task_config_path)
+
     def __init__(
         self,
         project_root: Path | str = ".",

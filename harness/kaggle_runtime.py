@@ -145,11 +145,21 @@ def find_dataset_mount(input_base, dataset_slug):
     direct = base / folder
     if direct.is_dir():
         return direct
+
+    folder_lower = folder.lower()
+    if base.is_dir():
+        for child in base.iterdir():
+            if child.is_dir() and child.name.lower() == folder_lower:
+                return child
+
     owner = dataset_slug.split("/", 1)[0] if "/" in dataset_slug else None
     candidates = [path for path in base.rglob(folder) if path.is_dir()]
+    if not candidates and base.is_dir():
+        candidates = [path for path in base.rglob("*") if path.is_dir() and path.name.lower() == folder_lower]
+
     if owner:
-        owned = [path for path in candidates if path.parent.name == owner]
-        if owned or any(path.parent.parent.name == "datasets" for path in candidates):
+        owned = [path for path in candidates if path.parent.name.lower() == owner.lower()]
+        if owned:
             candidates = owned
     if len(candidates) == 1:
         return candidates[0]
