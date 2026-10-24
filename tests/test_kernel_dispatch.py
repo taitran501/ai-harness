@@ -158,6 +158,18 @@ class DispatchKernelTests(unittest.TestCase):
             result = dispatch_kernel(str(nb), "own/k", "T", client=client)
             self.assertNotIn("staging_dir", result)
 
+    def test_dispatch_with_watch_waits_for_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            nb = self._notebook(Path(tmp))
+            client = _MockKernelClient()
+            watch_fake = {"kernel_slug": "own/k", "status": "COMPLETED", "success": True}
+            with mock.patch("harness.templates.kaggle_template.KaggleKernelManager.wait_for_kernel", return_value=watch_fake) as m:
+                result = dispatch_kernel(str(nb), "own/k", "T", client=client, watch=True, poll_interval=5.0, watch_timeout=100.0)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["status"], "COMPLETED")
+            self.assertEqual(result["watch"]["status"], "COMPLETED")
+            m.assert_called_once_with(exp_id="", kernel_slug=777, poll_interval=5.0, timeout_seconds=100.0)
+
 
 class KernelDispatchMainCliTests(unittest.TestCase):
     """``main()`` CLI entry point: arg parsing, JSON-on-stdout contract, exit
@@ -209,6 +221,9 @@ class KernelDispatchMainCliTests(unittest.TestCase):
             "--enable-internet",
             "--timeout", "1200",
             "--keep-staging",
+            "--watch",
+            "--poll", "5.0",
+            "--watch-timeout", "600.0",
         ])
         self.assertEqual(rc, 0)
         args, kwargs = dk.call_args
@@ -223,6 +238,9 @@ class KernelDispatchMainCliTests(unittest.TestCase):
         self.assertTrue(kwargs["enable_internet"])
         self.assertEqual(kwargs["timeout"], 1200)
         self.assertTrue(kwargs["keep_staging"])
+        self.assertTrue(kwargs["watch"])
+        self.assertEqual(kwargs["poll_interval"], 5.0)
+        self.assertEqual(kwargs["watch_timeout"], 600.0)
 
     def test_missing_required_args_exits_two(self):
         from harness.kernel_dispatch import main
@@ -243,6 +261,7 @@ class CliRegistrationTests(unittest.TestCase):
         choices = list(parser._subparsers._group_actions[0].choices.keys())
         self.assertIn("dispatch-kernel", choices)
         self.assertIn("submission", choices)
+        self.assertIn("leaderboard", choices)
 
 
 if __name__ == "__main__":

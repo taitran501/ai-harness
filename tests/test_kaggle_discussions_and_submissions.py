@@ -305,6 +305,44 @@ class TestSubmissionDispatchCLI(unittest.TestCase):
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    def test_tracker_get_leaderboard(self):
+        from types import SimpleNamespace
+        from harness.endgame_submission import KaggleLeaderboardTracker
+
+        mock_client = MagicMock()
+        mock_client.get_leaderboard.return_value = [
+            SimpleNamespace(team_id=101, team_name="WinnerTeam", score="0.9950", submission_date="2026-10-24 10:00:00"),
+            SimpleNamespace(team_id=102, team_name="RunnerUp", score="0.9850", submission_date="2026-10-23 12:00:00"),
+        ]
+
+        tracker = KaggleLeaderboardTracker(client=mock_client)
+        entries = tracker.get_leaderboard("test-comp", top=2)
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0]["rank"], 1)
+        self.assertEqual(entries[0]["team_name"], "WinnerTeam")
+        self.assertEqual(entries[0]["score"], "0.9950")
+        self.assertEqual(entries[1]["rank"], 2)
+        self.assertEqual(entries[1]["team_name"], "RunnerUp")
+        mock_client.get_leaderboard.assert_called_once_with("test-comp", page_size=2)
+
+    def test_submission_leaderboard_cli(self):
+        from unittest.mock import patch
+        from harness.submission_dispatch import main
+
+        with patch("harness.submission_dispatch.KaggleLeaderboardTracker") as mock_cls:
+            mock_inst = MagicMock()
+            mock_inst.get_leaderboard.return_value = [
+                {"rank": 1, "team_id": 1, "team_name": "T1", "score": "0.99", "submission_date": "2026-10-24"},
+            ]
+            mock_cls.return_value = mock_inst
+            ret = main(["leaderboard", "test-comp", "--top", "5"])
+            self.assertEqual(ret, 0)
+            mock_inst.get_leaderboard.assert_called_once_with("test-comp", top=5)
+
+            # Test alias lb
+            ret_alias = main(["lb", "test-comp"])
+            self.assertEqual(ret_alias, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -112,6 +112,86 @@ def kernel_output(kernel_slug: Optional[str] = None, exp_id: Optional[str] = Non
         return {"kernel_slug": slug, "status": status.get("status"), "files": [], "error": str(exc)}
 
 
+def kernel_watch(
+    kernel_slug: Optional[str] = None,
+    exp_id: Optional[str] = None,
+    poll_interval: float = 15.0,
+    timeout_seconds: float = 3600.0,
+) -> Dict[str, Any]:
+    """Wait/poll until a kernel completes (no re-dispatch)."""
+    from harness.templates.kaggle_template import KaggleKernelManager
+
+    if not kernel_slug and exp_id:
+        kernel_slug = _resolve_exp_kernel_slug(exp_id)
+    slug = kernel_slug or ""
+    res = KaggleKernelManager.wait_for_kernel(
+        exp_id=exp_id or "",
+        kernel_slug=slug,
+        poll_interval=poll_interval,
+        timeout_seconds=timeout_seconds,
+    )
+    if not slug and res.get("kernel_slug"):
+        slug = res["kernel_slug"]
+    return {
+        "kernel_slug": slug,
+        "status": res.get("status"),
+        "success": res.get("success", False),
+        "timed_out": res.get("timed_out", False),
+        "raw_output": res.get("raw_output", ""),
+    }
+
+
+def kernel_list(
+    competition: Optional[str] = None,
+    user: Optional[str] = None,
+    page_size: int = 20,
+    sort_by: str = "hot",
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    """List Kaggle kernels by competition or user."""
+    from harness.kaggle_compat import KaggleClient
+
+    client = KaggleClient()
+    sort_map = {
+        "hot": "hotness",
+        "hotness": "hotness",
+        "votes": "voteCount",
+        "votecount": "voteCount",
+        "voteCount": "voteCount",
+        "updated": "dateRun",
+        "daterun": "dateRun",
+        "dateRun": "dateRun",
+        "created": "dateCreated",
+        "datecreated": "dateCreated",
+        "dateCreated": "dateCreated",
+        "relevance": "relevance",
+    }
+    canonical_sort = sort_map.get(sort_by.lower(), sort_by)
+    kwargs: Dict[str, Any] = {"page_size": page_size, "sort_by": canonical_sort}
+    if competition:
+        kwargs["competition"] = competition
+    if search:
+        kwargs["search"] = search
+    kernels = client.list_kernels(user=user, **kwargs)
+    items = []
+    for k in kernels:
+        items.append({
+            "ref": getattr(k, "ref", None),
+            "title": getattr(k, "title", None),
+            "author": getattr(k, "author", None),
+            "total_votes": getattr(k, "total_votes", None) or getattr(k, "votes", None),
+            "last_run_time": str(getattr(k, "last_run_time", "")) if getattr(k, "last_run_time", None) else None,
+            "url": getattr(k, "url", None),
+        })
+    return {
+        "action": "list",
+        "competition": competition,
+        "user": user,
+        "count": len(items),
+        "kernels": items,
+    }
+
+
 def main(argv=None) -> int:
     import argparse
 
@@ -132,6 +212,19 @@ def main(argv=None) -> int:
     p_out.add_argument("kernel", nargs="?", help="Kernel slug or --exp")
     p_out.add_argument("--exp", default=None, help="exp_id to derive the default kernel slug")
 
+    p_watch = sub.add_parser("watch", help="Wait/poll until a kernel completes (no push).")
+    p_watch.add_argument("kernel", nargs="?", help="Kernel slug (e.g. user/title) or --exp to derive from task slug")
+    p_watch.add_argument("--exp", default=None, help="exp_id to derive the default kernel slug")
+    p_watch.add_argument("--poll", type=float, default=15.0, help="Poll interval in seconds (default: 15)")
+    p_watch.add_argument("--timeout", type=float, default=3600.0, help="Max wait time in seconds (default: 3600)")
+
+    p_list = sub.add_parser("list", help="List kernels by competition or user.")
+    p_list.add_argument("--competition", "-c", default=None, help="Filter by competition slug")
+    p_list.add_argument("--user", "-u", default=None, help="Filter by username")
+    p_list.add_argument("--sort-by", default="hot", help="Sort order: hot/hotness, votes/voteCount, updated/dateRun, created/dateCreated (default: hot)")
+    p_list.add_argument("--page-size", "-n", type=int, default=20, help="Number of kernels (default: 20)")
+    p_list.add_argument("--search", "-s", default=None, help="Search terms")
+
     args = parser.parse_args(argv)
     try:
         if args.action == "status":
@@ -144,6 +237,20 @@ def main(argv=None) -> int:
             return 0
         if args.action == "output":
             result = kernel_output(args.kernel, exp_id=args.exp)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.action == "watch":
+            result = kernel_watch(args.kernel, exp_id=args.exp, poll_interval=args.poll, timeout_seconds=args.timeout)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0 if result.get("status") in {"COMPLETED", "QUEUED", "RUNNING"} else 2
+        if args.action == "list":
+            result = kernel_list(
+                competition=args.competition,
+                user=args.user,
+                page_size=args.page_size,
+                sort_by=args.sort_by,
+                search=args.search,
+            )
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0
     except Exception as exc:  # noqa: BLE001 - report, don't crash

@@ -347,6 +347,18 @@ class KaggleClient:
             subs = api.competition_submissions()
         return [_NormalisedObject(s, self.sdk) for s in subs]
 
+    def get_leaderboard(
+        self, competition: str, page_size: int = 20, **kwargs: Any
+    ) -> List[Any]:
+        """Fetch competition public leaderboard entries.
+
+        Returns normalised objects with snake_case attributes:
+        team_id, team_name, score, submission_date.
+        """
+        api = self._legacy_api if self.sdk == "kaggle" else self._legacy_api_instance()
+        lb = api.competition_leaderboard_view(competition, page_size=page_size, **kwargs)
+        return [_NormalisedObject(item, self.sdk) for item in (lb or [])]
+
     def get_submission_limits(self, competition: str) -> Dict[str, Any]:
         """Fetch live daily submission limits for a competition.
 

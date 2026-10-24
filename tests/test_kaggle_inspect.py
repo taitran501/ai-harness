@@ -33,6 +33,36 @@ class TestKaggleInspectCli(unittest.TestCase):
         self.assertIn("lightgbm", result["error_log"])
         m.assert_called_once_with("user/title", max_lines=60)
 
+    def test_kernel_watch_delegates_to_manager(self):
+        wait_fake = {"kernel_slug": "user/title", "status": "COMPLETED", "success": True, "raw_output": "done"}
+        with mock.patch("harness.templates.kaggle_template.KaggleKernelManager.wait_for_kernel", return_value=wait_fake) as m:
+            result = kaggle_inspect.kernel_watch("user/title", poll_interval=5.0, timeout_seconds=120.0)
+        self.assertEqual(result["status"], "COMPLETED")
+        self.assertTrue(result["success"])
+        m.assert_called_once_with(exp_id="", kernel_slug="user/title", poll_interval=5.0, timeout_seconds=120.0)
+
+    def test_kernel_list_delegates_to_client(self):
+        from types import SimpleNamespace
+        k1 = SimpleNamespace(ref="user/k1", title="Kernel 1", author="alice", total_votes=10, last_run_time="2026-10-24", url=None)
+        k2 = SimpleNamespace(ref="user/k2", title="Kernel 2", author="bob", votes=5, last_run_time=None, url=None)
+        mock_client = mock.MagicMock()
+        mock_client.list_kernels.return_value = [k1, k2]
+        with mock.patch("harness.kaggle_compat.KaggleClient", return_value=mock_client):
+            res = kaggle_inspect.kernel_list(competition="comp-x", sort_by="hot", page_size=10)
+        self.assertEqual(res["count"], 2)
+        self.assertEqual(res["kernels"][0]["ref"], "user/k1")
+        self.assertEqual(res["kernels"][0]["total_votes"], 10)
+        self.assertEqual(res["kernels"][1]["total_votes"], 5)
+        mock_client.list_kernels.assert_called_once_with(user=None, page_size=10, sort_by="hotness", competition="comp-x")
+
+    def test_cli_watch_and_list_parsers(self):
+        parser = build_parser()
+        args_w = parser.parse_args(["kaggle", "watch", "user/title", "--poll", "10", "--timeout", "500"])
+        self.assertEqual(args_w.args, ["watch", "user/title", "--poll", "10", "--timeout", "500"])
+
+        args_l = parser.parse_args(["kaggle", "list", "--competition", "my-comp", "--sort-by", "votes"])
+        self.assertEqual(args_l.args, ["list", "--competition", "my-comp", "--sort-by", "votes"])
+
 
 class TestDryRunPlan(unittest.TestCase):
     def test_dry_run_plan_captures_metadata_and_bundle(self):

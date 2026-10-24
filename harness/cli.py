@@ -48,11 +48,14 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--no-attach", action="store_true", help="Skip manifest re-attach and skill regeneration")
     sync.add_argument("--json", action="store_true", help="Emit machine-readable result")
 
-    kaggle = subparsers.add_parser("kaggle", help="Inspect Kaggle kernel state (status/log/output) without re-dispatching")
-    kaggle.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|log|output + flags")
+    kaggle = subparsers.add_parser("kaggle", help="Inspect/watch Kaggle kernel state without re-dispatching")
+    kaggle.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: status|watch|log|output|list + flags")
 
-    submission = subparsers.add_parser("submission", help="Kaggle submission dispatch + score polling (harness-native)")
-    submission.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: dispatch|status|watch|latest|list + flags")
+    submission = subparsers.add_parser("submission", help="Kaggle submission dispatch, polling, and leaderboard (harness-native)")
+    submission.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: dispatch|status|watch|latest|list|quota|leaderboard + flags")
+
+    leaderboard = subparsers.add_parser("leaderboard", help="View Kaggle competition public leaderboard (shortcut to submission leaderboard)")
+    leaderboard.add_argument("args", nargs=argparse.REMAINDER, help="competition [flags]")
 
     discussion = subparsers.add_parser("discussion", help="Inspect Kaggle competition discussions/topics and read messages (harness-native)")
     discussion.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: list|view + flags")
@@ -290,6 +293,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "submission":
         from harness.submission_dispatch import main as submission_main
         return submission_main(list(args.args))
+
+    if args.command == "leaderboard":
+        from harness.submission_dispatch import main as submission_main
+        return submission_main(["leaderboard"] + list(args.args))
 
     if args.command == "discussion":
         from harness.discussion_cli import main as discussion_main

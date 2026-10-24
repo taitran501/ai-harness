@@ -344,5 +344,41 @@ class TestCreateExperimentAutoIdOnCollision(unittest.TestCase):
         self.assertIsNone(obs.data.get("auto_assigned_exp_id"))
 
 
+class TestWaitCloudJobKernelSlugFallback(unittest.TestCase):
+    def setUp(self) -> None:
+        self.ws = _make_bridge_workspace()
+        self.bridge = AgentBridge(self.ws)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.ws, ignore_errors=True)
+
+    def test_wait_cloud_job_with_kernel_slug_fallback(self) -> None:
+        from unittest.mock import patch
+        fake_wait = {"kernel_slug": "taitran501/test-taaf-m2", "status": "COMPLETED", "success": True}
+        with patch("harness.templates.kaggle_template.KaggleKernelManager.wait_for_kernel", return_value=fake_wait) as m:
+            _, obs = self.bridge.execute_action(
+                "wait_cloud_job",
+                params={"job_id": "taitran501/test-taaf-m2", "timeout_seconds": 60, "poll_interval": 2},
+                goal="wait for remote kernel",
+            )
+        self.assertEqual(obs.status, "SUCCESS")
+        self.assertIn("taitran501/test-taaf-m2", obs.summary)
+        self.assertEqual(obs.data["job"]["status"], "COMPLETED")
+        m.assert_called_once_with(exp_id="", kernel_slug="taitran501/test-taaf-m2", poll_interval=2.0, timeout_seconds=60.0)
+
+    def test_inspect_cloud_job_with_kernel_slug_fallback(self) -> None:
+        from unittest.mock import patch
+        fake_status = {"kernel_slug": "taitran501/test-taaf-m2", "status": "RUNNING"}
+        with patch("harness.templates.kaggle_template.KaggleKernelManager.get_kernel_status", return_value=fake_status) as m:
+            _, obs = self.bridge.execute_action(
+                "inspect_cloud_job",
+                params={"job_id": "taitran501/test-taaf-m2"},
+                goal="inspect remote kernel",
+            )
+        self.assertEqual(obs.status, "SUCCESS")
+        self.assertEqual(obs.data["job"]["status"], "RUNNING")
+        m.assert_called_once_with(exp_id="", kernel_slug="taitran501/test-taaf-m2")
+
+
 if __name__ == "__main__":
     unittest.main()

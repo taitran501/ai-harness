@@ -115,6 +115,9 @@ def dispatch_kernel(
     timeout: Optional[int] = None,
     keep_staging: bool = False,
     client: Any = None,
+    watch: bool = False,
+    poll_interval: float = 15.0,
+    watch_timeout: float = 3600.0,
 ) -> Dict[str, Any]:
     """Wrap a local notebook into a Kaggle kernel and push it.
 
@@ -219,6 +222,19 @@ def dispatch_kernel(
                 f"to kernel '{kernel_id}' earlier; pushing again creates a new "
                 "identical kernel version."
             )
+
+        if watch and result.get("ok"):
+            from harness.templates.kaggle_template import KaggleKernelManager
+
+            target_slug = result.get("ref") or kernel_id
+            watch_res = KaggleKernelManager.wait_for_kernel(
+                exp_id="",
+                kernel_slug=target_slug,
+                poll_interval=poll_interval,
+                timeout_seconds=watch_timeout,
+            )
+            result["watch"] = watch_res
+            result["status"] = watch_res.get("status")
         return result
     finally:
         if not keep_staging:
@@ -247,6 +263,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--enable-internet", action="store_true", help="Enable internet access in the kernel.")
     parser.add_argument("--timeout", type=int, default=None, help="Kernel run timeout seconds.")
     parser.add_argument("--keep-staging", action="store_true", help="Keep the staging dir after the push.")
+    parser.add_argument("--watch", action="store_true", help="Poll until the dispatched kernel finishes execution.")
+    parser.add_argument("--poll", type=float, default=15.0, help="Poll interval in seconds when --watch is used.")
+    parser.add_argument("--watch-timeout", type=float, default=3600.0, help="Max wait time in seconds when --watch is used.")
 
     args = parser.parse_args(argv)
     try:
@@ -264,6 +283,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             enable_internet=args.enable_internet,
             timeout=args.timeout,
             keep_staging=args.keep_staging,
+            watch=args.watch,
+            poll_interval=args.poll,
+            watch_timeout=args.watch_timeout,
         )
     except Exception as exc:  # noqa: BLE001 - surface any dispatch failure as JSON.
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2, default=str))
