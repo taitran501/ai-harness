@@ -54,6 +54,8 @@ from harness.bridge_common import (
     get_action_schema as get_action_schema,
 )
 
+typed_actions = [a.value for a in TypedActionName]
+
 
 class _AgentBridgeMeta(type):
     """Metaclass that routes class-level typed-action lookups to actionable guidance.

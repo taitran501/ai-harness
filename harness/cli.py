@@ -57,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
     leaderboard = subparsers.add_parser("leaderboard", help="View Kaggle competition public leaderboard (shortcut to submission leaderboard)")
     leaderboard.add_argument("args", nargs=argparse.REMAINDER, help="competition [flags]")
 
+    comp = subparsers.add_parser("competition", aliases=["comp"], help="Inspect Kaggle competition metadata, status, deadlines, and leaderboards")
+    comp.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: info|list|leaderboard + flags")
+
     discussion = subparsers.add_parser("discussion", help="Inspect Kaggle competition discussions/topics and read messages (harness-native)")
     discussion.add_argument("args", nargs=argparse.REMAINDER, help="subcommand args: list|view + flags")
 
@@ -297,6 +300,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "leaderboard":
         from harness.submission_dispatch import main as submission_main
         return submission_main(["leaderboard"] + list(args.args))
+
+    if args.command in ("competition", "comp"):
+        from harness.competition_cli import main as competition_main
+        return competition_main(list(args.args))
 
     if args.command == "discussion":
         from harness.discussion_cli import main as discussion_main
