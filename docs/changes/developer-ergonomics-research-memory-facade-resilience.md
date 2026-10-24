@@ -3,8 +3,8 @@
 - **Date**: 2026-10-24
 - **PR**: [#130](https://github.com/taitran501/ai-harness/pull/130)
 - **Branch**: `feat/developer-ergonomics-research-memory-facade-resilience`
-- **Status**: in-review
-- **Commits**: pending
+- **Status**: merged
+- **Commits**: 1fa0197
 
 ## Why
 
