@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -155,6 +156,12 @@ def dispatch_kernel(
         client = KaggleClient()
 
     staging = Path(tempfile.mkdtemp(prefix="harness_kernel_"))
+    try:
+        from harness.cleaner import STAGING_MARKER
+
+        (staging / STAGING_MARKER).write_text(str(os.getpid()), encoding="ascii")
+    except Exception:
+        pass
     try:
         shutil.copy2(nb, staging / code_file)
         meta = build_kernel_metadata(

@@ -1090,6 +1090,11 @@ class ActionHandlerMixin:
             session.compute_usage["smoke_runs"] = (
                 int(session.compute_usage.get("smoke_runs", 0)) + 1
             )
+        failure_info = None
+        if not passed:
+            from harness.failure_classifier import classify_failure
+
+            failure_info = classify_failure(out_text, returncode=retcode)
         return ActionObservation(
             step_index=call.step_index,
             action=act,
@@ -1098,6 +1103,7 @@ class ActionHandlerMixin:
             artifact_path=cfg_path,
             data={"returncode": retcode, "tail": out_text[-500:]},
             elapsed_seconds=elapsed,
+            failure=failure_info,
         )
 
     def _handle_run_probe(
@@ -1150,6 +1156,11 @@ class ActionHandlerMixin:
         session.compute_usage["smoke_runs"] = (
             int(session.compute_usage.get("smoke_runs", 0)) + 1
         )
+        failure_info = None
+        if not passed:
+            from harness.failure_classifier import classify_failure
+
+            failure_info = classify_failure(out_text, returncode=retcode)
         return ActionObservation(
             step_index=call.step_index,
             action=act,
@@ -1158,6 +1169,7 @@ class ActionHandlerMixin:
             artifact_path=cfg_path,
             data={"returncode": retcode, "tail": out_text[-500:]},
             elapsed_seconds=elapsed,
+            failure=failure_info,
         )
 
     def _handle_run_full_validation(
@@ -1271,6 +1283,7 @@ class ActionHandlerMixin:
             session.reassess_recommended = (
                 session.consecutive_rejections >= max_rej
             )
+            from harness.failure_classifier import classify_failure
             return ActionObservation(
                 step_index=call.step_index,
                 action=act,
@@ -1290,6 +1303,7 @@ class ActionHandlerMixin:
                     **({"mechanism_warnings": mechanism_warnings} if mechanism_warnings else {}),
                 },
                 elapsed_seconds=elapsed,
+                failure=classify_failure(out_text, returncode=retcode),
             )
 
         # Reload TreeJournal and evaluate metrics

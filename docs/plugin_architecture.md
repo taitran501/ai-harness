@@ -1,4 +1,4 @@
-# Task Plugins and Workspace Integration
+﻿# Task Plugins and Workspace Integration
 
 AI-Harness is distributed as an installable Python package. Task-specific competition adapters are separate distributions discovered via Python entry points under the `ai_harness.task_plugins` group.
 
@@ -53,19 +53,29 @@ my_competition = "my_adapter_package.plugin:MyCompetitionPlugin"
 ```
 
 ### Core Adapter Hooks
-A `TaskPlugin` implementation may override the following methods:
+`harness.plugins.TaskPlugin` is the **canonical interface**; the method names and signatures below are exactly what the runtime calls. Override only what your competition needs; every hook has a safe default.
 
-| Method Hook | Responsibility |
-|---|---|
-| `load_train_data()` | Ingests raw files, performs initial type casting, and returns a clean training DataFrame. |
-| `load_test_data()` | Ingests unlabelled evaluation data for test-set inference. |
-| `build_validation_splits()` | Produces deterministic train/validation indices enforcing anti-leakage invariants. |
-| `evaluate_predictions()` | Computes competition-specific evaluation metrics on prediction batches. |
-| `build_submission()` | Formats test predictions into the competition platform's required format (CSV, TSV, or ZIP). |
-| `validate_submission()` | Verifies that the generated submission package strictly satisfies platform constraints. |
-| `run_eda()` | Generates domain-specific exploratory data analysis summaries. |
+| Method Hook | Signature (after `self`) | Responsibility |
+|---|---|---|
+| `load_training_data()` | `(context)` → `DataFrame \| None` | Ingests raw files, performs initial type casting, and returns the training DataFrame. `None` falls back to declarative loading. |
+| `validate_training_data()` | `(context, data)` → `None` | Raises `TaskPluginError` if the data contract is invalid. |
+| `build_validation_splits()` | `(context, data, strategy, validation_config)` → `[(fold_id, train, val)] \| None` | Produces deterministic splits enforcing anti-leakage invariants. `None` uses core defaults. |
+| `validate_split()` | `(context, fold_id, train_data, validation_data)` → `None` | Raises when a split violates a task-specific contract. |
+| `build_model()` | `(context, model_name, params)` → model `\| None` | Task-specific model; `None` uses the generic model factory. |
+| `normalize_predictions()` | `(context, predictions)` → `dict` | Post-processes predictions before scoring. |
+| `evaluate_predictions()` | `(context, ground_truth, predictions)` → `dict` | Computes competition-specific metrics. Return a mapping that includes `primary_score` (or the primary metric name). |
+| `build_submission()` | `(context, predictions, output_path)` → `Path` | Formats predictions into the platform's required format (CSV, TSV, or ZIP). |
+| `validate_submission()` | `(context, submission)` → `None` | Raises if the submission violates platform constraints. |
+| `extend_eda_report()` | `(context, reports)` → `dict \| list \| None` | Adds domain-specific, value-safe checks to the generic EDA reports. |
+
+Remote runtime hooks (`remote_runtime_requirements()`, `remote_bundle_files()`, `remote_runtime_manifest()`; each takes `(context)`) declare what Kaggle/Modal needs to run the adapter.
+
+There is intentionally **no** `load_test_data()` or `run_eda()` hook: test-set inference is driven by your experiment script, and EDA is extended through `extend_eda_report()`. Methods with those names on a plugin are never called.
 
 If an adapter does not implement submission hooks, generic metric evaluation remains functional, but submission packaging operations fail closed with a `PluginCapabilityError`.
+
+### Reference Example
+A complete, tested adapter lives at [`examples/task_plugin/example_adapter.py`](../examples/task_plugin/example_adapter.py) (see `tests/test_plugin_docs_and_example.py`). Copy it as the starting point for a new competition adapter instead of inferring method names.
 
 ---
 

@@ -421,8 +421,10 @@ class KaggleRuntimeTests(unittest.TestCase):
                    "external_kaggle_dataset": "fixture-user/fixture-data",
                    "fingerprint": {"fingerprint": "fingerprint-fixture"}}
         events = []
+        submitted_metadata = {}
         def code_upload(package):
             events.append("code-ready")
+            submitted_metadata.update(json.loads((package / "kernel-metadata.json").read_text()))
             return {"success": True}
         def kernel_push(*args, **kwargs):
             events.append("kernel-push")
@@ -437,18 +439,15 @@ class KaggleRuntimeTests(unittest.TestCase):
             "harness.cloud_runner._sync_completed_run", return_value={}), patch.dict(sys.modules, {"kaggle": None}):
             result = run_via_kaggle("configs/exp.yaml", project_root=self.root, job_id="job_20261010_exp001_fixture")
         package = Path(push.call_args.args[0][-1])
-        try:
-            self.assertEqual(events, ["code-ready", "kernel-push"])
-            submitted = json.loads((package / "kernel-metadata.json").read_text())["id"]
-            self.assertEqual(result["kernel_slug"], submitted)
-            self.assertEqual(wait.call_args.args[1], submitted)
-            self.assertEqual(pull.call_args.args[1], submitted)
-            self.assertEqual(pull.call_args.kwargs["project_root"], self.root)
-        finally:
-            # This directory was returned by the dispatch mock, not the real checkout.
-            self.assertTrue(package.name.startswith("aih-kaggle-"))
-            self.assertEqual(package.parent, Path(tempfile.gettempdir()))
-            shutil.rmtree(package)
+        self.assertEqual(events, ["code-ready", "kernel-push"])
+        submitted = submitted_metadata["id"]
+        self.assertEqual(result["kernel_slug"], submitted)
+        self.assertEqual(wait.call_args.args[1], submitted)
+        self.assertEqual(pull.call_args.args[1], submitted)
+        self.assertEqual(pull.call_args.kwargs["project_root"], self.root)
+        self.assertTrue(package.name.startswith("aih-kaggle-job_"))
+        self.assertEqual(package.parent, Path(tempfile.gettempdir()))
+        self.assertFalse(package.exists())
 
     def test_staged_package_cli_never_pushes_kernel_when_code_upload_fails(self):
         from harness.templates.kaggle_template import main

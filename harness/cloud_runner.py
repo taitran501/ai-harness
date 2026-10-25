@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from typing import Any, Dict, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness.cloud_inspector import CloudPreflightInspector
+from harness.cleaner import STAGING_MARKER, _bounded, _inventory, _no_links
 from harness.cloud_policy import (
     UploadConsentStore,
     dataset_fingerprint,
@@ -42,6 +44,27 @@ from harness.templates.modal_template import (
     push_dataset_to_modal,
 )
 from harness.tree_journal import TreeJournal
+
+
+def _release_staging(stage_dir: Path, keep_staging: bool) -> None:
+    """Only release the allocated temp tree; refuse changed link boundaries."""
+    try:
+        _bounded(stage_dir, Path(tempfile.gettempdir()))
+        if not stage_dir.name.startswith(("aih-kaggle-job_", "aih-modal-job_")):
+            raise ValueError("Unrecognized staging directory prefix")
+        if keep_staging:
+            marker = stage_dir / STAGING_MARKER
+            if marker.exists():
+                _no_links(marker)
+                marker.unlink()
+            print(f"Staging retained: {stage_dir}")
+        else:
+            _inventory(stage_dir)  # refuse nested links/junctions before rmtree
+            shutil.rmtree(stage_dir, ignore_errors=True)
+            if stage_dir.exists():
+                print(f"Warning: could not fully remove staging: {stage_dir}", file=sys.stderr)
+    except (OSError, ValueError) as exc:
+        print(f"Warning: staging cleanup refused for {stage_dir}: {exc}", file=sys.stderr)
 
 
 def _warn_if_framework_checkout_dirty() -> None:
@@ -200,6 +223,7 @@ def run_via_modal(
     *,
     project_root: Optional[str | Path] = None,
     job_id: Optional[str] = None,
+    keep_staging: bool = False,
 ) -> Dict[str, Any]:
     """Upload consented task data, dispatch Modal, verify returned artifact identity, and sync the journal."""
     print("===========================================================")
@@ -234,52 +258,56 @@ def run_via_modal(
         raise RuntimeError(f"Modal dataset upload failed: {upload.get('error') or upload.get('logs')}")
 
     # Generate code in a unique temporary directory; never replace an older job bundle.
-    stage_dir = Path(tempfile.mkdtemp(prefix=f"aih-modal-{job_id}-"))
-    stage_dir.mkdir(parents=True, exist_ok=True)
-    modal_script_path = stage_dir / f"app_{exp_id}.py"
+    stage_dir = Path(tempfile.mkdtemp(prefix="aih-modal-job_"))
+    try:
+        (stage_dir / STAGING_MARKER).write_text(str(os.getpid()), encoding="ascii")
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        modal_script_path = stage_dir / f"app_{exp_id}.py"
 
-    code_content = generate_modal_script(
-        context["config_rel"], gpu=gpu, exp_id=exp_id, volume_name=volume_name,
-        project_root=project.root, task_config_path=project.task_config_path,
-        task_id=context["task_id"], job_id=job_id,
-        runtime_manifest=context["runtime"], config_sha256=context["config_sha256"],
-        artifacts_rel=project.artifacts_dir.relative_to(project.root).as_posix(),
-    )
-    modal_script_path.write_text(code_content, encoding="utf-8")
-
-    # 3. Execute Modal Run
-    cmd = ["modal", "run", str(modal_script_path)]
-    print(f"Executing: {' '.join(cmd)}")
-    if managed_job_id:
-        update_worker_state(
-            project.root, managed_job_id, status="RUNNING", provider_status="RUNNING",
-            exp_id=exp_id, config_sha256=context["config_sha256"],
+        code_content = generate_modal_script(
+            context["config_rel"], gpu=gpu, exp_id=exp_id, volume_name=volume_name,
+            project_root=project.root, task_config_path=project.task_config_path,
+            task_id=context["task_id"], job_id=job_id,
+            runtime_manifest=context["runtime"], config_sha256=context["config_sha256"],
+            artifacts_rel=project.artifacts_dir.relative_to(project.root).as_posix(),
         )
-    ret = subprocess.run(cmd, cwd=str(project.root))
+        modal_script_path.write_text(code_content, encoding="utf-8")
 
-    if ret.returncode != 0:
-        raise RuntimeError(f"Modal execution failed with code {ret.returncode}")
+        # 3. Execute Modal Run
+        cmd = ["modal", "run", str(modal_script_path)]
+        print(f"Executing: {' '.join(cmd)}")
+        if managed_job_id:
+            update_worker_state(
+                project.root, managed_job_id, status="RUNNING", provider_status="RUNNING",
+                exp_id=exp_id, config_sha256=context["config_sha256"],
+            )
+        ret = subprocess.run(cmd, cwd=str(project.root))
 
-    print("\n✔ Modal remote execution finished successfully.")
-    artifact_dir = project.artifacts_dir / exp_id
-    manifest_path = artifact_dir / "artifact_manifest.json"
-    if not manifest_path.is_file():
-        raise RuntimeError("Modal returned without artifact_manifest.json; result is not accepted.")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected = {"job_id": job_id, "task_id": context["task_id"], "exp_id": exp_id, "config_sha256": context["config_sha256"]}
-    mismatch = {key: {"expected": val, "actual": manifest.get(key)} for key, val in expected.items() if val is not None and manifest.get(key) != val}
-    if mismatch:
-        raise RuntimeError(f"Modal artifact identity mismatch: {mismatch}")
-    result = _sync_completed_run(project, exp_id)
-    result.update({"backend": "modal", "job_id": job_id, "status": "COMPLETED", "identity_verified": True, "upload_fingerprint": context["fingerprint"]["fingerprint"]})
-    if managed_job_id:
-        update_worker_state(
-            project.root, managed_job_id, status="COMPLETED", provider_status="COMPLETED",
-            result_metrics=result.get("result_metrics"), artifact_paths=result.get("artifact_paths"),
-            exp_id=exp_id, config_sha256=context["config_sha256"],
-        )
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    return result
+        if ret.returncode != 0:
+            raise RuntimeError(f"Modal execution failed with code {ret.returncode}")
+
+        print("\n✔ Modal remote execution finished successfully.")
+        artifact_dir = project.artifacts_dir / exp_id
+        manifest_path = artifact_dir / "artifact_manifest.json"
+        if not manifest_path.is_file():
+            raise RuntimeError("Modal returned without artifact_manifest.json; result is not accepted.")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected = {"job_id": job_id, "task_id": context["task_id"], "exp_id": exp_id, "config_sha256": context["config_sha256"]}
+        mismatch = {key: {"expected": val, "actual": manifest.get(key)} for key, val in expected.items() if val is not None and manifest.get(key) != val}
+        if mismatch:
+            raise RuntimeError(f"Modal artifact identity mismatch: {mismatch}")
+        result = _sync_completed_run(project, exp_id)
+        result.update({"backend": "modal", "job_id": job_id, "status": "COMPLETED", "identity_verified": True, "upload_fingerprint": context["fingerprint"]["fingerprint"]})
+        if managed_job_id:
+            update_worker_state(
+                project.root, managed_job_id, status="COMPLETED", provider_status="COMPLETED",
+                result_metrics=result.get("result_metrics"), artifact_paths=result.get("artifact_paths"),
+                exp_id=exp_id, config_sha256=context["config_sha256"],
+            )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return result
+    finally:
+        _release_staging(stage_dir, keep_staging)
 
 
 def _kaggle_dry_run_plan(
@@ -329,6 +357,7 @@ def run_via_kaggle(
     *,
     project_root: Optional[str | Path] = None,
     job_id: Optional[str] = None,
+    keep_staging: bool = False,
     poll_interval: float = 10.0,
     timeout_seconds: float = 24 * 60 * 60,
     force_import: bool = False,
@@ -381,96 +410,101 @@ def run_via_kaggle(
         KaggleKernelManager.wait_for_dataset(dataset_slug)
 
     # 2. Package exact core/adapter runtime and task code without credentials or dataset bytes.
-    stage_dir = Path(tempfile.mkdtemp(prefix=f"aih-kaggle-{job_id[:8]}-"))
-    runtime = dict(context["runtime"])
-    runtime["core"]["version"] = runtime["core"].get("version", "0.2.0")
-    KaggleKernelManager.setup_kernel_package(
-        stage_dir, context["config_rel"], exp_id, dataset_slug,
-        project_root=project.root, task_config_path=project.task_config_path,
-        task_id=context["task_id"], job_id=job_id, runtime_manifest=runtime,
-        enable_internet=bool((context["task"].get("runtime") or {}).get("enable_internet", False)),
-        bundle_mode=(context["task"].get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
-        requirement_check=(context["task"].get("runtime") or {}).get("requirement_check", "strict"),
-    )
-
-    print("Preparing private Kaggle code bundle input...")
-    if dry_run:
-        plan = _kaggle_dry_run_plan(context, project, exp_id, dataset_slug, stage_dir, runtime)
-        print(json.dumps(plan, indent=2, ensure_ascii=False))
-        print("\n\u2705 --dry-run: dispatch plan built. Nothing was pushed to Kaggle; no cloud quota consumed.")
-        return {"dry_run": True, "plan": plan}
-    KaggleKernelManager.push_code_bundle(stage_dir)
-
-    # 3. Push to Kaggle
-    cmd = ["kaggle", "kernels", "push", "-p", str(stage_dir)]
-    print(f"Pushing kernel: {' '.join(cmd)}")
-    if managed_job_id:
-        update_worker_state(
-            project.root, managed_job_id, status="RUNNING", provider_status="PUSHING",
-            exp_id=exp_id, config_sha256=context["config_sha256"],
+    stage_dir = Path(tempfile.mkdtemp(prefix="aih-kaggle-job_"))
+    try:
+        (stage_dir / STAGING_MARKER).write_text(str(os.getpid()), encoding="ascii")
+        runtime = dict(context["runtime"])
+        runtime["core"]["version"] = runtime["core"].get("version", "0.2.0")
+        KaggleKernelManager.setup_kernel_package(
+            stage_dir, context["config_rel"], exp_id, dataset_slug,
+            project_root=project.root, task_config_path=project.task_config_path,
+            task_id=context["task_id"], job_id=job_id, runtime_manifest=runtime,
+            enable_internet=bool((context["task"].get("runtime") or {}).get("enable_internet", False)),
+            bundle_mode=(context["task"].get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
+            requirement_check=(context["task"].get("runtime") or {}).get("requirement_check", "strict"),
         )
-    from harness.kaggle_compat import retry_with_backoff
 
-    def _do_push():
-        p = subprocess.run(cmd, cwd=str(project.root), capture_output=True, text=True)
-        if p.returncode != 0:
-            out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
-            print(f"[Kaggle push retry notice]: {out}", flush=True)
-            raise RuntimeError(f"Kaggle push failed with code {p.returncode}: {out}")
-        return p
+        print("Preparing private Kaggle code bundle input...")
+        if dry_run:
+            plan = _kaggle_dry_run_plan(context, project, exp_id, dataset_slug, stage_dir, runtime)
+            plan["staging_retained"] = keep_staging
+            print(json.dumps(plan, indent=2, ensure_ascii=False))
+            print("\n\u2705 --dry-run: dispatch plan built. Nothing was pushed to Kaggle; no cloud quota consumed.")
+            return {"dry_run": True, "plan": plan}
+        KaggleKernelManager.push_code_bundle(stage_dir)
 
-    retry_with_backoff(_do_push, max_attempts=4, base_delay=2.0, max_delay=15.0)
-
-    # Use the ID actually submitted; title normalization and job suffixes may change it.
-    kernel_slug = json.loads((stage_dir / "kernel-metadata.json").read_text(encoding="utf-8"))["id"]
-    print(f"Polling Kaggle kernel until a terminal state: {kernel_slug}")
-
-    def persist_kaggle_status(state: Dict[str, Any]) -> None:
+        # 3. Push to Kaggle
+        cmd = ["kaggle", "kernels", "push", "-p", str(stage_dir)]
+        print(f"Pushing kernel: {' '.join(cmd)}")
         if managed_job_id:
             update_worker_state(
-                project.root, managed_job_id, status="RUNNING",
-                provider_status=state.get("status") or "UNKNOWN", remote_id=kernel_slug,
+                project.root, managed_job_id, status="RUNNING", provider_status="PUSHING",
                 exp_id=exp_id, config_sha256=context["config_sha256"],
             )
+        from harness.kaggle_compat import retry_with_backoff
 
-    status = KaggleKernelManager.wait_for_kernel(
-        exp_id, kernel_slug, poll_interval=poll_interval, timeout_seconds=timeout_seconds,
-        status_callback=persist_kaggle_status if managed_job_id else None,
-    )
-    if status.get("status") != "COMPLETED":
-        err_log = KaggleKernelManager.get_kernel_error_log(kernel_slug)
-        err_msg = f"Kaggle kernel ended with status {status.get('status')}: {status.get('raw_output', '')}"
-        if err_log:
-            err_msg += f"\n\n--- Kaggle Remote Kernel Error Log ---\n{err_log}\n--------------------------------------"
-        raise RuntimeError(err_msg)
-    expected_identity = {
-        "job_id": job_id,
-        "task_id": context["task_id"],
-        "exp_id": exp_id,
-        "config_sha256": context["config_sha256"],
-        "core_version": context["runtime"]["core"]["version"],
-        "plugin_id": context["runtime"]["plugin"]["id"],
-    }
-    pulled = KaggleKernelManager.pull_kernel_output(
-        exp_id, kernel_slug,
-        artifact_dir=project.artifacts_dir / exp_id,
-        expected_identity=expected_identity,
-        project_root=project.root,
-        force_import=force_import,
-    )
-    if not pulled.get("success"):
-        raise RuntimeError(f"Kaggle output import failed: {pulled.get('raw_output') or pulled.get('identity_mismatches')}")
-    result = _sync_completed_run(project, exp_id)
-    result.update({"backend": "kaggle", "job_id": job_id, "kernel_slug": kernel_slug, "status": "COMPLETED", "identity_verified": True, "metrics": pulled.get("metrics"), "migrated_files": pulled.get("migrated_files"), "upload_fingerprint": context["fingerprint"]["fingerprint"]})
-    if managed_job_id:
-        update_worker_state(
-            project.root, managed_job_id, status="COMPLETED", provider_status="COMPLETED",
-            remote_id=kernel_slug, result_metrics=result.get("result_metrics"),
-            artifact_paths=result.get("artifact_paths"), exp_id=exp_id,
-            config_sha256=context["config_sha256"],
+        def _do_push():
+            p = subprocess.run(cmd, cwd=str(project.root), capture_output=True, text=True)
+            if p.returncode != 0:
+                out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
+                print(f"[Kaggle push retry notice]: {out}", flush=True)
+                raise RuntimeError(f"Kaggle push failed with code {p.returncode}: {out}")
+            return p
+
+        retry_with_backoff(_do_push, max_attempts=4, base_delay=2.0, max_delay=15.0)
+
+        # Use the ID actually submitted; title normalization and job suffixes may change it.
+        kernel_slug = json.loads((stage_dir / "kernel-metadata.json").read_text(encoding="utf-8"))["id"]
+        print(f"Polling Kaggle kernel until a terminal state: {kernel_slug}")
+
+        def persist_kaggle_status(state: Dict[str, Any]) -> None:
+            if managed_job_id:
+                update_worker_state(
+                    project.root, managed_job_id, status="RUNNING",
+                    provider_status=state.get("status") or "UNKNOWN", remote_id=kernel_slug,
+                    exp_id=exp_id, config_sha256=context["config_sha256"],
+                )
+
+        status = KaggleKernelManager.wait_for_kernel(
+            exp_id, kernel_slug, poll_interval=poll_interval, timeout_seconds=timeout_seconds,
+            status_callback=persist_kaggle_status if managed_job_id else None,
         )
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    return result
+        if status.get("status") != "COMPLETED":
+            err_log = KaggleKernelManager.get_kernel_error_log(kernel_slug)
+            err_msg = f"Kaggle kernel ended with status {status.get('status')}: {status.get('raw_output', '')}"
+            if err_log:
+                err_msg += f"\n\n--- Kaggle Remote Kernel Error Log ---\n{err_log}\n--------------------------------------"
+            raise RuntimeError(err_msg)
+        expected_identity = {
+            "job_id": job_id,
+            "task_id": context["task_id"],
+            "exp_id": exp_id,
+            "config_sha256": context["config_sha256"],
+            "core_version": context["runtime"]["core"]["version"],
+            "plugin_id": context["runtime"]["plugin"]["id"],
+        }
+        pulled = KaggleKernelManager.pull_kernel_output(
+            exp_id, kernel_slug,
+            artifact_dir=project.artifacts_dir / exp_id,
+            expected_identity=expected_identity,
+            project_root=project.root,
+            force_import=force_import,
+        )
+        if not pulled.get("success"):
+            raise RuntimeError(f"Kaggle output import failed: {pulled.get('raw_output') or pulled.get('identity_mismatches')}")
+        result = _sync_completed_run(project, exp_id)
+        result.update({"backend": "kaggle", "job_id": job_id, "kernel_slug": kernel_slug, "status": "COMPLETED", "identity_verified": True, "metrics": pulled.get("metrics"), "migrated_files": pulled.get("migrated_files"), "upload_fingerprint": context["fingerprint"]["fingerprint"]})
+        if managed_job_id:
+            update_worker_state(
+                project.root, managed_job_id, status="COMPLETED", provider_status="COMPLETED",
+                remote_id=kernel_slug, result_metrics=result.get("result_metrics"),
+                artifact_paths=result.get("artifact_paths"), exp_id=exp_id,
+                config_sha256=context["config_sha256"],
+            )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return result
+    finally:
+        _release_staging(stage_dir, keep_staging)
 
 
 def main() -> None:
@@ -482,6 +516,7 @@ def main() -> None:
     parser.add_argument("--job-id", default=None, help="Stable local/cloud job identity")
     parser.add_argument("--poll-interval", type=float, default=10.0, help="Kaggle status polling interval in seconds")
     parser.add_argument("--timeout-seconds", type=float, default=86400.0, help="Maximum Kaggle kernel wait")
+    parser.add_argument("--keep-staging", action="store_true", help="Retain staging for debugging")
     parser.add_argument("--gpu", default="A10", help="Modal GPU type (A10, A100, H100, T4, L4)")
     parser.add_argument(
         "--auto-submit",
@@ -504,11 +539,12 @@ def main() -> None:
         if args.job_id:
             update_worker_state(project.root, args.job_id, status="RUNNING", provider_status="STARTING")
         if args.backend == "modal":
-            run_via_modal(args.config, gpu=args.gpu, project_root=project.root, job_id=args.job_id)
+            run_via_modal(args.config, gpu=args.gpu, project_root=project.root, job_id=args.job_id, keep_staging=args.keep_staging)
         else:
             run_via_kaggle(
                 args.config, project_root=project.root, job_id=args.job_id,
                 poll_interval=args.poll_interval, timeout_seconds=args.timeout_seconds,
+                keep_staging=args.keep_staging,
             )
     except Exception as exc:
         if args.job_id:

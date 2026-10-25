@@ -127,3 +127,32 @@ class TestArtifactDriftSurfacing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestTaskCapabilitiesDiscovery(unittest.TestCase):
+    def test_unattached_reports_missing_attachment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status = collect_status(project_root=tmp, include_cloud=False)
+            self.assertIn("task_capabilities", status)
+            caps = status["task_capabilities"]
+            self.assertFalse(caps.get("attached"))
+            self.assertIn("task_attachment", caps.get("capabilities", {}))
+            self.assertEqual(caps["capabilities"]["task_attachment"]["state"], "missing")
+
+    def test_attached_reports_capabilities(self):
+        from tests.fixtures import make_workspace
+        root, task_cfg = make_workspace(prefix="aih-cap-")
+        try:
+            status = collect_status(project_root=str(root), include_cloud=False)
+            caps = status.get("task_capabilities", {})
+            self.assertTrue(caps.get("attached"))
+            c = caps.get("capabilities", {})
+            self.assertIn("data_loading", c)
+            self.assertEqual(c["data_loading"]["state"], "ready")
+            self.assertIn("custom_scoring", c)
+            self.assertEqual(c["custom_scoring"]["state"], "supported")
+            self.assertIn("local_execution", c)
+            self.assertEqual(c["local_execution"]["state"], "ready")
+            self.assertIn("submission", c)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)

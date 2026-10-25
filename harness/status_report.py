@@ -421,6 +421,233 @@ def _adoption_section(project_root: Optional[str]) -> Dict[str, Any]:
     }
 
 
+def _task_capabilities_section(
+    project_root: Optional[str], include_cloud: bool = True
+) -> Dict[str, Any]:
+    """Unified task capability discovery across data loading, scoring, execution, and submissions."""
+    from harness.project import HarnessProject
+
+    project: Optional[HarnessProject] = None
+    try:
+        project = HarnessProject.discover(project_root or ".")
+        if not project.manifest_path.is_file():
+            project = None
+    except Exception:
+        project = None
+
+    if project is None:
+        return {
+            "attached": False,
+            "capabilities": {
+                "task_attachment": {
+                    "state": "missing",
+                    "reason": "Project workspace is not attached to AI Harness.",
+                    "next_action": "Run `ai-harness attach` with your task config.",
+                }
+            },
+        }
+
+    spec = None
+    spec_error = ""
+    try:
+        from harness.task_spec import load_active_task_spec
+        spec = load_active_task_spec(project.task_config_path)
+    except Exception as exc:  # noqa: BLE001
+        spec = None
+        spec_error = str(exc)
+
+    if spec is None:
+        return {
+            "attached": True,
+            "capabilities": {
+                "task_contract": {
+                    "state": "blocked",
+                    "reason": f"Failed to load task specification: {spec_error}",
+                    "next_action": "Fix YAML syntax or missing fields in configs/task.yaml",
+                }
+            },
+        }
+
+    plugin_caps: Dict[str, bool] = {}
+    plugin_error: Optional[str] = None
+    if project.plugin_id and project.plugin_id != "default":
+        try:
+            from harness.plugins import TaskPluginContext, load_task_plugin
+            ctx = TaskPluginContext(project.root, project.task_config_path, spec, project.plugin_id)
+            plugin = load_task_plugin(project.plugin_id, ctx)
+            plugin_caps = plugin.capabilities()
+        except Exception as exc:  # noqa: BLE001
+            plugin_error = str(exc)
+            plugin_caps = {}
+    else:
+        try:
+            from harness.plugins import TaskPluginContext, load_task_plugin
+            ctx = TaskPluginContext(project.root, project.task_config_path, spec, "default")
+            plugin = load_task_plugin("default", ctx)
+            plugin_caps = plugin.capabilities()
+        except Exception:  # noqa: BLE001
+            plugin_caps = {}
+
+    if plugin_error:
+        return {
+            "attached": True,
+            "capabilities": {
+                "active_plugin": {
+                    "state": "blocked",
+                    "reason": f"Active plugin '{project.plugin_id}' failed to load: {plugin_error}",
+                    "next_action": "Fix plugin entry point, contract signature, or missing dependencies.",
+                }
+            },
+        }
+
+    capabilities: Dict[str, Dict[str, Any]] = {}
+
+    # 1. Data loading
+    data_cfg = getattr(spec, "metadata", {}).get("data_config") or getattr(spec, "metadata", {}).get("data") or {}
+    train_path_str = data_cfg.get("train_path") or data_cfg.get("train") or "dataset/train.csv"
+    train_path = Path(train_path_str)
+    if not train_path.is_absolute():
+        train_path = project.root / train_path
+
+    if plugin_caps.get("custom_data_loader"):
+        capabilities["data_loading"] = {
+            "state": "ready",
+            "source": f"plugin:{project.plugin_id}",
+        }
+    elif train_path.exists():
+        rel_path = str(train_path.relative_to(project.root)) if train_path.is_relative_to(project.root) else str(train_path)
+        capabilities["data_loading"] = {
+            "state": "ready",
+            "source": rel_path,
+        }
+    else:
+        capabilities["data_loading"] = {
+            "state": "missing",
+            "reason": f"Training dataset not found at '{train_path_str}'",
+            "next_action": "Provide training dataset or implement custom data loader in TaskPlugin",
+        }
+
+    # 2. Custom scoring / Metrics
+    metric_name = getattr(spec, "primary_metric", "unknown")
+    if plugin_caps.get("custom_metrics"):
+        capabilities["custom_scoring"] = {
+            "state": "ready",
+            "source": f"plugin:{project.plugin_id}",
+            "metric": metric_name,
+        }
+    else:
+        from harness.evaluation import metric_name as norm_metric_name
+        is_known = False
+        try:
+            norm_name = norm_metric_name(metric_name)
+            is_known = bool(norm_name)
+        except Exception:
+            is_known = False
+        if is_known:
+            capabilities["custom_scoring"] = {
+                "state": "supported",
+                "source": "built-in",
+                "metric": metric_name,
+            }
+        else:
+            capabilities["custom_scoring"] = {
+                "state": "missing",
+                "reason": f"Custom metric '{metric_name}' declared without evaluator",
+                "next_action": "Implement a TaskPlugin evaluator",
+            }
+
+    # 3. Local execution
+    capabilities["local_execution"] = {
+        "state": "ready",
+        "python": sys.version.split()[0],
+    }
+
+    # 4. Cloud execution (respects include_cloud flag)
+    exec_meta = getattr(spec, "metadata", {}).get("execution", {})
+    cloud_backend = exec_meta.get("backend", "local")
+    if not include_cloud:
+        capabilities["cloud_execution"] = {
+            "state": "unprobed",
+            "reason": "Cloud environment inspection disabled (--no-cloud)",
+        }
+    else:
+        from harness.environment_detector import EnvironmentDetector
+        env = EnvironmentDetector.get_full_status()
+        if cloud_backend == "kaggle":
+            kaggle_cli = bool(env.get("kaggle", {}).get("installed"))
+            kaggle_auth = bool(env.get("kaggle", {}).get("authenticated"))
+            if kaggle_cli and kaggle_auth:
+                capabilities["cloud_execution"] = {"state": "ready", "backend": "kaggle"}
+            elif not kaggle_cli:
+                capabilities["cloud_execution"] = {
+                    "state": "blocked",
+                    "backend": "kaggle",
+                    "reason": "Kaggle CLI not installed",
+                    "next_action": "Install kaggle CLI via pip install kaggle",
+                }
+            else:
+                capabilities["cloud_execution"] = {
+                    "state": "blocked",
+                    "backend": "kaggle",
+                    "reason": "Kaggle authentication unavailable",
+                    "next_action": "Configure Kaggle credentials (~/.kaggle/kaggle.json or env vars)",
+                }
+        elif cloud_backend == "modal":
+            modal_cli = bool(env.get("modal", {}).get("installed"))
+            modal_auth = bool(env.get("modal", {}).get("has_credentials"))
+            modal_ver = bool(env.get("modal", {}).get("version_supported", True))
+            if modal_cli and modal_auth and modal_ver:
+                capabilities["cloud_execution"] = {"state": "ready", "backend": "modal"}
+            elif not modal_cli:
+                capabilities["cloud_execution"] = {
+                    "state": "blocked",
+                    "backend": "modal",
+                    "reason": "Modal CLI not installed",
+                    "next_action": "Install modal CLI via pip install modal",
+                }
+            elif not modal_ver:
+                capabilities["cloud_execution"] = {
+                    "state": "blocked",
+                    "backend": "modal",
+                    "reason": "Modal CLI version unsupported",
+                    "next_action": "Upgrade modal CLI",
+                }
+            else:
+                capabilities["cloud_execution"] = {
+                    "state": "blocked",
+                    "backend": "modal",
+                    "reason": "Modal token credentials not configured",
+                    "next_action": "Run modal setup to authenticate",
+                }
+        else:
+            has_kaggle = bool(env.get("kaggle", {}).get("installed") and env.get("kaggle", {}).get("authenticated"))
+            has_modal = bool(env.get("modal", {}).get("installed") and env.get("modal", {}).get("has_credentials"))
+            capabilities["cloud_execution"] = {
+                "state": "ready" if (has_kaggle or has_modal) else "supported",
+                "backend": "optional",
+            }
+
+    # 5. Submission
+    if plugin_caps.get("submission_builder") and plugin_caps.get("submission_validator"):
+        capabilities["submission"] = {
+            "state": "ready",
+            "source": f"plugin:{project.plugin_id}",
+        }
+    elif getattr(spec, "metadata", {}).get("submission") or getattr(spec, "metadata", {}).get("submission_spec"):
+        capabilities["submission"] = {
+            "state": "supported",
+            "source": "declarative",
+        }
+    else:
+        capabilities["submission"] = {
+            "state": "missing",
+            "reason": "No submission builder or declared submission spec",
+            "next_action": "Declare submission in configs/task.yaml or implement build_submission in TaskPlugin",
+        }
+
+    return {"attached": True, "capabilities": capabilities}
+
+
 def collect_status(project_root: Optional[str] = None, include_cloud: bool = True) -> Dict[str, Any]:
     """Assemble the full status payload. Never raises."""
     status: Dict[str, Any] = {
@@ -432,6 +659,7 @@ def collect_status(project_root: Optional[str] = None, include_cloud: bool = Tru
         "framework": _section(_framework_section, project_root),
         "project": _section(_project_section, project_root),
         "plugins": _section(_plugins_section, project_root),
+        "task_capabilities": _section(_task_capabilities_section, project_root, include_cloud),
         "adoption": _section(_adoption_section, project_root),
         "session": _section(_session_section, project_root),
         "artifacts": _section(_artifact_health_section, project_root),
@@ -448,6 +676,16 @@ def render_markdown(status: Dict[str, Any]) -> str:
         return "\u2705" if ok else "\u2741"
 
     lines = ["# ai-harness status", ""]
+    caps_data = status.get("task_capabilities", {})
+    if isinstance(caps_data, dict) and caps_data.get("capabilities"):
+        lines.append("## Task Capabilities")
+        for cap_name, cap_info in caps_data["capabilities"].items():
+            if isinstance(cap_info, dict):
+                st = cap_info.get("state", "unknown")
+                st_icon = "\u2705" if st in ("ready", "supported") else ("\u26a0\ufe0f" if st == "missing" else "\u274c")
+                reason = f" ({cap_info['reason']})" if "reason" in cap_info else ""
+                lines.append(f"- {st_icon} **{cap_name}**: `{st}`{reason}")
+        lines.append("")
     inst = status.get("install", {})
     if inst.get("found"):
         lines.append(f"{mark(True)} install: {inst['package']} @ {inst['origin']}")
