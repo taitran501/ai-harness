@@ -229,11 +229,11 @@ def generate_skill_content(
         "",
         "---",
         "",
-        "## 2. Three-Layer Architecture (`Antigravity IDE` <-> `AgentBridge` <-> `Harness`)",
+        "## 2. Three-Layer Architecture (`AI Coding Agent` <-> `AgentBridge` <-> `Harness`)",
         "",
-        "- **Layer 1 — True Agent Runtime (`Antigravity in IDE`)**: Performs scientific reasoning, hypothesis formulation, and the `Observe -> Decide -> Next Action` loop. The Harness does **not** run a separate internal LLM planner.",
+        "- **Layer 1 — True Agent Runtime (`AI Coding Agent`: Antigravity / Codex / Claude Code)**: Performs scientific reasoning, hypothesis formulation, and the `Observe -> Decide -> Next Action` loop. The Harness does **not** run a separate internal LLM planner.",
         "- **Layer 2 — Agent Bridge & Context Bridge (`harness/agent_bridge.py`, `ai-harness-agent`)**:",
-        "  - Feeds Antigravity a compressed **Context Packet** (`CompetitionState` 8-Phase HUD, Parallel Tracks, `TreeJournal` UCB recommendation, Parent `DIAGNOSTICS` bottlenecks, Idea Graveyard, and active `BridgeSession` budget/usage):",
+        "  - Feeds the AI Agent a compressed **Context Packet** (`CompetitionState` 8-Phase HUD, Parallel Tracks, `TreeJournal` UCB recommendation, Parent `DIAGNOSTICS` bottlenecks, Idea Graveyard, and active `BridgeSession` budget/usage):",
         "    ```powershell",
         "    ai-harness-agent context",
         "    ```",
@@ -318,7 +318,7 @@ def generate_skill_content(
         "",
         "---",
         "",
-        "## 4. Standard Operating Procedure (SOP) for Antigravity in IDE",
+        "## 4. Standard Operating Procedure (SOP) for AI Agent",
         "",
         "1. **Read Bridge Context Packet**: Run `ai-harness-agent context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
         "2. **Start / Configure Session (Optional Budgets)**: Run `ai-harness-agent start-session --goal \"...\" --max-experiments 3`.",
@@ -327,7 +327,7 @@ def generate_skill_content(
         "5. **Execute Task-Declared Validation**: Run `ai-harness-agent act --action run_full_validation --config-path configs/<exp>.yaml`.",
         f"   (Backend defaults to `{exec_backend}` from the task contract's `execution.backend`."
         + (" **Locked** — do not pass `--backend` and never train locally." if exec_locked else " Pass `--backend <local|kaggle|modal>` only to override.") + ")",
-        "6. **Observe & Decide Next Step**: Antigravity analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
+        "6. **Observe & Decide Next Step**: The agent analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
         "7. **Endgame Blending & Post-Processing**: Run `ai-harness-agent act --action optimize_blend --components \"exp001,exp002\"` or `optimize_threshold --exp-id <exp> --metric f1`.",
         "   Threshold search requires a verified full run with one binary target and probability/class-order metadata. Supported metrics: f1, accuracy, kappa. It returns a recommendation for `positive_class` (the last declared class); apply it in new predictions, never edit completed evidence. This auxiliary score does not replace the task's official metric.",
         "8. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
@@ -492,7 +492,7 @@ def inject_skill_file(
             twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=twin_name)
             twin_dest.write_text(twin_content, encoding="utf-8")
 
-    # Purge legacy skills so Antigravity doesn't inject obsolete ml-harness prompts
+    # Purge legacy skills so agent hosts do not inject obsolete ml-harness prompts
     skills_dir = dest.parent.parent if dest.parent.parent.name == "skills" else project.root / ".agents" / "skills"
     for legacy_name in ("ml-harness", "ml-experiment-harness"):
         legacy_dir = skills_dir / legacy_name

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
+import inspect
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -158,7 +159,9 @@ class DeclarativeTaskPlugin(TaskPlugin):
             except Exception:
                 task_spec = None
         if task_spec is not None:
-            sub_spec = getattr(task_spec, "submission_spec", None) or task_spec.metadata.get("submission_spec")
+            meta = getattr(task_spec, "metadata", None)
+            meta_sub = meta.get("submission_spec") if isinstance(meta, dict) else None
+            sub_spec = getattr(task_spec, "submission_spec", None) or meta_sub
             if isinstance(sub_spec, dict) and sub_spec:
                 return sub_spec
         return None
@@ -343,6 +346,83 @@ def list_task_plugins() -> list[Dict[str, str]]:
     return plugins
 
 
+PLUGIN_HOOK_NAMES: Tuple[str, ...] = (
+    "load_training_data",
+    "build_model",
+    "normalize_predictions",
+    "evaluate_predictions",
+    "validate_training_data",
+    "build_validation_splits",
+    "validate_split",
+    "extend_eda_report",
+    "remote_runtime_requirements",
+    "remote_bundle_files",
+    "remote_runtime_manifest",
+    "validate_submission",
+    "build_submission",
+)
+
+
+def validate_plugin_contract(plugin: TaskPlugin, raise_on_error: bool = True) -> List[str]:
+    """Validate that overridden hooks on the plugin have signatures compatible with TaskPlugin.
+
+    Checks:
+    - capabilities() returns a valid Dict[str, bool].
+    - Every overridden hook is callable and accepts the expected positional arguments.
+    """
+    errors: List[str] = []
+
+    # 1. capabilities check
+    try:
+        caps = plugin.capabilities()
+        if not isinstance(caps, dict):
+            errors.append(f"capabilities() must return a dict, got {type(caps).__name__}")
+        else:
+            for k, v in caps.items():
+                if not isinstance(v, bool):
+                    errors.append(f"capabilities()[{k!r}] must be a bool, got {type(v).__name__}")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"capabilities() raised an exception: {exc}")
+
+    # 2. Hook signature validation
+    plugin_cls = type(plugin)
+    for hook_name in PLUGIN_HOOK_NAMES:
+        base_method = getattr(TaskPlugin, hook_name, None)
+        curr_method = getattr(plugin_cls, hook_name, None)
+        if base_method is None or curr_method is None:
+            continue
+        if curr_method is not base_method:
+            bound_fn = getattr(plugin, hook_name, None)
+            if not callable(bound_fn):
+                errors.append(
+                    f"Hook '{hook_name}' on plugin '{getattr(plugin, 'plugin_id', 'unknown')}' is not callable."
+                )
+                continue
+            base_params = [
+                param
+                for name, param in inspect.signature(base_method).parameters.items()
+                if name != "self"
+            ]
+            try:
+                sig = inspect.signature(bound_fn)
+                sig.bind(*([None] * len(base_params)))
+            except TypeError as exc:
+                expected_args = ", ".join(param.name for param in base_params)
+                errors.append(
+                    f"Hook '{hook_name}' signature mismatch: {exc}. "
+                    f"Expected parameter signature: ({expected_args})"
+                )
+
+    if errors and raise_on_error:
+        pid = getattr(plugin, "plugin_id", "unknown")
+        bullet_list = "\n  - ".join(errors)
+        raise PluginCapabilityError(
+            f"Task plugin '{pid}' failed contract validation:\n  - {bullet_list}"
+        )
+
+    return errors
+
+
 def load_task_plugin(
     plugin_id: Optional[str], context: TaskPluginContext
 ) -> TaskPlugin:
@@ -373,4 +453,5 @@ def load_task_plugin(
         raise TaskPluginError(
             f"Plugin entry point '{plugin_id}' resolved to adapter declaring ID '{declared_id}'."
         )
+    validate_plugin_contract(plugin, raise_on_error=True)
     return plugin

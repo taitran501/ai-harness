@@ -54,7 +54,6 @@ ALLOWED_TOP_DIRS = {
     "plugin",
     "__pycache__",
     ".ai-harness",
-    ".ml-harness",
     ".agents",
 }
 
@@ -156,6 +155,12 @@ def scan_workspace_hygiene(
         return {"clean": True, "findings": [], "summary": "unreadable"}
 
     for entry in entries:
+        if entry.name == ".ml-harness" and entry.is_dir():
+            findings.append({
+                "kind": "legacy_harness_dir", "path": entry.name,
+                "detail": "legacy harness directory; review with ai-harness clean --legacy (dry-run)",
+            })
+            continue
         if entry.name.startswith("."):
             continue  # hidden state dirs are harness-managed
         try:

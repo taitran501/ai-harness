@@ -181,6 +181,7 @@ class ActionObservation:
     artifact_path: Optional[str] = None
     data: Dict[str, Any] = field(default_factory=dict)
     elapsed_seconds: float = 0.0
+    failure: Optional[Dict[str, Any]] = None
 
 
 @dataclass

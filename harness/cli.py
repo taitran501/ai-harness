@@ -27,6 +27,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ai-harness")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    clean = subparsers.add_parser("clean", help="Preview or remove explicitly selected framework clutter")
+    clean.add_argument("--project-root", default=".", help="Workspace sandbox root")
+    mode = clean.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true", help="Preview only (default)")
+    mode.add_argument("--apply", action="store_true", help="Delete after validation and confirmation")
+    clean.add_argument("--temp", action="store_true", help="Old framework staging in system temp")
+    clean.add_argument("--legacy", action="store_true", help="Inactive .ml-harness directory")
+    clean.add_argument("--probes", action="store_true", help="Old individual probe runs")
+    clean.add_argument("--older-than-hours", type=float, default=2, help="Minimum age; temp always at least 2 hours")
+    clean.add_argument("--archive", action="store_true", help="Verify a legacy ZIP backup before deletion")
+    clean.add_argument("--yes", "-y", action="store_true", help="Skip interactive confirmation")
+
     attach = subparsers.add_parser("attach", help="Attach the installed harness to a task workspace")
     attach.add_argument("--project-root", default=".", help="Task repository root")
     attach.add_argument("--task-config", default="configs/task.yaml", help="Task specification YAML")
@@ -254,8 +266,45 @@ def _run_adoption_scan(args) -> int:
     return 0
 
 
+def _clean_command(args) -> int:
+    from harness.cleaner import execute_cleanup, scan_system_temp, scan_workspace_clutter
+
+    if not (args.temp or args.legacy or args.probes):
+        print("Select --temp, --legacy and/or --probes. Preview is the default.", file=sys.stderr)
+        return 2
+    try:
+        plan = []
+        if args.legacy or args.probes:
+            plan.extend(item for item in scan_workspace_clutter(args.project_root, args.older_than_hours)
+                        if (item.kind == "legacy" and args.legacy) or (item.kind == "probe" and args.probes))
+        if args.temp:
+            plan.extend(scan_system_temp(args.older_than_hours, project_root=args.project_root))
+    except (OSError, ValueError) as exc:
+        print(f"Cleanup refused: {exc}", file=sys.stderr)
+        return 2
+    preview = execute_cleanup(plan)
+    print(json.dumps({"dry_run": True, "candidate_bytes": sum(i.size_bytes for i in plan),
+                      "items": preview}, indent=2))
+    if not args.apply or not plan:
+        return 2 if any(i["status"] == "refused" for i in preview) else 0
+    if not args.yes:
+        try:
+            confirmed = input("Delete these candidates? Type yes to continue: ").strip().lower() == "yes"
+        except (EOFError, KeyboardInterrupt):
+            confirmed = False
+        if not confirmed:
+            print("Cleanup cancelled.")
+            return 1
+    results = execute_cleanup(plan, apply=True, archive=args.archive)
+    print(json.dumps({"dry_run": False, "items": results,
+                      "deleted_source_bytes": sum(i["size_bytes"] for i in results if i["status"] == "deleted")}, indent=2))
+    return 2 if any(i["status"] == "refused" for i in results) else 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "clean":
+        return _clean_command(args)
     if args.command != "plugins":
         from harness.toolchain import ensure_pinned_toolchain
 
