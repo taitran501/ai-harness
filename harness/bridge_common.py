@@ -211,7 +211,47 @@ class BridgeSession:
     stop_reason: Optional[str] = None
 
 
-_TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName)
+ACTION_ALIASES: Dict[str, str] = {
+    # Checkpoint aliases
+    "checkpoint": "record_research_checkpoint",
+    "save_checkpoint": "record_research_checkpoint",
+    "checkpoint_research_progress": "record_research_checkpoint",
+    "record_checkpoint": "record_research_checkpoint",
+    "research_checkpoint": "record_research_checkpoint",
+    # Insight aliases
+    "record_insight": "record_research_insight",
+    "add_insight": "record_research_insight",
+    "create_insight": "record_research_insight",
+    # Decision aliases
+    "record_decision": "record_research_decision",
+    "add_decision": "record_research_decision",
+    # Probe aliases
+    "plan_probe": "plan_research_probe",
+    "probe_plan": "plan_research_probe",
+    # Memory search aliases
+    "search_memory": "search_research_memory",
+    "search_research": "search_research_memory",
+    # Baseline anchor aliases
+    "establish_baseline": "establish_baseline_anchor",
+    "set_baseline_anchor": "establish_baseline_anchor",
+    "set_baseline": "establish_baseline_anchor",
+    # Experiment ID aliases
+    "get_next_exp_id": "get_next_experiment_id",
+    "next_experiment_id": "get_next_experiment_id",
+    "next_exp_id": "get_next_experiment_id",
+    # Execution aliases
+    "smoke_test": "run_smoke_test",
+    "full_validation": "run_full_validation",
+    "run_validation": "run_full_validation",
+}
+
+
+def resolve_action_name(name: str) -> str:
+    """Resolve an action name, mapping aliases to canonical typed actions."""
+    return ACTION_ALIASES.get(name, name)
+
+
+_TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName) | frozenset(ACTION_ALIASES.keys())
 
 
 TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -473,5 +513,5 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
 
 def get_action_schema(action: str) -> Optional[Dict[str, Any]]:
     """Return schema definition for a Typed Action, if registered."""
-    return TYPED_ACTION_SCHEMAS.get(action)
+    return TYPED_ACTION_SCHEMAS.get(resolve_action_name(action))
 

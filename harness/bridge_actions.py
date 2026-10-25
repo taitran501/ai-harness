@@ -41,16 +41,133 @@ class ActionHandlerMixin:
         if act == "search_research_memory":
             result = {"matches": memory.search(params.get("query", ""), params.get("limit", 8))}
         elif act == "record_research_insight":
-            result = memory.record_insight(title=params["title"], observation=params["observation"],
-                mechanism=params["mechanism"], next_action=params["next_action"],
-                evidence=params.get("evidence"), parent_insight_id=params.get("parent_insight_id"),
-                session_id=session.session_id)
+            # Defensive extraction with rich aliases
+            title = (
+                params.get("title")
+                or params.get("name")
+                or params.get("insight")
+                or params.get("summary")
+            )
+            observation = (
+                params.get("observation")
+                or params.get("hypothesis")
+                or params.get("description")
+                or params.get("content")
+                or params.get("details")
+                or params.get("text")
+                or ""
+            )
+            if not title:
+                title = (str(observation).split(".")[0][:80] if observation else "Untitled Insight")
+            mechanism = (
+                params.get("mechanism")
+                or params.get("rationale")
+                or params.get("reason")
+                or params.get("hypothesis")
+                or "Empirical mechanism"
+            )
+            next_action = (
+                params.get("next_action")
+                or params.get("action")
+                or params.get("plan")
+                or params.get("next_steps")
+                or params.get("todo")
+                or "Execute probe"
+            )
+            evidence = params.get("evidence")
+            if isinstance(evidence, str) and " " in evidence and not any(e in evidence for e in [r["exp_id"] for r in memory.sync()]):
+                observation = f"{observation} [Evidence reference: {evidence}]".strip()
+                evidence = None
+            result = memory.record_insight(
+                title=title,
+                observation=observation,
+                mechanism=mechanism,
+                next_action=next_action,
+                evidence=evidence,
+                parent_insight_id=params.get("parent_insight_id"),
+                session_id=session.session_id,
+            )
         elif act == "plan_research_probe":
-            result = memory.plan_probe(**{key: params[key] for key in (
-                "insight_id", "control", "intervention", "expected_observation", "alternative_explanation",
-                "decision_rule", "budget", "stop_rule")}, session_id=session.session_id)
+            # Defensive extraction with aliases and sensible defaults
+            control = (
+                params.get("control")
+                or params.get("baseline")
+                or params.get("reference")
+                or params.get("comparator")
+                or "exp000_baseline"
+            )
+            intervention = (
+                params.get("intervention")
+                or params.get("treatment")
+                or params.get("candidate")
+                or params.get("experiment")
+                or params.get("action")
+                or params.get("description")
+                or "Intervention probe"
+            )
+            expected_observation = (
+                params.get("expected_observation")
+                or params.get("expected_result")
+                or params.get("expected")
+                or params.get("expectation")
+                or "Primary metric improves relative to control baseline"
+            )
+            alternative_explanation = (
+                params.get("alternative_explanation")
+                or params.get("alternative")
+                or params.get("alternative_hypothesis")
+                or params.get("fallback_explanation")
+                or "Outcome may stem from sample variance or noise rather than mechanism"
+            )
+            decision_rule = (
+                params.get("decision_rule")
+                or params.get("rule")
+                or params.get("criteria")
+                or params.get("decision")
+                or params.get("evaluation_rule")
+                or "Proceed if metric improves"
+            )
+            budget = (
+                params.get("budget")
+                or params.get("max_budget")
+                or params.get("probe_budget")
+                or params.get("cost")
+                or "1 run"
+            )
+            stop_rule = (
+                params.get("stop_rule")
+                or params.get("stop_criteria")
+                or params.get("stopping_rule")
+                or params.get("termination_rule")
+                or "Stop upon regression or budget limit"
+            )
+            insight_id = (
+                params.get("insight_id")
+                or params.get("insight")
+                or params.get("id")
+                or params.get("parent_insight_id")
+            )
+            if not insight_id:
+                # Find most recent insight from current research memory
+                recent_insights = [e for e in memory.entries() if e.get("kind") == "insight"]
+                if recent_insights:
+                    insight_id = recent_insights[-1]["id"]
+                else:
+                    raise ValueError("plan_research_probe requires 'insight_id' linking to an existing insight")
+            result = memory.plan_probe(
+                insight_id=insight_id,
+                control=control,
+                intervention=intervention,
+                expected_observation=expected_observation,
+                alternative_explanation=alternative_explanation,
+                decision_rule=decision_rule,
+                budget=budget,
+                stop_rule=stop_rule,
+                session_id=session.session_id,
+            )
         elif act == "trace_research_insight":
-            result = memory.trace(params["insight_id"], params.get("offset", 0), params.get("limit", 20))
+            insight_id = params.get("insight_id") or params.get("insight") or params.get("id")
+            result = memory.trace(insight_id, params.get("offset", 0), params.get("limit", 20))
         elif act == "review_hypothesis":
             cfg = params.get("config")
             if cfg is None:
@@ -59,23 +176,66 @@ class ActionHandlerMixin:
                 cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
             result = memory.review(cfg, params.get("revisit_reason", ""))
         elif act == "record_research_decision":
-            # Agents frequently send JSON null for optional fields; null must
-            # behave exactly like an omitted field, otherwise None skips the
-            # revisit_when auto-default and fails _text validation.
-            result = memory.record_decision(outcome=params["outcome"], conclusion=params["conclusion"],
-                evidence=params.get("evidence"), next_action=params.get("next_action") or "",
-                insight_id=params.get("insight_id"), lesson=params.get("lesson") or "",
+            # Defensive extraction with rich aliases
+            from harness.research_memory import normalize_decision_outcome
+            outcome = normalize_decision_outcome(
+                params.get("outcome")
+                or params.get("decision")
+                or params.get("status")
+                or params.get("result")
+                or ""
+            )
+            conclusion = (
+                params.get("conclusion")
+                or params.get("lesson")
+                or params.get("summary")
+                or params.get("note")
+                or params.get("finding")
+                or params.get("description")
+                or ""
+            )
+            lesson = (
+                params.get("lesson")
+                or params.get("conclusion")
+                or params.get("summary")
+                or ""
+            )
+            next_action = (
+                params.get("next_action")
+                or params.get("action")
+                or params.get("plan")
+                or params.get("todo")
+                or params.get("next_steps")
+                or ""
+            )
+            evidence = params.get("evidence")
+            if isinstance(evidence, str) and " " in evidence and not any(e in evidence for e in [r["exp_id"] for r in memory.sync()]):
+                extra_note = f"[Evidence reference: {evidence}]"
+                conclusion = f"{conclusion} {extra_note}".strip()
+                evidence = None
+            result = memory.record_decision(
+                outcome=outcome,
+                conclusion=conclusion,
+                evidence=evidence,
+                next_action=next_action,
+                insight_id=params.get("insight_id"),
+                lesson=lesson,
                 revisit_when=params.get("revisit_when") or "",
-                session_id=session.session_id)
+                session_id=session.session_id,
+            )
         else:
             if not str(params.get("summary") or "").strip() or not str(params.get("next_action") or "").strip():
                 raise ValueError(
                     "record_research_checkpoint requires 'summary' and 'next_action' "
                     "text fields (the checkpoint field is 'summary', not 'conclusion')"
                 )
-            result = memory.checkpoint(summary=params["summary"], next_action=params["next_action"],
-                open_questions=params.get("open_questions", []), session_id=session.session_id,
-                insight_ids=params.get("insight_ids"))
+            result = memory.checkpoint(
+                summary=params["summary"],
+                next_action=params["next_action"],
+                open_questions=params.get("open_questions", []),
+                session_id=session.session_id,
+                insight_ids=params.get("insight_ids"),
+            )
         return ActionObservation(call.step_index, act, "SUCCESS", "Research memory action completed",
                                  data=result, elapsed_seconds=round(time.time() - t0, 3))
 

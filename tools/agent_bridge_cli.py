@@ -43,6 +43,7 @@ from harness.agent_bridge import (
     TYPED_ACTION_SCHEMAS,
     _TYPED_ACTION_NAMES,
     get_action_schema,
+    resolve_action_name,
 )
 from harness.project import HarnessProject
 
@@ -339,7 +340,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2, ensure_ascii=False, default=_json_serial))
 
     elif args.command == "act":
-        if args.action not in _TYPED_ACTION_NAMES:
+        act_name = resolve_action_name(args.action)
+        if act_name not in _TYPED_ACTION_NAMES:
             print(
                 f"Unknown action: '{args.action}'. Run 'ai-harness-agent schema' to list all valid actions.",
                 file=sys.stderr,
@@ -361,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
             params["backend"] = args.backend
 
         sess, obs = bridge.execute_action(
-            action=args.action,
+            action=act_name,
             params=params,
             rationale=args.rationale,
             session_id=args.session_id,
