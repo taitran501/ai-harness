@@ -3,8 +3,8 @@
 - **Date**: 2026-10-25
 - **PR**: [#131](https://github.com/taitran501/ai-harness/pull/131)
 - **Branch**: `feat/research-memory-identity-tolerance-and-param-aliases`
-- **Status**: open
-- **Commits**: `<sha>` (squash)
+- **Status**: merged
+- **Commits**: `a496e90` (squash)
 
 ## Why
 
