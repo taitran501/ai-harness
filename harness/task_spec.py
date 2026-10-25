@@ -777,6 +777,11 @@ def load_active_task_spec(
     """Load the task spec for the selected workspace without cross-project cache reuse."""
     from harness.project import HarnessProject, resolve_project_root
 
+    if isinstance(config_path, UniversalTaskSpec):
+        return config_path
+    if isinstance(config_path, dict):
+        return UniversalTaskSpec(**config_path)
+
     if config_path is None:
         p = HarnessProject.discover().task_config_path
     else:
@@ -784,6 +789,15 @@ def load_active_task_spec(
         if not p.is_absolute():
             p = resolve_project_root() / p
         p = p.resolve()
+    if p.is_dir():
+        candidate = p / "configs" / "task.yaml"
+        if candidate.is_file():
+            p = candidate
+        else:
+            try:
+                p = HarnessProject.discover(p).task_config_path
+            except Exception:
+                pass
     if p.is_file():
         import hashlib
         content_hash=hashlib.sha256(p.read_bytes()).hexdigest()

@@ -72,6 +72,51 @@ class _FrontierDescriptor:
         return _EntryList(ctx.get("research_frontier", []))
 
 
+DECISION_OUTCOME_ALIASES = {
+    # Supported
+    "supported": "supported",
+    "support": "supported",
+    "accepted": "supported",
+    "accept": "supported",
+    "keep": "supported",
+    "adopt": "supported",
+    "success": "supported",
+    "passed": "supported",
+    "pass": "supported",
+    "positive": "supported",
+    "verified": "supported",
+    "verified_and_ready": "supported",
+    # Rejected
+    "rejected": "rejected",
+    "reject": "rejected",
+    "discarded": "rejected",
+    "discard": "rejected",
+    "drop": "rejected",
+    "failed": "rejected",
+    "fail": "rejected",
+    "negative": "rejected",
+    # Inconclusive
+    "inconclusive": "inconclusive",
+    "uncertain": "inconclusive",
+    "unknown": "inconclusive",
+    "mixed": "inconclusive",
+    "flat": "inconclusive",
+    # Deferred
+    "deferred": "deferred",
+    "defer": "deferred",
+    "postponed": "deferred",
+    "postpone": "deferred",
+    "later": "deferred",
+    "pause": "deferred",
+    "paused": "deferred",
+}
+
+
+def normalize_decision_outcome(val: Any) -> str:
+    s = str(val or "").strip().lower()
+    return DECISION_OUTCOME_ALIASES.get(s, s)
+
+
 class ResearchMemory:
     frontier = _FrontierDescriptor()
     research_frontier = _FrontierDescriptor()
@@ -674,6 +719,7 @@ class ResearchMemory:
 
     def record_decision(self, *, outcome, conclusion, evidence=None, next_action="", session_id=None,
                         insight_id=None, lesson="", revisit_when=""):
+        outcome = normalize_decision_outcome(outcome)
         if outcome not in {"supported", "rejected", "inconclusive", "deferred"}:
             hint = (
                 " - that value looks like prose; put the narrative in 'conclusion' "

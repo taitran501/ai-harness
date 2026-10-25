@@ -50,6 +50,8 @@ from harness.bridge_common import (
     TypedActionCall,
     TypedActionName,
     _TYPED_ACTION_NAMES,
+    ACTION_ALIASES as ACTION_ALIASES,
+    resolve_action_name as resolve_action_name,
     TYPED_ACTION_SCHEMAS as TYPED_ACTION_SCHEMAS,
     get_action_schema as get_action_schema,
 )
@@ -71,7 +73,8 @@ class _AgentBridgeMeta(type):
     """
 
     def __getattr__(cls, name: str):
-        if name in _TYPED_ACTION_NAMES:
+        real_action = resolve_action_name(name)
+        if real_action in _TYPED_ACTION_NAMES:
             def _invoke_class(*args, **kwargs):
                 params: Dict[str, Any] = {}
                 if args and isinstance(args[0], dict):
@@ -234,7 +237,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         single execution path through :meth:`execute_action` (session state,
         approval tiers, and audit all still apply).
         """
-        real_action = name[len("_action_"):] if name.startswith("_action_") else name
+        real_action = resolve_action_name(name[len("_action_"):] if name.startswith("_action_") else name)
         if name.startswith("__") or real_action not in _TYPED_ACTION_NAMES:
             raise AttributeError(f"'AgentBridge' object has no attribute '{name}'")
 
@@ -1739,6 +1742,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
     ) -> Tuple[BridgeSession, ActionObservation]:
         """Execute a single Typed Action from Antigravity and update the stateful BridgeSession."""
         self._refresh_task_context()
+        action = resolve_action_name(action)
         params = params or {}
         session = self.get_active_or_create_session(
             goal=goal or "Iterative competition optimization via Antigravity IDE",
