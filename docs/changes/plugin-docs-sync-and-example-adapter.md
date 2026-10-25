@@ -1,10 +1,10 @@
 # Sync TaskPlugin docs with code and add a reference adapter
 
 - **Date**: 2026-10-25
-- **PR**: — (local)
+- **PR**: [#132](https://github.com/taitran501/ai-harness/pull/132)
 - **Branch**: `docs/plugin-docs-sync`
-- **Status**: open
-- **Commits**: —
+- **Status**: merged
+- **Commits**: `1233b8a` (squash)
 
 ## Why
 

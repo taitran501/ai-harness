@@ -1,10 +1,10 @@
 # Plugin Contract Validation, Unified Capability Discovery, and Structured Failure Classification
 
 - **Date**: 2026-10-25
-- **PR**: — (local)
+- **PR**: [#132](https://github.com/taitran501/ai-harness/pull/132)
 - **Branch**: `feat/plugin-validation-capability-discovery-failures`
-- **Status**: open
-- **Commits**: —
+- **Status**: merged
+- **Commits**: `1233b8a` (squash)
 
 ## Why
 

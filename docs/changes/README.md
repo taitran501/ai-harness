@@ -15,9 +15,9 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
-| 2026-10-25 | Plugin contract validation, unified capability discovery, and structured failure recovery | Local | [plugin-contract-validation-and-agent-resilience](plugin-contract-validation-and-agent-resilience.md) |
-| 2026-10-25 | Sync TaskPlugin docs with code and add a reference adapter | Local | [plugin-docs-sync-and-example-adapter](plugin-docs-sync-and-example-adapter.md) |
-| 2026-10-25 | Safe clean command, verified legacy archives, and automatic cloud staging cleanup | Local | [clean-command-and-staging-hygiene](clean-command-and-staging-hygiene.md) |
+| 2026-10-25 | Plugin contract validation, unified capability discovery, and structured failure recovery | [#132](https://github.com/taitran501/ai-harness/pull/132) | [plugin-contract-validation-and-agent-resilience](plugin-contract-validation-and-agent-resilience.md) |
+| 2026-10-25 | Sync TaskPlugin docs with code and add a reference adapter | [#132](https://github.com/taitran501/ai-harness/pull/132) | [plugin-docs-sync-and-example-adapter](plugin-docs-sync-and-example-adapter.md) |
+| 2026-10-25 | Safe clean command, verified legacy archives, and automatic cloud staging cleanup | [#132](https://github.com/taitran501/ai-harness/pull/132) | [clean-command-and-staging-hygiene](clean-command-and-staging-hygiene.md) |
 | 2026-10-25 | Research memory identity tolerance, action aliases, parameter ergonomics, and agent shims | [#131](https://github.com/taitran501/ai-harness/pull/131) | [research-memory-identity-tolerance-and-param-aliases](research-memory-identity-tolerance-and-param-aliases.md) |
 | 2026-10-24 | Developer ergonomics, research memory resilience, Kaggle facade parity, and mount robustness | [#130](https://github.com/taitran501/ai-harness/pull/130) | [developer-ergonomics-research-memory-facade-resilience](developer-ergonomics-research-memory-facade-resilience.md) |
 | 2026-10-24 | Kaggle competition discovery & metadata CLI (`ai-harness competition info/list`), response container iteration safety, and agent compatibility stubs | [#129](https://github.com/taitran501/ai-harness/pull/129) | [kaggle-competition-discovery-and-compat-stubs](kaggle-competition-discovery-and-compat-stubs.md) |
