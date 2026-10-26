@@ -103,3 +103,54 @@ def copy_repo_configs(dest_root: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(SOURCE_ROOT / "configs", dest, dirs_exist_ok=True)
     return dest
+
+
+def workspace_with_verified_pair(prefix="aih-policy-"):
+    """Disposable sealed classification evidence for research/dispatch invariants."""
+    import pandas as pd
+    from harness.decision_rules import ResearchPolicy
+    from harness.io_utils import atomic_write_json
+    doc = task_document()
+    doc["task"]["subtasks"] = [{"id": "label", "column": "label", "task_type": "binary_classification",
+                              "classes": [0, 1], "primary_metric": "accuracy", "direction": "maximize"}]
+    doc["task"]["submission_spec"] = {"required_columns": ["id", "label"]}
+    root, config = make_workspace(prefix=prefix, task=doc,
+        train_csv="id,text,label\n" + "".join(f"{i},text {i},{i % 2}\n" for i in range(40)))
+    pd.DataFrame({"id": range(40, 80), "text": ["test"] * 40}).to_csv(root / "dataset/test.csv", index=False)
+    policy = ResearchPolicy(minimum_effect={"value": .05, "scale": "absolute"}, max_comparisons=1,
+        bootstrap_resamples=1000, require_confirmation_for_adaptive_search=False)
+    atomic_write_json(root / ".ai-harness/policies/research_policy.json", policy.to_dict())
+    make_submission_evidence(root, "control", labels=[0] * 40)
+    return root, config
+
+
+def make_submission_evidence(root, exp_id, *, labels=None, cfg=None):
+    """Seal genuine plugin-recomputed synthetic OOF and test predictions."""
+    import pandas as pd
+    from harness.artifacts import contract_identity, digest, seal_file_map, sha256
+    from harness.plugins import TaskPluginContext, load_task_plugin
+    from harness.project import HarnessProject
+    from harness.task_spec import load_active_task_spec
+    project = HarnessProject.discover(root)
+    spec = load_active_task_spec(project.task_config_path)
+    context = TaskPluginContext(project.root, project.task_config_path, spec, project.plugin_id or "default")
+    plugin = load_task_plugin(project.plugin_id, context)
+    truth = pd.read_csv(root / "dataset/train.csv")
+    labels = list(truth.label) if labels is None else labels
+    frame = pd.DataFrame({"id": truth.id, "pred_label": labels, "fold": truth.id % 2, "input_variant": "fixture"})
+    cfg = cfg or {"experiment": {"id": exp_id}, "validation": {"partition": "oof"}}
+    run_dir = project.artifacts_dir / exp_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    frame.to_csv(run_dir / "oof_predictions.csv", index=False)
+    truth.to_csv(run_dir / "evaluation_truth.csv", index=False)
+    test_frame = pd.DataFrame({"id": range(40, 80), "pred_label": labels})
+    test_frame.to_csv(run_dir / "test_predictions.csv", index=False)
+    metrics = plugin.evaluate_predictions(context, truth, {"pred_label": labels})
+    metrics.update(experiment_id=exp_id, selection_variant="fixture")
+    (run_dir / "metrics.json").write_text(__import__("json").dumps(metrics), encoding="utf-8")
+    manifest = dict(schema_version=2, status="COMPLETED", run_kind="full", run_id=exp_id, exp_id=exp_id,
+        **contract_identity(spec, plugin), data_sha256=digest(truth.to_dict("list")), split_sha256=digest("fixture-split"),
+        resolved_config_sha256=sha256(run_dir / "run_config.yaml"), files=seal_file_map(run_dir))
+    (run_dir / "artifact_manifest.json").write_text(__import__("json").dumps(manifest), encoding="utf-8")
+    return run_dir

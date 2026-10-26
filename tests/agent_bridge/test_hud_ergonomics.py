@@ -183,7 +183,7 @@ class TestResearchContinuityHudRendering(unittest.TestCase):
         lines = _research_continuity_hud_lines(memory)
         text = "\n".join(lines)
         self.assertIn("STAGNATION / PLATEAU ADVISORY", text)
-        self.assertIn("Do NOT freeze or stop submissions", text)
+        self.assertIn("Honor the task-scoped stagnation pause", text)
         self.assertIn("ai-harness discussion list", text)
 
     def test_empty_memory_renders_without_error(self):

@@ -557,6 +557,9 @@ class KaggleKernelManager:
         if _BUNDLE_BYTES_CACHE is not None:
             try:
                 tree_digest = hashlib.sha256()
+                capsule_path = root / ".ai-harness/research_execution" / (exp_id + ".json")
+                if capsule_path.is_file():
+                    tree_digest.update(capsule_path.read_bytes())
                 for tree in ("src", "configs"):
                     tree_dir = root / tree
                     if tree_dir.is_dir():
@@ -608,6 +611,11 @@ class KaggleKernelManager:
                     source = root / rel
                     if source.is_dir():
                         shutil.copytree(source, bundle_base / rel, dirs_exist_ok=True)
+                capsule_source = root / ".ai-harness/research_execution" / (exp_id + ".json")
+                if capsule_source.is_file():
+                    capsule_dest = bundle_base / ".ai-harness/research_execution" / capsule_source.name
+                    capsule_dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(capsule_source, capsule_dest)
                 if not resolved_dataset:
                     # No separate provider dataset: the kernel has no data
                     # mount, so the task data ships inside the code bundle.

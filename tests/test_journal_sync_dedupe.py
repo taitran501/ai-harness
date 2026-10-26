@@ -207,7 +207,7 @@ class ExecuteActionSnapshotReuseTests(unittest.TestCase):
         sess, obs = self.bridge.execute_action(
             action="record_research_decision",
             params={
-                "outcome": "supported",
+                "outcome": "inconclusive",
                 "conclusion": "Baseline verified on fixture workspace.",
             },
         )

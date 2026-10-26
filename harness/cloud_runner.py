@@ -186,6 +186,15 @@ def _sync_completed_run(project: HarnessProject, exp_id: str) -> Dict[str, Any]:
     context=TaskPluginContext(project.root,project.task_config_path,spec,project.plugin_id or "default")
     plugin=load_task_plugin(project.plugin_id,context)
     validate_run(project.artifacts_dir/exp_id,task_spec=spec,plugin=plugin,expected={"exp_id":exp_id})
+    import yaml
+    cfg = yaml.safe_load((project.artifacts_dir / exp_id / "run_config.yaml").read_text(encoding="utf-8")) or {}
+    rule_id = cfg.get("research", {}).get("decision_rule_id")
+    if rule_id:
+        from harness.decision_rules import evaluate_decision_rule, load_registration
+        registration = load_registration(project, rule_id)
+        evaluate_decision_rule(registration["rule"],
+            {"kind": "full_run", "id": exp_id, "partition": cfg.get("validation", {}).get("partition", "oof")},
+            project=project, task_spec=spec, plugin=plugin, registration=registration)
     journal = TreeJournal(
         journal_path=project.artifacts_dir / "journal.json",
         artifacts_dir=project.artifacts_dir,task_spec=spec,task_plugin=plugin,
@@ -234,6 +243,8 @@ def run_via_modal(
     project = context["project"]
     exp_id = context["exp_id"]
     managed_job_id = job_id
+    from harness.decision_rules import prepare_remote_research
+    prepare_remote_research(project, context["config_rel"])
     job_id = job_id or f"modal_{exp_id}"
     if managed_job_id:
         update_worker_state(
@@ -376,6 +387,9 @@ def run_via_kaggle(
     context = _prepare_remote_run(config_path, "kaggle", project_root)
     project = context["project"]
     exp_id = context["exp_id"]
+    if not dry_run:
+        from harness.decision_rules import prepare_remote_research
+        prepare_remote_research(project, context["config_rel"])
     # Fail fast on a missing/broken kaggle CLI before any upload or push.
     KaggleKernelManager.ensure_cli_ready()
     managed_job_id = job_id

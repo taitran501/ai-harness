@@ -65,7 +65,7 @@ ENTRY_POINTS: List[Tuple[str, str]] = [
 #: the legacy camelCase and the new snake_case surface read identically.
 FACADE_METHODS: List[Tuple[str, str]] = [
     ("list_submissions", "List competition submissions (normalised: .public_score, .date, .status, …)."),
-    ("submit_submission", "Submit a file or a code-comp kernel output; returns a normalised ref."),
+    ("submit_submission", "Guarded submit: requires an internal single-use DispatchPermit; use tracker.dispatch with workspace/evidence/approval."),
     ("get_competition", "Fetch competition details (deadline, metric, rules, rank, is_code_competition)."),
     ("list_competitions", "List competitions (normalised: .ref, .category, .deadline, .reward)."),
     ("get_leaderboard", "Fetch competition leaderboard entries (rank, team, score)."),

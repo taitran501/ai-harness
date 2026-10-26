@@ -26,7 +26,76 @@ from tools.audit_gate import (
     audit_prediction_integrity,
     compute_continuous_significance,
     compute_diff_metrics,
+    check_prediction_diversity,
+    align_prediction_frames,
 )
+
+
+class TestPredictionDiversity(unittest.TestCase):
+    spec = {"id_column": "id", "prediction_columns": {"score": "continuous"}}
+
+    def receipt(self, a, b, spec=None):
+        return check_prediction_diversity(a, [{"id": "prior", "frame": b}], spec=spec or self.spec)
+
+    def test_rank_preserving_jitter_and_reordered_rows_are_near_duplicate(self):
+        base = pd.DataFrame({"id": range(20), "score": np.arange(20) / 20})
+        candidate = base.copy()
+        candidate.score += .00001
+        result = self.receipt(candidate.sample(frac=1, random_state=1), base)
+        self.assertEqual(result["status"], "near_duplicate")
+        self.assertAlmostEqual(result["maximum_similarity"], 1)
+
+    def test_signed_negative_correlation_is_diverse(self):
+        a = pd.DataFrame({"id": range(5), "score": range(5)})
+        b = a.copy()
+        b.score = -b.score
+        self.assertEqual(self.receipt(a, b)["status"], "diverse")
+
+    def test_all_prior_references_are_checked(self):
+        a = pd.DataFrame({"id": range(5), "score": range(5)})
+        b = a.copy()
+        b.score = -b.score
+        receipt = check_prediction_diversity(a, [{"id": "first", "frame": b}, {"id": "oldest", "frame": a}], spec=self.spec)
+        self.assertEqual(receipt["status"], "near_duplicate")
+        self.assertEqual(receipt["reference_count"], 2)
+
+    def test_multioutput_requires_all_columns_for_near_duplicate(self):
+        spec = {"id_column": "id", "prediction_columns": {"a": "continuous", "b": "continuous"}}
+        a = pd.DataFrame({"id": range(5), "a": range(5), "b": range(5)})
+        b = a.copy()
+        b.b = -b.b
+        result = self.receipt(a, b, spec)
+        self.assertEqual(result["status"], "diverse")
+        self.assertEqual(len(result["comparisons"][0]["columns"]), 2)
+
+    def test_distinct_constants_are_inconclusive(self):
+        a = pd.DataFrame({"id": range(5), "score": [1.] * 5})
+        b = a.copy()
+        b.score = 2.
+        self.assertEqual(self.receipt(a, b)["status"], "inconclusive")
+        self.assertEqual(self.receipt(a, a)["status"], "near_duplicate")
+
+    def test_duplicate_missing_and_typed_id_mismatch_rejected(self):
+        a = pd.DataFrame({"id": range(5), "score": range(5)})
+        for b in (a.iloc[:-1], pd.concat([a, a.iloc[:1]]), a.assign(id=a.id.astype(str)), a.assign(fold=0)):
+            with self.assertRaisesRegex(ValueError, "IDENTITY_MISMATCH"):
+                align_prediction_frames(a, b, ["id"])
+
+    def test_numeric_class_ids_use_disagreement(self):
+        spec = {"id_column": "id", "prediction_columns": {"label": "discrete"}}
+        a = pd.DataFrame({"id": range(5), "label": [0, 1, 2, 0, 1]})
+        b = a.assign(label=[2, 1, 0, 2, 1])
+        result = self.receipt(a, b, spec)
+        self.assertEqual(result["metric"], "exact_disagreement")
+        self.assertIsNone(result["maximum_similarity"])
+        self.assertEqual(result["status"], "diverse")
+
+    def test_missing_history_and_nonfinite_predictions_fail_closed(self):
+        a = pd.DataFrame({"id": range(5), "score": range(5)})
+        with self.assertRaisesRegex(ValueError, "HISTORY_INCOMPLETE"):
+            check_prediction_diversity(a, [{"id": "missing"}], spec=self.spec)
+        with self.assertRaisesRegex(ValueError, "NONFINITE"):
+            self.receipt(a.assign(score=np.inf), a)
 
 
 def make_task_spec(

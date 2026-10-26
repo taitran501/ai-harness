@@ -103,7 +103,7 @@ class ResearchTraceTests(unittest.TestCase):
         self.memory.record_decision(insight_id=insight["id"], outcome="inconclusive", evidence=["first"],
             conclusion="Recall improved without full gain", lesson="Need fold stability", next_action="Measure another seed")
         second = self.full("second", insight["id"], c=2)
-        self.memory.record_decision(insight_id=insight["id"], outcome="supported", evidence=["second"],
+        self.memory.record_decision(insight_id=insight["id"], outcome="inconclusive", evidence=["second"],
             conclusion="Second configuration measured a gain", lesson="Separate seed variance from intervention", next_action="Review candidate evidence")
         self.assertEqual(self.memory.context()["unreviewed_result_count"], 0)
         self.assertEqual(self.memory.trace(insight["id"])["state"]["unreviewed_result_count"], 0)

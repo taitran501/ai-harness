@@ -820,6 +820,8 @@ class CloudJobManager:
                     audit_cmd = [
                         sys.executable,
                         str(_find_script("tools/audit_gate.py")),
+                        "--receipt-scope", "validation",
+                        "--project-root", str(self.project_root),
                         "--candidate",
                         str(candidate_csv),
                         "--output-zip",

@@ -33,6 +33,13 @@ class SubmissionEntry:
     receipt_path: str = ""
     notes: str = ""
     divergence_warning: bool = False
+    gate_receipt_id: Optional[str] = None
+    payload_sha256: Optional[str] = None
+    prediction_sha256: Optional[str] = None
+    dispatch_intent_id: Optional[str] = None
+    approval_id: Optional[str] = None
+    official_observation_id: Optional[str] = None
+    official_score_source: str = "declared"
 
 
 class SubmissionManager:
@@ -270,6 +277,8 @@ class SubmissionManager:
 
             receipt = {
                 "status": "PASS",
+                "scope": "validation",
+                "dispatch_authorized": False,
                 "plugin_id": getattr(plugin, "plugin_id", "unknown"),
                 "plugin_version": getattr(plugin, "version", "unknown"),
                 "source_predictions": str(source),
@@ -289,6 +298,10 @@ class SubmissionManager:
                 receipt_path=str(receipt_path),
                 notes=notes,
             )
+            from harness.artifacts import sha256
+            from harness.audit_gate import semantic_prediction_hash
+            entry.payload_sha256 = sha256(final_path)
+            entry.prediction_sha256 = semantic_prediction_hash(predictions, plugin_context.task_spec)
             from harness.io_utils import atomic_write_json
 
             atomic_write_json(
@@ -430,6 +443,21 @@ class SubmissionManager:
             entry.notes = (entry.notes + f" | Portal Ref: {portal_reference}").strip(
                 " | "
             )
+        self.save()
+        return entry
+
+    def record_official_observation(self, sub_id, *, client, provider_ref, partition="public"):
+        from harness.submission_gate import SubmissionGate
+        entry = self.submissions[sub_id]
+        if not entry.dispatch_intent_id:
+            raise ValueError("Provider observations require a verified dispatch intent")
+        observation = SubmissionGate(self.project_root).resolve_official_score(entry.dispatch_intent_id,
+            client=client, provider_ref=provider_ref, partition=partition)
+        entry = self.record_official_score(sub_id, primary_score=observation["score"], split_type=partition)
+        entry.official_observation_id = observation["observation_id"]
+        entry.official_score_source = "provider_api"
+        # Keep provider precision; display formatting is a separate concern.
+        entry.official_scores[observation["metric"]] = observation["score"]
         self.save()
         return entry
 

@@ -146,14 +146,14 @@ class TestAgentSessionResilience(unittest.TestCase):
         sess, obs = bridge.execute_action(
             action="record_research_decision",
             params={
-                "decision": "accepted",
+                "decision": "mixed",
                 "lesson": "Route delay interactions reliably improve validation AUC.",
                 "next_action": "Promote candidate to baseline anchor",
                 "evidence": "Kaggle LB scored 0.96213 with global rank 19",
             },
         )
         self.assertEqual(obs.status, "SUCCESS")
-        self.assertEqual(obs.data["outcome"], "supported")
+        self.assertEqual(obs.data["outcome"], "inconclusive")
 
         # 4. record_research_checkpoint via alias 'checkpoint'
         sess, obs = bridge.execute_action(

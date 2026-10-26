@@ -206,7 +206,7 @@ class TestAgentBridge(unittest.TestCase):
     def test_soft_stop_reassess_recommended_and_spec_min_improvement(self) -> None:
         # 1. Verify spec-driven min_meaningful_improvement resolution from configs/task.yaml
         spec_min = self.bridge._get_spec_min_improvement()
-        self.assertAlmostEqual(spec_min, 0.002, places=4)
+        self.assertEqual(spec_min, 0.0)  # Unknown/composite Score has no unitless default.
 
         # 2. Verify consecutive rejections trigger REASSESS_RECOMMENDED (soft stop) without blocking execution
         sess = self.bridge.start_session(

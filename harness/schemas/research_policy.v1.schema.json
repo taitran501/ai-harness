@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-harness:research-policy:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_id",
+    "minimum_effect",
+    "confidence_level",
+    "max_comparisons",
+    "bootstrap_resamples",
+    "seed",
+    "max_spearman",
+    "stagnation_patience",
+    "near_duplicate_policy",
+    "require_confirmation_for_adaptive_search"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "policy_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "minimum_effect": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "scale"
+          ],
+          "properties": {
+            "value": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "scale": {
+              "enum": [
+                "absolute",
+                "relative"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "confidence_level": {
+      "type": "number",
+      "exclusiveMinimum": 0.5,
+      "exclusiveMaximum": 1
+    },
+    "max_comparisons": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "bootstrap_resamples": {
+      "type": "integer",
+      "minimum": 1000
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_spearman": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "stagnation_patience": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "near_duplicate_policy": {
+      "const": "require_independent_promotion"
+    },
+    "require_confirmation_for_adaptive_search": {
+      "type": "boolean"
+    }
+  }
+}

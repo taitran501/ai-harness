@@ -95,7 +95,7 @@ class TestResearchMemoryScopeStability(unittest.TestCase):
                          "legacy-scope entry lost after scope-key migration")
         insight_id = self.memory.entries()[-1]["id"]
         self.memory.record_decision(
-            outcome="supported", conclusion="c", insight_id=insight_id,
+            outcome="inconclusive", conclusion="c", insight_id=insight_id,
             next_action="keep probing", lesson="legacy entries survive migration"
         )
         # After the first migrated write, the legacy scope is attributed to

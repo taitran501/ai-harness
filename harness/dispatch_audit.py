@@ -42,6 +42,37 @@ _KIND_SUBMISSION = "submission"
 _KIND_KERNEL = "kernel"
 
 
+def read_submission_events(project_root):
+    """Strict authoritative history; corruption cannot establish an empty portfolio."""
+    from harness.policy_schema import validate_document
+    path = Path(project_root) / ".ai-harness" / "submission_events.jsonl"
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            raise ValueError("HISTORY_INCOMPLETE: empty dispatch event")
+        record = json.loads(line)
+        validate_document("dispatch_event", record)
+        events.append(record)
+    return events
+
+
+def append_dispatch_event(project_root, record):
+    """Durably append before sending; unlike the v0 advisory log this must succeed."""
+    from harness.policy_schema import validate_document
+    from harness.state_store import workspace_lock
+    validate_document("dispatch_event", record)
+    directory = Path(project_root) / ".ai-harness"
+    with workspace_lock(directory):
+        read_submission_events(project_root)
+        with (directory / "submission_events.jsonl").open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(record, allow_nan=False, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    return record
+
+
 def sha256_file(path: Optional[str | Path]) -> Optional[str]:
     """Stream-hash a local file, or ``None`` when it is missing/unreadable.
 

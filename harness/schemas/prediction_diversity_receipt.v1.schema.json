@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-harness:prediction-diversity-receipt:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "check",
+    "status",
+    "metric",
+    "max_spearman",
+    "hard_label_min_disagreement",
+    "candidate_prediction_sha256",
+    "comparison_identity_sha256",
+    "history_snapshot_sha256",
+    "identity_columns",
+    "prediction_columns",
+    "rows",
+    "reference_count",
+    "comparisons",
+    "nearest_reference_id",
+    "maximum_similarity",
+    "reason_codes",
+    "computed_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "check": {
+      "const": "prediction_diversity"
+    },
+    "status": {
+      "$ref": "#/$defs/status"
+    },
+    "metric": {
+      "enum": [
+        "spearman",
+        "exact_disagreement",
+        "mixed",
+        "none"
+      ]
+    },
+    "max_spearman": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1,
+      "default": 0.995
+    },
+    "hard_label_min_disagreement": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "candidate_prediction_sha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "comparison_identity_sha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "history_snapshot_sha256": {
+      "$ref": "#/$defs/hash"
+    },
+    "identity_columns": {
+      "$ref": "#/$defs/columns"
+    },
+    "prediction_columns": {
+      "$ref": "#/$defs/columns"
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "reference_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "comparisons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/comparison"
+      }
+    },
+    "nearest_reference_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "maximum_similarity": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": -1,
+      "maximum": 1
+    },
+    "reason_codes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "RANK_SIMILARITY_EXCEEDS_LIMIT",
+          "DISAGREEMENT_BELOW_LIMIT",
+          "SEMANTIC_DUPLICATE",
+          "UNDEFINED_CORRELATION",
+          "INSUFFICIENT_ROWS",
+          "IDENTITY_MISMATCH",
+          "SCHEMA_MISMATCH",
+          "NONFINITE_PREDICTION",
+          "HISTORY_INCOMPLETE",
+          "UNSUPPORTED_REPRESENTATION",
+          "INITIAL_PORTFOLIO"
+        ]
+      }
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "status": {
+      "enum": [
+        "diverse",
+        "near_duplicate",
+        "not_applicable",
+        "inconclusive"
+      ]
+    },
+    "columns": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "columnResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "method",
+        "value",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "method": {
+          "enum": [
+            "spearman",
+            "exact_disagreement"
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1,
+          "maximum": 1
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "exact_disagreement"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "diverse",
+                  "near_duplicate"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference_id",
+        "reference_prediction_sha256",
+        "source",
+        "rows",
+        "columns",
+        "status"
+      ],
+      "properties": {
+        "reference_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reference_prediction_sha256": {
+          "$ref": "#/$defs/hash"
+        },
+        "source": {
+          "enum": [
+            "incumbent",
+            "dispatched",
+            "prepared"
+          ]
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/columnResult"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        }
+      }
+    }
+  }
+}

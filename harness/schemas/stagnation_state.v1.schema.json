@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-harness:stagnation-state:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "comparison_identity_sha256",
+    "policy_sha256",
+    "generation",
+    "state",
+    "patience",
+    "consecutive_failures",
+    "incumbent_evidence_ref",
+    "incumbent_evaluation_id",
+    "last_processed_result_key",
+    "trigger_evaluation_ids",
+    "paused_at",
+    "recovery_probe_id",
+    "resume_evaluation_id",
+    "override_id",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "comparison_identity_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "policy_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "state": {
+      "enum": [
+        "active",
+        "paused_for_stagnation"
+      ]
+    },
+    "patience": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "consecutive_failures": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "incumbent_evidence_ref": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id",
+            "partition"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "full_run",
+                "official_submission"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "partition": {
+              "enum": [
+                "oof",
+                "holdout",
+                "confirmation",
+                "public",
+                "private"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "incumbent_evaluation_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "last_processed_result_key": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      ]
+    },
+    "trigger_evaluation_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "paused_at": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(Z|[+]00:00)$"
+        }
+      ]
+    },
+    "recovery_probe_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "resume_evaluation_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "override_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(Z|[+]00:00)$"
+    }
+  }
+}

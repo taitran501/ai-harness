@@ -53,6 +53,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_dispatch.add_argument("competition", help="Kaggle competition slug.")
     p_dispatch.add_argument("file", help="Submission file (or kernel output filename).")
     p_dispatch.add_argument("--message", "-m", default="", help="Leaderboard label.")
+    p_dispatch.add_argument("--project-root", default=None)
+    p_dispatch.add_argument("--exp-id", default=None, help="Sealed run containing test predictions.")
+    p_dispatch.add_argument("--rule-id", default=None)
+    p_dispatch.add_argument("--approval-id", default=None)
+    p_dispatch.add_argument("--receipt", default=None, help="Receipt to inspect; dispatch always re-evaluates live evidence.")
+    p_dispatch.add_argument("--user-approved", action="store_true", help="Operator attestation for dispatch of these exact bytes.")
+    p_dispatch.add_argument("--dry-run", action="store_true")
     p_dispatch.add_argument(
         "--kernel", "-k", default=None,
         help="Code competition: public kernel slug (owner/kernel).",
@@ -101,9 +108,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
     args = parser.parse_args(argv)
-    tracker = KaggleLeaderboardTracker()
 
     try:
+        tracker = KaggleLeaderboardTracker()
         if args.action == "dispatch":
             payload = tracker.dispatch(
                 args.competition,
@@ -111,6 +118,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 args.message,
                 kernel=args.kernel,
                 kernel_version=args.kernel_version,
+                project_root=args.project_root, exp_id=args.exp_id, rule_id=args.rule_id,
+                approval_id=args.approval_id, user_approved=args.user_approved, dry_run=args.dry_run,
             )
             _print_payload({"ok": True, "action": "dispatch", **payload})
             if payload.get("duplicate_warning"):
@@ -186,7 +195,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             })
             return 0
     except Exception as exc:  # noqa: BLE001 - surface any dispatch/poll failure as JSON.
-        _print_payload({"ok": False, "action": args.action, "error": str(exc)})
+        receipt = getattr(exc, "receipt", None) or {}
+        _print_payload({"ok": False, "action": args.action, "error": str(exc),
+                        "error_code": getattr(exc, "code", "SUBMISSION_ERROR"),
+                        "blockers": getattr(exc, "blockers", []), "receipt_id": receipt.get("receipt_id")})
         return 1
 
     parser.error(f"unknown action: {args.action}")

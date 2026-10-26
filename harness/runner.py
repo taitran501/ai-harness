@@ -295,6 +295,17 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             "python_version": platform.python_version(),
             "seed": self.seed,
         }
+        if self.run_kind == "full":
+            from harness.decision_rules import reserve_comparison_slot, validate_remote_research_capsule
+            from harness.stagnation import StagnationController
+            research = self.cfg.get("research", {})
+            self.remote_research_execution = validate_remote_research_capsule(self.project, self.config_path, self.cfg)
+            if not self.remote_research_execution:
+                blocker = StagnationController(self.project).check_action("run_full_validation",
+                    recovery_probe_id=research.get("recovery_probe_id"), candidate_id=self.cfg["experiment"]["id"])
+                if blocker:
+                    raise ValueError("STAGNATION_PAUSE: " + blocker["message"])
+                reserve_comparison_slot(self.project, self.task_spec, self.cfg, plugin=self.task_plugin)
         (self.exp_dir / "run_config.yaml").write_text(
             yaml.safe_dump(self.cfg, sort_keys=False), encoding="utf-8"
         )
@@ -1046,6 +1057,13 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 task_plugin=self.task_plugin,
             )
             journal.sync_from_artifacts()
+            research = self.cfg.get("research", {})
+            if research.get("decision_rule_id") and not getattr(self, "remote_research_execution", False):
+                from harness.decision_rules import evaluate_decision_rule, load_registration
+                registration = load_registration(self.project, research["decision_rule_id"])
+                evaluate_decision_rule(registration["rule"],
+                    {"kind": "full_run", "id": self.exp_id, "partition": self.cfg.get("validation", {}).get("partition", "oof")},
+                    project=self.project, task_spec=self.task_spec, plugin=self.task_plugin, registration=registration)
         return result
 
 

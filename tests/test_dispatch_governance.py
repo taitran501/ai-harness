@@ -1,24 +1,4 @@
-"""Dispatch governance (PR-C): audit trail + duplicate warning.
-
-The reviewer finding (C2): ``ai-harness submission dispatch`` and
-``ai-harness dispatch-kernel`` drove the Kaggle API in-process with no
-session, no ledger, and no trace — a double-submission (or a pushed
-kernel that was never tracked) left no evidence behind, unlike the
-governed Bridge ``prepare_submission`` path.
-
-These tests pin the additive governance contract:
-
-1. Every harness-native dispatch appends one JSONL entry to
-   ``<workspace>/.ai-harness/dispatch_log.jsonl`` (append-only, outside
-   any sealed bundle) with the *content hash* of what was sent.
-2. Re-dispatching an identical file to the same competition (or the same
-   notebook to the same kernel id) raises a duplicate warning — but does
-   NOT block (v1 is advisory, never a hard block).
-3. No project context (no explicit root, no attached workspace) → the
-   dispatch still succeeds and NO log is written anywhere — in
-   particular never into the installed framework checkout.
-4. Audit failure never breaks the dispatch.
-"""
+"""Submission sends fail closed; execution kernel pushes retain advisory history."""
 from __future__ import annotations
 
 import contextlib
@@ -46,7 +26,12 @@ class _FakeSubmitClient:
     def __init__(self):
         self.calls = []
 
-    def submit_submission(self, file_name, message, competition, kernel=None, kernel_version=None):
+    def get_submission_limits(self, competition):
+        return dict(daily_quota=5, num_today=0, has_remaining_quota=True)
+
+    def submit_submission(self, file_name, message, competition, kernel=None, kernel_version=None, *, _permit=None):
+        from harness.submission_gate import consume_dispatch_permit
+        consume_dispatch_permit(_permit, file_name=file_name, competition=competition, kernel=kernel, kernel_version=kernel_version)
         self.calls.append(
             dict(file_name=file_name, message=message, competition=competition,
                  kernel=kernel, kernel_version=kernel_version)
@@ -95,117 +80,62 @@ def _log_entries(root: Path) -> list:
 
 
 class SubmissionAuditTests(unittest.TestCase):
+    """Real shared gate with a fake transport; kernel pushes retain v0 logging."""
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="aih-dispatch-gov-")
-        self.root = _attached_workspace(Path(self.tmp.name))
+        import shutil
+        import pandas as pd
+        from tests.fixtures import workspace_with_verified_pair
+        from harness.submission_gate import SubmissionGate
+        self.root, _ = workspace_with_verified_pair()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.gate = SubmissionGate(self.root)
         self.client = _FakeSubmitClient()
-        self.tracker = KaggleLeaderboardTracker(client=self.client, sleep_fn=lambda s: None)
-        self.sub = self.root / "submission.csv"
-        self.sub.write_text("id,target\n1,0.1\n2,0.9\n", encoding="utf-8")
-        self.env = {"HARNESS_PROJECT_ROOT": str(self.root)}
+        self.tracker = KaggleLeaderboardTracker(client=self.client, sleep_fn=lambda _: None)
+        self.sub = self.gate.plugin.build_submission(self.gate.context,
+            pd.read_csv(self.gate.project.artifacts_dir / 'control/test_predictions.csv'), self.root / 'submission.csv')
 
-    def tearDown(self):
-        self.tmp.cleanup()
+    def send(self, **options):
+        return self.tracker.dispatch('comp-a', str(self.sub), 'Exp 1', project_root=self.root,
+            exp_id='control', user_approved=True, **options)
 
-    def test_dispatch_appends_audit_entry_with_content_hash(self):
-        with mock.patch.dict(os.environ, self.env):
-            result = self.tracker.dispatch("comp-a", str(self.sub), "Exp 1")
-        self.assertEqual(result["ref"], 1001)
-        entries = _log_entries(self.root)
-        self.assertEqual(len(entries), 1)
-        e = entries[0]
-        self.assertEqual(e["kind"], "submission")
-        self.assertEqual(e["competition"], "comp-a")
-        self.assertEqual(e["ref"], 1001)
-        self.assertEqual(e["file_sha256"], _sha256(self.sub.read_bytes()))
-        self.assertTrue(e["ts"])
-        self.assertIn("operator", e)
-        self.assertIn("cwd", e)
+    def test_dispatch_records_durable_intent_before_provider_call(self):
+        result = self.send()
+        events = dispatch_audit.read_submission_events(self.root)
+        self.assertEqual([e['event'] for e in events], ['prepared', 'sending', 'submitted'])
+        self.assertEqual(result['ref'], 1001)
+        self.assertEqual(events[-1]['payload_sha256'], _sha256(self.sub.read_bytes()))
 
-    def test_identical_resubmission_warns_but_still_dispatches(self):
-        with mock.patch.dict(os.environ, self.env):
-            r1 = self.tracker.dispatch("comp-a", str(self.sub), "Exp 1")
-            r2 = self.tracker.dispatch("comp-a", str(self.sub), "Exp 1 (retry)")
-        self.assertNotIn("duplicate_warning", r1)
-        self.assertIn("duplicate_warning", r2)
-        self.assertEqual(r2["duplicate_of"]["ref"], r1["ref"])
-        self.assertEqual(len(self.client.calls), 2, "v1 must not hard-block")
-        self.assertEqual(_log_entries(self.root)[1]["duplicate_of"]["ref"], 1001)
-
-    def test_same_file_different_competition_no_warning(self):
-        with mock.patch.dict(os.environ, self.env):
-            _ = self.tracker.dispatch("comp-a", str(self.sub), "")
-            r2 = self.tracker.dispatch("comp-b", str(self.sub), "")
-        self.assertNotIn("duplicate_warning", r2)
-
-    def test_changed_file_no_warning(self):
-        with mock.patch.dict(os.environ, self.env):
-            self.tracker.dispatch("comp-a", str(self.sub), "")
-        self.sub.write_text("id,target\n1,0.5\n2,0.5\n", encoding="utf-8")
-        with mock.patch.dict(os.environ, self.env):
-            r2 = self.tracker.dispatch("comp-a", str(self.sub), "")
-        self.assertNotIn("duplicate_warning", r2)
-
-    def test_missing_file_dispatches_with_null_sha_no_crash(self):
-        with mock.patch.dict(os.environ, self.env):
-            result = self.tracker.dispatch("comp-a", str(self.root / "ghost.csv"), "")
-        self.assertEqual(result["ref"], 1001)
-        entries = _log_entries(self.root)
-        self.assertEqual(entries[0]["file_sha256"], None)
-
-    def test_ledger_duplicate_detected(self):
-        # A previously ledger-registered submission with identical content.
-        sub_dir = self.root / "submissions"
-        sub_dir.mkdir()
-        archive = sub_dir / "sub_001_archive.csv"
-        archive.write_text(self.sub.read_text(encoding="utf-8"), encoding="utf-8")
-        (sub_dir / "registry.json").write_text(
-            json.dumps({"submissions": [{
-                "id": "sub_001", "exp_id": "exp_001", "created_at": "2026-01-01",
-                "status": "SUBMITTED_PENDING", "local_cv_scores": {},
-                "official_scores": {}, "score_deltas": {},
-                "candidate_path": str(self.sub), "baseline_path": None,
-                "archive_path": str(archive), "receipt_path": "",
-                "notes": "", "divergence_warning": False,
-            }]}),
-            encoding="utf-8",
-        )
-        with mock.patch.dict(os.environ, self.env):
-            result = self.tracker.dispatch("comp-a", str(self.sub), "")
-        self.assertIn("duplicate_warning", result)
-        self.assertEqual(result["duplicate_of"]["source"], "ledger")
-        self.assertEqual(result["duplicate_of"]["sub_id"], "sub_001")
-
-    def test_audit_failure_never_breaks_dispatch(self):
-        with mock.patch.dict(os.environ, self.env), mock.patch.object(
-            dispatch_audit, "record_dispatch", side_effect=OSError("disk full")
-        ), mock.patch(
-            "harness.endgame_submission.record_dispatch", side_effect=OSError("disk full")
-        ):
-            result = self.tracker.dispatch("comp-a", str(self.sub), "")
-        self.assertEqual(result["ref"], 1001)
+    def test_identical_resubmission_is_blocked_before_provider_call(self):
+        from harness.submission_gate import SubmissionGateError
+        self.send()
+        with self.assertRaisesRegex(SubmissionGateError, 'DUPLICATE_PAYLOAD'):
+            self.send()
         self.assertEqual(len(self.client.calls), 1)
 
-    def test_no_project_context_dispatches_without_any_log(self):
-        bare = Path(self.tmp.name) / "bare"
-        bare.mkdir()
-        ghost = bare / "s.csv"
-        ghost.write_text("id,target\n1,0.2\n", encoding="utf-8")
-        checkout_log = Path(__file__).resolve().parent.parent / ".ai-harness" / "dispatch_log.jsonl"
-        pre_checkout = checkout_log.is_file()
-        saved_cwd = os.getcwd()
-        # strip the env var so resolution cannot see the temp workspace
-        env = {k: v for k, v in os.environ.items() if k != "HARNESS_PROJECT_ROOT"}
-        with mock.patch.dict(os.environ, env, clear=True):
-            os.chdir(bare)
-            try:
-                result = self.tracker.dispatch("comp-a", str(ghost), "")
-            finally:
-                os.chdir(saved_cwd)
-        self.assertEqual(result["ref"], 1001)
-        self.assertFalse((bare / ".ai-harness").exists(), "no log in bare dir")
-        self.assertEqual(checkout_log.is_file(), pre_checkout,
-                         "must never write into the framework checkout")
+    def test_changed_file_requires_new_sealed_evidence(self):
+        from harness.submission_gate import SubmissionGateError
+        self.send()
+        self.sub.write_text('id,label\n40,1\n')
+        with self.assertRaisesRegex(SubmissionGateError, 'PAYLOAD_EVIDENCE_MISMATCH'):
+            self.send()
+        self.assertEqual(len(self.client.calls), 1)
+
+    def test_missing_file_is_blocked(self):
+        self.sub.unlink()
+        with self.assertRaisesRegex(ValueError, 'PAYLOAD_MISSING'):
+            self.send()
+        self.assertEqual(self.client.calls, [])
+
+    def test_durable_audit_failure_blocks_provider(self):
+        with mock.patch('harness.submission_gate.append_dispatch_event', side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(OSError, 'disk full'):
+                self.send()
+        self.assertEqual(self.client.calls, [])
+
+    def test_missing_workspace_cannot_dispatch_through_fake_client(self):
+        with self.assertRaisesRegex(ValueError, 'WORKSPACE_REQUIRED'):
+            self.tracker.dispatch('comp-a', str(self.sub), project_root=self.root / 'bare')
+        self.assertEqual(self.client.calls, [])
 
 
 class KernelAuditTests(unittest.TestCase):
@@ -252,38 +182,18 @@ class KernelAuditTests(unittest.TestCase):
 
 
 class CliWarningTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="aih-cli-gov-")
-        self.root = _attached_workspace(Path(self.tmp.name))
-        self.client = _FakeSubmitClient()
-        self.tracker = KaggleLeaderboardTracker(client=self.client, sleep_fn=lambda s: None)
-        self.sub = self.root / "submission.csv"
-        self.sub.write_text("id,target\n1,0.3\n", encoding="utf-8")
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_cli_dispatch_duplicate_warning_on_stderr_not_stdout(self):
-        def _run():
-            out, err = io.StringIO(), io.StringIO()
-            with mock.patch.object(
-                submission_dispatch, "KaggleLeaderboardTracker", return_value=self.tracker
-            ), mock.patch.dict(os.environ, {"HARNESS_PROJECT_ROOT": str(self.root)}), \
-                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                code = submission_dispatch.main(["dispatch", "comp-a", str(self.sub)])
-            return code, json.loads(out.getvalue()), err.getvalue()
-
-        c1, p1, e1 = _run()
-        self.assertEqual(c1, 0)
-        self.assertTrue(p1["ok"])
-        self.assertNotIn("duplicate_warning", p1)
-        self.assertEqual(e1, "")
-
-        c2, p2, e2 = _run()
-        self.assertEqual(c2, 0, "warning is advisory: exit code stays 0")
-        self.assertTrue(p2["ok"])
-        self.assertIn("duplicate_warning", p2, "payload carries the warning")
-        self.assertIn("duplicate", e2.lower(), "human-readable warning on stderr")
+    def test_cli_reports_blocked_unaudited_dispatch_as_json(self):
+        client = _FakeSubmitClient()
+        tracker = KaggleLeaderboardTracker(client=client, sleep_fn=lambda _: None)
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(submission_dispatch, 'KaggleLeaderboardTracker', return_value=tracker), contextlib.redirect_stdout(out):
+                code = submission_dispatch.main(['dispatch', 'comp-a', 'missing.csv', '--project-root', tmp])
+        payload = json.loads(out.getvalue())
+        self.assertEqual(code, 1)
+        self.assertFalse(payload['ok'])
+        self.assertEqual(payload['error_code'], 'WORKSPACE_REQUIRED')
+        self.assertEqual(client.calls, [])
 
 
 if __name__ == "__main__":

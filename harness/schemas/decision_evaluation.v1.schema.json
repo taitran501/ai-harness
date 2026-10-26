@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-harness:decision-evaluation:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evaluation_id",
+    "rule_id",
+    "rule_sha256",
+    "policy_sha256",
+    "comparison_identity_sha256",
+    "candidate",
+    "control",
+    "evidence_sha256",
+    "metric",
+    "direction",
+    "candidate_score",
+    "control_score",
+    "gain",
+    "minimum_effect",
+    "threshold_origin",
+    "uncertainty",
+    "comparison_slot",
+    "preregistered",
+    "independent_confirmation",
+    "checks",
+    "outcome",
+    "reason_codes",
+    "evaluated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "evaluation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rule_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rule_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "policy_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "comparison_identity_sha256": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      ]
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "partition"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "full_run",
+            "official_submission"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "partition": {
+          "enum": [
+            "oof",
+            "holdout",
+            "confirmation",
+            "public",
+            "private"
+          ]
+        }
+      }
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "partition"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "full_run",
+            "official_submission"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "partition": {
+          "enum": [
+            "oof",
+            "holdout",
+            "confirmation",
+            "public",
+            "private"
+          ]
+        }
+      }
+    },
+    "evidence_sha256": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate",
+        "control",
+        "truth"
+      ],
+      "properties": {
+        "candidate": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          ]
+        },
+        "control": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          ]
+        },
+        "truth": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          ]
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "subtask_id",
+        "name"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "primary",
+            "subtask"
+          ]
+        },
+        "subtask_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "primary"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "subtask_id": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "subtask_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "direction": {
+      "enum": [
+        "maximize",
+        "minimize"
+      ]
+    },
+    "candidate_score": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "control_score": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "gain": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "minimum_effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "scale"
+      ],
+      "properties": {
+        "value": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "scale": {
+          "enum": [
+            "absolute",
+            "relative"
+          ]
+        }
+      }
+    },
+    "threshold_origin": {
+      "type": "string",
+      "minLength": 1
+    },
+    "uncertainty": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "unit",
+            "units",
+            "resamples",
+            "seed",
+            "alpha",
+            "lower_bound",
+            "upper_bound",
+            "invalid_resamples"
+          ],
+          "properties": {
+            "method": {
+              "enum": [
+                "paired_bootstrap",
+                "plugin_paired"
+              ]
+            },
+            "unit": {
+              "enum": [
+                "row",
+                "group",
+                "query",
+                "block"
+              ]
+            },
+            "units": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "resamples": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "alpha": {
+              "type": "number"
+            },
+            "lower_bound": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "upper_bound": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "invalid_resamples": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "comparison_slot": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "family_id",
+            "index",
+            "max_comparisons"
+          ],
+          "properties": {
+            "family_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_comparisons": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "preregistered": {
+      "type": "boolean"
+    },
+    "independent_confirmation": {
+      "type": "boolean"
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": [
+          "pass",
+          "fail",
+          "inconclusive",
+          "not_required"
+        ]
+      }
+    },
+    "outcome": {
+      "enum": [
+        "supported",
+        "rejected",
+        "inconclusive"
+      ]
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "evaluated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(Z|[+]00:00)$"
+    }
+  }
+}

@@ -38,7 +38,10 @@ class ActionHandlerMixin:
         t0,
     ) -> ActionObservation:
         memory = self._research_memory()
-        if act == "search_research_memory":
+        if act == "register_recovery_probe":
+            from harness.stagnation import StagnationController
+            result = StagnationController(self.project).register_recovery_probe(**params)
+        elif act == "search_research_memory":
             result = {"matches": memory.search(params.get("query", ""), params.get("limit", 8))}
         elif act == "record_research_insight":
             # Defensive extraction with rich aliases
@@ -214,7 +217,7 @@ class ActionHandlerMixin:
                 conclusion = f"{conclusion} {extra_note}".strip()
                 evidence = None
             result = memory.record_decision(
-                outcome=outcome,
+                outcome=outcome or None,
                 conclusion=conclusion,
                 evidence=evidence,
                 next_action=next_action,
@@ -222,6 +225,11 @@ class ActionHandlerMixin:
                 lesson=lesson,
                 revisit_when=params.get("revisit_when") or "",
                 session_id=session.session_id,
+                rule_id=params.get("rule_id"),
+                candidate_evidence=params.get("candidate_evidence") or (
+                    {"id": params["candidate_evidence_id"], "kind": params.get("evidence_kind", "full_run"),
+                     "partition": params.get("evidence_partition", "oof")} if params.get("candidate_evidence_id") else None),
+                claimed_outcome=params.get("claimed_outcome"),
             )
         else:
             if not str(params.get("summary") or "").strip() or not str(params.get("next_action") or "").strip():
@@ -1884,9 +1892,7 @@ class ActionHandlerMixin:
             file_name=file_name,
             notes=params.get("notes", ""),
         )
-        session.compute_usage["submissions_used"] = (
-            int(session.compute_usage.get("submissions_used", 0)) + 1
-        )
+        # Packaging is not an external submission; confirmed sends consume quota.
         plugin_label = self.project.plugin_id or "default"
         return ActionObservation(
             step_index=call.step_index,
@@ -1913,17 +1919,18 @@ class ActionHandlerMixin:
             raise ValueError(
                 "Parameter 'sub_id' is required for 'record_external_score'."
             )
-        entry = sub_mgr.record_official_score(
-            sub_id=sub_id,
-            primary_score=(
-                params["primary_score"]
-                if "primary_score" in params
-                else params.get("score")
-            ),
-            scores=params.get("scores") or params.get("custom_scores"),
-            split_type=params.get("split_type", "public"),
-            notes=params.get("notes", ""),
-        )
+        if params.get("provider_ref"):
+            from harness.kaggle_compat import KaggleClient
+            entry = sub_mgr.record_official_observation(sub_id, client=KaggleClient(),
+                provider_ref=params["provider_ref"], partition=params.get("split_type", "public"))
+        else:
+            entry = sub_mgr.record_official_score(
+                sub_id=sub_id,
+                primary_score=(params["primary_score"] if "primary_score" in params else params.get("score")),
+                scores=params.get("scores") or params.get("custom_scores"),
+                split_type=params.get("split_type", "public"),
+                notes=params.get("notes", ""),
+            )
         blockers = (
             [
                 "CV vs LB Divergence detected (significant score delta between LB and Local CV)!"
@@ -1935,7 +1942,7 @@ class ActionHandlerMixin:
             step_index=call.step_index,
             action=act,
             status="SUCCESS",
-            summary=f"Recorded official score for '{sub_id}': {entry.official_scores} (Divergence={entry.divergence_warning}).",
+            summary=f"Recorded external score for '{sub_id}' (source={entry.official_score_source}): {entry.official_scores} (Divergence={entry.divergence_warning}).",
             new_blockers=blockers,
             data=asdict(entry),
             elapsed_seconds=round(time.time() - t0, 3),

@@ -17,6 +17,7 @@ live smoke path (see ``docs/kaggle_execution.md``).
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 from types import SimpleNamespace
 
 from harness.kaggle_compat import (
@@ -283,6 +284,13 @@ class ClientDispatchPathTests(unittest.TestCase):
     facade (file vs code-comp submit, kernels push). Pinning these prevents a
     silent regression on the exact high-level calls the reference advertises.
     """
+
+    def setUp(self):
+        # These tests isolate SDK routing/error normalization. The actual permit
+        # boundary is exercised without mocks by SubmissionGateTests.
+        patcher = mock.patch('harness.submission_gate.consume_dispatch_permit')
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_submit_file_uses_competition_submit(self):
         c = _make_client("kaggle")

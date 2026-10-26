@@ -39,6 +39,7 @@ class TypedActionName(str, Enum):
     RECORD_RESEARCH_CHECKPOINT = "record_research_checkpoint"
     RECORD_RESEARCH_INSIGHT = "record_research_insight"
     PLAN_RESEARCH_PROBE = "plan_research_probe"
+    REGISTER_RECOVERY_PROBE = "register_recovery_probe"
     TRACE_RESEARCH_INSIGHT = "trace_research_insight"
     WRITE_EXPERIMENT_CONFIG = "write_experiment_config"
     UPDATE_WORKSPACE_SETTINGS = "update_workspace_settings"
@@ -80,6 +81,7 @@ MAX_SESSION_OBSERVATIONS = 200
 
 
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
+    "register_recovery_probe": ApprovalTier.AUTO.value,
     TypedActionName.SEARCH_RESEARCH_MEMORY.value: ApprovalTier.AUTO.value,
     TypedActionName.REVIEW_HYPOTHESIS.value: ApprovalTier.AUTO.value,
     TypedActionName.SUGGEST_NEXT_INTERVENTIONS.value: ApprovalTier.AUTO.value,
@@ -256,6 +258,12 @@ _TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName) | frozen
 
 
 TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "register_recovery_probe": {
+        "summary": "Register one bounded recovery probe for a paused comparison group.",
+        "required": ["comparison_identity_sha256", "rule_id", "diagnosis", "mechanism", "stop_rule"],
+        "optional": {"max_runs": 1},
+        "description": "Keeps submissions paused until verified promotion of a preregistered recovery candidate.",
+    },
     "search_research_memory": {
         "summary": "Search persistent research insights and hypotheses by semantic query.",
         "required": ["query"],
@@ -281,7 +289,7 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "stop_rule",
         ],
         "optional": {},
-        "description": "Defines an atomic hypothesis-testing probe with expected observation and decision rules before executing compute.",
+        "description": "Predeclare a structured DecisionRuleV1 mapping before execution; legacy text remains an unverified plan.",
     },
     "trace_research_insight": {
         "summary": "Trace the lineage, probe results, and decisions associated with an insight.",
@@ -291,8 +299,9 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
     },
     "record_research_decision": {
         "summary": "Record an evidence-based decision (keep/discard/pivot) after an experiment.",
-        "required": ["outcome", "conclusion"],
-        "optional": {"evidence": None, "next_action": "", "insight_id": None, "lesson": "", "revisit_when": ""},
+        "required": ["conclusion"],
+        "optional": {"outcome": None, "rule_id": None, "candidate_evidence": None, "claimed_outcome": None,
+                     "evidence": None, "next_action": "", "insight_id": None, "lesson": "", "revisit_when": ""},
         "description": "Documents an empirical decision outcome with takeaway lesson and next step.",
     },
     "record_research_checkpoint": {

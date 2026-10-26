@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-harness:decision-rule:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "metric",
+    "direction",
+    "control",
+    "minimum_effect",
+    "comparator",
+    "score_target",
+    "evidence_requirements",
+    "uncertainty",
+    "multiplicity"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "superiority"
+    },
+    "metric": {
+      "$ref": "#/$defs/metric"
+    },
+    "direction": {
+      "enum": [
+        "maximize",
+        "minimize"
+      ]
+    },
+    "control": {
+      "$ref": "#/$defs/evidenceRef"
+    },
+    "minimum_effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "scale"
+      ],
+      "properties": {
+        "value": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "scale": {
+          "enum": [
+            "absolute",
+            "relative"
+          ]
+        }
+      }
+    },
+    "comparator": {
+      "enum": [
+        "gte",
+        "gt"
+      ]
+    },
+    "score_target": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operator",
+            "value"
+          ],
+          "properties": {
+            "operator": {
+              "enum": [
+                "gte",
+                "gt",
+                "lte",
+                "lt"
+              ]
+            },
+            "value": {
+              "type": "number"
+            }
+          }
+        }
+      ]
+    },
+    "evidence_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "partition",
+        "same_data",
+        "same_splits",
+        "same_scorer",
+        "same_coverage"
+      ],
+      "properties": {
+        "partition": {
+          "enum": [
+            "oof",
+            "holdout",
+            "confirmation",
+            "public",
+            "private"
+          ]
+        },
+        "same_data": {
+          "const": true
+        },
+        "same_splits": {
+          "const": true
+        },
+        "same_scorer": {
+          "const": true
+        },
+        "same_coverage": {
+          "const": true
+        }
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "unit",
+        "unit_column",
+        "stratify_column",
+        "confidence_level",
+        "resamples",
+        "seed"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "paired_bootstrap",
+            "plugin_paired"
+          ]
+        },
+        "unit": {
+          "enum": [
+            "row",
+            "group",
+            "query",
+            "block"
+          ]
+        },
+        "unit_column": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "stratify_column": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "confidence_level": {
+          "type": "number",
+          "exclusiveMinimum": 0.5,
+          "exclusiveMaximum": 1
+        },
+        "resamples": {
+          "type": "integer",
+          "minimum": 1000
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "unit": {
+                "const": "row"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "unit_column": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "unit_column": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "multiplicity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family_id",
+        "method",
+        "max_comparisons"
+      ],
+      "properties": {
+        "family_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "method": {
+          "const": "bonferroni_fixed_horizon"
+        },
+        "max_comparisons": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "subtask_id",
+        "name"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "primary",
+            "subtask"
+          ]
+        },
+        "subtask_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "primary"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "subtask_id": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "subtask_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "partition"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "full_run",
+            "official_submission"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "partition": {
+          "enum": [
+            "oof",
+            "holdout",
+            "confirmation",
+            "public",
+            "private"
+          ]
+        }
+      }
+    }
+  }
+}

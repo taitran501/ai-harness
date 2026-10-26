@@ -220,6 +220,10 @@ def main(argv: list[str] | None = None) -> int:
     act_p.add_argument("--session-id", default=None, help="Target session ID (uses active session if omitted)")
     act_p.add_argument("--goal", default=None, help="Optional goal if creating a new session")
     act_p.add_argument("--rationale", default="", help="Why Antigravity selected this action")
+    act_p.add_argument("--rule-id", default=None)
+    act_p.add_argument("--candidate-evidence-id", default=None)
+    act_p.add_argument("--evidence-kind", choices=("full_run", "official_submission"), default=None)
+    act_p.add_argument("--evidence-partition", choices=("oof", "holdout", "confirmation", "public", "private"), default=None)
     parameters = act_p.add_mutually_exclusive_group()
     parameters.add_argument("--params", default=None, help="JSON object of action parameters")
     parameters.add_argument("--param-file", "--params-file", dest="param_file", default=None,
@@ -359,6 +363,9 @@ def main(argv: list[str] | None = None) -> int:
         params = _parse_json_arg(raw)
         dynamic_params = _parse_dynamic_kv_args(extra_argv)
         params.update(dynamic_params)
+        for field in ("rule_id", "candidate_evidence_id", "evidence_kind", "evidence_partition"):
+            if getattr(args, field, None) is not None:
+                params[field] = getattr(args, field)
         if args.backend:
             params["backend"] = args.backend
 

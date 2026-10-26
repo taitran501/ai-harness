@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import math
 import re
 import subprocess
 import sys
@@ -134,7 +133,7 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
                 f"- Open questions: {'; '.join(_truncate_text(q, 120) for q in questions[:2])}"
             )
     for decision in (memory.get("recent_decisions") or [])[:2]:
-        outcome = decision.get("outcome") or "recorded"
+        outcome = decision.get("effective_outcome", decision.get("outcome")) or "recorded"
         conclusion = _truncate_text(decision.get("conclusion"), 120)
         lesson = _truncate_text(decision.get("lesson"), 120)
         lines.append(
@@ -159,10 +158,12 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
         lines.append(f"- \u26a0\ufe0f {memory['progress_warning']}")
     if memory.get("reassess_recommended") or streak >= 2:
         lines.append(
-            "- \u26a0\ufe0f STAGNATION / PLATEAU ADVISORY: Do NOT freeze or stop submissions while quota remains. "
+            "- \u26a0\ufe0f STAGNATION / PLATEAU ADVISORY: Quota is a ceiling. Honor the task-scoped stagnation pause; continue diagnostics and bounded recovery probes. "
             "Run 'ai-harness discussion list <comp>' to harvest competitor insights, explore orthogonal model families, "
             "and execute bounded discriminating probes autonomously."
         )
+    if memory.get("submission_pause"):
+        lines.append("- STAGNATION_PAUSE: submissions and ordinary full exploration are paused. Use register_recovery_probe with a diagnosis, fixed incumbent, structured rule and bounded stop criterion.")
     return lines
 
 
@@ -419,15 +420,9 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             if isinstance(session_or_budget, BridgeSession)
             else (session_or_budget if isinstance(session_or_budget, dict) else {})
         )
-        if budget_dict and budget_dict.get("min_meaningful_improvement") is not None:
-            return float(budget_dict["min_meaningful_improvement"])
-        spec = self.comp_state.spec or {}
-        if spec.get("min_meaningful_improvement") is not None:
-            return float(spec["min_meaningful_improvement"])
-        eval_proto = spec.get("evaluation_protocol", {})
-        if eval_proto.get("min_meaningful_improvement") is not None:
-            return float(eval_proto["min_meaningful_improvement"])
-        return 0.002
+        from harness.decision_rules import resolve_research_policy
+        policy = resolve_research_policy(self.project, self.task_spec, budget_dict)
+        return policy.minimum_effect["value"] if policy.minimum_effect else 0.0
 
     def _extract_idea_graveyard(self) -> List[str]:
         """Dynamically parse documented failed interventions from EXPERIMENTS.md."""
@@ -502,133 +497,26 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         raise ValueError(f"Unsupported candidate mode: {mode}")
 
     def _guard_submission(self, cand_path: Path, exp_id: str, sub_mgr) -> Dict[str, Any]:
-        """Deterministic anti-bypass guards run before a submission is registered.
+        """Compatibility preparation check over the shared runtime audit service.
 
-        The audit gate CLI (`tools/audit_gate.py`) is a standalone tool; the agent
-        drives `prepare_submission` through the bridge and would otherwise skip it
-        entirely. Enforce here, on the bridge path, the three checks that stop an
-        agent from shipping a non-improvement:
-
-        1. Duplicate-submission dedup: the candidate file's SHA-256 must not match
-           any previously registered submission (no re-submitting the same file).
-        2. Minimum meaningful effect size (MMES): the candidate's OOF must differ
-           from the baseline anchor's OOF on at least `min_diff_pct` of rows (or
-           `min_diff` rows). A model that only jitters < threshold of rows is not
-           a genuine new experiment.
-        3. Significance (when ground truth is available): the paired error test
-           (regression) / McNemar's test (classification) must reach p < 0.05.
-
-        Returns a small dict of guard evidence; raises ValueError on any hard fail.
+        Preparation evidence has validation scope; dispatch rechecks promotion,
+        approval, pause, history and quota before issuing a permit.
         """
-
-        from harness.artifacts import sha256
-
-        evidence: Dict[str, Any] = {"checks": {}}
-        cand_sha = sha256(cand_path)
-        evidence["candidate_sha256"] = cand_sha
-
-        # ---- 1. Duplicate-submission dedup ---------------------------------
-        existing = {
-            s.candidate_path: s.id
-            for s in sub_mgr.submissions.values()
-            if s.candidate_path
-        }
-        # Also compare by content hash: a previous submission may point at the
-        # same bytes even if the path differs. Re-hash prior submissions' files.
-        dup_id = None
-        for path, sub_id in existing.items():
-            p = Path(path)
-            if not p.is_absolute():
-                p = self.project_root / p
-            if not p.is_file():
+        from harness.audit_gate import evaluate_submission_candidate
+        from harness.decision_rules import resolve_research_policy
+        references = []
+        for entry in sub_mgr.submissions.values():
+            if entry.exp_id == exp_id:
                 continue
-            try:
-                if sha256(p) == cand_sha:
-                    dup_id = sub_id
-                    break
-            except OSError:
-                continue
-        if dup_id:
-            raise ValueError(
-                f"Submission dedup failed: candidate is byte-identical (SHA-256 "
-                f"{cand_sha[:12]}...) to already-registered submission '{dup_id}'. "
-                f"Re-submitting the same predictions does not advance the "
-                f"competition. Produce a genuinely different run first."
-            )
-        evidence["checks"]["dedup"] = "PASS"
-
-        # ---- 2. Minimum meaningful effect size vs baseline anchor ---------
-        baseline_exp_id = self.comp_state.state["gates"].get("baseline_exp_id")
-        sub_spec = self.comp_state.spec.get("submission_spec", {}) or {}
-        min_diff_pct = float(sub_spec.get("min_diff_pct", 2.0))
-        min_diff = int(sub_spec.get("min_diff", 1))
-        rel_eps = float(sub_spec.get("rel_epsilon", 0.01))
-        mmes = "SKIPPED_NO_BASELINE"
-        if baseline_exp_id and baseline_exp_id != exp_id:
-            base_oof = self.artifacts_dir / baseline_exp_id / "oof_predictions.csv"
-            cand_oof = cand_path.parent / "oof_predictions.csv"
-            if base_oof.is_file() and cand_oof.is_file():
-                try:
-                    cand_df = pd.read_csv(cand_oof)
-                    base_df = pd.read_csv(base_oof)
-                    key = self.task_spec.id_column
-                    if key in cand_df and key in base_df:
-                        cand_df = cand_df.set_index(key)
-                        base_df = base_df.set_index(key).reindex(cand_df.index)
-                        pred_cols = [c for c in cand_df if c.startswith(("pred_", "proba_"))]
-                        if pred_cols:
-                            changed = pd.Series(False, index=cand_df.index)
-                            for col in pred_cols:
-                                if col not in base_df.columns:
-                                    continue
-                                try:
-                                    cv = pd.to_numeric(cand_df[col], errors="raise")
-                                    bv = pd.to_numeric(base_df[col], errors="raise")
-                                    if pd.api.types.is_float_dtype(cv) or pd.api.types.is_float_dtype(bv):
-                                        std = float(np.std(bv))
-                                        scale = std if std > 1e-8 else 1.0
-                                        changed |= (np.abs(cv.to_numpy() - bv.to_numpy()) / scale) >= rel_eps
-                                    else:
-                                        changed |= cand_df[col] != base_df[col]
-                                except (ValueError, TypeError):
-                                    changed |= cand_df[col] != base_df[col]
-                            n_changed = int(changed.sum())
-                            n_rows = int(len(cand_df))
-                            pct = (n_changed / n_rows * 100.0) if n_rows else 0.0
-                            required = max(min_diff, int(math.ceil(n_rows * min_diff_pct / 100.0)))
-                            if n_changed < required:
-                                raise ValueError(
-                                    f"MMES violation: candidate '{exp_id}' differs from baseline "
-                                    f"anchor '{baseline_exp_id}' on only {n_changed}/{n_rows} rows "
-                                    f"({pct:.2f}%); required >= {required} ({min_diff_pct}%). "
-                                    f"A change below the minimum meaningful effect size is not a "
-                                    f"genuine new experiment (likely seed noise or a trivial tweak)."
-                                )
-                            mmes = f"PASS ({n_changed}/{n_rows} rows, {pct:.2f}%)"
-                        else:
-                            mmes = "SKIPPED_NO_PRED_COL"
-                except ValueError:
-                    raise
-                except Exception as exc:  # pragma: no cover - defensive
-                    mmes = f"SKIPPED ({exc})"
-        evidence["checks"]["mmes"] = mmes
-
-        # ---- 3. Significance test (only when ground truth is available) ----
-        sig = "SKIPPED_NO_GROUND_TRUTH"
-        truth_path = cand_path.parent / "evaluation_truth.csv"
-        if truth_path.is_file() and baseline_exp_id and baseline_exp_id != exp_id:
-            base_oof = self.artifacts_dir / baseline_exp_id / "oof_predictions.csv"
-            cand_oof = cand_path.parent / "oof_predictions.csv"
-            if base_oof.is_file() and cand_oof.is_file():
-                try:
-                    sig = self._significance_test(
-                        cand_oof, base_oof, truth_path, self.task_spec.id_column
-                    )
-                except Exception as exc:  # pragma: no cover - defensive
-                    sig = f"SKIPPED ({exc})"
-        evidence["checks"]["significance"] = sig
-
-        return evidence
+            path = Path(entry.candidate_path)
+            if not path.is_file():
+                raise ValueError("HISTORY_INCOMPLETE: prepared prediction snapshot missing")
+            references.append(dict(id=entry.id, path=str(path), source="prepared"))
+        policy = resolve_research_policy(self.project, self.task_spec)
+        diversity = evaluate_submission_candidate(cand_path, references, spec=self.task_spec, threshold=policy.max_spearman)
+        if any(r["reference_prediction_sha256"] == diversity["candidate_prediction_sha256"] for r in diversity["comparisons"]):
+            raise ValueError("SEMANTIC_DUPLICATE: submission dedup failed")
+        return dict(scope="validation", diversity=diversity, checks={"integrity": "PASS"})
 
     @staticmethod
     def _significance_test(
@@ -962,6 +850,11 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         return session
 
     def _reconcile_session_usage(self, session):
+        from harness.dispatch_audit import read_submission_events
+        events = read_submission_events(self.project_root)
+        latest = {e["intent_id"]: e for e in events}
+        session.compute_usage["submissions_used"] = sum(e["event"] in {"submitted", "reconciled"} for e in latest.values())
+        session.compute_usage["submissions_reserved"] = sum(e["event"] in {"prepared", "sending", "unknown"} for e in latest.values())
         path = self.artifacts_dir / "resource_ledger.json"
         if not path.is_file():
             return
@@ -1403,9 +1296,9 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             lines.append(f"- **Daily Submission Quota**: `{quota_used}/{daily_quota}` used{rem_str}")
             if rem_quota and rem_quota > 0:
                 lines.append(
-                    f"> ⚡ **QUOTA REMAINING ({rem_quota} slot{'s' if rem_quota != 1 else ''} today)**: "
-                    "Per Principle 10 & Rule 3.7, you MUST NOT stop while quota remains. "
-                    "Formulate orthogonal probes or test risk-hedging blends!"
+                    f"> ℹ️ **Daily Quota Ceiling ({rem_quota} slot{'s' if rem_quota != 1 else ''} available)**: "
+                    "Per Principle 10, quota is a ceiling, never an obligation to spend. "
+                    "Submit only when backed by verified local CV improvement; never burn quota on speculative micro-blends."
                 )
 
         subs = pkt.get("recent_submissions") or []
@@ -1591,6 +1484,18 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
 
         budget = session.budget
         usage = session.compute_usage
+
+        from harness.stagnation import StagnationController
+        recovery_id, candidate_id = None, None
+        config_file = self.project_root / params.get("config_path", "")
+        if action == "run_full_validation" and params.get("config_path") and config_file.is_file():
+            cfg = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+            recovery_id = cfg.get("research", {}).get("recovery_probe_id")
+            candidate_id = cfg.get("experiment", {}).get("id")
+        pause = StagnationController(self.project).check_action(action,
+            recovery_probe_id=recovery_id, candidate_id=candidate_id)
+        if pause:
+            return ("STOP_POLICY_TRIGGERED", "STAGNATION_PAUSE: " + pause["message"])
 
         # 2. Optional Hard Stop on consecutive rejections (only if explicitly enabled in session budget)
         max_rej = int(budget.get("max_consecutive_rejections") or 3)
@@ -1801,6 +1706,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
                 status=v_status,
                 summary=v_msg,
                 new_blockers=[v_msg],
+                data={"failure": {"code": "STAGNATION_PAUSE"}} if "STAGNATION_PAUSE" in v_msg else {},
             )
             # Do NOT append the blocked call to session.actions — the action was
             # not executed. Recording it in actions would inflate step_index for
@@ -2043,6 +1949,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         "record_research_checkpoint": "_handle_research_memory_group",
         "record_research_insight": "_handle_research_memory_group",
         "plan_research_probe": "_handle_research_memory_group",
+        "register_recovery_probe": "_handle_research_memory_group",
         "trace_research_insight": "_handle_research_memory_group",
         "suggest_next_interventions": "_handle_suggest_next_interventions",
         "update_workspace_settings": "_handle_update_workspace_settings",

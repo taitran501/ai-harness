@@ -316,6 +316,28 @@ class _NormalisedObject:
         return hash(object.__getattribute__(self, "_raw"))
 
 
+
+class _GuardedKaggleApiProxy:
+    """Proxy around raw KaggleApi that blocks unaudited submissions."""
+    def __init__(self, target: Any) -> None:
+        self._target = target
+
+    def competition_submit(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError(
+            "Direct 'competition_submit' is forbidden; outbound submissions must use "
+            "KaggleClient.submit_submission() with a verified DispatchPermit."
+        )
+
+    def competition_submit_code(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError(
+            "Direct 'competition_submit_code' is forbidden; outbound submissions must use "
+            "KaggleClient.submit_submission() with a verified DispatchPermit."
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._target, name)
+
+
 class KaggleClient:
     """Unified facade over whichever Kaggle SDK is installed.
 
@@ -550,6 +572,7 @@ class KaggleClient:
         competition: str,
         kernel: Optional[str] = None,
         kernel_version: Optional[str] = None,
+        *, _permit=None,
     ) -> Any:
         """Submit to a competition (standard file, or code-competition kernel output).
 
@@ -559,6 +582,9 @@ class KaggleClient:
         single call. Returns a normalised response exposing ``ref`` and
         ``message``.
         """
+        from harness.submission_gate import consume_dispatch_permit
+        consume_dispatch_permit(_permit, file_name=file_name, competition=competition,
+                                kernel=kernel, kernel_version=kernel_version)
         api = self._legacy_api_instance()
         try:
             if kernel:
@@ -808,6 +834,11 @@ class KaggleClient:
 
         Useful for SDK-specific methods that are not part of the stable facade.
         """
+        if method_name in {"competition_submit", "competition_submit_code"}:
+            raise RuntimeError(
+                f"Direct execution of '{method_name}' is forbidden; outbound submissions must use "
+                "KaggleClient.submit_submission() with a verified DispatchPermit."
+            )
         target = self._legacy_api if self.sdk == "kaggle" else self._client
         # Try canonical name first, then legacy aliases
         if hasattr(target, method_name):
@@ -819,13 +850,13 @@ class KaggleClient:
 
     @property
     def api(self) -> Any:
-        """Underlying legacy KaggleApi instance for direct operations."""
-        return self._legacy_api_instance()
+        """Underlying legacy KaggleApi instance for direct operations (guarded)."""
+        return _GuardedKaggleApiProxy(self._legacy_api_instance())
 
     @property
     def _api(self) -> Any:
         """Alias for :attr:`api`."""
-        return self._legacy_api_instance()
+        return _GuardedKaggleApiProxy(self._legacy_api_instance())
 
     def kernels_pull(
         self,

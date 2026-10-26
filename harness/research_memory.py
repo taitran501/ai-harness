@@ -2,7 +2,7 @@
 
 Configuration equivalence is deterministic; mechanism similarity is an advisory,
 not proof that two scientific hypotheses are equivalent. Decisions remain declared
-interpretations, even when their referenced measurements are verified.
+interpretations unless a prospective structured rule is machine-evaluated.
 """
 from __future__ import annotations
 
@@ -322,7 +322,8 @@ class ResearchMemory:
                 labels = ("title", "parent_insight_id", "insight_id", "probe_plan_id", "exp_id", "action",
                     "observation", "mechanism", "hypothesis", "control", "intervention", "expected_observation",
                     "alternative_explanation", "decision_rule", "budget", "stop_rule", "outcome", "score",
-                    "conclusion", "lesson", "revisit_when", "next_action", "evidence", "open_questions", "insight_ids")
+                    "conclusion", "lesson", "revisit_when", "next_action", "evidence", "open_questions", "insight_ids",
+                    "claimed_outcome", "effective_outcome", "verification_status", "rule_id", "evaluation_id", "reason_codes")
                 for item in history:
                     stamp = datetime.fromtimestamp(item['timestamp'], timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
                     kind = item.get('kind', 'verified_full_result')
@@ -478,6 +479,18 @@ class ResearchMemory:
                 runs.append(record)
             except (ValueError, KeyError, OSError, TypeError, yaml.YAMLError):
                 continue
+        # Imported/remote completions are evaluated on the canonical workspace,
+        # where their preregistration and fixed control remain available.
+        for run in runs:
+            cfg_path = Path(run["path"]) / "run_config.yaml"
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            rule_id = cfg.get("research", {}).get("decision_rule_id")
+            if rule_id:
+                from harness.decision_rules import evaluate_decision_rule, load_registration
+                registration = load_registration(self.root, rule_id)
+                evaluate_decision_rule(registration["rule"],
+                    {"kind": "full_run", "id": run["exp_id"], "partition": cfg.get("validation", {}).get("partition", "oof")},
+                    project=self.root, task_spec=self.spec, plugin=self.plugin, registration=registration)
         return sorted(runs, key=lambda r: (r["timestamp"], r["exp_id"]))
 
     @staticmethod
@@ -487,7 +500,8 @@ class ResearchMemory:
                  "conclusion", "next_action", "outcome", "evidence_status", "path",
                  "insight_id", "parent_insight_id", "probe_plan_id", "title", "observation", "mechanism", "lesson", "revisit_when",
                  "control", "expected_observation", "alternative_explanation",
-                 "decision_rule", "budget", "stop_rule") if key in record}
+                 "decision_rule", "budget", "stop_rule", "claimed_outcome", "effective_outcome", "verification_status",
+                 "rule_id", "evaluation_id", "reason_codes") if key in record}
 
     @staticmethod
     def _text(value, field):
@@ -534,14 +548,29 @@ class ResearchMemory:
 
     def plan_probe(self, *, insight_id, control, intervention, expected_observation,
                    alternative_explanation, decision_rule, budget, stop_rule, session_id=None):
+        from harness.decision_rules import DecisionRuleV1, register_decision_rule
+        structured = isinstance(decision_rule, (dict, DecisionRuleV1))
         fields = {key: self._text(value, key) for key, value in {
             "control": control, "intervention": intervention, "expected_observation": expected_observation,
-            "alternative_explanation": alternative_explanation, "decision_rule": decision_rule,
+            "alternative_explanation": alternative_explanation,
             "budget": budget, "stop_rule": stop_rule}.items()}
         with workspace_lock(self.path.parent):
             self._insight(insight_id)
-            return self._append("probe_plan", insight_id=insight_id, **fields,
+            if structured:
+                registration = register_decision_rule(decision_rule, project=self.root, task_spec=self.spec, plugin=self.plugin)
+                fields.update(decision_rule=registration["rule"], registration=registration,
+                              rule_id=registration["rule_id"], entry_schema_version=2, verification_status="preregistered")
+            else:
+                fields.update(decision_rule=self._text(decision_rule, "decision_rule"), decision_rule_text=str(decision_rule),
+                              verification_status="legacy_unstructured")
+            plan = self._append("probe_plan", insight_id=insight_id, **fields,
                 session_id=session_id, evidence_status="declared_plan_not_execution")
+            if structured:
+                from harness.decision_rules import policy_directory
+                from harness.io_utils import atomic_write_json
+                registration.update(probe_plan_id=plan["id"], insight_id=insight_id)
+                atomic_write_json(policy_directory(self.root) / (registration["rule_id"] + ".json"), registration)
+            return plan
 
     def _linked_records(self, insight, entries, runs):
         linked = [entry for entry in entries if entry.get("insight_id") == insight["id"]]
@@ -575,7 +604,8 @@ class ResearchMemory:
         elif unreviewed:
             status, action = "needs_interpretation", "Inspect linked results and record a decision, lesson and next_action."
         elif decision and decision["timestamp"] >= latest:
-            status, action = decision["outcome"], decision["next_action"]
+            from harness.decision_rules import effective_outcome
+            status, action = effective_outcome(decision), decision["next_action"]
         elif executions and (not plan or executions[-1]["timestamp"] >= plan["timestamp"]):
             status, action = "needs_diagnosis", "Inspect execution/probe output; it does not reject the scientific mechanism."
         elif plan:
@@ -717,8 +747,27 @@ class ResearchMemory:
                          evidence_status="unrun_proposal")
         return review
 
-    def record_decision(self, *, outcome, conclusion, evidence=None, next_action="", session_id=None,
-                        insight_id=None, lesson="", revisit_when=""):
+    def record_decision(self, *, outcome=None, conclusion, evidence=None, next_action="", session_id=None,
+                        insight_id=None, lesson="", revisit_when="", rule_id=None, candidate_evidence=None, claimed_outcome=None):
+        from harness.decision_rules import (DecisionRuleNotSatisfied, evaluate_decision_rule, load_registration)
+        evaluation = None
+        requested = normalize_decision_outcome(outcome) if outcome else None
+        if rule_id:
+            registration = load_registration(self.root, rule_id)
+            plans = [entry for entry in self.entries() if entry.get("rule_id") == rule_id and entry["kind"] == "probe_plan"]
+            if not plans or (insight_id and plans[-1]["insight_id"] != insight_id):
+                raise ValueError("Rule must belong to the selected insight's probe plan")
+            if not candidate_evidence:
+                raise ValueError("Structured decision requires typed candidate_evidence")
+            evaluation = evaluate_decision_rule(registration["rule"], candidate_evidence, project=self.root,
+                task_spec=self.spec, plugin=self.plugin, registration=registration)
+            if requested == "supported" and evaluation["outcome"] != "supported":
+                raise DecisionRuleNotSatisfied(evaluation["reason_codes"])
+            outcome = evaluation["outcome"]
+        elif requested == "supported":
+            raise DecisionRuleNotSatisfied(["NOT_PREREGISTERED"])
+        else:
+            outcome = requested or "inconclusive"
         outcome = normalize_decision_outcome(outcome)
         if outcome not in {"supported", "rejected", "inconclusive", "deferred"}:
             hint = (
@@ -739,11 +788,18 @@ class ResearchMemory:
                 if not str(revisit_when).strip():
                     revisit_when = "When a fundamentally different mechanism with plausible improvement is available."
                 revisit_when = self._text(revisit_when, "revisit_when")
+        if evaluation:
+            evidence = list(evidence or []) if not isinstance(evidence, str) else [evidence]
+            evidence += [ref["id"] for ref in (evaluation["candidate"], evaluation["control"]) if ref["kind"] == "full_run" and ref["id"] not in evidence]
         evidence = self._evidence(evidence)
         return self._append("decision", outcome=outcome, conclusion=str(conclusion),
             evidence=evidence, next_action=str(next_action), session_id=session_id,
             insight_id=insight_id, lesson=str(lesson), revisit_when=str(revisit_when),
-            evidence_status="declared_interpretation")
+            evidence_status="machine_evaluated" if evaluation else "declared_interpretation",
+            entry_schema_version=2, claimed_outcome=claimed_outcome or requested,
+            effective_outcome=outcome, verification_status="machine_evaluated" if evaluation else "legacy_unstructured",
+            rule_id=rule_id, evaluation_id=evaluation["evaluation_id"] if evaluation else None,
+            reason_codes=evaluation["reason_codes"] if evaluation else [], evaluation=dict(evaluation) if evaluation else None)
 
     def checkpoint(self, *, summary, next_action, open_questions=None, session_id=None, insight_ids=None):
         if not str(summary).strip() or not str(next_action).strip():
@@ -787,8 +843,11 @@ class ResearchMemory:
         # Resolve evidence links live: a prior interpretation can outlive its evidence.
         verified = {r["exp_id"] for r in runs}
         recent_decisions = []
+        from harness.decision_rules import effective_outcome
         for decision in decisions[-4:]:
             recent_decisions.append({**self._compact(decision),
+                "effective_outcome": effective_outcome(decision),
+                "verification_status": decision.get("verification_status", "legacy_unverified"),
                 "evidence": decision.get("evidence", []),
                 "evidence_currently_verified": bool(decision.get("evidence")) and
                     all(exp in verified for exp in decision["evidence"])})
@@ -803,6 +862,11 @@ class ResearchMemory:
         compact_frontier = [{key: value for key, value in state.items() if key != "exp_ids"}
                             for state in active[:3]]
         progress = self._publish_progress(runs)
+        from harness.decision_rules import _project
+        from harness.stagnation import StagnationController
+        project = _project(self.root)
+        states = StagnationController(project).reconcile_results() if project.artifacts_dir.resolve() == self.artifacts.resolve() else {}
+        paused = [state for state in states.values() if state["state"] == "paused_for_stagnation"]
         return {"ledger_path": str(self.path), **progress, "entry_count": len(entries), "verified_run_count": len(runs),
             "insight_count": len(insights), "open_insight_count": len(active), "research_frontier": compact_frontier,
             "unreviewed_result_count": len(unreviewed),
@@ -810,13 +874,15 @@ class ResearchMemory:
             "latest_checkpoint": checkpoint, "recent_decisions": recent_decisions,
             "recent_results": [self._compact(r) for r in runs[-4:]],
             "consecutive_non_improvements": stalled, "reassess_recommended": stalled >= max(1, patience),
+            "submission_pause": bool(paused), "stagnation_states": paused[:3],
             "resume_protocol": ["Read checkpoint and search_research_memory before brainstorming.",
                 "Use review_hypothesis before implementation; explain related approaches and intentional repeats.",
                 "Record each insight with record_research_insight; plan_research_probe before linked implementation. "
                 "Link config.research.insight_id; use trace_research_insight for its history and derived directions.",
                 "Interpret unreviewed results before another brainstorm. Record insight-linked decisions with lesson, "
                 "next_action and revisit_when for rejected/deferred directions; checkpoint active insight_ids.",
-                "On plateau / stagnation: NEVER declare premature freeze or halt submissions while quota remains. "
+                "Quota is a ceiling. Honor the task-scoped stagnation pause after three failed comparable promotion results. "
+                "Submissions and ordinary full exploration stay paused until a registered bounded recovery probe is verified supported. "
                 "Proactively mine community discussions ('ai-harness discussion list <comp>') for fresh signals, representations, or external insights. "
                 "Inspect verified diagnostics, retrieve old lessons, enumerate alternative orthogonal mechanisms (different model families, novel representations, risk-hedging ensembles), "
                 "and choose a bounded discriminating probe with an explicit promotion/stop criterion. "

@@ -91,7 +91,7 @@ class ResearchActionContractTests(unittest.TestCase):
         # JSON null for each must behave like omission (no auto-defaults
         # required for non-rejected/deferred-insight decisions).
         _, obs = self.bridge.execute_action("record_research_decision", params={
-            "outcome": "supported",
+            "outcome": "inconclusive",
             "conclusion": "V6 verified at 0.71 on Codabench.",
             "next_action": None,
             "lesson": None,

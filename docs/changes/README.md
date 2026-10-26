@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-25 | Evidence-derived research decisions, shared pre-dispatch gate, diversity and stagnation recovery | Working tree | [systemic-research-dispatch-gates](systemic-research-dispatch-gates.md) |
 | 2026-10-25 | Plugin contract validation, unified capability discovery, and structured failure recovery | [#132](https://github.com/taitran501/ai-harness/pull/132) | [plugin-contract-validation-and-agent-resilience](plugin-contract-validation-and-agent-resilience.md) |
 | 2026-10-25 | Sync TaskPlugin docs with code and add a reference adapter | [#132](https://github.com/taitran501/ai-harness/pull/132) | [plugin-docs-sync-and-example-adapter](plugin-docs-sync-and-example-adapter.md) |
 | 2026-10-25 | Safe clean command, verified legacy archives, and automatic cloud staging cleanup | [#132](https://github.com/taitran501/ai-harness/pull/132) | [clean-command-and-staging-hygiene](clean-command-and-staging-hygiene.md) |

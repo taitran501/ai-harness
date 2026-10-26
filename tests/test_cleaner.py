@@ -375,6 +375,7 @@ class StagingLifecycleTests(unittest.TestCase):
         self.root, _ = make_workspace()
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         self.project = HarnessProject.discover(self.root)
+        (self.root / "configs/exp.yaml").write_text("experiment:\n  id: exp001\n", encoding="utf-8")
         self.context = {"project": self.project, "exp_id": "exp001", "runtime": {
             "core": {"version": "test"}, "plugin": {"id": "test"}},
             "config_rel": "configs/exp.yaml", "task_id": "fixture-task",

@@ -59,28 +59,19 @@ class _SequenceClient:
 
 
 class KaggleLeaderboardTrackerTests(unittest.TestCase):
-    def test_dispatch_returns_ref_and_inputs(self):
+    def test_dispatch_requires_workspace_even_with_mock_client(self):
         client = _MockClient([], submit_ref=999)
         tracker = KaggleLeaderboardTracker(client=client, sleep_fn=_no_sleep)
-        result = tracker.dispatch(
-            "comp", "sub.csv", "Exp 1", kernel="own/k", kernel_version="3"
-        )
-        self.assertEqual(result["ref"], 999)
-        self.assertEqual(result["competition"], "comp")
-        self.assertEqual(result["file_name"], "sub.csv")
-        self.assertEqual(result["kernel"], "own/k")
-        self.assertEqual(result["kernel_version"], "3")
-        self.assertEqual(
-            client.submit_calls, [("sub.csv", "Exp 1", "comp", "own/k", "3")]
-        )
+        with self.assertRaisesRegex(ValueError, "WORKSPACE_REQUIRED"):
+            tracker.dispatch("comp", "sub.csv", "Exp 1", project_root="missing-workspace")
+        self.assertEqual(client.submit_calls, [])
 
-    def test_dispatch_standard(self):
+    def test_dispatch_code_requires_a_verified_workspace(self):
         client = _MockClient([], submit_ref=55)
         tracker = KaggleLeaderboardTracker(client=client, sleep_fn=_no_sleep)
-        result = tracker.dispatch("comp", "sub.csv", "label")
-        self.assertEqual(result["ref"], 55)
-        self.assertIsNone(result["kernel"])
-        self.assertEqual(client.submit_calls, [("sub.csv", "label", "comp", None, None)])
+        with self.assertRaisesRegex(ValueError, "WORKSPACE_REQUIRED"):
+            tracker.dispatch("comp", "sub.csv", "label", kernel="own/k", kernel_version="3", project_root="missing-workspace")
+        self.assertEqual(client.submit_calls, [])
 
     def test_get_submission_finds_ref(self):
         client = _MockClient([_sub(1234, "COMPLETE", public="0.76", private="0.77")])

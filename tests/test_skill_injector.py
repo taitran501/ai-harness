@@ -118,12 +118,13 @@ class SkillInjectorTests(unittest.TestCase):
             "direction": "maximize",
         }
         content = generate_skill_content(task_cfg)
-        self.assertIn("3.7 Anti-Defeatism, Quota Utilization & Proactive Discussion Mining", content)
+        self.assertIn("3.7 Stagnation Pause Protocol & Proactive Discussion Mining", content)
         self.assertIn("ai-harness discussion list", content)
         self.assertIn("ai-harness discussion view", content)
         self.assertIn("ai-harness submission list", content)
         self.assertIn("ai-harness codabench status", content)
-        self.assertIn("NO PREMATURE FREEZING", content)
+        self.assertIn("Quota is a ceiling", content)
+        self.assertIn("register_recovery_probe", content)
 
     def test_inject_skill_file(self):
         """Verify writing skill file to disk in a temporary directory."""

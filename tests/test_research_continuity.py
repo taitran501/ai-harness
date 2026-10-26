@@ -99,7 +99,7 @@ class ResearchContinuity(unittest.TestCase):
 
     def test_scope_isolation_and_live_evidence_revalidation(self):
         folder = self.full("full", .8)
-        self.memory.record_decision(outcome="supported", conclusion="Measured full validation gain", evidence=["full"])
+        self.memory.record_decision(outcome="inconclusive", conclusion="Measured full validation gain", evidence=["full"])
         self.assertTrue(self.memory.context()["recent_decisions"][0]["evidence_currently_verified"])
         with self.assertRaises(ValueError):
             self.memory.record_decision(outcome="rejected", conclusion="No evidence", evidence=["missing"])

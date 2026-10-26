@@ -10,7 +10,6 @@ Guarantees 100% submission integrity before dispatching to Kaggle/Remote:
 from __future__ import annotations
 
 import json
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +18,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from harness.dispatch_audit import record_dispatch
 
 
 @dataclass
@@ -199,6 +197,7 @@ class KaggleLeaderboardTracker:
         message: str = "",
         kernel: Optional[str] = None,
         kernel_version: Optional[str] = None,
+        *, project_root=None, exp_id=None, rule_id=None, approval_id=None, user_approved=False, dry_run=False,
     ) -> Dict[str, Any]:
         """Submit a file (or code-competition kernel output) and return the ref.
 
@@ -214,53 +213,34 @@ class KaggleLeaderboardTracker:
         Returns:
             dict with ``ref`` (int), ``message`` and the dispatch inputs.
         """
-        resp = self._client.submit_submission(
-            file_name,
-            message,
-            competition,
-            kernel=kernel,
-            kernel_version=kernel_version,
-        )
-        result: Dict[str, Any] = {
-            "ref": getattr(resp, "ref", None),
-            "message": getattr(resp, "message", ""),
-            "competition": competition,
-            "file_name": file_name,
-            "kernel": kernel,
-            "kernel_version": kernel_version,
-        }
-        # Dispatch governance (PR-C): append-only audit entry + advisory
-        # duplicate warning. Best-effort — audit failure never blocks the
-        # dispatch itself.
+        from harness.submission_gate import SubmissionGate
+        gate = SubmissionGate(project_root)
+        quota = self._client.get_submission_limits(competition) if hasattr(self._client, "get_submission_limits") else None
+        provider_refs = [str(s.ref) for s in self._client.list_submissions(competition)]
+        authorization = gate.authorize_dispatch(competition, file_name, exp_id=exp_id, rule_id=rule_id,
+            user_approved=user_approved, approval_id=approval_id, kernel=kernel,
+            kernel_version=kernel_version, quota=quota, provider_refs=provider_refs, dry_run=dry_run)
+        if dry_run:
+            return authorization
+        intent = authorization["intent"]
         try:
-            audit = record_dispatch(
-                kind="submission",
-                competition=competition,
-                file_path=file_name,
-                kernel=kernel,
-                kernel_version=kernel_version,
-                message=message,
-                ref=result["ref"],
+            resp = self._client.submit_submission(
+                intent["file_name"], message + " [aih:" + intent["intent_id"] + "]", competition,
+                kernel=kernel, kernel_version=kernel_version, _permit=authorization["permit"],
             )
-        except Exception as exc:  # noqa: BLE001 - audit must never break dispatch
-            print(
-                f"[dispatch_audit] warning: audit entry not recorded: {exc}",
-                file=sys.stderr,
-            )
-            audit = None
-        if audit and audit.get("duplicate_of"):
-            dup = audit["duplicate_of"]
-            ref_info = f" (ref {dup['ref']})" if dup.get("ref") is not None else ""
-            sub_info = f" (submission {dup['sub_id']})" if dup.get("sub_id") else ""
-            result["duplicate_of"] = dup
-            result["duplicate_warning"] = (
-                f"Duplicate submission: identical file was already sent to "
-                f"'{competition}'"
-                f"{ref_info}{sub_info}; resubmitting identical content may waste a "
-                "submission slot. [matched via "
-                f"{dup.get('source', 'dispatch log')}]"
-            )
-        return result
+        except Exception as exc:
+            gate.finish_submission_intent(authorization, error=exc)
+            raise
+        ref = getattr(resp, "ref", None)
+        try:
+            gate.finish_submission_intent(authorization, provider_ref=ref)
+        except Exception as exc:
+            raise RuntimeError(f"Provider ref {ref}; local persistence uncertain. Reconcile intent {intent['intent_id']} before retrying.") from exc
+        if ref is None:
+            raise RuntimeError(f"Provider returned no ref; reconcile intent {intent['intent_id']} before retrying.")
+        return dict(ref=ref, message=getattr(resp, "message", ""), competition=competition,
+                    file_name=file_name, kernel=kernel, kernel_version=kernel_version,
+                    receipt_id=authorization["receipt"]["receipt_id"], intent_id=intent["intent_id"])
 
     def get_submission(self, competition: str, ref: Any) -> Dict[str, Any]:
         """Fetch a single submission by ref (list + filter, cross-SDK safe)."""
