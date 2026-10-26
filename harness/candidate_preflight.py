@@ -120,6 +120,8 @@ def run_candidate_preflight(
     pred_col: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Perform preflight analysis comparing candidate predictions to an incumbent baseline."""
+    if not candidate_path:
+        raise ValueError("candidate_path is required for candidate preflight verification.")
     project = HarnessProject.discover(Path(project_root).resolve())
     cand_p = Path(candidate_path)
     if not cand_p.is_absolute():

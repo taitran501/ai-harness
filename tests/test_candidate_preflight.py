@@ -1,9 +1,11 @@
 import shutil
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
+from harness.agent_bridge import AgentBridge
 from harness.candidate_preflight import compute_prediction_similarity, run_candidate_preflight
 from harness.project import attach_project
 from tests.fixtures import make_workspace
@@ -28,7 +30,6 @@ class TestCandidatePreflight(unittest.TestCase):
         self.assertAlmostEqual(sim_rev["rank_swap_ratio"], 1.0)
 
     def test_preflight_flags_near_duplicate_micro_tinkering(self):
-        # 1000 samples
         n = 1000
         ids = np.arange(n)
         inc_preds = np.random.RandomState(42).uniform(0.1, 0.9, size=n)
@@ -70,6 +71,57 @@ class TestCandidatePreflight(unittest.TestCase):
         self.assertEqual(receipt["classification"], "DIVERSE_CANDIDATE")
         self.assertIsNone(receipt["delusion_warning"])
         self.assertIn("PASS", receipt["recommendation"])
+
+    def test_preflight_missing_candidate_raises(self):
+        with self.assertRaises(ValueError):
+            run_candidate_preflight(self.root, candidate_path=None)
+
+    def test_bridge_action_candidate_preflight(self):
+        n = 100
+        ids = np.arange(n)
+        preds = np.random.RandomState(42).uniform(0, 1, size=n)
+        cand_df = pd.DataFrame({"id": ids, "satisfaction": preds})
+        inc_df = pd.DataFrame({"id": ids, "satisfaction": preds * 0.999})
+        cand_file = self.root / "cand.csv"
+        inc_file = self.root / "inc.csv"
+        cand_df.to_csv(cand_file, index=False)
+        inc_df.to_csv(inc_file, index=False)
+
+        bridge = AgentBridge(self.root, task_spec_path=self.spec_path)
+        sess = bridge.start_session(goal="Test preflight action")
+        _, obs = bridge.execute_action(
+            action="candidate_preflight",
+            params={"candidate": str(cand_file), "incumbent": str(inc_file)},
+            session_id=sess.session_id,
+        )
+        self.assertEqual(obs.status, "SUCCESS")
+        self.assertEqual(obs.data["verdict"], "FLAGGED_NEAR_DUPLICATE")
+
+    def test_cli_allow_abbrev_preserves_candidate_flag(self):
+        from tools.agent_bridge_cli import main
+
+        n = 50
+        ids = np.arange(n)
+        preds = np.random.RandomState(42).uniform(0, 1, size=n)
+        cand_file = self.root / "c.csv"
+        inc_file = self.root / "i.csv"
+        pd.DataFrame({"id": ids, "satisfaction": preds}).to_csv(cand_file, index=False)
+        pd.DataFrame({"id": ids, "satisfaction": preds}).to_csv(inc_file, index=False)
+
+        argv = [
+            "--project-root",
+            str(self.root),
+            "act",
+            "--action",
+            "candidate_preflight",
+            "--candidate",
+            str(cand_file),
+            "--incumbent",
+            str(inc_file),
+        ]
+        with patch.dict("os.environ", {"AI_HARNESS_TOOLCHAIN_NO_PIN": "1"}):
+            code = main(argv)
+            self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

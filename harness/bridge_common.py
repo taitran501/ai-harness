@@ -547,6 +547,24 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "optional": {},
         "description": "Writes an experiment configuration with insight tracking.",
     },
+    "candidate_preflight": {
+        "summary": "Preflight verification of candidate predictions against incumbent baseline.",
+        "required": ["candidate_path"],
+        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None},
+        "description": "Computes Spearman rho, rank swaps, and delta distributions. Emits delusion warning if rho >= 0.995.",
+    },
+    "reconcile_submissions": {
+        "summary": "Reconcile live provider submissions against local ledger.",
+        "required": [],
+        "optional": {"competition": None},
+        "description": "Audits live platform dispatches against local submission events to catch external bypasses.",
+    },
+    "acknowledge_external_submissions": {
+        "summary": "Acknowledge and clear external submission discrepancy warnings.",
+        "required": ["refs", "reason"],
+        "optional": {},
+        "description": "Records operator acknowledgement of external dispatches with justification, unlocking submission gate.",
+    },
 }
 
 

@@ -50,9 +50,20 @@ class ActionHandlerMixin:
             result = retrospective_status(memory, memory.sync(), StagnationController(self.project).reconcile_results())
         elif act == "candidate_preflight":
             from harness.candidate_preflight import run_candidate_preflight
+            candidate_p = (
+                params.get("candidate_path")
+                or params.get("candidate")
+                or params.get("path")
+                or params.get("file")
+                or params.get("pred")
+                or params.get("predictions")
+                or params.get("candidate_evidence_id")
+            )
+            if not candidate_p:
+                raise ValueError("candidate_path (e.g. --candidate <path>) is required for candidate_preflight.")
             result = run_candidate_preflight(
                 self.project.root,
-                candidate_path=params.get("candidate_path") or params.get("candidate") or params.get("path"),
+                candidate_path=candidate_p,
                 incumbent_path=params.get("incumbent_path") or params.get("incumbent") or params.get("baseline"),
                 id_col=params.get("id_col"),
                 pred_col=params.get("pred_col"),

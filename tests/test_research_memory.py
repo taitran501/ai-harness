@@ -58,7 +58,7 @@ class ResearchInvariantTests(unittest.TestCase):
         from jsonschema import Draft202012Validator
         directory = Path(__file__).resolve().parents[1] / "harness/schemas"
         schemas = list(directory.glob("*.v1.schema.json"))
-        self.assertEqual(len(schemas), 9)
+        self.assertEqual(len(schemas), 11)
         for path in schemas:
             schema = json.loads(path.read_text())
             Draft202012Validator.check_schema(schema)

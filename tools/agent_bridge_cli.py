@@ -187,7 +187,8 @@ def _parse_json_arg(raw: str | None) -> Dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Antigravity <-> AI Harness Bidirectional Context & Action Bridge CLI"
+        description="Antigravity <-> AI Harness Bidirectional Context & Action Bridge CLI",
+        allow_abbrev=False,
     )
     parser.add_argument("--project-root", default=None, help="Competition workspace root")
     parser.add_argument("--task-config", default=None, help="Task spec path relative to workspace root")
@@ -218,7 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # 3. act
-    act_p = subparsers.add_parser("act", help="Execute a single Typed Harness Action and return ActionObservation")
+    act_p = subparsers.add_parser(
+        "act",
+        help="Execute a single Typed Harness Action and return ActionObservation",
+        allow_abbrev=False,
+    )
     act_p.add_argument("--action", required=True, help="Typed action name (e.g. create_experiment, run_smoke_test)")
     act_p.add_argument("--session-id", default=None, help="Target session ID (uses active session if omitted)")
     act_p.add_argument("--goal", default=None, help="Optional goal if creating a new session")
