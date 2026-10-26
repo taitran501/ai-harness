@@ -19,7 +19,8 @@
       "const": 1
     },
     "preflight_id": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^preflight-[a-f0-9]{32}$"
     },
     "candidate": {
       "type": "object",

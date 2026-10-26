@@ -1,6 +1,7 @@
 import shutil
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from harness.dispatch_audit import append_dispatch_event
 from harness.project import attach_project
@@ -17,6 +18,11 @@ class MockKaggleClient:
 
     def competition_submissions(self, competition):
         return self._subs
+
+
+class FailingKaggleClient:
+    def competition_submissions(self, competition):
+        raise RuntimeError("provider request failed")
 
 
 class TestReconciliation(unittest.TestCase):
@@ -71,6 +77,51 @@ class TestReconciliation(unittest.TestCase):
         )
         self.assertEqual(rec_after["status"], "CLEAN")
         self.assertEqual(len(rec_after["unexplained_submissions"]), 0)
+
+    def test_provider_query_failure_is_unknown_with_null_count(self):
+        report = reconcile_provider_submissions(
+            self.root,
+            competition="test-comp",
+            provider_client=FailingKaggleClient(),
+        )
+
+        self.assertEqual(report["status"], "UNKNOWN")
+        self.assertEqual(report["reason_code"], "PROVIDER_UNAVAILABLE")
+        self.assertIsNone(report["provider_submissions_count"])
+
+    def test_unavailable_provider_does_not_report_clean(self):
+        report = reconcile_provider_submissions(
+            self.root,
+            competition="test-comp",
+            provider="unsupported-provider",
+        )
+
+        self.assertEqual(report["status"], "UNKNOWN")
+        self.assertEqual(report["reason_code"], "PROVIDER_UNAVAILABLE")
+        self.assertIsNone(report["provider_submissions_count"])
+
+    def test_unavailable_provider_client_does_not_report_clean(self):
+        with patch("harness.kaggle_compat.KaggleClient", side_effect=RuntimeError("client unavailable")):
+            report = reconcile_provider_submissions(
+                self.root,
+                competition="test-comp",
+                provider_client=None,
+            )
+
+        self.assertEqual(report["status"], "UNKNOWN")
+        self.assertEqual(report["reason_code"], "PROVIDER_UNAVAILABLE")
+        self.assertIsNone(report["provider_submissions_count"])
+
+    def test_successful_empty_provider_query_is_clean(self):
+        report = reconcile_provider_submissions(
+            self.root,
+            competition="test-comp",
+            provider_client=MockKaggleClient([]),
+        )
+
+        self.assertEqual(report["status"], "CLEAN")
+        self.assertEqual(report["provider_submissions_count"], 0)
+        self.assertIsNone(report.get("reason_code"))
 
 
 if __name__ == "__main__":

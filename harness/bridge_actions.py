@@ -68,6 +68,17 @@ class ActionHandlerMixin:
                 id_col=params.get("id_col"),
                 pred_col=params.get("pred_col"),
             )
+        elif act == "validate_candidate_pitch":
+            from harness.candidate_preflight import validate_candidate_pitch
+            result = validate_candidate_pitch(
+                self.project.root,
+                preflight_id=params.get("preflight_id"),
+                candidate_path=params.get("candidate_path"),
+                claim_kind=params.get("claim_kind", "submission_candidate"),
+                candidate_exp_id=params.get("candidate_exp_id"),
+                incumbent_exp_id=params.get("incumbent_exp_id"),
+                paired_oof_evaluation_id=params.get("paired_oof_evaluation_id"),
+            )
         elif act == "reconcile_submissions":
             from harness.reconciliation import reconcile_provider_submissions
             comp = params.get("competition") or (self.spec.get("competition", {}).get("id") if hasattr(self, "spec") and isinstance(self.spec, dict) else None) or "competition"
@@ -287,7 +298,20 @@ class ActionHandlerMixin:
                 session_id=session.session_id,
                 insight_ids=params.get("insight_ids"),
             )
-        return ActionObservation(call.step_index, act, "SUCCESS", "Research memory action completed",
+        summary = "Research memory action completed"
+        if act == "reconcile_submissions":
+            status = result.get("status", "UNKNOWN")
+            reason = result.get("reason_code")
+            summary = f"Provider reconciliation: {status}"
+            if reason:
+                summary += f" ({reason})"
+        elif act == "validate_candidate_pitch":
+            summary = "Candidate pitch allowed" if result.get("allowed") else "Candidate pitch blocked"
+            details = [*result.get("warnings", []), *result.get("errors", [])]
+            if details:
+                summary += ": " + " ".join(details)
+        status = "FAILED" if act == "validate_candidate_pitch" and not result.get("allowed") else "SUCCESS"
+        return ActionObservation(call.step_index, act, status, summary,
                                  data=result, elapsed_seconds=round(time.time() - t0, 3))
 
     def _handle_suggest_next_interventions(

@@ -9,10 +9,11 @@ Enforces epistemic grounding:
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -23,6 +24,9 @@ from harness.audit_gate import semantic_prediction_hash
 from harness.io_utils import atomic_write_json
 from harness.policy_schema import validate_document
 from harness.project import HarnessProject
+
+_PREFLIGHT_ID_PATTERN = re.compile(r"^preflight-[a-f0-9]{32}$")
+_EVALUATION_ID_PATTERN = re.compile(r"^evaluation-[a-f0-9]{64}$")
 
 
 def _utc_now_iso() -> str:
@@ -198,13 +202,13 @@ def run_candidate_preflight(
         verdict = "FLAGGED_NEAR_DUPLICATE"
         delusion_warning = (
             f"CRITICAL DELUSION WARNING: Spearman rho = {rho:.6f} (>= 0.999). "
-            "This candidate is mathematically nearly identical to the incumbent. "
-            "Score variations on public leaderboard are pure sampling noise. "
-            "Submitting this wastes daily quota without testing a distinct scientific mechanism."
+            "This candidate is nearly identical in rank ordering to the incumbent. "
+            "Rank similarity alone does not establish why any score changed; require verified paired OOF gain "
+            "before pitching it for submission."
         )
         recommendation = (
-            "REJECT / HALT: Do not submit this candidate. Explore an untouched research family "
-            "(e.g. Target Transformation, Calibration, or Neural Architecture) instead of micro-tinkering."
+            "Do not pitch this candidate for submission without a verified paired OOF evaluation showing gain. "
+            "Otherwise explore an orthogonal, predeclared research mechanism."
         )
     elif rho >= 0.995:
         classification = "MINOR_REWEIGHTING"
@@ -262,9 +266,178 @@ def run_candidate_preflight(
     validate_document("candidate_preflight_receipt", receipt)
 
     # Persist receipt
-    out_dir = project.root / ".ai-harness" / "preflights"
+    out_dir = project.root / ".ai-harness" / "artifacts" / "preflight"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{receipt['preflight_id']}.json"
     atomic_write_json(out_path, receipt)
 
     return receipt
+
+
+def load_preflight_receipt(project_root: str | Path, preflight_id: str) -> Optional[Dict[str, Any]]:
+    """Load a schema-validated candidate preflight receipt by its exact ID."""
+    if not isinstance(preflight_id, str) or not _PREFLIGHT_ID_PATTERN.fullmatch(preflight_id):
+        return None
+    path = Path(project_root).resolve() / ".ai-harness" / "artifacts" / "preflight" / f"{preflight_id}.json"
+    if not path.is_file():
+        return None
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    validate_document("candidate_preflight_receipt", receipt)
+    if receipt.get("preflight_id") != preflight_id:
+        raise ValueError("Preflight receipt ID does not match its requested ID.")
+    return receipt
+
+
+def _validate_paired_oof_gain(
+    project: HarnessProject,
+    evaluation_id: Optional[str],
+    candidate_exp_id: Optional[str],
+    incumbent_exp_id: Optional[str],
+) -> tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+    """Verify an indexed machine evaluation for the cited candidate/control pair."""
+    if not evaluation_id:
+        return False, None, "Provide paired_oof_evaluation_id for machine-verified paired OOF gain."
+    if not _EVALUATION_ID_PATTERN.fullmatch(str(evaluation_id)):
+        return False, None, "paired_oof_evaluation_id is malformed."
+    if not candidate_exp_id or not incumbent_exp_id:
+        return False, None, "Provide candidate_exp_id and incumbent_exp_id to bind the paired evaluation."
+
+    from harness.decision_rules import policy_directory, read_decision_evaluation
+
+    directory = policy_directory(project)
+    try:
+        index = json.loads((directory / "evaluations.json").read_text(encoding="utf-8"))
+        if evaluation_id not in set(index.get("evaluations", {}).values()):
+            return False, None, "The paired OOF evaluation is not indexed as verified workspace evidence."
+        receipt = read_decision_evaluation(directory / f"{evaluation_id}.json")
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        return False, None, f"Could not verify the paired OOF evaluation: {exc}"
+
+    candidate = receipt.get("candidate") or {}
+    control = receipt.get("control") or {}
+    checks = receipt.get("checks") or {}
+    lower_bound = (receipt.get("uncertainty") or {}).get("lower_bound")
+    valid = (
+        receipt.get("evaluation_id") == evaluation_id
+        and receipt.get("outcome") == "supported"
+        and receipt.get("preregistered") is True
+        and candidate.get("kind") == "full_run"
+        and candidate.get("id") == candidate_exp_id
+        and candidate.get("partition") == "oof"
+        and control.get("kind") == "full_run"
+        and control.get("id") == incumbent_exp_id
+        and control.get("partition") == "oof"
+        and candidate_exp_id != incumbent_exp_id
+        and checks.get("identity") == "pass"
+        and checks.get("metric_gain") == "pass"
+        and checks.get("uncertainty") == "pass"
+        and isinstance(receipt.get("gain"), (int, float))
+        and receipt["gain"] > 0
+        and isinstance(lower_bound, (int, float))
+        and lower_bound > 0
+    )
+    if not valid:
+        return False, None, (
+            "The evaluation must be machine-supported, preregistered, positive-gain OOF evidence "
+            "for the specified candidate and incumbent."
+        )
+    return True, receipt, None
+
+
+def validate_candidate_pitch(
+    project_root: str | Path,
+    preflight_id: str,
+    candidate_path: Optional[str | Path] = None,
+    *,
+    claim_kind: str = "submission_candidate",
+    candidate_exp_id: Optional[str] = None,
+    incumbent_exp_id: Optional[str] = None,
+    paired_oof_evaluation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Validate a cited preflight and block near-duplicate pitches without paired OOF gain."""
+    project = HarnessProject.discover(Path(project_root).resolve())
+    errors: List[str] = []
+    warnings: List[str] = []
+    citation_bundle: Dict[str, Any] = {"preflight_id": preflight_id}
+    allowed_claim_kinds = {"blend", "temperature_tuning", "submission_candidate", "candidate"}
+    if claim_kind not in allowed_claim_kinds:
+        errors.append(f"claim_kind must be one of {', '.join(sorted(allowed_claim_kinds))}.")
+
+    if not isinstance(preflight_id, str) or not _PREFLIGHT_ID_PATTERN.fullmatch(preflight_id):
+        receipt = None
+        errors.append("preflight_id is malformed; cite an ID returned by candidate_preflight.")
+    else:
+        try:
+            receipt = load_preflight_receipt(project.root, preflight_id)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            receipt = None
+            errors.append(f"Preflight receipt is invalid: {exc}")
+        if receipt is None and not errors:
+            errors.append("preflight_id was not found in this workspace; run candidate_preflight first.")
+
+    evaluation = None
+    if receipt is not None:
+        requested_path = candidate_path or receipt["candidate"]["path"]
+        prediction_path = Path(requested_path)
+        if not prediction_path.is_absolute():
+            prediction_path = project.root / prediction_path
+        prediction_path = prediction_path.resolve()
+        inside_workspace = True
+        try:
+            prediction_path.relative_to(project.root)
+        except ValueError:
+            inside_workspace = False
+            errors.append("Candidate pitch validation is limited to files inside the active workspace.")
+        if inside_workspace and not prediction_path.is_file():
+            errors.append(f"Candidate prediction file does not exist: {prediction_path}")
+        elif inside_workspace and sha256(prediction_path) != receipt["candidate"]["sha256"]:
+            errors.append("Candidate prediction hash differs from the cited preflight receipt; rerun candidate_preflight.")
+
+        similarity = receipt.get("similarity") or {}
+        rho = similarity.get("spearman_rho")
+        near_duplicate = (
+            receipt.get("verdict") == "FLAGGED_NEAR_DUPLICATE"
+            or isinstance(rho, (int, float)) and rho >= 0.995
+        )
+        if near_duplicate:
+            warnings.append(
+                f"Near duplicate (Spearman rho={rho!s}): rank similarity alone does not establish score cause. "
+                "A verified paired OOF gain is required before this pitch is allowed."
+            )
+            verified, evaluation, reason = _validate_paired_oof_gain(
+                project,
+                paired_oof_evaluation_id,
+                candidate_exp_id,
+                incumbent_exp_id,
+            )
+            if verified:
+                citation_bundle["paired_oof_evaluation_id"] = paired_oof_evaluation_id
+                citation_bundle["candidate_exp_id"] = candidate_exp_id
+                citation_bundle["incumbent_exp_id"] = incumbent_exp_id
+                warnings.append("The cited paired OOF evaluation verifies positive gain for this candidate/control pair.")
+            else:
+                warnings.append(reason or "Paired OOF gain could not be verified.")
+
+    citation_valid = receipt is not None and not errors
+    is_flagged = bool(receipt) and (
+        receipt.get("verdict") == "FLAGGED_NEAR_DUPLICATE"
+        or (receipt.get("similarity") or {}).get("spearman_rho", 0) >= 0.995
+    )
+    paired_gain_verified = evaluation is not None
+    allowed = citation_valid and (not is_flagged or paired_gain_verified)
+    result = {
+        "preflight_id": preflight_id,
+        "claim_kind": claim_kind,
+        "citation_valid": citation_valid,
+        "allowed": allowed,
+        "verdict": receipt.get("verdict") if receipt else "INVALID_CITATION",
+        "spearman_rho": (receipt.get("similarity") or {}).get("spearman_rho") if receipt else None,
+        "errors": errors,
+        "warnings": warnings,
+        "citation_bundle": citation_bundle if allowed else None,
+    }
+    if receipt is not None:
+        result["receipt"] = receipt
+    if evaluation is not None:
+        result["paired_oof_evaluation"] = evaluation
+    return result

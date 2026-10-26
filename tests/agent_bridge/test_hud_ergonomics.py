@@ -125,6 +125,8 @@ class TestResearchContinuityHudRendering(unittest.TestCase):
         self.assertNotIn('"entry_count"', text)
         # The resume-critical facts survive.
         self.assertIn("V11 scored 0.50", text)
+        self.assertIn("[UNVERIFIED NOTE] Latest checkpoint:", text)
+        self.assertIn("[UNVERIFIED NOTE] Open questions:", text)
         self.assertIn("Implement V12", text)
         self.assertIn("[704da07f]", text)
         self.assertIn("rejected", text)
@@ -207,6 +209,47 @@ class TestResearchContinuityHudRendering(unittest.TestCase):
         )
         self.assertTrue(lines)
         self.assertIn("Entries: 0", lines[0])
+
+    def test_context_hud_shows_cached_provider_reconciliation_truthfully(self):
+        from harness.agent_bridge import AgentBridge
+        from harness.io_utils import atomic_write_json
+        from harness.project import attach_project
+
+        root, spec_path = make_workspace(prefix="aih-test-rec-hud-")
+        try:
+            attach_project(root, task_config=spec_path)
+            bridge = AgentBridge(root, task_spec_path=spec_path)
+            report_path = root / ".ai-harness" / "reconciliation_report.json"
+            reports = [
+                ("CLEAN", None, 0),
+                ("DISCREPANCY_DETECTED", None, 3),
+                ("UNKNOWN", "PROVIDER_UNAVAILABLE", None),
+            ]
+            for status, reason, count in reports:
+                report = {
+                    "schema_version": 1,
+                    "reconciliation_id": "rec-fixture",
+                    "competition": "fixture",
+                    "provider": "kaggle",
+                    "provider_submissions_count": count,
+                    "accounted_submissions_count": 0,
+                    "unexplained_submissions": [],
+                    "status": status,
+                    "checked_at": "2026-10-26T12:00:00+00:00",
+                }
+                if reason:
+                    report["reason_code"] = reason
+                atomic_write_json(report_path, report)
+                text = bridge.render_context_markdown()
+                display = f"{status} / {reason}" if reason else status
+                self.assertIn(f"Status: `{display}`", text)
+                self.assertIn("Last checked: `2026-10-26T12:00:00+00:00`", text)
+                if count is None:
+                    self.assertNotIn("Provider submissions: `0`", text)
+                else:
+                    self.assertIn(f"Provider submissions: `{count}`", text)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

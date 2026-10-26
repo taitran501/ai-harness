@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import yaml
 
@@ -29,6 +29,185 @@ _SYNC_CACHE: dict = {}
 # task+scorer contract that produced the cached record; the per-file tuple
 # invalidates the cache when ANY artifact file changes (not only
 # manifest/config/metrics). See ResearchMemory.sync().
+
+UNVERIFIED_AGENT_NOTE = "[UNVERIFIED AGENT NOTE - HYPOTHESIS ONLY]"
+
+
+def render_markdown_progress(
+    scope: str,
+    entries: Sequence[Mapping[str, Any]],
+    verified_runs: Optional[Sequence[Mapping[str, Any]]] = None,
+    verified_decisions: Optional[Sequence[Mapping[str, Any]]] = None,
+    validated_incumbent: Optional[Mapping[str, Any]] = None,
+) -> str:
+    """Render verified research state separately from agent-declared notes.
+
+    ``verified_runs``, ``verified_decisions``, and ``validated_incumbent`` are
+    projections supplied by the live validators. Checkpoint prose is always
+    rendered as an unverified hypothesis and never contributes to metrics.
+    """
+    verified_runs = [
+        dict(run) for run in (verified_runs or [])
+        if run.get("evidence_status") == "verified_full"
+    ]
+    verified_decisions = [
+        dict(decision) for decision in (verified_decisions or [])
+        if decision.get("verification_status") == "machine_evaluated"
+    ]
+    entries = [dict(entry) for entry in (entries or [])]
+
+    def markdown(value):
+        text = html.escape(str(value), quote=False)
+        return re.sub(r"([\\`*_{}\[\]()#+!|])", r"\\\1", text)
+
+    groups: Dict[str, Dict[str, Any]] = {}
+    for run in verified_runs:
+        group = str(run.get("comparison_group") or "unknown")
+        utility = run.get("utility")
+        if not isinstance(utility, (int, float)) or not math.isfinite(float(utility)):
+            continue
+        previous = groups.get(group)
+        if previous is None or float(utility) > float(previous["utility"]):
+            groups[group] = run
+
+    checkpoints = [entry for entry in entries if entry.get("kind") == "checkpoint"]
+    checkpoint = checkpoints[-1] if checkpoints else None
+    lines = [
+        "<!-- ai-harness:research-progress:v1 -->",
+        "# Research progress",
+        "",
+        "Generated from research_memory.json and live-validated full runs. "
+        "Record notes through the Bridge; manual edits to this generated file are replaced.",
+        "",
+        f"Task/scorer scope: `{markdown(scope)}`",
+        "",
+        "## Resume here",
+        "",
+        "### Verified state",
+        "",
+        f"- Verified completed full runs: {len(verified_runs)}",
+    ]
+    if groups:
+        best_runs = sorted(groups.items(), key=lambda item: item[0])
+        if len(best_runs) == 1:
+            group, run = best_runs[0]
+            lines.append(
+                f"- Best verified CV: `{markdown(run.get('exp_id', 'unknown'))}` "
+                f"({float(run.get('score', float('nan'))):.6g}; comparison identity `{markdown(group[:12])}`)"
+            )
+        else:
+            lines.append("- Best verified CV by comparison identity:")
+            for group, run in best_runs:
+                lines.append(
+                    f"  - `{markdown(run.get('exp_id', 'unknown'))}` "
+                    f"({float(run.get('score', float('nan'))):.6g}; `{markdown(group[:12])}`)"
+                )
+    else:
+        lines.append("- Best verified CV: unknown (no live-validated full run)")
+
+    lines.append(f"- Machine-verified decisions: {len(verified_decisions)}")
+    for decision in verified_decisions[-3:]:
+        lines.append(
+            f"  - `{markdown(decision.get('evaluation_id', 'evaluation'))}`: "
+            f"{markdown(decision.get('outcome', 'recorded'))}"
+        )
+    if validated_incumbent:
+        ref = validated_incumbent.get("evidence_ref") or {}
+        score = validated_incumbent.get("score")
+        score_text = f" ({float(score):.6g})" if isinstance(score, (int, float)) else ""
+        lines.append(
+            f"- Validated incumbent: `{markdown(ref.get('id', 'unknown'))}`{score_text} "
+            f"(evaluation `{markdown(validated_incumbent.get('evaluation_id', 'unknown'))}`)"
+        )
+    else:
+        lines.append("- Validated incumbent: unknown (no current machine-verified incumbent state)")
+
+    considered = {
+        exp
+        for entry in entries
+        if entry.get("kind") == "decision"
+        for exp in (entry.get("evidence") or [])
+    }
+    pending = [run.get("exp_id") for run in verified_runs if run.get("exp_id") not in considered]
+    lines.append(f"- Uninterpreted verified full results: {markdown(', '.join(pending) or 'none')}")
+
+    lines.extend([
+        "",
+        f"### Unverified Agent Notes {UNVERIFIED_AGENT_NOTE}",
+        "",
+        f"> [!NOTE] {UNVERIFIED_AGENT_NOTE}",
+    ])
+    if checkpoint:
+        lines.extend([
+            f"> **Checkpoint summary**: {markdown(checkpoint.get('conclusion', ''))}",
+            f"> **Next action**: {markdown(checkpoint.get('next_action', ''))}",
+        ])
+        for question in checkpoint.get("open_questions") or []:
+            lines.append(f"> **Open question**: {markdown(question)}")
+    else:
+        lines.append("> No checkpoint recorded.")
+
+    insights = [entry for entry in entries if entry.get("kind") == "insight"]
+    lines.extend([
+        "",
+        "## Insight status",
+        "",
+        "| Insight | Status | Required step | Next action |",
+        "| --- | --- | --- | --- |",
+    ])
+    for insight in insights:
+        state = insight.get("progress_state") or {}
+        cells = [
+            f"{insight.get('title', 'Untitled')} ({insight.get('id', '')})",
+            state.get("status", "needs evidence review"),
+            state.get("required_step", "Review verified results"),
+            state.get("next_action", "Plan a bounded probe"),
+        ]
+        lines.append("| " + " | ".join(markdown(cell).replace("\n", " ") for cell in cells) + " |")
+    if not insights:
+        lines.append("| No insights recorded | needs notes | Record an observation and mechanism | Plan a bounded probe |")
+
+    lines.extend(["", "## Chronological journal", ""])
+    history = sorted(
+        [*entries, *verified_runs],
+        key=lambda item: (item.get("timestamp", 0), item.get("id", item.get("exp_id", ""))),
+    )
+    labels = (
+        "title", "parent_insight_id", "insight_id", "probe_plan_id", "exp_id", "action",
+        "family_id", "source_refs", "review_id", "map_digest", "run_count_at_review",
+        "changes_since_last_review", "supported_mechanisms", "rejected_mechanisms",
+        "highest_priority_untouched", "next_probe_rationale", "budget_limit", "revisit_conditions",
+        "observation", "mechanism", "hypothesis", "control", "intervention", "expected_observation",
+        "alternative_explanation", "decision_rule", "budget", "stop_rule", "outcome", "score",
+        "conclusion", "lesson", "revisit_when", "next_action", "evidence", "open_questions", "insight_ids",
+        "claimed_outcome", "effective_outcome", "verification_status", "rule_id", "evaluation_id", "reason_codes",
+    )
+    verified_ids = {run.get("exp_id") for run in verified_runs}
+    for item in history:
+        timestamp = item.get("timestamp", 0)
+        stamp = datetime.fromtimestamp(float(timestamp or 0), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        is_checkpoint = item.get("kind") == "checkpoint"
+        kind = "note [unverified]" if is_checkpoint else markdown(item.get("kind", "verified_full_result"))
+        identity = item.get("id", item.get("exp_id", ""))
+        lines.extend([f"### {stamp} — {kind} `{markdown(identity)}`", ""])
+        if is_checkpoint:
+            lines.append(f"> [!NOTE] {UNVERIFIED_AGENT_NOTE}")
+        for key in labels:
+            value = item.get(key)
+            if value is None or value == "" or value == []:
+                continue
+            if isinstance(value, list):
+                value = "; ".join(str(part) for part in value)
+            text = markdown(value).replace("\n", "\n> ")
+            lines.append(f"> **{key}**: {text}\n")
+        evidence = item.get("evidence", [])
+        evidence_status = item.get("evidence_status", "declared")
+        if evidence:
+            evidence_status += "; evidence currently verified=" + str(all(exp in verified_ids for exp in evidence)).lower()
+        lines.extend([f"> **evidence_status**: {markdown(evidence_status)}", ""])
+    if not history:
+        lines.append("No research events or verified full results recorded for this scope.")
+    return "\n".join(lines) + "\n"
 
 
 class _EntryRecord(dict):
@@ -279,6 +458,66 @@ class ResearchMemory:
         text = html.escape(str(value), quote=False)
         return re.sub(r"([\\`*_{}\[\]()#+!|])", r"\\\1", text)
 
+    def _validated_progress_decisions(self, entries):
+        """Return only decisions backed by indexed, intact evaluation receipts."""
+        from harness.decision_rules import policy_directory, read_decision_evaluation
+        from harness.project import HarnessProject
+
+        directory = policy_directory(HarnessProject.discover(self.root))
+        index_path = directory / "evaluations.json"
+        try:
+            indexed = set(json.loads(index_path.read_text(encoding="utf-8")).get("evaluations", {}).values())
+        except (OSError, ValueError, TypeError):
+            return []
+
+        verified = []
+        for entry in entries:
+            if entry.get("kind") != "decision" or entry.get("verification_status") != "machine_evaluated":
+                continue
+            evaluation_id = entry.get("evaluation_id")
+            if not evaluation_id or evaluation_id not in indexed:
+                continue
+            try:
+                receipt = read_decision_evaluation(directory / f"{evaluation_id}.json")
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if (receipt.get("outcome") != entry.get("outcome")
+                    or receipt.get("evaluation_id") != evaluation_id
+                    or dict(entry.get("evaluation") or {}) != receipt):
+                continue
+            verified.append(dict(entry))
+        return verified
+
+    def _validated_progress_incumbent(self):
+        """Read the current incumbent only from replayed machine evaluation state."""
+        try:
+            from harness.decision_rules import policy_directory, read_decision_evaluation
+            from harness.project import HarnessProject
+            from harness.stagnation import StagnationController
+
+            project = HarnessProject.discover(self.root)
+            states = StagnationController(project).reconcile_results()
+            candidates = [
+                state for state in states.values()
+                if state.get("incumbent_evaluation_id") and state.get("incumbent_evidence_ref")
+            ]
+            if not candidates:
+                return None
+            state = max(candidates, key=lambda item: item.get("updated_at", ""))
+            evaluation_id = state["incumbent_evaluation_id"]
+            directory = policy_directory(project)
+            receipt = read_decision_evaluation(directory / f"{evaluation_id}.json")
+            if (receipt.get("outcome") != "supported"
+                    or receipt.get("candidate") != state["incumbent_evidence_ref"]):
+                return None
+            return {
+                "evidence_ref": dict(state["incumbent_evidence_ref"]),
+                "evaluation_id": evaluation_id,
+                "score": receipt.get("candidate_score"),
+            }
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
     def _publish_progress(self, runs):
         """Refresh a derived human-readable journal; JSON remains authoritative."""
         marker = "<!-- ai-harness:research-progress:v1 -->"
@@ -291,62 +530,20 @@ class ResearchMemory:
                 # Re-read under the lock so a concurrent decision is not erased
                 # by publishing an older ledger snapshot.
                 entries = self.entries()
-                verified = {run["exp_id"] for run in runs}
-                insights = [entry for entry in entries if entry["kind"] == "insight"]
-                lines = [marker, "# Research progress", "",
-                    "Generated from research_memory.json and live-validated full runs. "
-                    "Record notes through the Bridge; manual edits to this generated file are replaced.", "",
-                    f"Task/scorer scope: `{self.scope}`", "",
-                    "## Resume here", ""]
-                checkpoints = [entry for entry in entries if entry["kind"] == "checkpoint"]
-                if checkpoints:
-                    checkpoint = checkpoints[-1]
-                    lines.extend([f"- Checkpoint: {self._markdown(checkpoint['conclusion'])}",
-                                  f"- Next action: {self._markdown(checkpoint['next_action'])}"])
-                else:
-                    lines.append("- No checkpoint recorded. Record one before stopping or changing direction.")
-                considered = {exp for entry in entries if entry["kind"] == "decision" for exp in entry.get("evidence", [])}
-                pending = [run["exp_id"] for run in runs if run["exp_id"] not in considered]
-                lines.extend([f"- Uninterpreted full results: {self._markdown(', '.join(pending) or 'none')}",
-                              "", "## Insight status", "",
-                              "| Insight | Status | Required step | Next action |",
-                              "| --- | --- | --- | --- |"])
-                for insight in insights:
-                    state = self._trace_state(insight, entries, runs)
-                    cells = [f"{insight['title']} ({insight['id']})", state['status'], state['required_step'], state['next_action']]
-                    lines.append("| " + " | ".join(self._markdown(cell).replace('\n', ' ') for cell in cells) + " |")
-                if not insights:
-                    lines.append("| No insights recorded | needs notes | Record an observation and mechanism | Plan a bounded probe |")
-                lines.extend(["", "## Chronological journal", ""])
-                history = sorted([*entries, *runs], key=lambda item: (item['timestamp'], item.get('id', item.get('exp_id', ''))))
-                labels = ("title", "parent_insight_id", "insight_id", "probe_plan_id", "exp_id", "action",
-                    "family_id", "source_refs", "review_id", "map_digest", "run_count_at_review",
-                    "changes_since_last_review", "supported_mechanisms", "rejected_mechanisms",
-                    "highest_priority_untouched", "next_probe_rationale", "budget_limit", "revisit_conditions",
-                    "observation", "mechanism", "hypothesis", "control", "intervention", "expected_observation",
-                    "alternative_explanation", "decision_rule", "budget", "stop_rule", "outcome", "score",
-                    "conclusion", "lesson", "revisit_when", "next_action", "evidence", "open_questions", "insight_ids",
-                    "claimed_outcome", "effective_outcome", "verification_status", "rule_id", "evaluation_id", "reason_codes")
-                for item in history:
-                    stamp = datetime.fromtimestamp(item['timestamp'], timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-                    kind = item.get('kind', 'verified_full_result')
-                    identity = item.get('id', item.get('exp_id', ''))
-                    lines.extend([f"### {stamp} — {kind} `{self._markdown(identity)}`", ""])
-                    for key in labels:
-                        value = item.get(key)
-                        if value is not None and value != '' and value != []:
-                            if isinstance(value, list):
-                                value = '; '.join(str(part) for part in value)
-                            text = self._markdown(value).replace('\n', '\n> ')
-                            lines.append(f"> **{key}**: {text}\n")
-                    evidence = item.get('evidence', [])
-                    evidence_status = item.get('evidence_status', 'declared')
-                    if evidence:
-                        evidence_status += '; evidence currently verified=' + str(all(exp in verified for exp in evidence)).lower()
-                    lines.extend([f"> **evidence_status**: {evidence_status}", ""])
-                if not history:
-                    lines.append("No research events or verified full results recorded for this scope.")
-                content = '\n'.join(lines) + '\n'
+                verified_runs = [run for run in runs if run.get("evidence_status") == "verified_full"]
+                render_entries = []
+                for entry in entries:
+                    rendered = dict(entry)
+                    if entry.get("kind") == "insight":
+                        rendered["progress_state"] = self._trace_state(entry, entries, verified_runs)
+                    render_entries.append(rendered)
+                content = render_markdown_progress(
+                    self.scope,
+                    render_entries,
+                    verified_runs=verified_runs,
+                    verified_decisions=self._validated_progress_decisions(entries),
+                    validated_incumbent=self._validated_progress_incumbent(),
+                )
                 if content != previous:
                     atomic_write_text(self.progress_path, content)
                 return {"progress_path": str(self.progress_path), "progress_warning": None}

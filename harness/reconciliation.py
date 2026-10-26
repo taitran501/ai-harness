@@ -114,7 +114,7 @@ def reconcile_provider_submissions(
     project = HarnessProject.discover(Path(project_root).resolve())
     accounted_refs = collect_accounted_refs(project.root, competition)
 
-    remote_subs = []
+    remote_subs = None
     if provider == "kaggle":
         client = provider_client
         if client is None:
@@ -128,7 +128,7 @@ def reconcile_provider_submissions(
             try:
                 remote_subs = client.competition_submissions(competition)
             except Exception:
-                # Offline or unauthenticated - return clean advisory without crashing
+                # Offline or unauthenticated: a failed query is unknown, never clean.
                 remote_subs = None
 
     unexplained: List[Dict[str, Any]] = []
@@ -150,8 +150,18 @@ def reconcile_provider_submissions(
                     }
                 )
 
-    status = "DISCREPANCY_DETECTED" if unexplained else "CLEAN"
-    total_provider_count = len(remote_subs) if remote_subs is not None else len(accounted_refs)
+    if remote_subs is None:
+        status = "UNKNOWN"
+        reason_code = "PROVIDER_UNAVAILABLE"
+        total_provider_count = None
+    elif unexplained:
+        status = "DISCREPANCY_DETECTED"
+        reason_code = None
+        total_provider_count = len(remote_subs)
+    else:
+        status = "CLEAN"
+        reason_code = None
+        total_provider_count = len(remote_subs)
 
     report = {
         "schema_version": 1,
@@ -164,6 +174,8 @@ def reconcile_provider_submissions(
         "status": status,
         "checked_at": _utc_now_iso(),
     }
+    if reason_code is not None:
+        report["reason_code"] = reason_code
 
     validate_document("reconciliation_report", report)
 

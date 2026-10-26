@@ -28,7 +28,7 @@
       "type": "string"
     },
     "provider_submissions_count": {
-      "type": "integer",
+      "type": ["integer", "null"],
       "minimum": 0
     },
     "accounted_submissions_count": {
@@ -51,7 +51,10 @@
     },
     "status": {
       "type": "string",
-      "enum": ["CLEAN", "DISCREPANCY_DETECTED"]
+      "enum": ["CLEAN", "DISCREPANCY_DETECTED", "UNEXPLAINED_EXTERNAL_DISPATCH", "UNKNOWN"]
+    },
+    "reason_code": {
+      "type": "string"
     },
     "checked_at": {
       "type": "string",

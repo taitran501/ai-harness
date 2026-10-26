@@ -130,11 +130,11 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
         suffix = f" [{ids}]" if ids else ""
         conclusion = _truncate_text(checkpoint.get("conclusion"), 160)
         next_action = _truncate_text(checkpoint.get("next_action"), 140)
-        lines.append(f"- Latest checkpoint: {conclusion} -> next: {next_action}{suffix}")
+        lines.append(f"- [UNVERIFIED NOTE] Latest checkpoint: {conclusion} -> next: {next_action}{suffix}")
         questions = checkpoint.get("open_questions") or []
         if questions:
             lines.append(
-                f"- Open questions: {'; '.join(_truncate_text(q, 120) for q in questions[:2])}"
+                f"- [UNVERIFIED NOTE] Open questions: {'; '.join(_truncate_text(q, 120) for q in questions[:2])}"
             )
     for decision in (memory.get("recent_decisions") or [])[:2]:
         outcome = decision.get("effective_outcome", decision.get("outcome")) or "recorded"
@@ -182,6 +182,39 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
         except Exception:
             pass
     return lines
+
+
+def _reconciliation_hud_lines(report: Optional[Dict[str, Any]]) -> List[str]:
+    """Render cached provider reconciliation without treating unknown as clean."""
+    if not report:
+        return []
+    status = str(report.get("status") or "UNKNOWN")
+    reason = report.get("reason_code")
+    display_status = f"{status} / {reason}" if status == "UNKNOWN" and reason else status
+    lines = ["", "## Remote provider reconciliation", f"- Status: `{display_status}`"]
+    checked_at = report.get("checked_at") or "unknown"
+    lines.append(f"- Last checked: `{checked_at}`")
+    count = report.get("provider_submissions_count")
+    if isinstance(count, int) and not isinstance(count, bool):
+        lines.append(f"- Provider submissions: `{count}`")
+    return lines
+
+
+def _load_reconciliation_report(project_root: Path) -> Optional[Dict[str, Any]]:
+    """Load the workspace's cached report; malformed reports are shown as unknown."""
+    path = project_root / ".ai-harness" / "reconciliation_report.json"
+    if not path.is_file():
+        return None
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("report must be an object")
+        from harness.policy_schema import validate_document
+
+        validate_document("reconciliation_report", report)
+        return report
+    except Exception:
+        return {"status": "UNKNOWN", "reason_code": "REPORT_UNREADABLE", "checked_at": "unknown"}
 
 
 def adoption_gate_lines(
@@ -1247,6 +1280,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             "idea_graveyard": graveyard,
             "recent_submissions": recent_submissions,
             "workspace_hygiene": workspace_hygiene,
+            "reconciliation_report": _load_reconciliation_report(self.project_root),
             "research_memory": self._research_memory().context(
                 min_improvement=self._get_spec_min_improvement((active_session or {}).get("budget", {})),
                 patience=int((active_session or {}).get("budget", {}).get("max_consecutive_rejections") or 3),
@@ -1403,6 +1437,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         memory = pkt["research_memory"]
         lines.extend(["", "## Research continuity (survives sessions and compaction)"])
         lines.extend(_research_continuity_hud_lines(memory))
+        lines.extend(_reconciliation_hud_lines(pkt.get("reconciliation_report")))
         lines.extend(f"- {step}" for step in memory["resume_protocol"])
 
         from harness.hygiene import hygiene_hud_lines
@@ -1975,6 +2010,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
     # cloud inspect/wait pair) share one method and branch on ``act`` internally.
     _TYPED_ACTION_HANDLER_NAMES = {
         "candidate_preflight": "_handle_research_memory_group",
+        "validate_candidate_pitch": "_handle_research_memory_group",
         "reconcile_submissions": "_handle_research_memory_group",
         "acknowledge_external_submissions": "_handle_research_memory_group",
         "record_macro_review": "_handle_research_memory_group",

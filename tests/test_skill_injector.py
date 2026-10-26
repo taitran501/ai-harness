@@ -18,6 +18,24 @@ from tools.dashboard_server import DashboardHandler
 
 
 class SkillInjectorTests(unittest.TestCase):
+    def test_generated_skill_contains_confinement_and_candidate_citation_rules(self):
+        content = generate_skill_content({
+            "task_name": "Confinement fixture",
+            "platform": "kaggle",
+            "modality": "tabular",
+            "primary_metric": "Accuracy",
+            "direction": "maximize",
+        })
+
+        self.assertIn("Workspace Confinement & Anti-Dredging", content)
+        self.assertIn("<appDataDir>\\brain\\<other-conversation-id>", content)
+        self.assertIn("ai-harness-agent context", content)
+        self.assertIn("validate_candidate_pitch", content)
+        self.assertIn("verified 'preflight_id'", content)
+        self.assertIn("Spearman rho >= 0.995", content)
+        self.assertIn("verified paired OOF gain", content)
+        self.assertIn("not an OS security boundary", content)
+
     def test_generate_skill_nlp(self):
         """Verify dynamic skill generation for NLP multi-task competition."""
         task_cfg = {

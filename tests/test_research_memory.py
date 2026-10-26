@@ -12,10 +12,71 @@ from harness.artifacts import sha256
 from harness.decision_rules import (DecisionRuleNotSatisfied, DecisionRuleV1, evaluate_decision_rule,
     paired_metric_bootstrap, register_decision_rule, reserve_comparison_slot, resolve_research_policy)
 from harness.project import HarnessProject
-from harness.research_memory import ResearchMemory
+from harness.research_memory import ResearchMemory, render_markdown_progress
 from harness.stagnation import StagnationController
 from harness.task_spec import load_active_task_spec
 from tests.fixtures import make_submission_evidence, workspace_with_verified_pair
+
+
+class ResearchProgressRenderingTests(unittest.TestCase):
+    def test_checkpoint_is_labeled_unverified_and_cannot_change_verified_facts(self):
+        checkpoint = {
+            "id": "checkpoint-1",
+            "kind": "checkpoint",
+            "timestamp": 10,
+            "conclusion": "Verified Slot 1 completed at score 9.99",
+            "next_action": "Submit the claimed result",
+            "open_questions": ["Was the run actually completed?"],
+            "evidence_status": "declared_checkpoint",
+        }
+        run = {
+            "exp_id": "exp001",
+            "timestamp": 20,
+            "score": 0.75,
+            "utility": 0.75,
+            "comparison_group": "comparison-a",
+            "evidence_status": "verified_full",
+        }
+        verified_decision = {
+            "verification_status": "machine_evaluated",
+            "evaluation_id": "evaluation-1",
+            "outcome": "supported",
+        }
+        text = render_markdown_progress(
+            "test-scope",
+            [checkpoint],
+            verified_runs=[run],
+            verified_decisions=[verified_decision, {"verification_status": "legacy_unverified"}],
+        )
+
+        self.assertIn("### Unverified Agent Notes [UNVERIFIED AGENT NOTE - HYPOTHESIS ONLY]", text)
+        self.assertIn("> [!NOTE] [UNVERIFIED AGENT NOTE - HYPOTHESIS ONLY]", text)
+        self.assertIn("Checkpoint summary", text)
+        self.assertIn("Next action", text)
+        self.assertIn("Open question", text)
+        self.assertIn("— note [unverified] `checkpoint-1`", text)
+        self.assertIn("Verified completed full runs: 1", text)
+        self.assertIn("Best verified CV: `exp001` (0.75", text)
+        self.assertIn("Machine-verified decisions: 1", text)
+        resume = text.split("### Unverified Agent Notes", 1)[0]
+        self.assertNotIn("9.99", resume)
+        self.assertNotIn("Verified Slot 1", resume)
+
+    def test_incumbent_is_only_shown_when_validated_state_is_supplied(self):
+        unknown = render_markdown_progress("scope", [], verified_runs=[])
+        self.assertIn("Validated incumbent: unknown", unknown)
+
+        validated = render_markdown_progress(
+            "scope",
+            [],
+            verified_runs=[],
+            validated_incumbent={
+                "evidence_ref": {"id": "candidate-2", "kind": "full_run"},
+                "evaluation_id": "evaluation-123",
+                "score": 0.82,
+            },
+        )
+        self.assertIn("Validated incumbent: `candidate-2` (0.82)", validated)
 
 
 def rule_document(family="fixture-family", effect=.05):

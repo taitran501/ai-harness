@@ -75,6 +75,7 @@ class TypedActionName(str, Enum):
     FINALIZE_COMPETITION = "finalize_competition"
     GET_NEXT_EXPERIMENT_ID = "get_next_experiment_id"
     CANDIDATE_PREFLIGHT = "candidate_preflight"
+    VALIDATE_CANDIDATE_PITCH = "validate_candidate_pitch"
     RECONCILE_SUBMISSIONS = "reconcile_submissions"
     ACKNOWLEDGE_EXTERNAL_SUBMISSIONS = "acknowledge_external_submissions" 
 
@@ -88,6 +89,7 @@ MAX_SESSION_OBSERVATIONS = 200
 
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     "candidate_preflight": ApprovalTier.AUTO.value,
+    "validate_candidate_pitch": ApprovalTier.AUTO.value,
     "reconcile_submissions": ApprovalTier.AUTO.value,
     "acknowledge_external_submissions": ApprovalTier.USER_APPROVAL.value,
     "record_macro_review": ApprovalTier.AUTO.value,
@@ -551,7 +553,19 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "summary": "Preflight verification of candidate predictions against incumbent baseline.",
         "required": ["candidate_path"],
         "optional": {"incumbent_path": None, "id_col": None, "pred_col": None},
-        "description": "Computes Spearman rho, rank swaps, and delta distributions. Emits delusion warning if rho >= 0.995.",
+        "description": "Computes Spearman rho, rank swaps, and delta distributions. Flags rho >= 0.995; rank similarity alone does not establish score cause.",
+    },
+    "validate_candidate_pitch": {
+        "summary": "Verify a candidate pitch citation against its stored preflight and prediction hash.",
+        "required": ["preflight_id"],
+        "optional": {
+            "candidate_path": None,
+            "claim_kind": "submission_candidate",
+            "candidate_exp_id": None,
+            "incumbent_exp_id": None,
+            "paired_oof_evaluation_id": None,
+        },
+        "description": "Requires a current preflight citation. Near-duplicates (rho >= 0.995) require an indexed, machine-supported paired OOF gain tied to candidate and incumbent IDs.",
     },
     "reconcile_submissions": {
         "summary": "Reconcile live provider submissions against local ledger.",
