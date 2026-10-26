@@ -1974,6 +1974,9 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
     # which typed actions the bridge supports. Multi-action handlers (e.g. the
     # cloud inspect/wait pair) share one method and branch on ``act`` internally.
     _TYPED_ACTION_HANDLER_NAMES = {
+        "candidate_preflight": "_handle_research_memory_group",
+        "reconcile_submissions": "_handle_research_memory_group",
+        "acknowledge_external_submissions": "_handle_research_memory_group",
         "record_macro_review": "_handle_research_memory_group",
         "get_macro_hypothesis_map": "_handle_research_memory_group",
         "check_retrospective_status": "_handle_research_memory_group",
