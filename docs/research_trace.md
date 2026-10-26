@@ -28,7 +28,8 @@ loop, automatic model selection, or destructive rollback of completed evidence.
    new direction. Related mechanisms are advisory; a renamed insight does not
    make the same execution configuration novel.
 2. Call `record_research_insight` with `title`, `observation`, `mechanism`, and
-   `next_action`. An observation is a declared interpretation unless backed by
+   `next_action`, plus a canonical `family_id` and optional provenance `source_refs`.
+   Legacy or unknown families remain `unclassified`. An observation is a declared interpretation unless backed by
    optional verified full-run IDs in `evidence`. Save the returned `id`.
 3. Call `plan_research_probe` with that `insight_id` and all seven plan fields:
    `control`, one `intervention`, `expected_observation`, `alternative_explanation`,

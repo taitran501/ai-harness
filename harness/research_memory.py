@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -320,6 +320,9 @@ class ResearchMemory:
                 lines.extend(["", "## Chronological journal", ""])
                 history = sorted([*entries, *runs], key=lambda item: (item['timestamp'], item.get('id', item.get('exp_id', ''))))
                 labels = ("title", "parent_insight_id", "insight_id", "probe_plan_id", "exp_id", "action",
+                    "family_id", "source_refs", "review_id", "map_digest", "run_count_at_review",
+                    "changes_since_last_review", "supported_mechanisms", "rejected_mechanisms",
+                    "highest_priority_untouched", "next_probe_rationale", "budget_limit", "revisit_conditions",
                     "observation", "mechanism", "hypothesis", "control", "intervention", "expected_observation",
                     "alternative_explanation", "decision_rule", "budget", "stop_rule", "outcome", "score",
                     "conclusion", "lesson", "revisit_when", "next_action", "evidence", "open_questions", "insight_ids",
@@ -474,6 +477,7 @@ class ResearchMemory:
                     "bottlenecks": diag.get("critical_bottlenecks", [])[:5],
                     "timestamp": manifest_path.stat().st_mtime,
                     "evidence_status": "verified_full",
+                    "evidence_sha256": digest(manifest),
                 }
                 _SYNC_CACHE[cache_key] = record
                 runs.append(record)
@@ -501,7 +505,10 @@ class ResearchMemory:
                  "insight_id", "parent_insight_id", "probe_plan_id", "title", "observation", "mechanism", "lesson", "revisit_when",
                  "control", "expected_observation", "alternative_explanation",
                  "decision_rule", "budget", "stop_rule", "claimed_outcome", "effective_outcome", "verification_status",
-                 "rule_id", "evaluation_id", "reason_codes") if key in record}
+                 "rule_id", "evaluation_id", "reason_codes", "family_id", "source_refs",
+                 "review_id", "map_digest", "run_count_at_review", "changes_since_last_review",
+                 "supported_mechanisms", "rejected_mechanisms", "highest_priority_untouched",
+                 "next_probe_rationale", "budget_limit", "revisit_conditions") if key in record}
 
     @staticmethod
     def _text(value, field):
@@ -531,7 +538,12 @@ class ResearchMemory:
         return list(dict.fromkeys(evidence))
 
     def record_insight(self, *, title, observation, mechanism, next_action, evidence=None,
-                       parent_insight_id=None, session_id=None):
+                       parent_insight_id=None, session_id=None, family_id: Optional[str] = "unclassified",
+                       source_refs: Optional[List[str]] = None):
+        from harness.macro_research import family_id as normalize_family
+        if source_refs is not None and (not isinstance(source_refs, list) or
+                any(not isinstance(ref, str) or not ref.strip() for ref in source_refs)):
+            raise ValueError("source_refs must be a list of non-empty source references")
         fields = {key: self._text(value, key) for key, value in {
             "title": title, "observation": observation, "mechanism": mechanism,
             "next_action": next_action}.items()}
@@ -544,6 +556,7 @@ class ResearchMemory:
             evidence_list = self._evidence(evidence) if evidence else []
             return self._append("insight", **fields, evidence=evidence_list,
                 parent_insight_id=parent_insight_id, session_id=session_id,
+                family_id=normalize_family(family_id), source_refs=list(source_refs or []),
                 evidence_status="declared_insight")
 
     def plan_probe(self, *, insight_id, control, intervention, expected_observation,
@@ -867,7 +880,24 @@ class ResearchMemory:
         project = _project(self.root)
         states = StagnationController(project).reconcile_results() if project.artifacts_dir.resolve() == self.artifacts.resolve() else {}
         paused = [state for state in states.values() if state["state"] == "paused_for_stagnation"]
+        from harness.macro_research import compute_macro_hypothesis_map, retrospective_status
+        macro_map = compute_macro_hypothesis_map(self, runs)
+        # Context is bounded independently of campaign length. Full evidence IDs
+        # and comparison groups are available through get_macro_hypothesis_map.
+        macro_map = {"map_digest": macro_map["map_digest"], "verified_run_count": macro_map["verified_run_count"],
+            "families": {fid: {key: row[key] for key in ("state", "run_count", "supported", "rejected", "active")}
+                for fid, row in macro_map["families"].items()}}
+        retrospective = retrospective_status(self, runs, states)
+        macro_reviews = [entry for entry in entries if entry["kind"] == "macro_review"]
+        latest_macro_review = None
+        if macro_reviews:
+            last = macro_reviews[-1]
+            latest_macro_review = {"review_id": last["review_id"], "run_count_at_review": last["run_count_at_review"],
+                "highest_priority_untouched": {key: str(last["highest_priority_untouched"][key])[:180]
+                    for key in ("family_id", "proposed_direction")}}
         return {"ledger_path": str(self.path), **progress, "entry_count": len(entries), "verified_run_count": len(runs),
+            "macro_hypothesis_map": macro_map, "retrospective_status": retrospective,
+            "latest_macro_review": latest_macro_review,
             "insight_count": len(insights), "open_insight_count": len(active), "research_frontier": compact_frontier,
             "unreviewed_result_count": len(unreviewed),
             "unreviewed_results": [self._compact(run) for run in unreviewed[-4:]],
@@ -890,4 +920,7 @@ class ResearchMemory:
 
     def render(self, **kwargs):
         context = self.context(**kwargs)
-        return "## Research continuity\n" + json.dumps(context, ensure_ascii=False, indent=2) + "\n"
+        from harness.macro_research import macro_hud_lines
+        return ("\n".join(macro_hud_lines(context["macro_hypothesis_map"], context["retrospective_status"],
+                context["latest_macro_review"])) + "\n## Research continuity\n" +
+                json.dumps(context, ensure_ascii=False, indent=2) + "\n")

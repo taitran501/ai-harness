@@ -54,11 +54,11 @@ class ResearchInvariantTests(unittest.TestCase):
             self.memory.record_decision(outcome="supported", conclusion="Agent says it improved")
         self.assertEqual(len(self.memory.entries()), before)
 
-    def test_all_seven_schemas_are_valid_draft_2020_12(self):
+    def test_all_versioned_schemas_are_valid_draft_2020_12(self):
         from jsonschema import Draft202012Validator
         directory = Path(__file__).resolve().parents[1] / "harness/schemas"
         schemas = list(directory.glob("*.v1.schema.json"))
-        self.assertEqual(len(schemas), 7)
+        self.assertEqual(len(schemas), 9)
         for path in schemas:
             schema = json.loads(path.read_text())
             Draft202012Validator.check_schema(schema)

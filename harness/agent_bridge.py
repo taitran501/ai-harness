@@ -113,6 +113,10 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
     with lessons, unreviewed results, progress path.
     """
     lines: List[str] = []
+    if memory.get("macro_hypothesis_map"):
+        from harness.macro_research import macro_hud_lines
+        lines.extend(macro_hud_lines(memory["macro_hypothesis_map"], memory["retrospective_status"],
+                                     memory.get("latest_macro_review")))
     streak = memory.get("consecutive_non_improvements") or 0
     lines.append(
         f"- Entries: {memory.get('entry_count', 0)} (insights {memory.get('insight_count', 0)}, "
@@ -1421,7 +1425,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             [
                 "",
                 "## 🛠️ Typed Bridge Actions (`ai-harness-agent act --action <name> ...`)",
-                "- **AUTO (Research continuity)**: `search_research_memory`, `review_hypothesis`, `record_research_insight`, `plan_research_probe`, `trace_research_insight`, `record_research_decision`, `record_research_checkpoint`, `suggest_next_interventions` (stagnation countermeasure)",
+                "- **AUTO (Research continuity)**: `search_research_memory`, `review_hypothesis`, `record_research_insight`, `plan_research_probe`, `trace_research_insight`, `record_research_decision`, `record_research_checkpoint`, `get_macro_hypothesis_map`, `check_retrospective_status`, `record_macro_review`, `suggest_next_interventions` (stagnation countermeasure)",
                 "- **AUTO**: `inspect_data_readiness`, `run_eda`, `record_phase_output`, `inspect_experiment`, `inspect_diagnostics`, `create_experiment`, `run_smoke_test`",
                 "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation` (dispatches a tracked local/Kaggle/Modal job), `synthesize_candidate`, `build_ensemble`",
                 "- **AUTO (Job lifecycle)**: `inspect_cloud_job`, `wait_cloud_job`",
@@ -1464,6 +1468,9 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             TypedActionName.INSPECT_EXPERIMENT.value,
             TypedActionName.INSPECT_DIAGNOSTICS.value,
             TypedActionName.SEARCH_RESEARCH_MEMORY.value,
+            TypedActionName.RECORD_MACRO_REVIEW.value,
+            TypedActionName.GET_MACRO_HYPOTHESIS_MAP.value,
+            TypedActionName.CHECK_RETROSPECTIVE_STATUS.value,
             TypedActionName.REVIEW_HYPOTHESIS.value,
             TypedActionName.RECORD_RESEARCH_DECISION.value,
             TypedActionName.RECORD_RESEARCH_CHECKPOINT.value,
@@ -1484,6 +1491,17 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
 
         budget = session.budget
         usage = session.compute_usage
+
+        if action in {"run_full_validation", "prepare_submission"}:
+            from harness.macro_research import enforce_retrospective
+            cfg = {}
+            if params.get("config_path"):
+                cfg_path = (self.project_root / params["config_path"]).resolve()
+                cfg_path.relative_to(self.project_root)
+                if cfg_path.is_file():
+                    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            enforce_retrospective(self.project, cfg=cfg,
+                recovery_probe=action == "run_full_validation" and bool(cfg.get("research", {}).get("recovery_probe_id")))
 
         from harness.stagnation import StagnationController
         recovery_id, candidate_id = None, None
@@ -1943,6 +1961,9 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
     # which typed actions the bridge supports. Multi-action handlers (e.g. the
     # cloud inspect/wait pair) share one method and branch on ``act`` internally.
     _TYPED_ACTION_HANDLER_NAMES = {
+        "record_macro_review": "_handle_research_memory_group",
+        "get_macro_hypothesis_map": "_handle_research_memory_group",
+        "check_retrospective_status": "_handle_research_memory_group",
         "search_research_memory": "_handle_research_memory_group",
         "review_hypothesis": "_handle_research_memory_group",
         "record_research_decision": "_handle_research_memory_group",

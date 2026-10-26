@@ -440,6 +440,23 @@ class CloudJobManager:
             raise ValueError("Competition is frozen")
         if backend not in {"local", "modal", "kaggle"}:
             raise ValueError(f"Unsupported execution backend: {backend}")
+        # Check before provider preflight, uploads, persisted jobs or subprocesses.
+        # Use the same probe definition as the local runner.
+        import yaml
+        from harness.macro_research import enforce_retrospective
+        from harness.runner import build_parser, is_local_only_run
+        gate_path = Path(config_path).expanduser()
+        gate_path = (gate_path if gate_path.is_absolute() else self.project_root / gate_path).resolve()
+        gate_path.relative_to(self.project_root)
+        yaml_job = gate_path.suffix.lower() in {".yaml", ".yml"}
+        gate_cfg = (yaml.safe_load(gate_path.read_text(encoding="utf-8")) or {}) if yaml_job else {}
+        probe_args, _ = build_parser().parse_known_args(["--config", str(gate_path), *(extra_args or [])])
+        is_probe = yaml_job and is_local_only_run(probe_args, gate_cfg)
+        if is_probe and backend != "local":
+            raise ValueError("Smoke/probe jobs must run locally")
+        if not is_probe:
+            enforce_retrospective(self.project, cfg=gate_cfg,
+                recovery_probe=bool(gate_cfg.get("research", {}).get("recovery_probe_id")))
         is_custom_plugin = self.project.plugin_id not in (None, "default")
         upload_fingerprint = None
         if backend in {"modal", "kaggle"}:

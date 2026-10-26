@@ -299,8 +299,12 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             from harness.decision_rules import reserve_comparison_slot, validate_remote_research_capsule
             from harness.stagnation import StagnationController
             research = self.cfg.get("research", {})
+            is_remote_container = os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1"
             self.remote_research_execution = validate_remote_research_capsule(self.project, self.config_path, self.cfg)
-            if not self.remote_research_execution:
+            if not (is_remote_container and self.remote_research_execution):
+                from harness.macro_research import enforce_retrospective
+                enforce_retrospective(self.project, cfg=self.cfg,
+                    recovery_probe=bool(research.get("recovery_probe_id")))
                 blocker = StagnationController(self.project).check_action("run_full_validation",
                     recovery_probe_id=research.get("recovery_probe_id"), candidate_id=self.cfg["experiment"]["id"])
                 if blocker:

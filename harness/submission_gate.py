@@ -185,6 +185,8 @@ class SubmissionGate:
         if not 0 < threshold <= policy.max_spearman:
             raise SubmissionGateError("POLICY_WEAKENING", "Outbound Spearman flags may strengthen the active policy only.")
         blocker = StagnationController(self.project).check_action("dispatch")
+        from harness.macro_research import enforce_retrospective
+        enforce_retrospective(self.project)
         if blocker:
             raise SubmissionGateError(blocker["code"], blocker["message"])
         state_path = self.project.artifacts_dir / "competition_state.json"
@@ -325,6 +327,8 @@ class SubmissionGate:
                        prediction_file_sha256=sha256(staged_prediction), exp_id=exp_id, approval_id=receipt["approval"]["id"],
                        kernel=None, kernel_version=None)
         with workspace_lock(self.project.root / ".ai-harness"):
+            from harness.macro_research import enforce_retrospective
+            enforce_retrospective(self.project)
             _, _, _, current_hash = self._history(competition)
             if current_hash != receipt["history_snapshot_sha256"]:
                 raise SubmissionGateError("HISTORY_CHANGED", "Dispatch history changed; evaluate again.")

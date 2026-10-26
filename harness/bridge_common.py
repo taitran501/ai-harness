@@ -38,6 +38,9 @@ class TypedActionName(str, Enum):
     RECORD_RESEARCH_DECISION = "record_research_decision"
     RECORD_RESEARCH_CHECKPOINT = "record_research_checkpoint"
     RECORD_RESEARCH_INSIGHT = "record_research_insight"
+    RECORD_MACRO_REVIEW = "record_macro_review"
+    GET_MACRO_HYPOTHESIS_MAP = "get_macro_hypothesis_map"
+    CHECK_RETROSPECTIVE_STATUS = "check_retrospective_status"
     PLAN_RESEARCH_PROBE = "plan_research_probe"
     REGISTER_RECOVERY_PROBE = "register_recovery_probe"
     TRACE_RESEARCH_INSIGHT = "trace_research_insight"
@@ -81,6 +84,9 @@ MAX_SESSION_OBSERVATIONS = 200
 
 
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
+    "record_macro_review": ApprovalTier.AUTO.value,
+    "get_macro_hypothesis_map": ApprovalTier.AUTO.value,
+    "check_retrospective_status": ApprovalTier.AUTO.value,
     "register_recovery_probe": ApprovalTier.AUTO.value,
     TypedActionName.SEARCH_RESEARCH_MEMORY.value: ApprovalTier.AUTO.value,
     TypedActionName.REVIEW_HYPOTHESIS.value: ApprovalTier.AUTO.value,
@@ -258,6 +264,23 @@ _TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName) | frozen
 
 
 TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "record_macro_review": {
+        "summary": "Record an evidence-linked macro retrospective and advance its milestone.",
+        "required": ["map_digest", "changes_since_last_review", "supported_mechanisms", "rejected_mechanisms",
+                     "highest_priority_untouched", "next_probe_rationale", "next_action"],
+        "optional": {"review_id": None, "run_count_at_review": None, "task_id": None,
+                     "budget_limit": None, "revisit_conditions": None},
+        "description": "Use the current map digest. Cite real insight/decision/candidate run IDs. "
+                       "Nested objects/lists accept JSON via flat flags or --param-file. Session/task/count are derived.",
+    },
+    "get_macro_hypothesis_map": {
+        "summary": "Project research family coverage from live verified evidence.",
+        "required": [], "optional": {}, "description": "Returns families, evidence counts and map_digest for a retrospective.",
+    },
+    "check_retrospective_status": {
+        "summary": "Check five-run cadence and unreviewed stagnation events.",
+        "required": [], "optional": {}, "description": "Read-only status; smoke and failed runs never advance the cadence.",
+    },
     "register_recovery_probe": {
         "summary": "Register one bounded recovery probe for a paused comparison group.",
         "required": ["comparison_identity_sha256", "rule_id", "diagnosis", "mechanism", "stop_rule"],
@@ -273,7 +296,7 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "record_research_insight": {
         "summary": "Record an empirical research insight into persistent task memory.",
         "required": ["title", "observation", "mechanism", "next_action"],
-        "optional": {"evidence": None, "parent_insight_id": None},
+        "optional": {"evidence": None, "parent_insight_id": None, "family_id": "unclassified", "source_refs": None},
         "description": "Registers an empirical observation and its underlying mechanism, creating a tracked insight ID.",
     },
     "plan_research_probe": {

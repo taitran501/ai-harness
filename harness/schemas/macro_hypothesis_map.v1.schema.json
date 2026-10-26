@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "macro_hypothesis_map.v1.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "families": {
+      "type": "object",
+      "properties": {
+        "data_and_splits": {
+          "$ref": "#/$defs/family"
+        },
+        "representation": {
+          "$ref": "#/$defs/family"
+        },
+        "architecture": {
+          "$ref": "#/$defs/family"
+        },
+        "target": {
+          "$ref": "#/$defs/family"
+        },
+        "optimization": {
+          "$ref": "#/$defs/family"
+        },
+        "ensemble": {
+          "$ref": "#/$defs/family"
+        },
+        "post_processing": {
+          "$ref": "#/$defs/family"
+        },
+        "domain_signals": {
+          "$ref": "#/$defs/family"
+        },
+        "unclassified": {
+          "$ref": "#/$defs/family"
+        }
+      },
+      "required": [
+        "data_and_splits",
+        "representation",
+        "architecture",
+        "target",
+        "optimization",
+        "ensemble",
+        "post_processing",
+        "domain_signals",
+        "unclassified"
+      ],
+      "additionalProperties": false
+    },
+    "verified_run_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "map_digest": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "evidence_digest": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "families",
+    "verified_run_count",
+    "map_digest",
+    "evidence_digest"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "family": {
+      "type": "object",
+      "properties": {
+        "family_id": {
+          "type": "string",
+          "enum": [
+            "data_and_splits",
+            "representation",
+            "architecture",
+            "target",
+            "optimization",
+            "ensemble",
+            "post_processing",
+            "domain_signals",
+            "unclassified"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "untried",
+            "active",
+            "supported",
+            "exhausted"
+          ]
+        },
+        "insight_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "run_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "supported": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "insight_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "uniqueItems": true
+        },
+        "run_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "uniqueItems": true
+        },
+        "comparison_groups": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "family_id",
+        "label",
+        "state",
+        "insight_count",
+        "run_count",
+        "supported",
+        "rejected",
+        "active",
+        "insight_ids",
+        "run_ids",
+        "comparison_groups"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

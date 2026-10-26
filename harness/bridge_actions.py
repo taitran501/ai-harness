@@ -38,7 +38,17 @@ class ActionHandlerMixin:
         t0,
     ) -> ActionObservation:
         memory = self._research_memory()
-        if act == "register_recovery_probe":
+        if act == "record_macro_review":
+            from harness.macro_research import record_macro_review
+            result = record_macro_review(memory, params, session_id=session.session_id)
+        elif act == "get_macro_hypothesis_map":
+            from harness.macro_research import compute_macro_hypothesis_map
+            result = compute_macro_hypothesis_map(memory, memory.sync())
+        elif act == "check_retrospective_status":
+            from harness.macro_research import retrospective_status
+            from harness.stagnation import StagnationController
+            result = retrospective_status(memory, memory.sync(), StagnationController(self.project).reconcile_results())
+        elif act == "register_recovery_probe":
             from harness.stagnation import StagnationController
             result = StagnationController(self.project).register_recovery_probe(**params)
         elif act == "search_research_memory":
@@ -88,6 +98,7 @@ class ActionHandlerMixin:
                 next_action=next_action,
                 evidence=evidence,
                 parent_insight_id=params.get("parent_insight_id"),
+                family_id=params.get("family_id", "unclassified"), source_refs=params.get("source_refs"),
                 session_id=session.session_id,
             )
         elif act == "plan_research_probe":

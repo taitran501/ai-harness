@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from harness.agent_bridge import AgentBridge, HANDLERS, _ACTION_REGISTRY, typed_actions
@@ -85,7 +86,8 @@ class ErgonomicsAndResilienceTests(unittest.TestCase):
         spec = load_task_spec(".")
         self.assertIsNotNone(spec)
 
-    def test_kaggle_client_facade_methods_and_aliases(self):
+    @mock.patch.object(KaggleClient, "_legacy_api_instance")
+    def test_kaggle_client_facade_methods_and_aliases(self, legacy_api):
         # KaggleLeaderboardTracker must be importable from kaggle_compat
         self.assertIsNotNone(KaggleLeaderboardTracker)
 

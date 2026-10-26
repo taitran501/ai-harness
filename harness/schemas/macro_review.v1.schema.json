@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "macro_review.v1.schema.json",
+  "type": "object",
+  "properties": {
+    "review_id": {
+      "type": "string",
+      "pattern": "^rev_[A-Za-z0-9_-]+$"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "run_count_at_review": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "map_digest": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "changes_since_last_review": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "supported_mechanisms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "family_id": {
+            "type": "string",
+            "enum": [
+              "data_and_splits",
+              "representation",
+              "architecture",
+              "target",
+              "optimization",
+              "ensemble",
+              "post_processing",
+              "domain_signals",
+              "unclassified"
+            ]
+          },
+          "insight_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "decision_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "mechanism_summary": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "family_id",
+          "insight_id",
+          "decision_id",
+          "run_id",
+          "mechanism_summary"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "rejected_mechanisms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "family_id": {
+            "type": "string",
+            "enum": [
+              "data_and_splits",
+              "representation",
+              "architecture",
+              "target",
+              "optimization",
+              "ensemble",
+              "post_processing",
+              "domain_signals",
+              "unclassified"
+            ]
+          },
+          "insight_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "decision_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "mechanism_summary": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "family_id",
+          "insight_id",
+          "decision_id",
+          "run_id",
+          "mechanism_summary"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "highest_priority_untouched": {
+      "type": "object",
+      "properties": {
+        "family_id": {
+          "type": "string",
+          "enum": [
+            "data_and_splits",
+            "representation",
+            "architecture",
+            "target",
+            "optimization",
+            "ensemble",
+            "post_processing",
+            "domain_signals",
+            "unclassified"
+          ]
+        },
+        "proposed_direction": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "family_id",
+        "proposed_direction",
+        "rationale",
+        "source_ref"
+      ],
+      "additionalProperties": false
+    },
+    "next_probe_rationale": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "next_action": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "budget_limit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "revisit_conditions": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    }
+  },
+  "required": [
+    "review_id",
+    "session_id",
+    "task_id",
+    "run_count_at_review",
+    "map_digest",
+    "changes_since_last_review",
+    "supported_mechanisms",
+    "rejected_mechanisms",
+    "highest_priority_untouched",
+    "next_probe_rationale",
+    "next_action"
+  ],
+  "additionalProperties": false
+}

@@ -28,6 +28,72 @@ or on an agent remembering to read the old Markdown graveyard.
 
 ## Iteration protocol
 
+### Macro coverage and periodic retrospectives
+
+The HUD and `get_macro_hypothesis_map` project nine canonical families from the
+ledger: `data_and_splits`, `representation`, `architecture`, `target`,
+`optimization`, `ensemble`, `post_processing`, `domain_signals`, and
+`unclassified`. Record `family_id` and optional `source_refs` on each new insight;
+unknown or missing families stay unclassified. Counts retain comparison groups;
+the map never compares scores across split/data/scorer identities.
+
+An open direction takes precedence in the family display (`active`), even alongside
+supported mechanisms. Support requires a machine-evaluated decision whose receipt
+and full-run dependencies still verify. Exhaustion applies only to registered
+directions within their bounded probe budgets and stopping criteria, with terminal
+evidence and documented revisit conditions. Unstructured rejection alone cannot
+exhaust a family. An untried family has no registered insights or verified runs.
+
+Every five newly verified full-run results since the last review, or a stagnation
+pause not covered by that review, `RETROSPECTIVE_REQUIRED` blocks the next ordinary
+full run and competition submission. Smoke/probe runs, failures, EDA and Bridge
+action counts do not advance this cadence. Run-ID milestones persist across
+sessions and prevent lost/tampered old evidence from discounting new results.
+Inspection, notes and smoke probes remain available. The exception is a registered
+stagnation recovery probe using its registered rule, pause generation and bounded
+candidate budget; a freeform `recovery_probe` flag grants no exemption. Recording
+a review does not clear the separate stagnation pause.
+
+Retrieve a current `map_digest`, then submit a review through
+`ai-harness-agent act --action record_macro_review --param-file retrospective.json`.
+The CLI also accepts flat flags (nested values as JSON) and `--params`. The Bridge
+provides session ID, task ID, review ID and current run count; explicit task/count
+must match. Supported/rejected claims must cite real linked insight, decision and
+candidate-run IDs. Empty evidence lists are allowed when there are no mechanisms
+to cite. The untouched lead must identify an untried family while such gaps remain;
+when all families have been explored, describe an untouched direction within a
+family instead. Its priority and rationale are the scientist's judgment.
+
+Example review body (replace the digest and evidence IDs with current values):
+
+```json
+{
+  "map_digest": "<from get_macro_hypothesis_map>",
+  "changes_since_last_review": "Representation probes are complete; target formulation remains untouched.",
+  "supported_mechanisms": [],
+  "rejected_mechanisms": [],
+  "highest_priority_untouched": {
+    "family_id": "target",
+    "proposed_direction": "Test a target transformation against the fixed control",
+    "rationale": "Residual slices suggest scale-dependent errors",
+    "source_ref": "diagnostics:residual-slices"
+  },
+  "next_probe_rationale": "Changes the learning target rather than another nearby model parameter.",
+  "next_action": "Register one bounded smoke probe before full validation.",
+  "budget_limit": 1,
+  "revisit_conditions": "Reassess after the registered stop criterion is reached."
+}
+```
+
+Each mechanism claim has `family_id`, `insight_id`, `decision_id`, `run_id`, and
+`mechanism_summary`. Reviews are appended to `research_memory.json` with covered
+run IDs and stagnation events as the retrospective milestone, and included in
+`RESEARCH_PROGRESS.md`. Stale map digests or invented support claims do not advance
+the milestone. Coverage gaps are derived; high-priority leads require an explicit
+sourced review, never keyword inference.
+
+### Per-iteration actions
+
 Use `ai-harness-agent --project-root .`:
 
 1. Read `context` after restart/compaction and before planning an iteration.

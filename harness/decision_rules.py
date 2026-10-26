@@ -327,6 +327,8 @@ def prepare_remote_research(project, config_path):
     cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     research = cfg.get("research", {})
     candidate_id = cfg["experiment"]["id"]
+    from harness.macro_research import enforce_retrospective
+    enforce_retrospective(project, cfg=cfg, recovery_probe=bool(research.get("recovery_probe_id")))
     blocker = StagnationController(project).check_action("run_full_validation",
         recovery_probe_id=research.get("recovery_probe_id"), candidate_id=candidate_id)
     if blocker:

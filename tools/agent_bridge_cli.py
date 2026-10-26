@@ -19,6 +19,9 @@ BridgeSession tracking, optional budget enforcement, and USER_APPROVAL governanc
   ai-harness-agent act --action run_smoke_test --config-path configs/exp002_feat_feature_v1.yaml
   ai-harness-agent act --action run_full_validation --config-path configs/exp002_feat_feature_v1.yaml --backend local
   ai-harness-agent act --action synthesize_candidate --param-file synthesize.json
+  ai-harness-agent act --action get_macro_hypothesis_map
+  ai-harness-agent act --action check_retrospective_status
+  ai-harness-agent act --action record_macro_review --param-file retrospective.json
 
   # 4. Approve a paused USER_APPROVAL action (submit, freeze, unfreeze, finalize):
   ai-harness-agent approve --session-id session_0001
@@ -332,11 +335,15 @@ def main(argv: list[str] | None = None) -> int:
         from harness.agent_bridge import adoption_gate_lines
         from harness.hygiene import scan_workspace_hygiene
 
+        packet = bridge.get_context_packet(session_id=sess.session_id) or {}
+        memory = packet.get("research_memory") or {}
+        if memory.get("macro_hypothesis_map"):
+            payload["macro_hypothesis_map"] = memory["macro_hypothesis_map"]
+            payload["retrospective_status"] = memory["retrospective_status"]
         gate = adoption_gate_lines(
             scan_workspace_hygiene(project.root),
             int(
-                ((bridge.get_context_packet(session_id=sess.session_id) or {})
-                 .get("competition_hud") or {}).get("total_experiments") or 0
+                (packet.get("competition_hud") or {}).get("total_experiments") or 0
             ),
         )
         if gate:
