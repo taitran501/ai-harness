@@ -48,6 +48,27 @@ class ActionHandlerMixin:
             from harness.macro_research import retrospective_status
             from harness.stagnation import StagnationController
             result = retrospective_status(memory, memory.sync(), StagnationController(self.project).reconcile_results())
+        elif act == "candidate_preflight":
+            from harness.candidate_preflight import run_candidate_preflight
+            result = run_candidate_preflight(
+                self.project.root,
+                candidate_path=params.get("candidate_path") or params.get("candidate") or params.get("path"),
+                incumbent_path=params.get("incumbent_path") or params.get("incumbent") or params.get("baseline"),
+                id_col=params.get("id_col"),
+                pred_col=params.get("pred_col"),
+            )
+        elif act == "reconcile_submissions":
+            from harness.reconciliation import reconcile_provider_submissions
+            comp = params.get("competition") or (self.spec.get("competition", {}).get("id") if hasattr(self, "spec") and isinstance(self.spec, dict) else None) or "competition"
+            result = reconcile_provider_submissions(self.project.root, competition=comp)
+        elif act == "acknowledge_external_submissions":
+            from harness.reconciliation import acknowledge_external_submissions
+            result = acknowledge_external_submissions(
+                self.project.root,
+                refs=params.get("refs") or params.get("unexplained_refs") or [],
+                reason=params.get("reason", "Operator acknowledged external run"),
+                operator=params.get("operator"),
+            )
         elif act == "register_recovery_probe":
             from harness.stagnation import StagnationController
             result = StagnationController(self.project).register_recovery_probe(**params)

@@ -329,6 +329,17 @@ class SubmissionGate:
         with workspace_lock(self.project.root / ".ai-harness"):
             from harness.macro_research import enforce_retrospective
             enforce_retrospective(self.project)
+            from harness.reconciliation import reconcile_provider_submissions
+            rec = reconcile_provider_submissions(self.project.root, competition)
+            if rec.get("status") == "DISCREPANCY_DETECTED":
+                unexp = rec["unexplained_submissions"][0]
+                raise SubmissionGateError(
+                    "UNEXPLAINED_EXTERNAL_DISPATCH",
+                    f"Unrecorded external submission detected on provider (Ref: {unexp['ref']}). "
+                    "Custom dispatch scripts or raw API calls are strictly prohibited. "
+                    "Reconcile with 'ai-harness-agent act --action acknowledge_external_submissions' before dispatching.",
+                    receipt=receipt,
+                )
             _, _, _, current_hash = self._history(competition)
             if current_hash != receipt["history_snapshot_sha256"]:
                 raise SubmissionGateError("HISTORY_CHANGED", "Dispatch history changed; evaluate again.")

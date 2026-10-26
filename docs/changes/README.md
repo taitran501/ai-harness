@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-26 | Authority reconciliation audit, candidate preflight, and side-effect boundary governance | Working tree | [authority-reconciliation-and-candidate-preflight](authority-reconciliation-and-candidate-preflight.md) |
 | 2026-10-26 | Macro hypothesis map and evidence-triggered periodic retrospective gate | Working tree | [macro-hypothesis-map-and-retrospective-gate](macro-hypothesis-map-and-retrospective-gate.md) |
 | 2026-10-25 | Evidence-derived research decisions, shared pre-dispatch gate, diversity and stagnation recovery | Working tree | [systemic-research-dispatch-gates](systemic-research-dispatch-gates.md) |
 | 2026-10-25 | Plugin contract validation, unified capability discovery, and structured failure recovery | [#132](https://github.com/taitran501/ai-harness/pull/132) | [plugin-contract-validation-and-agent-resilience](plugin-contract-validation-and-agent-resilience.md) |

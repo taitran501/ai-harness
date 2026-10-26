@@ -74,6 +74,9 @@ class TypedActionName(str, Enum):
     EMERGENCY_UNFREEZE = "emergency_unfreeze"
     FINALIZE_COMPETITION = "finalize_competition"
     GET_NEXT_EXPERIMENT_ID = "get_next_experiment_id"
+    CANDIDATE_PREFLIGHT = "candidate_preflight"
+    RECONCILE_SUBMISSIONS = "reconcile_submissions"
+    ACKNOWLEDGE_EXTERNAL_SUBMISSIONS = "acknowledge_external_submissions" 
 
 
 # Session history caps: keep `sessions_dir/*.json` bounded for long
@@ -84,6 +87,9 @@ MAX_SESSION_OBSERVATIONS = 200
 
 
 DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
+    "candidate_preflight": ApprovalTier.AUTO.value,
+    "reconcile_submissions": ApprovalTier.AUTO.value,
+    "acknowledge_external_submissions": ApprovalTier.USER_APPROVAL.value,
     "record_macro_review": ApprovalTier.AUTO.value,
     "get_macro_hypothesis_map": ApprovalTier.AUTO.value,
     "check_retrospective_status": ApprovalTier.AUTO.value,

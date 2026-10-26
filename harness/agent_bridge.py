@@ -168,6 +168,19 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
         )
     if memory.get("submission_pause"):
         lines.append("- STAGNATION_PAUSE: submissions and ordinary full exploration are paused. Use register_recovery_probe with a diagnosis, fixed incumbent, structured rule and bounded stop criterion.")
+    rec_path = Path(memory.get("root", ".")) / ".ai-harness" / "reconciliation_report.json"
+    if rec_path.is_file():
+        try:
+            rec_data = json.loads(rec_path.read_text(encoding="utf-8"))
+            if rec_data.get("status") == "DISCREPANCY_DETECTED":
+                unexp = rec_data.get("unexplained_submissions", [])
+                ref_sample = unexp[0].get("ref") if unexp else "N/A"
+                lines.append(
+                    f"- 🚨 UNEXPLAINED SUBMISSIONS DETECTED: {len(unexp)} unrecorded submission(s) on provider (e.g. Ref {ref_sample}). "
+                    "Custom dispatch scripts are prohibited. Run 'ai-harness-agent act --action acknowledge_external_submissions'."
+                )
+        except Exception:
+            pass
     return lines
 
 
