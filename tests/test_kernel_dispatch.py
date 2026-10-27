@@ -253,6 +253,37 @@ class KernelDispatchMainCliTests(unittest.TestCase):
         dk.assert_not_called()
 
 
+
+
+class PushKernelDirectoryTests(unittest.TestCase):
+    def test_push_kernel_directory_success(self):
+        from harness.kernel_dispatch import push_kernel_directory
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            meta = {
+                "id": "owner/arc-solution",
+                "title": "ARC Solution",
+                "code_file": "main.py",
+                "machine_shape": "KaggleGPU",
+            }
+            (folder / "kernel-metadata.json").write_text(json.dumps(meta))
+            (folder / "main.py").write_text("print('ARC')")
+
+            client = _MockKernelClient()
+            result = push_kernel_directory(folder, client=client)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["kernel_id"], 555)
+            self.assertEqual(len(client.push_calls), 1)
+            self.assertEqual(client.push_calls[0]["folder"], str(folder.resolve()))
+            self.assertEqual(client.push_calls[0]["acc"], "KaggleGPU")
+
+    def test_push_kernel_directory_missing_metadata(self):
+        from harness.kernel_dispatch import push_kernel_directory
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "main.py").write_text("print('hello')")
+            with self.assertRaises(FileNotFoundError):
+                push_kernel_directory(folder)
 class CliRegistrationTests(unittest.TestCase):
     def test_new_subcommands_registered(self):
         from harness.cli import build_parser
@@ -262,6 +293,7 @@ class CliRegistrationTests(unittest.TestCase):
         self.assertIn("dispatch-kernel", choices)
         self.assertIn("submission", choices)
         self.assertIn("leaderboard", choices)
+        self.assertIn("preflight", choices)
 
 
 if __name__ == "__main__":

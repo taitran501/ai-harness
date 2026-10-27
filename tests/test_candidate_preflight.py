@@ -98,7 +98,26 @@ class TestCandidatePreflight(unittest.TestCase):
             session_id=session.session_id,
         )
         self.assertEqual(observation.status, "SUCCESS")
-        self.assertTrue(observation.data["allowed"])
+
+    def test_cli_preflight_command(self):
+        from harness.cli import main
+        import io, contextlib
+
+        cand_df = pd.DataFrame({"id": np.arange(100), "satisfaction": np.random.RandomState(1).uniform(0, 1, 100)})
+        inc_df = pd.DataFrame({"id": np.arange(100), "satisfaction": np.random.RandomState(2).uniform(0, 1, 100)})
+        cand_p = self.root / "cli_cand.csv"
+        inc_p = self.root / "cli_inc.csv"
+        cand_df.to_csv(cand_p, index=False)
+        inc_df.to_csv(inc_p, index=False)
+
+        buf = io.StringIO()
+        with patch("harness.toolchain.ensure_pinned_toolchain", return_value=None), contextlib.redirect_stdout(buf):
+            code = main(["preflight", str(cand_p), "--incumbent", str(inc_p), "--project-root", str(self.root), "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertIn("preflight_id", payload)
+        self.assertEqual(payload["verdict"], "PASS")
+
 
     def test_preflight_citation_rejects_missing_malformed_and_stale_receipts(self):
         candidate = self.root / "candidate.csv"

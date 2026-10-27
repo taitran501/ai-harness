@@ -167,6 +167,19 @@ def build_parser() -> argparse.ArgumentParser:
     nb_export.add_argument("--output", default="submission_notebook.ipynb", help="Target output .ipynb path")
     nb_export.add_argument("--id-column", default="id", help="Dataset identifier column name")
     nb_export.add_argument("--target-column", default="target", help="Dataset prediction target column name")
+
+    preflight = subparsers.add_parser("preflight", help="Epistemic preflight verification of candidate predictions before costly runs or submissions")
+    preflight.add_argument("candidate", help="Candidate predictions CSV file")
+    preflight.add_argument("--incumbent", default=None, help="Incumbent baseline predictions CSV file (auto-resolved if omitted)")
+    preflight.add_argument("--id-col", default=None, help="Explicit ID column name")
+    preflight.add_argument("--pred-col", default=None, help="Explicit prediction column name")
+    preflight.add_argument("--pitch", action="store_true", help="Validate candidate pitch governance (reject near-duplicate without paired gain)")
+    preflight.add_argument("--claim-kind", default="submission_candidate", choices=("blend", "temperature_tuning", "submission_candidate", "candidate"))
+    preflight.add_argument("--candidate-exp-id", default=None)
+    preflight.add_argument("--incumbent-exp-id", default=None)
+    preflight.add_argument("--paired-oof-eval-id", default=None)
+    preflight.add_argument("--project-root", default=".", help="Task workspace root (default: current dir)")
+    preflight.add_argument("--json", action="store_true", help="Emit JSON output")
     return parser
 
 
@@ -308,7 +321,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command != "plugins":
         from harness.toolchain import ensure_pinned_toolchain
 
-        _pinned = ensure_pinned_toolchain(getattr(args, "project_root", None), "harness.cli", sys.argv[1:])
+        _pinned = ensure_pinned_toolchain(getattr(args, "project_root", None), "harness.cli", sys.argv[1:] if argv is None else list(argv))
         if _pinned is not None:
             return int(_pinned.returncode)
     if args.command == "plugins":
@@ -365,6 +378,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "dispatch-kernel":
         from harness.kernel_dispatch import main as kernel_dispatch_main
         return kernel_dispatch_main(list(args.args))
+
+    if args.command == "preflight":
+        return _run_preflight(args)
 
     if args.command == "repair":
         from harness.repair import run_repair
@@ -519,6 +535,72 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 2
 
     return 2
+
+
+def _run_preflight(args) -> int:
+    from harness.candidate_preflight import run_candidate_preflight, validate_candidate_pitch
+
+    try:
+        receipt = run_candidate_preflight(
+            project_root=args.project_root,
+            candidate_path=args.candidate,
+            incumbent_path=args.incumbent,
+            id_col=args.id_col,
+            pred_col=args.pred_col,
+        )
+    except Exception as exc:
+        if args.json:
+            print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, indent=2, default=str))
+        else:
+            print(f"Preflight error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+
+    if args.pitch:
+        pitch_res = validate_candidate_pitch(
+            project_root=args.project_root,
+            preflight_id=receipt["preflight_id"],
+            candidate_path=args.candidate,
+            claim_kind=args.claim_kind,
+            candidate_exp_id=args.candidate_exp_id,
+            incumbent_exp_id=args.incumbent_exp_id,
+            paired_oof_evaluation_id=args.paired_oof_eval_id,
+        )
+        if args.json:
+            print(json.dumps(pitch_res, indent=2, default=str))
+        else:
+            print(f"Preflight ID: {pitch_res['preflight_id']}")
+            print(f"Claim kind:   {pitch_res['claim_kind']}")
+            print(f"Allowed:      {pitch_res['allowed']}")
+            print(f"Verdict:      {pitch_res['verdict']}")
+            if pitch_res.get("spearman_rho") is not None:
+                print(f"Spearman rho: {pitch_res['spearman_rho']:.6f}")
+            if pitch_res.get("warnings"):
+                for w in pitch_res["warnings"]:
+                    print(f"Warning: {w}")
+            if pitch_res.get("errors"):
+                for e in pitch_res["errors"]:
+                    print(f"Error: {e}", file=sys.stderr)
+        return 0 if pitch_res["allowed"] else 1
+
+    if args.json:
+        print(json.dumps(receipt, indent=2, default=str))
+    else:
+        sim = receipt.get("similarity", {})
+        print(f"Preflight ID:    {receipt['preflight_id']}")
+        print(f"Candidate:       {receipt['candidate']['path']}")
+        print(f"Incumbent:       {receipt['incumbent']['path']}")
+        print(f"Spearman rho:    {sim.get('spearman_rho', 0.0):.6f}")
+        print(f"Pearson r:       {sim.get('pearson_r', 0.0):.6f}")
+        print(f"Rank swap ratio: {sim.get('rank_swap_ratio', 0.0):.4%}")
+        print(f"Mean abs delta:  {sim.get('mean_abs_delta', 0.0):.6f}")
+        print(f"Max abs delta:   {sim.get('max_abs_delta', 0.0):.6f}")
+        print(f"Verdict:         {receipt['verdict']}")
+        print(f"Classification:  {receipt['classification']}")
+        if receipt.get("delusion_warning"):
+            print(f"\n{receipt['delusion_warning']}")
+        print(f"\nRecommendation:  {receipt['recommendation']}")
+
+    return 0 if receipt["verdict"] == "PASS" else (1 if receipt["verdict"] == "FLAGGED_NEAR_DUPLICATE" else 2)
 
 
 if __name__ == "__main__":

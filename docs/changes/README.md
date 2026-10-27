@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-27 | Candidate preflight CLI (`ai-harness preflight`), SubmissionGate candidate blend parity (`--user-approved`), probability metric tolerance, and kernel directory push (`ai-harness kaggle push` / `dispatch-kernel -p`) | Working tree | [candidate-preflight-cli-and-submission-gate-parity](candidate-preflight-cli-and-submission-gate-parity.md) |
 | 2026-10-26 | Research checkpoints separated from verified progress; provider reconciliation fails closed to `UNKNOWN`; candidate pitches require a current preflight citation and paired OOF support for near duplicates; added workspace anti-dredging guidance | Working tree | [epistemic-memory-confinement-reconciliation](epistemic-memory-confinement-reconciliation.md) |
 | 2026-10-26 | Authority reconciliation audit, candidate preflight, and side-effect boundary governance | Working tree | [authority-reconciliation-and-candidate-preflight](authority-reconciliation-and-candidate-preflight.md) |
 | 2026-10-26 | Macro hypothesis map and evidence-triggered periodic retrospective gate | Working tree | [macro-hypothesis-map-and-retrospective-gate](macro-hypothesis-map-and-retrospective-gate.md) |

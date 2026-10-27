@@ -26,12 +26,15 @@ def align_prediction_frames(candidate, reference, identity_columns):
             raise ValueError("IDENTITY_MISMATCH: asymmetric scope")
         if scope in candidate and scope not in keys:
             keys.append(scope)
-    rows = []
     for frame in (candidate, reference):
         if not keys or not all(key in frame for key in keys) or frame.empty:
             raise ValueError("IDENTITY_MISMATCH: missing keys/rows")
         if frame[keys].isna().any().any() or frame.duplicated(keys).any():
             raise ValueError("IDENTITY_MISMATCH: null/duplicate keys")
+    if len(candidate) == len(reference) and all((candidate[k].to_numpy() == reference[k].to_numpy()).all() for k in keys):
+        return candidate.reset_index(drop=True), reference.reset_index(drop=True)
+    rows = []
+    for frame in (candidate, reference):
         rows.append([tuple(_typed(v) for v in row) for row in frame[keys].itertuples(index=False, name=None)])
     if set(rows[0]) != set(rows[1]):
         raise ValueError("IDENTITY_MISMATCH: unequal coverage")
@@ -83,7 +86,31 @@ def _values(series, *, parse_json=True):
     return result
 
 
+def _normalize_prediction_frame(frame, spec):
+    """Normalize prediction frames so candidate files with target col match pred_<col>."""
+    frame = frame.copy()
+    if not isinstance(spec, dict) and hasattr(spec, "subtasks"):
+        for key in spec.subtasks:
+            if f"pred_{key}" not in frame.columns and key in frame.columns:
+                frame[f"pred_{key}"] = frame[key]
+    elif isinstance(spec, dict):
+        subtasks = spec.get("subtasks", {})
+        for key in subtasks:
+            if f"pred_{key}" not in frame.columns and key in frame.columns:
+                frame[f"pred_{key}"] = frame[key]
+        pred_cols = spec.get("prediction_columns", {})
+        if isinstance(pred_cols, dict):
+            for col in pred_cols:
+                if col not in frame.columns:
+                    for prefix in ("pred_", "proba_"):
+                        if col.startswith(prefix) and col[len(prefix):] in frame.columns:
+                            frame[col] = frame[col[len(prefix):]]
+                            break
+    return frame
+
+
 def semantic_prediction_hash(frame, spec):
+    frame = _normalize_prediction_frame(frame, spec)
     keys, outputs, _ = prediction_contract(spec, frame)
     align_prediction_frames(frame, frame, keys)
     cols = sorted(set(keys) | set(outputs) | {c for c in frame if c.startswith("classes_")})
@@ -118,6 +145,7 @@ def check_prediction_diversity(candidate, references, *, spec, threshold=.995):
     if not np.isfinite(threshold) or not 0 < threshold <= 1:
         raise ValueError("Invalid max_spearman")
     candidate = pd.read_csv(candidate) if isinstance(candidate, (Path, str)) else candidate
+    candidate = _normalize_prediction_frame(candidate, spec)
     keys, outputs, floor = prediction_contract(spec, candidate)
     align_prediction_frames(candidate, candidate, keys)
     cand_hash = semantic_prediction_hash(candidate, spec)
@@ -138,6 +166,7 @@ def check_prediction_diversity(candidate, references, *, spec, threshold=.995):
             if not path or not Path(path).is_file():
                 raise ValueError("HISTORY_INCOMPLETE: missing prediction snapshot")
             frame = pd.read_csv(path)
+        frame = _normalize_prediction_frame(frame, spec)
         c, r = align_prediction_frames(candidate, frame, keys)
         rkeys, routputs, _ = prediction_contract(spec, r)
         if outputs != routputs or keys != rkeys:
@@ -304,7 +333,11 @@ def audit_prediction_integrity(
             elif st.task_type in ("generative_nlp", "generation", "text_generation", "seq2seq", "nlp", "generative"):
                 pass
             elif getattr(st, "classes", None) and len(st.classes) > 0:
-                if not df[col].astype(str).isin(list(map(str, st.classes))).all():
+                is_prob_metric = getattr(st, "primary_metric", "") in {"roc_auc", "auc", "log_loss", "brier_score"}
+                numeric_vals = pd.to_numeric(df[col], errors="coerce")
+                if is_prob_metric and numeric_vals.notna().all() and (numeric_vals >= 0.0).all() and (numeric_vals <= 1.0).all():
+                    pass
+                elif not df[col].astype(str).isin(list(map(str, st.classes))).all():
                     errors.append("invalid values outside declared classes: " + target)
     return errors
 

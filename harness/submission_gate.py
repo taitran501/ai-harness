@@ -130,7 +130,12 @@ class SubmissionGate:
                 if entry.get("status") in {"SCORED", "SUBMITTED_PENDING"} and not entry.get("dispatch_intent_id"):
                     legacy_entries.append(entry)
         for entry in legacy_entries:
-            prediction_path = entry.get("candidate_path")
+            prediction_path = entry.get("candidate_path") or entry.get("file_name") or entry.get("archive_path")
+            if prediction_path:
+                cand_p = Path(prediction_path)
+                if not cand_p.is_absolute():
+                    cand_p = (self.project.root / cand_p).resolve()
+                prediction_path = str(cand_p)
             payload_hash = entry.get("file_sha256") or entry.get("sha256") or entry.get("payload_sha256")
             if payload_hash:
                 payloads.append(payload_hash)
@@ -139,7 +144,7 @@ class SubmissionGate:
             refs.append(dict(id=str(entry.get("id") or entry.get("ref")), path=prediction_path, source="dispatched", exp_id=entry.get("exp_id"), provider_ref=entry.get("ref")))
         return events, refs, payloads, digest({"events": events, "legacy": legacy_entries})
 
-    def _resolve_payload(self, file_name, exp_id):
+    def _resolve_payload(self, file_name, exp_id=None, user_approved=False, preflight_id=None):
         path = Path(file_name)
         path = (self.project.root / path).resolve() if not path.is_absolute() else path.resolve()
         if not path.is_file():
@@ -150,7 +155,22 @@ class SubmissionGate:
         if not exp_id and matches:
             exp_id = matches[-1]["exp_id"]
         if not exp_id:
-            raise SubmissionGateError("EXPERIMENT_EVIDENCE_REQUIRED", "Pass --exp-id for a sealed run with test predictions.")
+            if user_approved or preflight_id:
+                self.plugin.validate_submission(self.context, path)
+                candidate_id = f"candidate_{path.stem}"
+                evidence = {
+                    "kind": "candidate_file",
+                    "id": candidate_id,
+                    "partition": "test",
+                    "score": None,
+                    "identity": digest({"kind": "candidate_file", "name": path.name, "sha256": sha256(path)}),
+                    "evidence_sha256": sha256(path),
+                    "manifest": {"files": [path.name]},
+                    "cfg": {"research": {}},
+                    "reference": {"kind": "candidate_file", "id": candidate_id, "partition": "test"},
+                }
+                return path, candidate_id, path, evidence
+            raise SubmissionGateError("EXPERIMENT_EVIDENCE_REQUIRED", "Pass --exp-id for a sealed run with test predictions or --user-approved for candidate files.")
         run_dir = (self.project.artifacts_dir / exp_id).resolve()
         run_dir.relative_to(self.project.artifacts_dir.resolve())
         cfg_path = run_dir / "run_config.yaml"
@@ -172,7 +192,8 @@ class SubmissionGate:
         return path, exp_id, predictions, evidence
 
     def evaluate(self, competition, file_name, *, exp_id=None, rule_id=None, user_approved=False,
-                 approval_id=None, kernel=None, kernel_version=None, quota=None, max_spearman=None, provider_refs=None):
+                 approval_id=None, kernel=None, kernel_version=None, quota=None, max_spearman=None, provider_refs=None,
+                 preflight_id=None):
         if kernel or kernel_version:
             raise SubmissionGateError("UNVERIFIED_KERNEL_OUTPUT", "Exact completed kernel version/output binding is required; a local same-named file is insufficient.")
         declared_competition = self.spec.metadata.get("competition") or self.spec.metadata.get("competition_slug")
@@ -195,12 +216,21 @@ class SubmissionGate:
             gates = state.get("gates", {})
             if gates.get("freeze_locked") or gates.get("finalized"):
                 raise SubmissionGateError("COMPETITION_FROZEN")
-        path, exp_id, predictions, evidence = self._resolve_payload(file_name, exp_id)
+        path, exp_id, predictions, evidence = self._resolve_payload(file_name, exp_id=exp_id, user_approved=user_approved, preflight_id=preflight_id)
+        if preflight_id:
+            from harness.candidate_preflight import load_preflight_receipt
+            receipt_pre = load_preflight_receipt(self.project.root, preflight_id)
+            if not receipt_pre:
+                raise SubmissionGateError("PREFLIGHT_RECEIPT_NOT_FOUND", f"Preflight receipt {preflight_id} not found.")
+            if receipt_pre.get("candidate", {}).get("sha256") != sha256(path):
+                raise SubmissionGateError("PREFLIGHT_PAYLOAD_MISMATCH", "Candidate file hash does not match cited preflight receipt.")
         events, refs, payload_hashes, history_hash = self._history(competition)
         known_refs = {str(r["provider_ref"]) for r in refs if r.get("provider_ref") is not None}
+        from harness.reconciliation import _load_acknowledged_refs
+        known_refs.update(_load_acknowledged_refs(self.project.root))
         if provider_refs is not None and set(provider_refs) - known_refs:
             raise SubmissionGateError("HISTORY_INCOMPLETE", "Provider submissions are missing local prediction snapshots; reconcile them before sending.")
-        if quota and type(quota.get("num_total")) is int and quota["num_total"] > len(known_refs):
+        if quota and quota.get("limited_by_total") and type(quota.get("num_total")) is int and quota["num_total"] > len(known_refs):
             raise SubmissionGateError("HISTORY_INCOMPLETE", "The provider reports more submissions than the verified local history.")
         payload_hash = sha256(path)
         if payload_hash in payload_hashes:
@@ -214,39 +244,45 @@ class SubmissionGate:
         if refs:
             rule_id = rule_id or evidence["cfg"].get("research", {}).get("decision_rule_id")
             if not rule_id:
-                raise SubmissionGateError("PROMOTION_EVIDENCE_REQUIRED")
-            registration = load_registration(self.project, rule_id)
-            evaluation = evaluate_decision_rule(registration["rule"], evidence["reference"], project=self.project,
-                                               task_spec=self.spec, plugin=self.plugin, registration=registration)
-            if evaluation["outcome"] != "supported":
-                raise SubmissionGateError("PROMOTION_RULE_NOT_SATISFIED", ", ".join(evaluation["reason_codes"]))
-            # The control must be the current verified incumbent, not an obsolete anchor.
-            states = StagnationController(self.project).reconcile_results()
-            state = states.get(evaluation["comparison_identity_sha256"])
-            control_id = registration["rule"]["control"]["id"]
-            prior_exp_ids = {r["exp_id"] for r in refs}
-            if control_id not in prior_exp_ids:
-                raise SubmissionGateError("INCUMBENT_COMPARISON_REQUIRED")
-            prior_evidence = []
-            for prior_exp in sorted(prior_exp_ids):
-                if not prior_exp:
-                    raise SubmissionGateError("HISTORY_INCOMPLETE", "A historical submission has no sealed experiment binding.")
-                prior = resolve_evidence({"kind": "full_run", "id": prior_exp, "partition": evidence["reference"]["partition"]},
-                    project=self.project, task_spec=self.spec, plugin=self.plugin)
-                if prior["identity"] != evidence["identity"]:
-                    raise SubmissionGateError("INCUMBENT_COMPARISON_REQUIRED", "Prior submissions need comparable validation evidence.")
-                prior_evidence.append((prior["score"] if self.spec.direction == "maximize" else -prior["score"], prior_exp))
-            best_prior_score = max(value for value, _ in prior_evidence)
-            if control_id not in {prior_exp for value, prior_exp in prior_evidence if value == best_prior_score}:
-                raise SubmissionGateError("INCUMBENT_COMPARISON_REQUIRED", "The predeclared control is worse than the submitted incumbent.")
-            if state and state["incumbent_evidence_ref"]["id"] not in {control_id, exp_id}:
-                raise SubmissionGateError("INCUMBENT_COMPARISON_REQUIRED")
+                if user_approved or preflight_id:
+                    evaluation_ids.append(preflight_id or "operator_attestation")
+                else:
+                    raise SubmissionGateError("PROMOTION_EVIDENCE_REQUIRED")
+            else:
+                registration = load_registration(self.project, rule_id)
+                evaluation = evaluate_decision_rule(registration["rule"], evidence["reference"], project=self.project,
+                                                   task_spec=self.spec, plugin=self.plugin, registration=registration)
+                if evaluation["outcome"] != "supported":
+                    raise SubmissionGateError("PROMOTION_RULE_NOT_SATISFIED", ", ".join(evaluation["reason_codes"]))
+                # The control must be the current verified incumbent, not an obsolete anchor.
+                states = StagnationController(self.project).reconcile_results()
+                state = states.get(evaluation["comparison_identity_sha256"])
+                control_id = registration["rule"]["control"]["id"]
+                prior_exp_ids = {r["exp_id"] for r in refs}
+                if control_id not in prior_exp_ids:
+                    raise SubmissionGateError("INCUMBENT_COMPARISON_REQUIRED")
+                prior_evidence = []
+                for prior_exp in sorted(prior_exp_ids):
+                    if not prior_exp:
+                        raise SubmissionGateError("HISTORY_INCOMPLETE", "A historical submission has no sealed experiment binding.")
+                    prior = resolve_evidence({"kind": "full_run", "id": prior_exp, "partition": evidence["reference"]["partition"]},
+                        project=self.project, task_spec=self.spec, plugin=self.plugin)
+                    if prior["identity"] != evidence["identity"]:
+                        raise SubmissionGateError("INCUMBENT_COMPARISON_REQUIRED", "Prior submissions need comparable validation evidence.")
+                    prior_evidence.append((prior["score"] if self.spec.direction == "maximize" else -prior["score"], prior_exp))
+                best_prior_score = max(value for value, _ in prior_evidence)
+                if control_id not in {prior_exp for value, prior_exp in prior_evidence if value == best_prior_score}:
+                    raise SubmissionGateError("INCUMBENT_COMPARISON_REQUIRED", "The predeclared control is worse than the submitted incumbent.")
+                if state and state["incumbent_evidence_ref"]["id"] not in {control_id, exp_id}:
+                    raise SubmissionGateError("INCUMBENT_COMPARISON_REQUIRED")
+                evaluation_ids.append(evaluation["evaluation_id"])
             if diversity["status"] == "near_duplicate":
+                if not rule_id:
+                    raise SubmissionGateError("INDEPENDENT_CONFIRMATION_REQUIRED", "Near-duplicate candidate requires independent confirmation / decision rule.")
                 near_ids = {r["reference_id"] for r in diversity["comparisons"] if r["status"] == "near_duplicate"}
                 nearest_exp_ids = {r["exp_id"] for r in refs if r["id"] in near_ids}
                 if not evaluation["independent_confirmation"] or nearest_exp_ids - {control_id}:
                     raise SubmissionGateError("INDEPENDENT_CONFIRMATION_REQUIRED")
-            evaluation_ids.append(evaluation["evaluation_id"])
         subject = digest(dict(competition=competition, payload_sha256=payload_hash, exp_id=exp_id))
         approval = None
         if approval_id:

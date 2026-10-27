@@ -225,6 +225,16 @@ class SubmissionGateTests(unittest.TestCase):
         with self.assertRaisesRegex(SubmissionGateError, "HISTORY_INCOMPLETE"):
             self.authorize(provider_refs=["untracked-remote-submission"])
 
+
+    def test_candidate_file_dispatch_with_user_approved(self):
+        # Candidate file without experiment evidence is authorized when user_approved=True
+        cand_file = self.root / "candidate_blend.csv"
+        import shutil
+        shutil.copyfile(self.payload, cand_file)
+        result = self.gate.authorize_dispatch("fixture-comp", cand_file, exp_id=None, user_approved=True, dry_run=True, quota=self.quota)
+        self.assertEqual(result["receipt"]["status"], "pass")
+        self.assertEqual(result["receipt"]["payload"]["kind"], "file")
+
     def test_consumption_rechecks_expiry_and_payload_bytes(self):
         auth = self.authorize()
         with mock.patch("harness.submission_gate.time.monotonic", return_value=float("inf")):

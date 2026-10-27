@@ -248,15 +248,110 @@ def dispatch_kernel(
             shutil.rmtree(staging, ignore_errors=True)
 
 
+
+
+def push_kernel_directory(
+    dir_path: str | Path,
+    client: Any = None,
+    watch: bool = False,
+    poll_interval: float = 15.0,
+    watch_timeout: float = 3600.0,
+) -> Dict[str, Any]:
+    """Push a directory containing kernel-metadata.json directly to Kaggle.
+
+    First-class support for Kaggle Code Competitions and pre-staged kernels.
+    """
+    p = Path(dir_path).resolve()
+    if not p.is_dir():
+        raise FileNotFoundError(f"Kernel directory not found: {p}")
+    meta_path = p / "kernel-metadata.json"
+    if not meta_path.is_file():
+        raise FileNotFoundError(f"kernel-metadata.json not found in {p}")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Invalid kernel-metadata.json in {p}: {exc}") from exc
+
+    kernel_id = meta.get("id")
+    if not kernel_id:
+        raise ValueError("kernel-metadata.json must define an 'id' (owner/kernel-slug)")
+    title = meta.get("title", kernel_id)
+    code_file = meta.get("code_file", "code.py")
+    code_path = p / code_file
+    if not code_path.is_file():
+        raise FileNotFoundError(f"Declared code_file '{code_file}' not found in {p}")
+
+    if client is None:
+        from harness.kaggle_compat import KaggleClient
+        client = KaggleClient()
+
+    machine_shape = meta.get("machine_shape")
+    resp = client.kernels_push(str(p), acc=machine_shape)
+    result: Dict[str, Any] = {
+        "ok": True,
+        "ref": getattr(resp, "ref", None),
+        "url": getattr(resp, "url", None),
+        "kernel_id": getattr(resp, "kernel_id", None) or kernel_id,
+        "version_number": getattr(resp, "version_number", None),
+        "metadata": meta,
+    }
+    for field in (
+        "invalid_dataset_sources",
+        "invalid_competition_sources",
+        "invalid_kernel_sources",
+        "invalid_model_sources",
+        "error",
+    ):
+        val = getattr(resp, field, None)
+        if val:
+            result[field] = val
+
+    try:
+        from harness.dispatch_audit import record_dispatch
+        audit = record_dispatch(
+            kind="kernel",
+            kernel_id=kernel_id,
+            notebook_path=str(code_path),
+            message=title,
+            ref=result.get("ref"),
+        )
+    except Exception as exc:
+        import sys as _sys
+        print(f"[dispatch_audit] warning: audit entry not recorded: {exc}", file=_sys.stderr)
+        audit = None
+
+    if audit and audit.get("duplicate_of"):
+        dup = audit["duplicate_of"]
+        result["duplicate_of"] = dup
+        result["duplicate_warning"] = (
+            f"Duplicate kernel: identical code content was already pushed "
+            f"to kernel '{kernel_id}' earlier; pushing again creates a new "
+            "identical kernel version."
+        )
+
+    if watch and result.get("ok"):
+        from harness.templates.kaggle_template import KaggleKernelManager
+        target_slug = result.get("ref") or kernel_id
+        watch_res = KaggleKernelManager.wait_for_kernel(
+            exp_id="",
+            kernel_slug=target_slug,
+            poll_interval=poll_interval,
+            timeout_seconds=watch_timeout,
+        )
+        result["watch"] = watch_res
+        result["status"] = watch_res.get("status")
+
+    return result
 def main(argv: Optional[List[str]] = None) -> int:
     """Entry point for ``ai-harness dispatch-kernel``."""
     parser = argparse.ArgumentParser(
         prog="ai-harness dispatch-kernel",
-        description="Wrap a local notebook into a Kaggle kernel and push it.",
+        description="Wrap a local notebook into a Kaggle kernel and push it (or push a staged directory directly).",
     )
-    parser.add_argument("notebook", help="Local notebook/script path to push.")
-    parser.add_argument("--kernel-id", "-i", required=True, help="Kernel slug (owner/kernel).")
-    parser.add_argument("--title", "-t", required=True, help="Kernel title.")
+    parser.add_argument("notebook", nargs="?", default=None, help="Local notebook/script path to push.")
+    parser.add_argument("-p", "--path", default=None, help="Staged kernel directory (with kernel-metadata.json) to push directly.")
+    parser.add_argument("--kernel-id", "-i", default=None, help="Kernel slug (owner/kernel).")
+    parser.add_argument("--title", "-t", default=None, help="Kernel title.")
     parser.add_argument("--code-file", default=None, help="Code filename in the kernel (default: notebook name).")
     parser.add_argument(
         "--machine-shape", default=None,
@@ -276,10 +371,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        result = dispatch_kernel(
-            args.notebook,
-            args.kernel_id,
-            args.title,
+        if args.path:
+            result = push_kernel_directory(
+                args.path,
+                watch=args.watch,
+                poll_interval=args.poll,
+                watch_timeout=args.watch_timeout,
+            )
+        else:
+            if not args.notebook or not args.kernel_id or not args.title:
+                parser.error("Either -p/--path <dir> or notebook, --kernel-id, and --title must be specified.")
+            result = dispatch_kernel(
+                args.notebook,
+                args.kernel_id,
+                args.title,
             code_file=args.code_file,
             machine_shape=args.machine_shape,
             dataset_sources=args.dataset,

@@ -225,6 +225,12 @@ def main(argv=None) -> int:
     p_list.add_argument("--page-size", "-n", type=int, default=20, help="Number of kernels (default: 20)")
     p_list.add_argument("--search", "-s", default=None, help="Search terms")
 
+    p_push = sub.add_parser("push", help="Push a staged kernel directory (with kernel-metadata.json) to Kaggle.")
+    p_push.add_argument("-p", "--path", default=".", help="Directory containing kernel-metadata.json (default: current dir)")
+    p_push.add_argument("--watch", action="store_true", help="Poll until the kernel completes")
+    p_push.add_argument("--poll", type=float, default=15.0, help="Poll interval in seconds (default: 15)")
+    p_push.add_argument("--timeout", type=float, default=3600.0, help="Max wait time in seconds (default: 3600)")
+
     args = parser.parse_args(argv)
     try:
         if args.action == "status":
@@ -253,6 +259,11 @@ def main(argv=None) -> int:
             )
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0
+        if args.action == "push":
+            from harness.kernel_dispatch import push_kernel_directory
+            result = push_kernel_directory(args.path, watch=args.watch, poll_interval=args.poll, watch_timeout=args.timeout)
+            print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+            return 0 if result.get("ok") else 1
     except Exception as exc:  # noqa: BLE001 - report, don't crash
         print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, indent=2, ensure_ascii=False))
         return 1

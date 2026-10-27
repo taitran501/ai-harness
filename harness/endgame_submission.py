@@ -197,7 +197,7 @@ class KaggleLeaderboardTracker:
         message: str = "",
         kernel: Optional[str] = None,
         kernel_version: Optional[str] = None,
-        *, project_root=None, exp_id=None, rule_id=None, approval_id=None, user_approved=False, dry_run=False,
+        *, project_root=None, exp_id=None, rule_id=None, approval_id=None, user_approved=False, dry_run=False, preflight_id=None,
     ) -> Dict[str, Any]:
         """Submit a file (or code-competition kernel output) and return the ref.
 
@@ -219,7 +219,7 @@ class KaggleLeaderboardTracker:
         provider_refs = [str(s.ref) for s in self._client.list_submissions(competition)]
         authorization = gate.authorize_dispatch(competition, file_name, exp_id=exp_id, rule_id=rule_id,
             user_approved=user_approved, approval_id=approval_id, kernel=kernel,
-            kernel_version=kernel_version, quota=quota, provider_refs=provider_refs, dry_run=dry_run)
+            kernel_version=kernel_version, quota=quota, provider_refs=provider_refs, dry_run=dry_run, preflight_id=preflight_id)
         if dry_run:
             return authorization
         intent = authorization["intent"]

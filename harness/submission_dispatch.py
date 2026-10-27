@@ -59,6 +59,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_dispatch.add_argument("--approval-id", default=None)
     p_dispatch.add_argument("--receipt", default=None, help="Receipt to inspect; dispatch always re-evaluates live evidence.")
     p_dispatch.add_argument("--user-approved", action="store_true", help="Operator attestation for dispatch of these exact bytes.")
+    p_dispatch.add_argument("--preflight-id", default=None, help="Verified candidate preflight receipt ID.")
     p_dispatch.add_argument("--dry-run", action="store_true")
     p_dispatch.add_argument(
         "--kernel", "-k", default=None,
@@ -120,6 +121,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 kernel_version=args.kernel_version,
                 project_root=args.project_root, exp_id=args.exp_id, rule_id=args.rule_id,
                 approval_id=args.approval_id, user_approved=args.user_approved, dry_run=args.dry_run,
+                preflight_id=args.preflight_id,
             )
             _print_payload({"ok": True, "action": "dispatch", **payload})
             if payload.get("duplicate_warning"):
