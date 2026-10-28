@@ -47,6 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("plugins", help="List installed task plugins")
 
+    audit_scripts = subparsers.add_parser("audit-scripts", help="Scan workspace scripts for raw dispatch calls")
+    audit_scripts.add_argument("--project-root", default=".", help="Workspace root")
+    audit_scripts.add_argument("--json", action="store_true", help="Emit JSON report")
+
     status = subparsers.add_parser("status", help="Single-command install + workspace health report (default JSON)")
     status.add_argument("--project-root", default=None, help="Task workspace root (default: current dir / HARNESS_PROJECT_ROOT)")
     status.add_argument("--markdown", action="store_true", help="Print short human-readable summary instead of JSON")
@@ -330,6 +334,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "plugins":
         print(json.dumps(list_task_plugins(), indent=2, ensure_ascii=False))
         return 0
+
+    if args.command == "audit-scripts":
+        from harness.audit_gate import scan_dispatch_scripts
+        report = scan_dispatch_scripts(args.project_root)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print("No raw dispatch scripts found." if not report["findings"] else "\n".join(
+                f"{item['path']}:{item['line']} [{item['severity']}] {item['pattern']}" for item in report["findings"]
+            ))
+        return 1 if report["findings"] else 0
 
     if args.command == "status":
         from harness.status_report import collect_status, render_markdown

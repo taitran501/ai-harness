@@ -149,7 +149,8 @@ def make_submission_evidence(root, exp_id, *, labels=None, cfg=None):
     metrics = plugin.evaluate_predictions(context, truth, {"pred_label": labels})
     metrics.update(experiment_id=exp_id, selection_variant="fixture")
     (run_dir / "metrics.json").write_text(__import__("json").dumps(metrics), encoding="utf-8")
-    manifest = dict(schema_version=2, status="COMPLETED", run_kind="full", run_id=exp_id, exp_id=exp_id,
+    manifest = dict(schema_version=2, provenance_version=1, provenance="local_run",
+        status="COMPLETED", run_kind="full", run_id=exp_id, exp_id=exp_id,
         **contract_identity(spec, plugin), data_sha256=digest(truth.to_dict("list")), split_sha256=digest("fixture-split"),
         resolved_config_sha256=sha256(run_dir / "run_config.yaml"), files=seal_file_map(run_dir))
     (run_dir / "artifact_manifest.json").write_text(__import__("json").dumps(manifest), encoding="utf-8")

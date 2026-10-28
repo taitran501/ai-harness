@@ -41,14 +41,13 @@ class BlendOptimizerContractTests(unittest.TestCase):
 
     def test_incompatible_class_order_fails_before_reporting_an_optimization(self):
         bridge = self.make_bridge(reverse_second=True)
+        with self.assertRaisesRegex(ValueError, "EXTERNAL_PREDICTION_NOT_SUBMITTABLE"):
+            find_optimal_blend_weights(bridge.project, ["A", "B"])
         before = {}
         for name in ("A", "B"):
             folder = bridge.artifacts_dir / name
             validate_run(folder, task_spec=bridge.task_spec, plugin=bridge.task_plugin)
             before[name] = sha256(folder / "artifact_manifest.json")
-        _, obs = bridge.execute_action("optimize_blend", {"components": ["A", "B"]})
-        self.assertEqual(obs.status, "FAILED", obs.summary)
-        self.assertIn("Probability class orders differ", obs.summary)
         self.assertFalse(bridge.comp_state.state["candidate_pool"]["synthesized_candidates"])
         for name in before:
             self.assertEqual(sha256(bridge.artifacts_dir / name / "artifact_manifest.json"), before[name])
@@ -56,10 +55,8 @@ class BlendOptimizerContractTests(unittest.TestCase):
     def test_compatible_sources_optimize_and_build_the_reported_candidate(self):
         bridge = self.make_bridge()
         _, obs = bridge.execute_action("optimize_blend", {"components": ["A", "B"]})
-        self.assertEqual(obs.status, "SUCCESS", obs.summary)
-        result = obs.data["optimization"]
-        self.assertEqual(result["best_score"], 1.0)
-        self.assertEqual(obs.data["candidate"]["primary_score"], result["best_score"])
+        self.assertEqual(obs.status, "FAILED", obs.summary)
+        self.assertIn("EXTERNAL_PREDICTION_NOT_SUBMITTABLE", obs.summary)
 
     def test_duplicate_components_and_unknown_modes_are_rejected(self):
         bridge = self.make_bridge()

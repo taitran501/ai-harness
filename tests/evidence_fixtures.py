@@ -9,6 +9,8 @@ def seal_fixture(folder, spec, score=0.75, **identity):
     folder.mkdir(parents=True, exist_ok=True)
     metrics = {
         "schema_version": 2,
+        "provenance_version": 1,
+        "provenance": "local_run",
         "experiment_id": folder.name,
         "primary_metric": spec.primary_metric,
         "primary_score": score,
@@ -28,6 +30,8 @@ def seal_fixture(folder, spec, score=0.75, **identity):
             (folder / name).write_text(contents)
     manifest = {
         "schema_version": 2,
+        "provenance_version": 1,
+        "provenance": "local_run",
         "run_id": "test-" + folder.name,
         "exp_id": folder.name,
         "run_kind": "full",

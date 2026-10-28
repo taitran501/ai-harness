@@ -162,6 +162,8 @@ class TestEndgameCandidatesAndBridge(unittest.TestCase):
 
             manifest = {
                 "schema_version": 2,
+                "provenance_version": 1,
+                "provenance": "local_run",
                 "exp_id": exp_id,
                 "task_sha256": sha256(self.root / "configs/task.yaml"),
                 "scorer_sha256": "default_scorer",
@@ -204,6 +206,7 @@ class TestEndgameCandidatesAndBridge(unittest.TestCase):
         spec = load_active_task_spec(self.root / "configs/task.yaml")
         for exp_id in ("exp001", "exp002"):
             seal_fixture(self.root / "artifacts" / exp_id, spec, score=.5)
+        # The shared fixture emits explicit local provenance for these synthetic runs.
         opt = find_optimal_blend_weights(
             project=self.root,
             component_ids=["exp001", "exp002"],

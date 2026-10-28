@@ -130,3 +130,11 @@ Consumers (such as the candidate pool and dashboard) reject artifacts with missi
 - Internal metrics and model capabilities require references to validated immutable artifacts; research decisions require machine evaluation receipts.
 - External source references establish provenance only. Claims from papers, discussions, or public leaderboards remain external and cannot establish local execution or local model performance.
 - Current research state in the Context HUD and `RESEARCH_PROGRESS.md` is rendered from live validators. Ungrounded notes and legacy assertions remain in the append-only ledger but are quarantined from default resume context and active macro-family state.
+
+## 9. Candidate Provenance and Dispatch Script Guard
+
+- Full runs record `provenance_version: 1` and a provenance classification. Imported prediction values are always `external_prediction`, even when their score and file integrity are verified; they are not submission eligible and cannot be candidate constituents.
+- Candidate recipes bind source IDs, source manifest hashes, and OOF/test prediction hashes through `recipe_binding_sha256`. Candidate construction and blend optimization revalidate provenance before reading predictions.
+- `verified` describes artifact integrity and scoring. `submission_eligible` is a separate derived decision; `eligible` is only its compatibility mirror. Test predictions and a supported promotion decision are required before dispatch.
+- `ai-harness audit-scripts` scans root Python files and `scratch/` for raw Kaggle submission and kernel push calls. Unacknowledged blocking findings lock submission dispatch with `DISPATCH_BACKDOOR_DETECTED`.
+- User approval and diversity preflight receipts do not substitute for a supported decision evaluation. Submission payloads must resolve to a validated run or candidate manifest.

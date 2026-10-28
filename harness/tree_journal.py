@@ -242,6 +242,7 @@ class TreeJournal:
                 verified = True
             except (ValueError, KeyError, OSError):
                 verified = False
+                manifest = {}
             exp = cfg.get("experiment", {})
             model_cfg = cfg.get("model", {})
             task_cfg = cfg.get("task", {})
@@ -269,7 +270,10 @@ class TreeJournal:
                 metrics=metrics if isinstance(metrics,dict) else {"legacy_folds":metrics},
                 primary_metric_name=metrics.get("primary_metric","unknown") if isinstance(metrics,dict) else "unknown",
                 direction=metrics.get("direction","maximize") if isinstance(metrics,dict) else "maximize",
-                verified=verified,eligible=verified,status="COMPLETED" if verified else "LEGACY_UNVERIFIED",
+                verified=verified,eligible=bool(verified and manifest.get(
+                    "submission_eligible",
+                    manifest.get("provenance") == "local_run",
+                )),status="COMPLETED" if verified else "LEGACY_UNVERIFIED",
                 artifact_dir=str(directory),atomic_hypothesis=exp.get("hypothesis",""),
                 intervention=exp.get("intervention", ""), diagnostics_summary=diagnostics,
                 timestamp=(directory / "artifact_manifest.json").stat().st_mtime

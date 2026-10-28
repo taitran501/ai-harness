@@ -15,6 +15,7 @@ import shutil
 from unittest import mock
 
 import pandas as pd
+import yaml
 
 from harness import submission_dispatch
 from harness.endgame_submission import KaggleLeaderboardTracker
@@ -137,6 +138,14 @@ class SubmissionGateTests(unittest.TestCase):
     def setUp(self):
         self.root, _ = workspace_with_verified_pair()
         self.addCleanup(shutil.rmtree, self.root)
+        project_manifest = yaml.safe_load((self.root / ".ai-harness/project.yaml").read_text(encoding="utf-8"))
+        state_path = self.root / project_manifest["artifacts_dir"] / "competition_state.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps({"gates": {"baseline_locked": True, "baseline_exp_id": "control"}}), encoding="utf-8")
+        from harness.competition_state import CompetitionStateMachine
+        state_machine = CompetitionStateMachine(self.root)
+        state_machine.state["gates"].update(baseline_locked=True, baseline_exp_id="control")
+        state_machine.save()
         self.gate = SubmissionGate(self.root)
         predictions = pd.read_csv(self.gate.project.artifacts_dir / "control/test_predictions.csv")
         self.payload = self.gate.plugin.build_submission(self.gate.context, predictions, self.root / "submission.csv")
@@ -226,14 +235,45 @@ class SubmissionGateTests(unittest.TestCase):
             self.authorize(provider_refs=["untracked-remote-submission"])
 
 
-    def test_candidate_file_dispatch_with_user_approved(self):
-        # Candidate file without experiment evidence is authorized when user_approved=True
+    def test_candidate_file_dispatch_without_manifest_is_rejected(self):
         cand_file = self.root / "candidate_blend.csv"
         import shutil
         shutil.copyfile(self.payload, cand_file)
-        result = self.gate.authorize_dispatch("fixture-comp", cand_file, exp_id=None, user_approved=True, dry_run=True, quota=self.quota)
-        self.assertEqual(result["receipt"]["status"], "pass")
-        self.assertEqual(result["receipt"]["payload"]["kind"], "file")
+        with self.assertRaisesRegex(SubmissionGateError, "EXPERIMENT_EVIDENCE_REQUIRED"):
+            self.gate.authorize_dispatch("fixture-comp", cand_file, exp_id=None, user_approved=True, dry_run=True, quota=self.quota)
+
+    def test_preflight_or_approval_does_not_replace_promotion_receipt(self):
+        from harness.candidate_preflight import run_candidate_preflight
+        incumbent = self.root / "incumbent.csv"
+        incumbent.write_bytes(self.payload.read_bytes())
+        preflight = run_candidate_preflight(project_root=self.root, candidate_path=self.payload,
+                                            incumbent_path=incumbent, id_col="id", pred_col="label")
+        import shutil
+        unpromoted_dir = self.gate.project.artifacts_dir / "unpromoted"
+        shutil.copytree(self.gate.project.artifacts_dir / "control", unpromoted_dir)
+        unpromoted_manifest = json.loads((unpromoted_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+        unpromoted_manifest["exp_id"] = "unpromoted"
+        (unpromoted_dir / "artifact_manifest.json").write_text(json.dumps(unpromoted_manifest), encoding="utf-8")
+        unpromoted_metrics = json.loads((unpromoted_dir / "metrics.json").read_text(encoding="utf-8"))
+        unpromoted_metrics["experiment_id"] = "unpromoted"
+        (unpromoted_dir / "metrics.json").write_text(json.dumps(unpromoted_metrics), encoding="utf-8")
+        unpromoted_cfg = yaml.safe_load((unpromoted_dir / "run_config.yaml").read_text(encoding="utf-8"))
+        unpromoted_cfg.setdefault("experiment", {})["id"] = "unpromoted"
+        (unpromoted_dir / "run_config.yaml").write_text(yaml.safe_dump(unpromoted_cfg), encoding="utf-8")
+        from harness.artifacts import seal_file_map
+        unpromoted_manifest["files"] = seal_file_map(unpromoted_dir)
+        unpromoted_manifest["resolved_config_sha256"] = __import__("harness.artifacts", fromlist=["sha256"]).sha256(unpromoted_dir / "run_config.yaml")
+        (unpromoted_dir / "artifact_manifest.json").write_text(json.dumps(unpromoted_manifest), encoding="utf-8")
+        with self.assertRaisesRegex(SubmissionGateError, "PROMOTION_EVIDENCE_REQUIRED"):
+            self.gate.evaluate("fixture-comp", self.payload, exp_id="unpromoted", user_approved=True,
+                               preflight_id=preflight["preflight_id"], quota=self.quota)
+
+    def test_backdoor_script_locks_dispatch(self):
+        script = self.root / "scratch"
+        script.mkdir(exist_ok=True)
+        (script / "push.py").write_text("kaggle.api.competition_submit(file_name='x')\n")
+        with self.assertRaisesRegex(SubmissionGateError, "DISPATCH_BACKDOOR_DETECTED"):
+            self.gate.evaluate("fixture-comp", self.payload, exp_id="control", user_approved=True, quota=self.quota)
 
     def test_consumption_rechecks_expiry_and_payload_bytes(self):
         auth = self.authorize()

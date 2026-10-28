@@ -18,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from harness.artifacts import digest, sha256
-from harness.audit_gate import evaluate_submission_candidate, semantic_prediction_hash
+from harness.audit_gate import enforce_dispatch_script_guard, evaluate_submission_candidate, semantic_prediction_hash
 from harness.decision_rules import (evaluate_decision_rule, load_registration, policy_directory,
                                     resolve_evidence, resolve_research_policy, utc_now)
 from harness.dispatch_audit import append_dispatch_event, read_submission_events
@@ -155,22 +155,7 @@ class SubmissionGate:
         if not exp_id and matches:
             exp_id = matches[-1]["exp_id"]
         if not exp_id:
-            if user_approved or preflight_id:
-                self.plugin.validate_submission(self.context, path)
-                candidate_id = f"candidate_{path.stem}"
-                evidence = {
-                    "kind": "candidate_file",
-                    "id": candidate_id,
-                    "partition": "test",
-                    "score": None,
-                    "identity": digest({"kind": "candidate_file", "name": path.name, "sha256": sha256(path)}),
-                    "evidence_sha256": sha256(path),
-                    "manifest": {"files": [path.name]},
-                    "cfg": {"research": {}},
-                    "reference": {"kind": "candidate_file", "id": candidate_id, "partition": "test"},
-                }
-                return path, candidate_id, path, evidence
-            raise SubmissionGateError("EXPERIMENT_EVIDENCE_REQUIRED", "Pass --exp-id for a sealed run with test predictions or --user-approved for candidate files.")
+            raise SubmissionGateError("EXPERIMENT_EVIDENCE_REQUIRED", "A submission file must be bound to a validated run or candidate manifest.")
         run_dir = (self.project.artifacts_dir / exp_id).resolve()
         run_dir.relative_to(self.project.artifacts_dir.resolve())
         cfg_path = run_dir / "run_config.yaml"
@@ -196,6 +181,10 @@ class SubmissionGate:
                  preflight_id=None):
         if kernel or kernel_version:
             raise SubmissionGateError("UNVERIFIED_KERNEL_OUTPUT", "Exact completed kernel version/output binding is required; a local same-named file is insufficient.")
+        script_guard = enforce_dispatch_script_guard(self.project.root)
+        if script_guard["status"] == "blocked":
+            sample = script_guard["findings"][0]
+            raise SubmissionGateError("DISPATCH_BACKDOOR_DETECTED", f"{sample['path']}:{sample['line']} ({sample['pattern']})")
         declared_competition = self.spec.metadata.get("competition") or self.spec.metadata.get("competition_slug")
         if isinstance(declared_competition, dict):
             declared_competition = declared_competition.get("slug")
@@ -224,6 +213,8 @@ class SubmissionGate:
                 raise SubmissionGateError("PREFLIGHT_RECEIPT_NOT_FOUND", f"Preflight receipt {preflight_id} not found.")
             if receipt_pre.get("candidate", {}).get("sha256") != sha256(path):
                 raise SubmissionGateError("PREFLIGHT_PAYLOAD_MISMATCH", "Candidate file hash does not match cited preflight receipt.")
+            if not exp_id:
+                raise SubmissionGateError("EXPERIMENT_EVIDENCE_REQUIRED")
         events, refs, payload_hashes, history_hash = self._history(competition)
         known_refs = {str(r["provider_ref"]) for r in refs if r.get("provider_ref") is not None}
         from harness.reconciliation import _load_acknowledged_refs
@@ -244,10 +235,7 @@ class SubmissionGate:
         if refs:
             rule_id = rule_id or evidence["cfg"].get("research", {}).get("decision_rule_id")
             if not rule_id:
-                if user_approved or preflight_id:
-                    evaluation_ids.append(preflight_id or "operator_attestation")
-                else:
-                    raise SubmissionGateError("PROMOTION_EVIDENCE_REQUIRED")
+                raise SubmissionGateError("PROMOTION_EVIDENCE_REQUIRED", "A verified supported decision evaluation is required; approval and preflight do not substitute.")
             else:
                 registration = load_registration(self.project, rule_id)
                 evaluation = evaluate_decision_rule(registration["rule"], evidence["reference"], project=self.project,
@@ -283,6 +271,16 @@ class SubmissionGate:
                 nearest_exp_ids = {r["exp_id"] for r in refs if r["id"] in near_ids}
                 if not evaluation["independent_confirmation"] or nearest_exp_ids - {control_id}:
                     raise SubmissionGateError("INDEPENDENT_CONFIRMATION_REQUIRED")
+        else:
+            # Initial dispatch is allowed only for the explicitly configured
+            # baseline anchor; approval/preflight alone cannot turn any run
+            # into a first candidate.
+            state_path = self.project.artifacts_dir / "competition_state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
+            gates = state.get("gates", {})
+            baseline_id = gates.get("baseline_exp_id")
+            if exp_id != baseline_id:
+                raise SubmissionGateError("PROMOTION_EVIDENCE_REQUIRED")
         subject = digest(dict(competition=competition, payload_sha256=payload_hash, exp_id=exp_id))
         approval = None
         if approval_id:

@@ -476,6 +476,8 @@ class TestBaselineAnchorIdentityGate(unittest.TestCase):
         )
         manifest = {
             "schema_version": 2,
+            "provenance_version": 1,
+            "provenance": "local_run",
             "run_id": f"run_{exp_id}",
             "exp_id": exp_id,
             "status": "COMPLETED",

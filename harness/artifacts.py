@@ -135,6 +135,8 @@ def validate_run(directory, task_spec=None, *, plugin=None, expected=None):
     if not path.is_file():
         raise ValueError("LEGACY_UNVERIFIED: missing manifest v2")
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    from harness.provenance import validate_provenance_record
+    validate_provenance_record(manifest)
     if (
         manifest.get("schema_version") != 2
         or manifest.get("status") != "COMPLETED"

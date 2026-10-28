@@ -2,6 +2,8 @@
 from __future__ import annotations
 import hashlib
 import json
+import ast
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,6 +12,56 @@ import pandas as pd
 
 from harness.artifacts import digest
 from harness.policy_schema import validate_document
+
+
+_DISPATCH_PATTERNS = (
+    ("kaggle competitions submit", re.compile(r"kaggle\s+competitions\s+submit", re.I)),
+    ("competitions_submissions_create", re.compile(r"competitions_submissions_create", re.I)),
+    ("kaggle.api.competition_submit", re.compile(r"kaggle\s*\.\s*api\s*\.\s*competition_submit", re.I)),
+    ("kernels_push_directory", re.compile(r"kernels_push_directory", re.I)),
+)
+
+
+def scan_dispatch_scripts(project_root):
+    """Find raw provider dispatch calls in scratch Python and root Python files."""
+    root = Path(project_root).resolve()
+    files = set(root.glob("*.py"))
+    scratch = root / "scratch"
+    if scratch.is_dir():
+        files.update(scratch.rglob("*.py"))
+    findings = []
+    for path in sorted(files):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        try:
+            ast.parse(source, filename=str(path))
+        except SyntaxError:
+            # Still scan malformed scripts: an invalid file is not evidence of safety.
+            pass
+        for line_number, line in enumerate(source.splitlines(), 1):
+            for name, pattern in _DISPATCH_PATTERNS:
+                if pattern.search(line):
+                    findings.append({"path": path.relative_to(root).as_posix(), "line": line_number,
+                                     "pattern": name, "severity": "blocking"})
+    acknowledged = set()
+    ack_path = root / ".ai-harness" / "acknowledged_dispatch_scripts.json"
+    if ack_path.is_file():
+        try:
+            acknowledged = set(json.loads(ack_path.read_text(encoding="utf-8")).get("acknowledged", []))
+        except (OSError, ValueError, AttributeError):
+            acknowledged = set()
+    for finding in findings:
+        finding["acknowledged"] = finding["path"] in acknowledged
+    return {"status": "findings" if findings else "clean", "findings": findings}
+
+
+def enforce_dispatch_script_guard(project_root):
+    report = scan_dispatch_scripts(project_root)
+    active = [finding for finding in report["findings"] if finding["severity"] == "blocking" and not finding["acknowledged"]]
+    return {"status": "blocked" if active else "clean", "findings": active,
+            "blocker": "DISPATCH_BACKDOOR_DETECTED" if active else None}
 
 
 def _typed(value):

@@ -89,6 +89,7 @@ def _stored_recipe_fingerprint(entry):
 
 
 def build_candidate(project, name, mode, source_map):
+    from harness.provenance import require_allowed_provenance, resolve_run_provenance
     spec = load_active_task_spec(project.task_config_path)
     context = TaskPluginContext(
         project.root, project.task_config_path, spec, project.plugin_id or "default"
@@ -109,17 +110,17 @@ def build_candidate(project, name, mode, source_map):
         raise ValueError("Unsupported candidate mode")
     if not ids or any(not x or Path(x).name != x for x in ids):
         raise ValueError("Require exact source experiment IDs")
+    # Resolve every source's immutable manifest and provenance before loading
+    # prediction values or creating the candidate directory.
+    source_manifests = [resolve_run_provenance(project, exp) for exp in ids]
+    require_allowed_provenance(source_manifests, purpose="submission candidates")
     frames = []
     manifests = []
     scores = []
     key = spec.id_column
     for exp in ids:
         folder = project.artifacts_dir / exp
-        manifests.append(
-            validate_run(
-                folder, task_spec=spec, plugin=plugin, expected={"exp_id": exp}
-            )
-        )
+        manifests.append(validate_run(folder, task_spec=spec, plugin=plugin, expected={"exp_id": exp}))
         metrics = json.loads((folder / "metrics.json").read_text())
         frame = pd.read_csv(folder / "oof_predictions.csv")
         frame = frame[frame.input_variant == metrics["selection_variant"]].copy()
@@ -329,18 +330,31 @@ def build_candidate(project, name, mode, source_map):
         raise ValueError("Superiority guard: ensemble must improve best constituent")
     candidate_id = "cand_" + uuid.uuid4().hex
     folder = project.artifacts_dir / candidate_id
-    folder.mkdir(exist_ok=False)
     merged["input_variant"] = mode
     merged.to_csv(folder / "oof_predictions.csv", index=False)
     if has_test_preds and merged_test is not None:
         merged_test["input_variant"] = mode
         merged_test.to_csv(folder / "test_predictions.csv", index=False)
+    provenance_values = {m["provenance"] for m in source_manifests}
+    candidate_provenance = ("reproduced_external_code" if "reproduced_external_code" in provenance_values else "local_run")
+    recipe_binding = digest({"recipe": _candidate_recipe_fingerprint(mode, ids, source_map),
+                             "constituents": [{"exp_id": exp, "provenance": m["provenance"],
+                                               "manifest_sha256": sha256(project.artifacts_dir / exp / "artifact_manifest.json"),
+                                               "oof_sha256": sha256(project.artifacts_dir / exp / "oof_predictions.csv"),
+                                               "test_sha256": sha256(project.artifacts_dir / exp / "test_predictions.csv") if (project.artifacts_dir / exp / "test_predictions.csv").is_file() else None}
+                                              for exp, m in zip(ids, source_manifests)]})
+    folder.mkdir(exist_ok=False)
     entry = {
         "id": candidate_id,
         "name": name,
         "mode": mode,
         "verified": True,
-        "eligible": True,
+        "provenance_version": 1,
+        "provenance": candidate_provenance,
+        "submission_eligible": False,
+        "eligible": False,
+        "eligibility_reason_codes": ["PROMOTION_EVALUATION_REQUIRED"] + ([] if has_test_preds else ["TEST_PREDICTIONS_REQUIRED"]),
+        "recipe_binding_sha256": recipe_binding,
         "source_ids": ids,
         # Deterministic identity of the candidate *recipe*: which sources, in which
         # mode, with which weights/routing. This is what lets the bridge reject a
@@ -377,7 +391,8 @@ def build_candidate(project, name, mode, source_map):
 
 
 def validate_candidate(project, entry):
-    if not entry.get("eligible") or not entry.get("verified"):
+    from harness.provenance import require_allowed_provenance, resolve_run_provenance
+    if not entry.get("verified") or entry.get("provenance") not in {"local_run", "reproduced_external_code"}:
         raise ValueError("Candidate is ineligible")
     folder = project.artifacts_dir / entry["id"]
     manifest = json.loads((folder / "candidate_manifest.json").read_text())
@@ -397,9 +412,21 @@ def validate_candidate(project, entry):
     )
     plugin = load_task_plugin(project.plugin_id, context)
     for exp, value in manifest["source_hashes"].items():
+        source_manifest = resolve_run_provenance(project, exp)
+        require_allowed_provenance([source_manifest], purpose="candidate validation")
         validate_run(project.artifacts_dir / exp, task_spec=spec, plugin=plugin)
         if sha256(project.artifacts_dir / exp / "artifact_manifest.json") != value:
             raise ValueError("Candidate source changed")
+    source_ids = manifest.get("source_ids") or []
+    binding = digest({"recipe": manifest.get("recipe_fingerprint"),
+                      "constituents": [{"exp_id": exp,
+                                        "provenance": resolve_run_provenance(project, exp)["provenance"],
+                                        "manifest_sha256": sha256(project.artifacts_dir / exp / "artifact_manifest.json"),
+                                        "oof_sha256": sha256(project.artifacts_dir / exp / "oof_predictions.csv"),
+                                        "test_sha256": sha256(project.artifacts_dir / exp / "test_predictions.csv") if (project.artifacts_dir / exp / "test_predictions.csv").is_file() else None}
+                                       for exp in source_ids]})
+    if manifest.get("recipe_binding_sha256") != binding:
+        raise ValueError("Candidate recipe binding mismatch")
     return manifest
 
 
@@ -419,6 +446,10 @@ def find_optimal_blend_weights(
 
     if not component_ids or len(component_ids) < 2 or len(set(component_ids)) != len(component_ids):
         raise ValueError("Blend optimization requires at least 2 distinct component IDs")
+    if blend_mode is not None and blend_mode not in {"weighted_blend", "probability_blend", "ensemble_vote"}:
+        raise ValueError("Unsupported blend mode: " + str(blend_mode))
+    from harness.provenance import require_allowed_provenance, resolve_run_provenance
+    require_allowed_provenance([resolve_run_provenance(project, exp) for exp in component_ids], purpose="blend optimization")
     if blend_mode is not None and blend_mode not in {"weighted_blend", "probability_blend", "ensemble_vote"}:
         raise ValueError("Unsupported blend mode: " + str(blend_mode))
 
@@ -782,6 +813,14 @@ def register_external_prediction(
         "run_id": f"ext_{uuid.uuid4().hex[:12]}",
         "exp_id": name,
         "status": "COMPLETED",
+        "provenance_version": 1,
+        "provenance": "external_prediction",
+        "submission_eligible": False,
+        "eligible": False,
+        "eligibility_reason_codes": ["EXTERNAL_PREDICTION_NOT_SUBMITTABLE"],
+        "provenance_record": {"producer": "harness.candidates.register_external_prediction",
+                              "source_sha256": sha256(oof_file),
+                              "test_source_sha256": sha256(test_file) if test_file else None},
         "run_kind": "full",
         **contract_identity(spec, plugin),
         "data_sha256": frame_hash(truth),
@@ -803,7 +842,7 @@ def register_external_prediction(
         primary_metric_name=spec.primary_metric,
         direction=spec.direction,
         verified=True,
-        eligible=True,
+        eligible=False,
         status="COMPLETED",
         artifact_dir=str(exp_dir),
         atomic_hypothesis=f"External prediction from {author} ({source}): {notes}",
@@ -820,5 +859,8 @@ def register_external_prediction(
         "metric": spec.primary_metric,
         "rows": len(aligned),
         "has_test_predictions": test_file is not None,
+        "provenance": "external_prediction",
+        "submission_eligible": False,
+        "eligible": False,
         "artifact_dir": safe_relpath(exp_dir, project.root),
     }

@@ -132,6 +132,8 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         self.expected_validation_ids: set = set()
         self.manifest = {
             "schema_version": 2,
+            "provenance_version": 1,
+            "provenance": "local_run",
             "run_id": self.run_id,
             "run_kind": self.run_kind,
             "exp_id": self.exp_id,
@@ -1049,6 +1051,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         # bare names for top-level files, POSIX relpaths for nested ones.
         self.manifest.update(
             status="COMPLETED",
+            submission_eligible=False,
+            eligible=False,
+            eligibility_reason_codes=["PROMOTION_EVALUATION_REQUIRED"],
             estimator=self.estimator_metadata,
             files=seal_file_map(self.exp_dir),
         )

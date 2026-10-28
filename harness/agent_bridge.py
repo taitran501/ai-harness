@@ -113,6 +113,13 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
     with lessons, unreviewed results, progress path.
     """
     lines: List[str] = []
+    root = memory.get("root")
+    if root:
+        from harness.audit_gate import scan_dispatch_scripts
+        report = scan_dispatch_scripts(root)
+        for finding in report["findings"]:
+            if not finding.get("acknowledged"):
+                lines.append(f"- ?? UNAUTHORIZED DISPATCH SCRIPT DETECTED: {finding['path']}")
     if memory.get("macro_hypothesis_map"):
         from harness.macro_research import macro_hud_lines
         lines.extend(macro_hud_lines(memory["macro_hypothesis_map"], memory["retrospective_status"],
