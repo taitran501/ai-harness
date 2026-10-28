@@ -121,3 +121,12 @@ Consumers (such as the candidate pool and dashboard) reject artifacts with missi
 - **Non-NLP Modalities**: Tabular, Vision, Audio, and Multimodal support is experimental work-in-progress on the roadmap.
 - **Feature Extraction**: Text metadata and TF-IDF feature pipelines are supported in `UniversalFeaturePipeline`. Probability calibration and decision threshold tuning are utility functions requiring explicit integration, not built-in runner models.
 - **Test Integrity**: External provider calls in regression tests are strictly mocked. Live cloud verification runs require separately budgeted executions.
+
+---
+
+## 8. Research Memory Epistemic Contract
+
+- Agent prose, including insight narratives, checkpoints, and declared decisions, is never machine-verified evidence.
+- Internal metrics and model capabilities require references to validated immutable artifacts; research decisions require machine evaluation receipts.
+- External source references establish provenance only. Claims from papers, discussions, or public leaderboards remain external and cannot establish local execution or local model performance.
+- Current research state in the Context HUD and `RESEARCH_PROGRESS.md` is rendered from live validators. Ungrounded notes and legacy assertions remain in the append-only ledger but are quarantined from default resume context and active macro-family state.

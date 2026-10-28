@@ -180,6 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--paired-oof-eval-id", default=None)
     preflight.add_argument("--project-root", default=".", help="Task workspace root (default: current dir)")
     preflight.add_argument("--json", action="store_true", help="Emit JSON output")
+
+    audit_memory = subparsers.add_parser("audit-memory", help="Classify research memory against live validated evidence")
+    audit_memory.add_argument("--project-root", default=".", help="Task workspace root (default: current dir)")
     return parser
 
 
@@ -381,6 +384,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.command == "preflight":
         return _run_preflight(args)
+
+    if args.command == "audit-memory":
+        from harness.research_memory import ResearchMemory
+        try:
+            memory = ResearchMemory.load(args.project_root)
+            print(json.dumps(memory.audit_research_memory(), indent=2, ensure_ascii=False))
+            return 0
+        except Exception as exc:  # noqa: BLE001 - audit is a read-only report
+            print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False))
+            return 2
 
     if args.command == "repair":
         from harness.repair import run_repair

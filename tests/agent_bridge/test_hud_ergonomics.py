@@ -123,13 +123,12 @@ class TestResearchContinuityHudRendering(unittest.TestCase):
         # No raw JSON dump in the HUD.
         self.assertNotIn("{", text)
         self.assertNotIn('"entry_count"', text)
-        # The resume-critical facts survive.
-        self.assertIn("V11 scored 0.50", text)
-        self.assertIn("[UNVERIFIED NOTE] Latest checkpoint:", text)
-        self.assertIn("[UNVERIFIED NOTE] Open questions:", text)
-        self.assertIn("Implement V12", text)
-        self.assertIn("[704da07f]", text)
-        self.assertIn("rejected", text)
+        self.assertIn("EPISTEMIC DISCONNECT WARNING", text)
+        self.assertIn("[QUARANTINED NOTE] Latest checkpoint", text)
+        self.assertNotIn("V11 scored 0.50", text)
+        self.assertNotIn("Implement V12", text)
+        self.assertIn("Recent decision (unverified interpretation)", text)
+        self.assertNotIn("Recent decision (rejected)", text)
         self.assertIn("RESEARCH_PROGRESS.md", text)
         self.assertIn("Unreviewed results: 1", text)
         # Bounded: a HUD block should be far smaller than a json dump of the
@@ -209,6 +208,19 @@ class TestResearchContinuityHudRendering(unittest.TestCase):
         )
         self.assertTrue(lines)
         self.assertIn("Entries: 0", lines[0])
+
+    def test_hud_suppresses_checkpoint_and_marks_unverified_decisions(self):
+        from harness.agent_bridge import _research_continuity_hud_lines
+        text = "\n".join(_research_continuity_hud_lines({
+            "entry_count": 3, "verified_run_count": 0, "insight_count": 2,
+            "open_insight_count": 2, "latest_checkpoint": {"conclusion": "SCORE 0.99 FINAL", "next_action": "Promote"},
+            "recent_decisions": [{"conclusion": "Model is best", "outcome": "supported", "verification_status": "legacy_unstructured"}],
+            "research_frontier": [], "unreviewed_result_count": 0,
+        }))
+        self.assertIn("EPISTEMIC DISCONNECT WARNING", text)
+        self.assertIn("[QUARANTINED NOTE]", text)
+        self.assertNotIn("SCORE 0.99", text)
+        self.assertIn("[UNVERIFIED]", text)
 
     def test_context_hud_shows_cached_provider_reconciliation_truthfully(self):
         from harness.agent_bridge import AgentBridge

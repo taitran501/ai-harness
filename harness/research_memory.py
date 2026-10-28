@@ -54,6 +54,10 @@ def render_markdown_progress(
         dict(decision) for decision in (verified_decisions or [])
         if decision.get("verification_status") == "machine_evaluated"
     ]
+    verified_decisions = [
+        decision for decision in verified_decisions
+        if decision.get("evaluation_id") or decision.get("evaluation")
+    ]
     entries = [dict(entry) for entry in (entries or [])]
 
     def markdown(value):
@@ -72,6 +76,18 @@ def render_markdown_progress(
 
     checkpoints = [entry for entry in entries if entry.get("kind") == "checkpoint"]
     checkpoint = checkpoints[-1] if checkpoints else None
+    verified_ids = {run.get("exp_id") for run in verified_runs}
+    insights = [entry for entry in entries if entry.get("kind") == "insight"]
+    for insight in insights:
+        if not insight.get("evidence_currently_verified"):
+            insight["evidence_currently_verified"] = bool(
+                set(insight.get("evidence", [])) & verified_ids
+                or any(run.get("insight_id") == insight.get("id") for run in verified_runs)
+            )
+    quarantined_count = sum(not entry["evidence_currently_verified"] for entry in insights)
+    incumbent_label = "unknown"
+    if validated_incumbent:
+        incumbent_label = str((validated_incumbent.get("evidence_ref") or {}).get("id") or "validated")
     lines = [
         "<!-- ai-harness:research-progress:v1 -->",
         "# Research progress",
@@ -83,10 +99,21 @@ def render_markdown_progress(
         "",
         "## Resume here",
         "",
+    ]
+    if (len(verified_runs) <= 1 and quarantined_count > 0) or quarantined_count > len(insights) / 2:
+        lines.extend([
+            "> [!WARNING]",
+            "> **EPISTEMIC DISCONNECT WARNING**:",
+            f"> Harness evidence: {len(verified_runs)} validated full run(s); {len(verified_decisions)} machine-evaluated decision(s); validated incumbent: {markdown(incumbent_label)}.",
+            f"> Memory audit: {quarantined_count} ungrounded insight(s) / legacy note(s) quarantined.",
+            "> DO NOT infer model capabilities, architectures, or scores from unverified notes.",
+            "",
+        ])
+    lines.extend([
         "### Verified state",
         "",
         f"- Verified completed full runs: {len(verified_runs)}",
-    ]
+    ])
     if groups:
         best_runs = sorted(groups.items(), key=lambda item: item[0])
         if len(best_runs) == 1:
@@ -137,17 +164,26 @@ def render_markdown_progress(
         "",
         f"> [!NOTE] {UNVERIFIED_AGENT_NOTE}",
     ])
-    if checkpoint:
-        lines.extend([
-            f"> **Checkpoint summary**: {markdown(checkpoint.get('conclusion', ''))}",
-            f"> **Next action**: {markdown(checkpoint.get('next_action', ''))}",
-        ])
+    checkpoint_evidence = checkpoint.get("evidence", []) if checkpoint else []
+    checkpoint_grounded = bool(checkpoint_evidence) and all(exp in verified_ids for exp in checkpoint_evidence)
+    if checkpoint and not checkpoint_grounded:
+        lines.append(
+            f"> **Status**: Checkpoint narrative quarantined ({quarantined_count} ungrounded insight(s) in scope). "
+            "Base next actions strictly on verified full runs or registered probe plans."
+        )
+        next_action = checkpoint.get("next_action", "")
+        if next_action:
+            lines.append(f"> **Next action**: {markdown(next_action)}")
+        for question in checkpoint.get("open_questions") or []:
+            lines.append(f"> **Open question**: {markdown(question)}")
+    elif checkpoint:
+        lines.append(f"> **Checkpoint summary**: {markdown(checkpoint.get('conclusion', ''))}")
+        lines.append(f"> **Next action**: {markdown(checkpoint.get('next_action', ''))}")
         for question in checkpoint.get("open_questions") or []:
             lines.append(f"> **Open question**: {markdown(question)}")
     else:
         lines.append("> No checkpoint recorded.")
 
-    insights = [entry for entry in entries if entry.get("kind") == "insight"]
     lines.extend([
         "",
         "## Insight status",
@@ -155,8 +191,21 @@ def render_markdown_progress(
         "| Insight | Status | Required step | Next action |",
         "| --- | --- | --- | --- |",
     ])
+    visible_insights = []
     for insight in insights:
         state = insight.get("progress_state") or {}
+        has_verified_run = bool(set(insight.get("evidence", [])) & verified_ids) or any(
+            exp_id in verified_ids for exp_id in state.get("exp_ids", [])
+        )
+        has_active_plan = any(
+            entry.get("kind") == "probe_plan"
+            and entry.get("insight_id") == insight.get("id")
+            and entry.get("verification_status") == "preregistered"
+            for entry in entries
+        )
+        if not (has_verified_run or has_active_plan):
+            continue
+        visible_insights.append(insight)
         cells = [
             f"{insight.get('title', 'Untitled')} ({insight.get('id', '')})",
             state.get("status", "needs evidence review"),
@@ -164,6 +213,12 @@ def render_markdown_progress(
             state.get("next_action", "Plan a bounded probe"),
         ]
         lines.append("| " + " | ".join(markdown(cell).replace("\n", " ") for cell in cells) + " |")
+    quarantined_status_count = len(insights) - len(visible_insights)
+    if quarantined_status_count:
+        lines.append(
+            f"* {quarantined_status_count} ungrounded insight(s) quarantined from active status table. "
+            "Run 'ai-harness audit-memory' to inspect.*"
+        )
     if not insights:
         lines.append("| No insights recorded | needs notes | Record an observation and mechanism | Plan a bounded probe |")
 
@@ -182,7 +237,6 @@ def render_markdown_progress(
         "conclusion", "lesson", "revisit_when", "next_action", "evidence", "open_questions", "insight_ids",
         "claimed_outcome", "effective_outcome", "verification_status", "rule_id", "evaluation_id", "reason_codes",
     )
-    verified_ids = {run.get("exp_id") for run in verified_runs}
     for item in history:
         timestamp = item.get("timestamp", 0)
         stamp = datetime.fromtimestamp(float(timestamp or 0), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -192,6 +246,29 @@ def render_markdown_progress(
         lines.extend([f"### {stamp} — {kind} `{markdown(identity)}`", ""])
         if is_checkpoint:
             lines.append(f"> [!NOTE] {UNVERIFIED_AGENT_NOTE}")
+            lines.append(
+                f"> **Status**: Checkpoint narrative quarantined ({quarantined_count} ungrounded insight(s) in scope). "
+                "Base next actions strictly on verified full runs or registered probe plans."
+            )
+            if item.get("next_action"):
+                lines.append(f"> **Next action**: {markdown(item.get('next_action'))}")
+            lines.append("")
+            continue
+        insight_has_run = bool(set(item.get("evidence", [])) & verified_ids) or any(
+            run.get("insight_id") == item.get("id") for run in verified_runs
+        )
+        insight_has_plan = any(
+            entry.get("kind") == "probe_plan"
+            and entry.get("insight_id") == item.get("id")
+            and entry.get("verification_status") in {"preregistered", "legacy_unstructured"}
+            for entry in entries
+        )
+        if item.get("kind") == "insight" and not (insight_has_run or insight_has_plan):
+            lines.extend([
+                "> **Status**: Insight narrative quarantined from default journal; inspect with 'ai-harness audit-memory'.",
+                "",
+            ])
+            continue
         for key in labels:
             value = item.get(key)
             if value is None or value == "" or value == []:
@@ -487,6 +564,92 @@ class ResearchMemory:
                 continue
             verified.append(dict(entry))
         return verified
+
+    def audit_research_memory(self):
+        """Classify append-only research notes against current validators.
+
+        Prose remains in the ledger; this projection identifies which claims can
+        safely ground a resume and which require review or a registered probe.
+        """
+        entries = [dict(entry) for entry in self.entries()]
+        runs = self.sync()
+        verified_run_ids = {run.get("exp_id") for run in runs}
+        machine_decisions = self._validated_progress_decisions(entries)
+        decision_ids = {entry.get("id") for entry in machine_decisions}
+        evaluation_ids = {entry.get("evaluation_id") for entry in machine_decisions}
+        plans_by_insight = {}
+        for entry in entries:
+            if entry.get("kind") == "probe_plan":
+                plans_by_insight.setdefault(entry.get("insight_id"), []).append(entry)
+
+        def has_live_plan(insight_id):
+            plans = plans_by_insight.get(insight_id, [])
+            return bool(plans and plans[-1].get("verification_status") == "preregistered")
+
+        classified = []
+        for entry in entries:
+            kind = entry.get("kind")
+            evidence = entry.get("evidence") or []
+            backed_run = bool(set(evidence) & verified_run_ids)
+            backed_receipt = (entry.get("id") in decision_ids or entry.get("evaluation_id") in evaluation_ids)
+            if backed_run or backed_receipt:
+                classification = "verified"
+            elif kind == "probe_plan" and entry.get("verification_status") == "preregistered":
+                classification = "active_probe"
+            elif kind == "insight" and entry.get("source_refs") and not evidence:
+                # References establish provenance of an external discussion, not
+                # that the referenced claim describes local execution.
+                classification = "external_discussion"
+            elif self._claims_local_execution(entry):
+                classification = "unsupported_legacy_assertion"
+            else:
+                classification = "hypothesis"
+            detail = {**entry, "classification": classification}
+            if kind == "insight":
+                detail["active_probe_plan"] = has_live_plan(entry.get("id"))
+                detail["verified_run_ids"] = sorted(
+                    run_id for run_id, run in ((r.get("exp_id"), r) for r in runs)
+                    if run.get("insight_id") == entry.get("id")
+                )
+            classified.append(detail)
+
+        counts = {}
+        for item in classified:
+            counts[item["classification"]] = counts.get(item["classification"], 0) + 1
+        return {
+            "summary": {
+                "entry_count": len(classified),
+                "verified_run_count": len(runs),
+                "machine_decision_count": len(machine_decisions),
+                "classification_counts": counts,
+                "quarantined_insight_count": sum(
+                    1 for entry in entries
+                    if entry.get("kind") == "insight"
+                    and not any(
+                        run.get("insight_id") == entry.get("id")
+                        or run.get("exp_id") in (entry.get("evidence") or [])
+                        for run in runs
+                    )
+                    and not has_live_plan(entry.get("id"))
+                ),
+                "quarantined_count": counts.get("unsupported_legacy_assertion", 0)
+                    + counts.get("hypothesis", 0),
+            },
+            "entries": classified,
+        }
+
+    @staticmethod
+    def _claims_local_execution(entry):
+        """Conservatively flag unbacked metric or local-execution assertions."""
+        fields = ("title", "observation", "mechanism", "conclusion", "lesson", "next_action", "summary")
+        text = " ".join(str(entry.get(key) or "") for key in fields).lower()
+        metric_claim = bool(re.search(r"(?:score|metric|auc|f1|accuracy|rmse|logloss)\s*(?:of|:|=|at)?\s*[-+]?\d+(?:\.\d+)?", text))
+        execution_claim = bool(re.search(
+            r"\b(?:trained|fine[- ]?tuned|ran|executed|completed|validated|submitted)\b"
+            r"(?:\s+(?:the|a|an|our|local|full|final|candidate|baseline|model|run|experiment|score|validation|training)){0,8}\b",
+            text,
+        ))
+        return metric_claim or execution_claim or bool(entry.get("score") is not None and entry.get("kind") != "insight")
 
     def _validated_progress_incumbent(self):
         """Read the current incumbent only from replayed machine evaluation state."""

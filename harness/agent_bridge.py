@@ -124,25 +124,42 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
         f"non-improvement streak: {streak}"
         + (" | REASSESS PLATEAU" if memory.get("reassess_recommended") else "")
     )
+    verified_run_count = int(memory.get("verified_run_count", 0) or 0)
+    insight_count = int(memory.get("insight_count", 0) or 0)
+    machine_decision_count = int(memory.get("machine_decision_count", 0) or 0)
+    ungrounded_count = int(memory.get("ungrounded_insight_count", insight_count) or 0)
+    if ((verified_run_count <= 1 and insight_count > 3) or ungrounded_count > 0):
+        lines.append(
+            f"- ?? EPISTEMIC DISCONNECT WARNING: {verified_run_count} validated run(s), "
+            f"{machine_decision_count} machine decisions. {ungrounded_count} ungrounded insights quarantined. "
+            "Ground current state strictly in verified runs; do not infer models or scores from legacy notes."
+        )
     checkpoint = memory.get("latest_checkpoint")
     if checkpoint:
-        ids = ", ".join(str(i)[:8] for i in (checkpoint.get("insight_ids") or [])[:3])
-        suffix = f" [{ids}]" if ids else ""
-        conclusion = _truncate_text(checkpoint.get("conclusion"), 160)
-        next_action = _truncate_text(checkpoint.get("next_action"), 140)
-        lines.append(f"- [UNVERIFIED NOTE] Latest checkpoint: {conclusion} -> next: {next_action}{suffix}")
-        questions = checkpoint.get("open_questions") or []
-        if questions:
+        grounded = bool(checkpoint.get("evidence")) and bool(checkpoint.get("evidence_currently_verified"))
+        if verified_run_count == 0 or not grounded:
             lines.append(
-                f"- [UNVERIFIED NOTE] Open questions: {'; '.join(_truncate_text(q, 120) for q in questions[:2])}"
+                "- [QUARANTINED NOTE] Latest checkpoint: ungrounded narrative excluded "
+                "(no verified runs). Base next action strictly on verified state."
             )
-    for decision in (memory.get("recent_decisions") or [])[:2]:
+        else:
+            ids = ", ".join(str(i)[:8] for i in (checkpoint.get("insight_ids") or [])[:3])
+            suffix = f" [{ids}]" if ids else ""
+            conclusion = _truncate_text(checkpoint.get("conclusion"), 160)
+            next_action = _truncate_text(checkpoint.get("next_action"), 140)
+            lines.append(f"- [UNVERIFIED NOTE] Latest checkpoint: {conclusion} -> next: {next_action}{suffix}")
+    rendered_decisions = 0
+    for decision in reversed(memory.get("recent_decisions") or []):
         outcome = decision.get("effective_outcome", decision.get("outcome")) or "recorded"
         conclusion = _truncate_text(decision.get("conclusion"), 120)
-        lesson = _truncate_text(decision.get("lesson"), 120)
-        lines.append(
-            f"- Recent decision ({outcome}): {conclusion}" + (f" | lesson: {lesson}" if lesson else "")
-        )
+        if decision.get("verification_status") == "machine_evaluated":
+            lesson = _truncate_text(decision.get("lesson"), 120)
+            lines.append(f"- Recent decision ({outcome}): {conclusion}" + (f" | lesson: {lesson}" if lesson else ""))
+        else:
+            lines.append(f"- Recent decision (unverified interpretation): {conclusion} [UNVERIFIED]")
+        rendered_decisions += 1
+        if rendered_decisions >= 2:
+            break
     frontier = memory.get("research_frontier") or []
     frontier_label = (
         "empty"

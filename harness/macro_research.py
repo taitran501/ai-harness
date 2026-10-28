@@ -119,6 +119,8 @@ def compute_macro_hypothesis_map(research_memory, run_history) -> Dict[str, Any]
         decisions = [e for e in linked if e.get("kind") == "decision"]
         plans = [e for e in linked if e.get("kind") == "probe_plan"]
         results = [r for rid, r in runs.items() if linked_runs[rid] == iid]
+        latest_plan = plans[-1] if plans else None
+        has_active_plan = bool(latest_plan and latest_plan.get("verification_status") in {"preregistered", "legacy_unstructured"})
         decision = decisions[-1] if decisions else None
         plan = plans[-1] if plans else None
         machine = {d["id"]: _machine_decision(research_memory, d, runs) for d in decisions}
@@ -138,13 +140,16 @@ def compute_macro_hypothesis_map(research_memory, run_history) -> Dict[str, Any]
         closed_support = bool(supported and decision and decision.get("outcome") == "supported"
             and machine[decision["id"]]
             and decision.get("timestamp", 0) >= latest and all(r["exp_id"] in interpreted for r in results))
-        row["active"] += int(not terminal and not closed_support)
+        # An ungrounded note is not an active research direction by itself.
+        # Only a live verified run or a preregistered plan keeps the family active.
+        row["active"] += int(bool(results or has_active_plan) and not terminal and not closed_support)
     for row in families.values():
         row["insight_count"], row["run_count"] = len(row["insight_ids"]), len(row["run_ids"])
         row["run_ids"].sort()
         row["comparison_groups"].sort()
         row["state"] = ("active" if row["active"] else "supported" if row["supported"] else
-            "exhausted" if row["insight_count"] else "active" if row["run_count"] else "untried")
+            "exhausted" if row["insight_count"] and row["run_count"] and row["supported"] + row["rejected"] else
+            "untried" if row["insight_count"] else "active" if row["run_count"] else "untried")
     result = dict(schema_version=1, families=families, verified_run_count=len(runs),
         evidence_digest=digest(dict(events=[e for e in entries if e.get("kind") in
             {"insight", "probe_plan", "decision", "proposal", "execution"}],

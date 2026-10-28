@@ -51,16 +51,33 @@ class ResearchProgressRenderingTests(unittest.TestCase):
 
         self.assertIn("### Unverified Agent Notes [UNVERIFIED AGENT NOTE - HYPOTHESIS ONLY]", text)
         self.assertIn("> [!NOTE] [UNVERIFIED AGENT NOTE - HYPOTHESIS ONLY]", text)
-        self.assertIn("Checkpoint summary", text)
+        self.assertIn("Checkpoint narrative quarantined", text)
         self.assertIn("Next action", text)
-        self.assertIn("Open question", text)
         self.assertIn("— note [unverified] `checkpoint-1`", text)
         self.assertIn("Verified completed full runs: 1", text)
         self.assertIn("Best verified CV: `exp001` (0.75", text)
         self.assertIn("Machine-verified decisions: 1", text)
-        resume = text.split("### Unverified Agent Notes", 1)[0]
-        self.assertNotIn("9.99", resume)
-        self.assertNotIn("Verified Slot 1", resume)
+        self.assertNotIn("9.99", text)
+        self.assertNotIn("Verified Slot 1", text)
+
+    def test_unverified_insight_title_and_checkpoint_are_quarantined(self):
+        entries = [
+            {"id": "i1", "kind": "insight", "title": "Fantasy architecture", "observation": "Score: 0.99"},
+            {"id": "c1", "kind": "checkpoint", "conclusion": "DAY 18 FINAL COMPLETION MILESTONE", "next_action": "Inspect evidence"},
+        ]
+        text = render_markdown_progress("scope", entries, verified_runs=[])
+        self.assertIn("EPISTEMIC DISCONNECT WARNING", text)
+        self.assertNotIn("Fantasy architecture", text)
+        self.assertNotIn("DAY 18 FINAL", text)
+        self.assertIn("1 ungrounded insight(s) quarantined from active status table", text)
+
+    def test_registered_probe_plan_keeps_insight_in_active_table(self):
+        entries = [
+            {"id": "i1", "kind": "insight", "title": "Planned mechanism", "observation": "Possible effect"},
+            {"id": "p1", "kind": "probe_plan", "insight_id": "i1", "verification_status": "preregistered"},
+        ]
+        text = render_markdown_progress("scope", entries, verified_runs=[])
+        self.assertIn("Planned mechanism", text.split("## Insight status", 1)[1])
 
     def test_incumbent_is_only_shown_when_validated_state_is_supplied(self):
         unknown = render_markdown_progress("scope", [], verified_runs=[])
@@ -114,6 +131,18 @@ class ResearchInvariantTests(unittest.TestCase):
         with self.assertRaises(DecisionRuleNotSatisfied):
             self.memory.record_decision(outcome="supported", conclusion="Agent says it improved")
         self.assertEqual(len(self.memory.entries()), before)
+
+    def test_audit_classifies_legacy_claims_hypotheses_and_external_notes(self):
+        self.memory.record_insight(title="Hypothesis", observation="Rare tokens may matter", mechanism="Representation", next_action="Probe")
+        self.memory.record_insight(title="External score claim", observation="Discussion score: 0.98", mechanism="External report", next_action="Review", source_refs=["discussion:42"])
+        self.memory._append("checkpoint", conclusion="Trained model achieved score 0.98", next_action="Promote")
+        audit = self.memory.audit_research_memory()
+        classes = [item["classification"] for item in audit["entries"]]
+        self.assertIn("hypothesis", classes)
+        self.assertIn("external_discussion", classes)
+        self.assertIn("unsupported_legacy_assertion", classes)
+        self.assertEqual(audit["summary"]["verified_run_count"], 1)
+        self.assertEqual(audit["summary"]["quarantined_insight_count"], 2)
 
     def test_all_versioned_schemas_are_valid_draft_2020_12(self):
         from jsonschema import Draft202012Validator

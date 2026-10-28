@@ -63,11 +63,23 @@ class MacroResearchTests(unittest.TestCase):
         self.assertEqual(insight["source_refs"], ["eda:errors"])
         macro = self.map()
         self.assertEqual(set(macro["families"]), set(FAMILIES))
-        self.assertEqual(macro["families"]["unclassified"]["state"], "active")
+        self.assertEqual(macro["families"]["unclassified"]["state"], "untried")
+        self.assertEqual(macro["families"]["unclassified"]["active"], 0)
         self.assertEqual(macro["families"]["target"]["state"], "untried")
         for value in ("bad", [""], [4]):
             with self.assertRaises(ValueError):
                 self.memory.record_insight(title="t", observation="o", mechanism="m", next_action="n", source_refs=value)
+
+    def test_unverified_insight_does_not_activate_family_but_registered_plan_does(self):
+        insight = self.memory.record_insight(title="Legacy", observation="A possible pattern", mechanism="M",
+            next_action="Probe", family_id="representation")
+        row = self.map()["families"]["representation"]
+        self.assertEqual((row["active"], row["state"], row["insight_count"]), (0, "untried", 1))
+        self.memory.plan_probe(insight_id=insight["id"], control="fixed control", intervention="one mechanism",
+            expected_observation="fewer errors", alternative_explanation="noise", decision_rule=rule_document(),
+            budget="one run", stop_rule="stop after one run")
+        row = self.map()["families"]["representation"]
+        self.assertEqual((row["active"], row["state"]), (1, "active"))
 
     def test_legacy_entries_without_family_are_visible(self):
         self.memory._append("insight", title="Legacy", observation="o", mechanism="m", next_action="n")
@@ -89,7 +101,7 @@ class MacroResearchTests(unittest.TestCase):
         self.memory.record_decision(insight_id=insight["id"], outcome="rejected", evidence=["control"],
             conclusion="Manual opinion", lesson="Unknown", next_action="Test", revisit_when="New evidence")
         row = self.map()["families"]["representation"]
-        self.assertEqual((row["state"], row["rejected"]), ("active", 0))
+        self.assertEqual((row["state"], row["rejected"]), ("untried", 0))
 
     def test_exhausted_requires_terminal_evidence_scope_stop_and_revisit(self):
         self.decision("rejected")
@@ -97,7 +109,7 @@ class MacroResearchTests(unittest.TestCase):
         self.assertEqual((row["state"], row["rejected"]), ("exhausted", 1))
         self.insight()
         row = self.map()["families"]["representation"]
-        self.assertEqual((row["state"], row["active"]), ("active", 1))
+        self.assertEqual((row["state"], row["active"]), ("exhausted", 0))
 
     def test_missing_stop_or_revisit_prevents_exhaustion(self):
         self.decision("rejected")
@@ -113,7 +125,7 @@ class MacroResearchTests(unittest.TestCase):
         self.decision()
         self.insight()
         row = self.map()["families"]["representation"]
-        self.assertEqual((row["state"], row["supported"], row["active"]), ("active", 1, 1))
+        self.assertEqual((row["state"], row["supported"], row["active"]), ("supported", 1, 0))
 
     def test_new_plan_reopens_supported_insight(self):
         insight, _, _ = self.decision()
