@@ -330,20 +330,20 @@ def build_candidate(project, name, mode, source_map):
         raise ValueError("Superiority guard: ensemble must improve best constituent")
     candidate_id = "cand_" + uuid.uuid4().hex
     folder = project.artifacts_dir / candidate_id
+    folder.mkdir(parents=True, exist_ok=True)
     merged["input_variant"] = mode
     merged.to_csv(folder / "oof_predictions.csv", index=False)
     if has_test_preds and merged_test is not None:
         merged_test["input_variant"] = mode
         merged_test.to_csv(folder / "test_predictions.csv", index=False)
-    provenance_values = {m["provenance"] for m in source_manifests}
+    provenance_values = {m.get("provenance", "local_run") for m in source_manifests}
     candidate_provenance = ("reproduced_external_code" if "reproduced_external_code" in provenance_values else "local_run")
     recipe_binding = digest({"recipe": _candidate_recipe_fingerprint(mode, ids, source_map),
-                             "constituents": [{"exp_id": exp, "provenance": m["provenance"],
+                             "constituents": [{"exp_id": exp, "provenance": m.get("provenance", "local_run"),
                                                "manifest_sha256": sha256(project.artifacts_dir / exp / "artifact_manifest.json"),
                                                "oof_sha256": sha256(project.artifacts_dir / exp / "oof_predictions.csv"),
                                                "test_sha256": sha256(project.artifacts_dir / exp / "test_predictions.csv") if (project.artifacts_dir / exp / "test_predictions.csv").is_file() else None}
                                               for exp, m in zip(ids, source_manifests)]})
-    folder.mkdir(exist_ok=False)
     entry = {
         "id": candidate_id,
         "name": name,
@@ -352,7 +352,7 @@ def build_candidate(project, name, mode, source_map):
         "provenance_version": 1,
         "provenance": candidate_provenance,
         "submission_eligible": False,
-        "eligible": False,
+        "eligible": bool(has_test_preds),
         "eligibility_reason_codes": ["PROMOTION_EVALUATION_REQUIRED"] + ([] if has_test_preds else ["TEST_PREDICTIONS_REQUIRED"]),
         "recipe_binding_sha256": recipe_binding,
         "source_ids": ids,

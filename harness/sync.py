@@ -270,16 +270,21 @@ def run_sync(
             os.environ["HARNESS_PROJECT_ROOT"] = str(root)
             try:
                 code = (
-                    "import harness, json;"
-                    "from pathlib import Path;"
-                    "from harness.project import attach_project;"
-                    "from harness.skill_injector import inject_skill_file;"
+                    "import harness, json\n"
+                    "from pathlib import Path\n"
+                    "from harness.project import attach_project\n"
+                    "from harness.skill_injector import inject_skill_file\n"
                     "result = attach_project("
-                    f"{str(root)!r}, task_config=Path({str(task_cfg)!r}), force=True);"
+                    f"{str(root)!r}, task_config=Path({str(task_cfg)!r}), force=True)\n"
                     "result['skill_path'] = str("
-                    f"inject_skill_file(config_path=Path({str(task_cfg)!r}))" ") ;"
-                    "result['harness_origin'] = harness.__file__;"
-                    "print(json.dumps(result))"
+                    f"inject_skill_file(config_path=Path({str(task_cfg)!r})))\n"
+                    "try:\n"
+                    "    from harness.skill_injector import install_global_skills\n"
+                    "    result['global_skills'] = [str(p) for p in install_global_skills()]\n"
+                    "except Exception as e:\n"
+                    "    result['global_skills_error'] = str(e)\n"
+                    "result['harness_origin'] = harness.__file__\n"
+                    "print(json.dumps(result))\n"
                 )
                 child_env = dict(os.environ)
                 child_env["PYTHONPATH"] = str(repo) + os.pathsep + child_env.get("PYTHONPATH", "")
@@ -300,6 +305,7 @@ def run_sync(
                         "status": result.get("status"),
                         "manifest": result.get("manifest"),
                         "skill_path": result.get("skill_path"),
+                        "global_skills": result.get("global_skills"),
                         "harness_origin": result.get("harness_origin"),
                     }
                 else:

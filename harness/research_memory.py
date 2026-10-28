@@ -203,7 +203,8 @@ def render_markdown_progress(
             and entry.get("verification_status") == "preregistered"
             for entry in entries
         )
-        if not (has_verified_run or has_active_plan):
+        has_needs_review = bool(state.get("missing_evidence") or state.get("status") == "needs_evidence_review")
+        if not (has_verified_run or has_active_plan or has_needs_review):
             continue
         visible_insights.append(insight)
         cells = [

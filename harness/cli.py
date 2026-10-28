@@ -47,6 +47,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("plugins", help="List installed task plugins")
 
+    install_skills = subparsers.add_parser(
+        "install-skills",
+        help="Install or update modular slash-command skills globally (~/.gemini/config/skills) and/or in workspace (.agents/skills)",
+    )
+    install_skills.add_argument(
+        "--global",
+        dest="global_install",
+        action="store_true",
+        help="Install into global Antigravity skills directory (~/.gemini/config/skills)",
+    )
+    install_skills.add_argument(
+        "--project-root",
+        default=None,
+        help="Workspace root to install workspace-scoped skills into .agents/skills",
+    )
+    install_skills.add_argument(
+        "--all",
+        action="store_true",
+        help="Install both globally and into the active workspace",
+    )
+    install_skills.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON result",
+    )
+
     audit_scripts = subparsers.add_parser("audit-scripts", help="Scan workspace scripts for raw dispatch calls")
     audit_scripts.add_argument("--project-root", default=".", help="Workspace root")
     audit_scripts.add_argument("--json", action="store_true", help="Emit JSON report")
@@ -188,6 +214,58 @@ def build_parser() -> argparse.ArgumentParser:
     audit_memory = subparsers.add_parser("audit-memory", help="Classify research memory against live validated evidence")
     audit_memory.add_argument("--project-root", default=".", help="Task workspace root (default: current dir)")
     return parser
+
+
+def _run_install_skills(args) -> int:
+    from harness.skill_injector import get_global_skills_dir, install_global_skills, install_workspace_skills
+
+    installed = {"global": [], "workspace": []}
+    do_global = args.global_install or args.all
+    do_workspace = (args.project_root is not None) or args.all
+
+    if not args.global_install and args.project_root is None and not args.all:
+        do_global = True
+        do_workspace = True
+
+    if do_workspace:
+        root = Path(args.project_root or ".").expanduser().resolve()
+        try:
+            paths = install_workspace_skills(project_root=root)
+            installed["workspace"] = [str(p) for p in paths]
+        except Exception as exc:
+            if args.project_root is not None:
+                if args.json:
+                    print(json.dumps({"status": "error", "error": str(exc)}, indent=2))
+                else:
+                    print(f"Error installing workspace skills: {exc}", file=sys.stderr)
+                return 2
+            installed["workspace_error"] = str(exc)
+
+    if do_global:
+        try:
+            paths = install_global_skills()
+            installed["global"] = [str(p) for p in paths]
+        except Exception as exc:
+            if args.json:
+                print(json.dumps({"status": "error", "error": str(exc)}, indent=2))
+            else:
+                print(f"Error installing global skills: {exc}", file=sys.stderr)
+            return 2
+
+    if args.json:
+        print(json.dumps({"status": "ok", "installed": installed}, indent=2, ensure_ascii=False))
+    else:
+        if installed["global"]:
+            print(f"✔ Installed {len(installed['global'])} global skills in {get_global_skills_dir()}:")
+            for p in installed["global"]:
+                print(f"  - {p}")
+        if installed["workspace"]:
+            print(f"✔ Installed {len(installed['workspace'])} workspace skills in .agents/skills:")
+            for p in installed["workspace"]:
+                print(f"  - {p}")
+        if installed.get("workspace_error"):
+            print("ℹ Workspace skills skipped (not an attached workspace).")
+    return 0
 
 
 def _run_import_artifacts(args) -> int:
@@ -420,6 +498,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             drop_missing=args.drop_missing,
             as_json=args.json,
         )
+
+    if args.command == "install-skills":
+        return _run_install_skills(args)
 
     if args.command == "import-artifacts":
         return _run_import_artifacts(args)

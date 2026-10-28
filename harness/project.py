@@ -333,8 +333,12 @@ def attach_project(
     prev_root_env = _os.environ.get("HARNESS_PROJECT_ROOT")
     _os.environ["HARNESS_PROJECT_ROOT"] = str(root)
     try:
-        from harness.skill_injector import inject_skill_file
+        from harness.skill_injector import inject_skill_file, install_global_skills
         skill_path = inject_skill_file(config_path=task_path)
+        try:
+            install_global_skills(task_config=task_data)
+        except Exception:
+            pass
     finally:
         if prev_root_env is None:
             _os.environ.pop("HARNESS_PROJECT_ROOT", None)

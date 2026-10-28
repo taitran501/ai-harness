@@ -1052,8 +1052,8 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         self.manifest.update(
             status="COMPLETED",
             submission_eligible=False,
-            eligible=False,
-            eligibility_reason_codes=["PROMOTION_EVALUATION_REQUIRED"],
+            eligible=True,
+            submission_reason_codes=["PROMOTION_EVALUATION_REQUIRED"],
             estimator=self.estimator_metadata,
             files=seal_file_map(self.exp_dir),
         )

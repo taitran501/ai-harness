@@ -7,6 +7,7 @@ parameterizing task modalities, metrics, subtasks, grounding backbones, and audi
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -128,6 +129,12 @@ def generate_skill_content(
         ">",
         "> [!IMPORTANT]",
         "> **Scope Notice**: AI-Harness is currently validated and working well ONLY on Natural Language Processing (NLP / Text) tasks. Other modalities (Tabular, Vision, Audio, Multimodal) are experimental works-in-progress (WIP / Roadmap) and NOT yet validated in practice.",
+        ">",
+        "> [!TIP]",
+        "> **Modular Slash Command Skills**:",
+        "> - `/ai-harness-resume`: Safe session restart, grounding audit, and anti-hallucination triage",
+        "> - `/ai-harness-explore`: Discussion mining, orthogonal hypothesis formulation, and bounded probe planning",
+        "> - `/ai-harness-submit`: Submission governance, local CV improvement mandate, provenance, and preflight check",
     ]
     if exec_locked:
         lines += [
@@ -467,59 +474,436 @@ def generate_skill_content(
     return "\n".join(lines)
 
 
+
+
+def generate_resume_skill_content(
+    task: Dict[str, Any],
+    artifact_path: str = ".ai-harness/artifacts/<task-id>",
+    skill_name: str = "ai-harness-resume",
+) -> str:
+    """Generate Markdown content for the resume slash command skill."""
+    task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
+    platform = (task.get("platform") or "generic").capitalize()
+    primary_metric = task.get("primary_metric") or "Score (CV)"
+    direction = task.get("direction") or "maximize"
+
+    return f"""---
+name: {skill_name}
+description: Safely resumes an active competition session without hallucination. Reads machine-verified state from Context HUD and RESEARCH_PROGRESS.md, checks baseline anchor, verifies active probes, quarantines legacy unverified narratives, and blocks ungrounded architecture claims.
+---
+
+# Safe Session Resumption Protocol — {task_name}
+
+> **Active Benchmark**: **{task_name}** ({platform}) | **Metric**: `{primary_metric}` ({direction})
+> **Trigger**: Activate this skill (`/{skill_name}`) whenever the operator asks to "resume", "tiếp tục ngày mới", "tiếp tục loop", "check current state", or when starting a fresh chat in an ongoing competition workspace.
+
+---
+
+## 1. Mandatory Grounding Gate (Anti-Hallucination)
+
+> [!CAUTION]
+> **Anti-Hallucination Quarantine Rule**:
+> NEVER infer model architectures, hyper-parameters, local CV scores, or leaderboard standings from conversational prose, unverified agent notes, or chat memory. An LLM agent resuming a session tends to hallucinate imaginary previous results or claim models that were never run.
+
+Before taking ANY action or responding with hypotheses:
+1. **Query the Active Context HUD**:
+   ```powershell
+   ai-harness-agent context
+   ```
+2. **Read the Verified State in `RESEARCH_PROGRESS.md`**:
+   - Inspect the `Resume here` section.
+   - Look out for `⚠️ EPISTEMIC DISCONNECT WARNING` or `[QUARANTINED NOTE]`.
+   - Any quarantined note is treated strictly as an **unverified hypothesis**; never present it as historical fact or validated progress.
+3. **Verify Evidence on Disk**:
+   - Only runs with valid `.ai-harness/artifacts/<task_id>/<exp_id>/run_manifest.json` count as verified evidence.
+   - Run memory classification audit if unsure:
+     ```powershell
+     ai-harness audit-memory
+     ```
+4. **Enforce Workspace Confinement**:
+   - Strictly DO NOT inspect or dredge other chat directories in `<appDataDir>\\brain\\<other-conversation-id>`.
+   - All state must come from the local workspace files and `ai-harness-agent context`.
+
+---
+
+## 2. Baseline Anchor & Stagnation Protocol Check
+
+1. **Verify Incumbent Anchor**:
+   - Identify the current baseline experiment ID (`expXXX`) and its verified metric value from the Context HUD.
+2. **Check Consecutive Rejections**:
+   - If `consecutive_rejections >= 3`:
+     > [!WARNING]
+     > **Stagnation Pause Latch Active**: Quota is a ceiling. Submissions and ordinary full exploration are paused across session restarts.
+     > You CANNOT run ordinary full runs or submit to the public leaderboard.
+     > Permitted actions:
+     > - Error diagnostics (`inspect_diagnostics`)
+     > - Community discussion mining (`ai-harness discussion list <comp>`)
+     > - Register bounded recovery probe (`register_recovery_probe` with orthogonal mechanism)
+3. **Check Retrospective Cadence**:
+   - If `RETROSPECTIVE_REQUIRED` is flagged:
+     - Run `get_macro_hypothesis_map` and record retrospective via `record_macro_review` before proceeding.
+
+---
+
+## 3. In-Flight & Probe Verification
+
+1. **Check Active Cloud Jobs**:
+   - If running on Kaggle/remote backends, inspect in-flight kernels before dispatching new ones:
+     ```powershell
+     ai-harness kaggle status --exp <exp_id>
+     ai-harness-agent act --action inspect_cloud_job
+     ```
+2. **Review Active Probe Plans**:
+   - Check if an experiment was planned (`research.probe_plan_id`) but not yet executed or evaluated.
+
+---
+
+## 4. Synthesize Resumption Summary for Operator
+
+Provide a concise, grounded status summary (under 20 lines):
+1. **Current Lifecycle Phase**: (e.g. Phase 4 Iteration Track / Phase 5 Candidate Management)
+2. **Verified Incumbent Anchor**: Exp ID + verified metric score.
+3. **Evidence Status**: Count of verified full runs vs quarantined legacy entries.
+4. **Stagnation / Latch Status**: Clean / Paused (with consecutive rejection count).
+5. **Immediate Recommended Next Action**: Single bounded next step.
+"""
+
+
+def generate_explore_skill_content(
+    task: Dict[str, Any],
+    artifact_path: str = ".ai-harness/artifacts/<task-id>",
+    skill_name: str = "ai-harness-explore",
+) -> str:
+    """Generate Markdown content for the exploration slash command skill."""
+    task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
+    platform = (task.get("platform") or "generic").capitalize()
+    primary_metric = task.get("primary_metric") or "Score (CV)"
+    direction = task.get("direction") or "maximize"
+    comp_id = task.get("competition_id") or task.get("kaggle_id") or "<competition_id>"
+
+    return f"""---
+name: {skill_name}
+description: Guides grounded research, discussion mining, and hypothesis formulation. Enforces proactive Kaggle/community discussion retrieval, bounded probe preregistration with DecisionRuleV1, single-fold smoke tests before full runs, and halts stagnation loops.
+---
+
+# Grounded Exploration & Hypothesis Mining — {task_name}
+
+> **Active Benchmark**: **{task_name}** ({platform}) | **Metric**: `{primary_metric}` ({direction})
+> **Trigger**: Activate this skill (`/{skill_name}`) whenever the operator asks to "brainstorm", "tìm hướng mới", "explore features", "check discussions", or when stuck on a score plateau.
+
+---
+
+## 1. Proactive Community Discussion Mining
+
+> [!IMPORTANT]
+> Do NOT guess in the dark or fabricate complex pipelines without competitor intelligence. Mine top discussions first!
+
+Retrieve community insights using native harness commands:
+```powershell
+ai-harness discussion list {comp_id} --sort-by hot --page-size 15
+ai-harness discussion view <topic_id>
+```
+Look for:
+- Data leakage warnings and temporal splits.
+- Feature engineering techniques specific to the dataset.
+- Tokenization or text preprocessing nuances (special tokens, sequence lengths).
+- Model backbone families that work best on this benchmark.
+- Post-processing, calibration, and optimal metric thresholding tips.
+
+---
+
+## 2. Formulate Orthogonal Scientific Hypotheses
+
+1. **Single-Mechanism Principle**:
+   - Change ONE scientific mechanism against a fixed comparable control.
+   - Predeclare the mechanism, expected confounders, and ablation path.
+2. **Anti-Pseudo-Ensembling Rule**:
+   - DO NOT blend models of the same family (e.g. 3 DeBERTa models with slightly different learning rates).
+   - Require architectural diversity: e.g., Transformer + GBDT, DeBERTa-v3 + ModernBERT, or distinct feature representations.
+3. **Record Grounded Research Insight**:
+   ```powershell
+   ai-harness-agent act --action record_research_insight --title "<Short Title>" --observation "<What discussion/diagnostic revealed>" --mechanism "<Why this works>" --next-action "<Concrete probe>" --family-id "<model_backbone|feature_engineering|post_processing|...>"
+   ```
+
+---
+
+## 3. Bounded Discriminating Probe Preregistration
+
+Before committing expensive multi-fold compute:
+1. **Preregister Probe Plan**:
+   - Define a structured `DecisionRuleV1` with threshold and stop condition.
+   - Run `plan_research_probe` linking the `insight_id`.
+2. **Bind Config**:
+   - Reference `research.insight_id` and `research.probe_plan_id` in `configs/exp<NNN>.yaml`.
+   - Validate grounding schema:
+     ```powershell
+     python harness/grounding_gate.py --config configs/exp<NNN>.yaml
+     ```
+
+---
+
+## 4. Fast Single-Fold Smoke Probe First
+
+> [!TIP]
+> Never dispatch full cross-validation without a smoke probe!
+
+Run a single-fold probe locally:
+```powershell
+ai-harness-run --config configs/exp<NNN>.yaml --debug --fold 0
+```
+Verify:
+- Loss converges properly.
+- Predictions contain valid probabilities/scores (no NaNs or infinite values).
+- Prediction format matches the submission specification.
+
+Once the smoke probe passes, proceed to full validation:
+```powershell
+ai-harness-agent act --action run_full_validation --config-path configs/exp<NNN>.yaml
+```
+"""
+
+
+def generate_submit_skill_content(
+    task: Dict[str, Any],
+    artifact_path: str = ".ai-harness/artifacts/<task-id>",
+    skill_name: str = "ai-harness-submit",
+) -> str:
+    """Generate Markdown content for the submission slash command skill."""
+    task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
+    platform = (task.get("platform") or "generic").capitalize()
+    primary_metric = task.get("primary_metric") or "Score (CV)"
+    direction = task.get("direction") or "maximize"
+    comp_id = task.get("competition_id") or task.get("kaggle_id") or "<competition_id>"
+
+    return f"""---
+name: {skill_name}
+description: Enforces strict submission governance and candidate provenance. Rejects quota-spending without verified local CV gain, validates prediction origin (no raw external blend / leak), requires candidate_preflight diversity check, audits against backdoor dispatch scripts, and mandates operator approval.
+---
+
+# Submission Governance & Provenance Gate — {task_name}
+
+> **Active Benchmark**: **{task_name}** ({platform}) | **Metric**: `{primary_metric}` ({direction})
+> **Trigger**: Activate this skill (`/{skill_name}`) whenever the operator asks to "làm sub", "submit candidate", "tiến hành submit", or use competition daily submission quota.
+
+---
+
+## 1. Local CV Improvement Mandate (Quota Conservation)
+
+> [!CAUTION]
+> **Zero Local CV Gain = ZERO Submission**:
+> Quota is a finite ceiling, never a playground. Submissions without a machine-verified local CV improvement over the fixed baseline anchor are STRICTLY FORBIDDEN.
+> - "Testing on public LB to see how it scores" is a critical violation of harness policy.
+> - Even with user approval or a valid preflight receipt, a candidate lacking verified local CV gain CANNOT be dispatched.
+
+---
+
+## 2. Prediction Provenance & Recipe Binding
+
+1. **Valid Provenance Types**:
+   - `local_run`: Trained and evaluated locally or via verified harness cloud runner.
+   - `reproduced_external_code`: Public notebook code fully reproduced and cross-validated locally.
+2. **Prohibited Submissions**:
+   - `external_prediction`: CSV predictions downloaded directly from public Kaggle kernels or external competitors. These are flagged `submission_eligible: False`.
+   - Any blend or ensemble containing an unverified external CSV will be rejected by `build_candidate`.
+3. **Recipe Binding**:
+   - Candidates must bind exact recipe sha256 (`recipe_binding_sha256`) to ensure reproducibility.
+
+---
+
+## 3. Candidate Preflight & Diversity Governance
+
+Before promoting or proposing a candidate:
+1. **Run Candidate Preflight**:
+   ```powershell
+   ai-harness preflight <candidate_predictions.csv> --incumbent <incumbent_predictions.csv> --pitch
+   ```
+2. **Spearman Diversity Gate**:
+   - If Spearman $\\rho \\ge 0.995$ against the incumbent, the candidate is a **near-duplicate**.
+   - Near-duplicates CANNOT be submitted to the leaderboard without verified paired out-of-fold gain.
+
+---
+
+## 4. Backdoor Script Prohibition
+
+> [!WARNING]
+> Direct Kaggle CLI calls (`kaggle competitions submit`, `kaggle kernels push`) or ad-hoc Python scripts importing `kaggle.api` bypass the audit trail and will trigger `UNEXPLAINED_EXTERNAL_DISPATCH` locking the workspace!
+
+Run security script audit:
+```powershell
+ai-harness audit-scripts
+```
+Ensure no unmonitored scripts exist in `scratch/` or workspace root.
+
+---
+
+## 5. Exact-Payload Operator Approval & Dispatch
+
+All leaderboard dispatches must use the official harness dispatch:
+```powershell
+ai-harness submission dispatch {comp_id} <submission.csv> -m "Exp NNN: <brief description>" --project-root . --exp-id <exp_id> --user-approved
+```
+
+**Information to present to the user before asking for confirmation**:
+1. Incumbent CV score vs Candidate CV score (must show positive gain).
+2. Preflight verification ID and Spearman $\\rho$.
+3. Constituent models and provenance.
+4. Current daily quota usage and remaining submissions.
+"""
+
+
+def generate_modular_skills(
+    task: Dict[str, Any],
+    artifact_path: str = ".ai-harness/artifacts/<task-id>",
+) -> Dict[str, str]:
+    """Generate all modular skills for the task."""
+    return {
+        "ai-harness": generate_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness"),
+        "ai-harness-resume": generate_resume_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-resume"),
+        "ai-harness-explore": generate_explore_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-explore"),
+        "ai-harness-submit": generate_submit_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-submit"),
+    }
+
+
+def get_global_skills_dir() -> Path:
+    """Return the global Antigravity/Gemini skills directory."""
+    env_dir = os.environ.get("GEMINI_SKILLS_DIR") or os.environ.get("ANTIGRAVITY_SKILLS_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    return (Path.home() / ".gemini" / "config" / "skills").resolve()
+
+
+def install_global_skills(
+    target_dir: Optional[Path] = None,
+    task_config: Optional[Dict[str, Any]] = None,
+) -> List[Path]:
+    """Install or update modular slash skills into the global Antigravity skills directory."""
+    skills_dir = Path(target_dir).expanduser().resolve() if target_dir else get_global_skills_dir()
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    cfg = task_config or {
+        "name": "General ML/DL Benchmark",
+        "platform": "generic",
+        "type": "Supervised Learning",
+        "modality": "generic",
+        "primary_metric": "Score (CV)",
+        "direction": "maximize",
+    }
+    modular = generate_modular_skills(cfg)
+    written: List[Path] = []
+    for skill_name, content in modular.items():
+        dest = skills_dir / skill_name / "SKILL.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        written.append(dest)
+        if skill_name == "ai-harness":
+            twin_dest = skills_dir / "ai-experiment-harness" / "SKILL.md"
+            twin_dest.parent.mkdir(parents=True, exist_ok=True)
+            twin_content = generate_skill_content(cfg, skill_name="ai-experiment-harness")
+            twin_dest.write_text(twin_content, encoding="utf-8")
+            written.append(twin_dest)
+    return written
+
+
+def install_workspace_skills(
+    project_root: Optional[Path] = None,
+    task_config: Optional[Dict[str, Any]] = None,
+    config_path: Optional[Path] = None,
+) -> List[Path]:
+    """Install or update modular slash skills in a workspace's .agents/skills/ directory."""
+    import shutil
+
+    if project_root is not None:
+        root = Path(project_root).expanduser().resolve()
+        task_path = Path(config_path).expanduser().resolve() if config_path else root / "configs" / "task.yaml"
+    else:
+        project = HarnessProject.discover()
+        root = project.root
+        task_path = Path(config_path).expanduser().resolve() if config_path else project.task_config_path
+        if not task_path.is_absolute():
+            task_path = root / task_path
+
+    cfg = task_config or load_task_config(task_path)
+    try:
+        if project_root is not None:
+            try:
+                p = HarnessProject.discover(root)
+                artifact_path = p.artifacts_dir.relative_to(root).as_posix()
+            except Exception:
+                artifact_path = ".ai-harness/artifacts/<task-id>"
+        else:
+            artifact_path = project.artifacts_dir.relative_to(project.root).as_posix()
+    except (ValueError, Exception):
+        artifact_path = ".ai-harness/artifacts/<task-id>"
+
+    skills_dir = root / ".agents" / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+
+    modular = generate_modular_skills(cfg, artifact_path=artifact_path)
+    written: List[Path] = []
+    for skill_name, content in modular.items():
+        dest = skills_dir / skill_name / "SKILL.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        written.append(dest)
+        if skill_name == "ai-harness":
+            twin_dest = skills_dir / "ai-experiment-harness" / "SKILL.md"
+            twin_dest.parent.mkdir(parents=True, exist_ok=True)
+            twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name="ai-experiment-harness")
+            twin_dest.write_text(twin_content, encoding="utf-8")
+            written.append(twin_dest)
+
+    # Purge legacy skills so agent hosts do not inject obsolete ml-harness prompts
+    for legacy_name in ("ml-harness", "ml-experiment-harness"):
+        legacy_dir = skills_dir / legacy_name
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir, ignore_errors=True)
+
+    return written
+
+
 def inject_skill_file(
     task_config: Optional[Dict[str, Any]] = None,
     config_path: Optional[Path] = None,
     output_path: Optional[Path] = None,
 ) -> Path:
     """Inject/write dynamic SKILL.md tailored to the specified task configuration."""
-    import shutil
-
     project = HarnessProject.discover()
     task_path = Path(config_path).expanduser() if config_path is not None else project.task_config_path
     if not task_path.is_absolute():
         task_path = project.root / task_path
     cfg = task_config or load_task_config(task_path)
-    try:
-        artifact_path = project.artifacts_dir.relative_to(project.root).as_posix()
-    except ValueError:
-        artifact_path = str(project.artifacts_dir)
-    dest = output_path or (project.root / ".agents" / "skills" / "ai-harness" / "SKILL.md")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=dest.parent.name)
-    dest.write_text(content, encoding="utf-8")
-    for twin_name in ("ai-experiment-harness", "ai-harness"):
-        if dest.parent.parent.name == "skills" and dest.parent.name != twin_name:
-            twin_dest = dest.parent.parent / twin_name / "SKILL.md"
-            twin_dest.parent.mkdir(parents=True, exist_ok=True)
-            twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=twin_name)
-            twin_dest.write_text(twin_content, encoding="utf-8")
-        elif output_path is None:
-            twin_dest = project.root / ".agents" / "skills" / twin_name / "SKILL.md"
-            twin_dest.parent.mkdir(parents=True, exist_ok=True)
-            twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=twin_name)
-            twin_dest.write_text(twin_content, encoding="utf-8")
 
-    # Purge legacy skills so agent hosts do not inject obsolete ml-harness prompts
-    skills_dir = dest.parent.parent if dest.parent.parent.name == "skills" else project.root / ".agents" / "skills"
-    for legacy_name in ("ml-harness", "ml-experiment-harness"):
-        legacy_dir = skills_dir / legacy_name
-        if legacy_dir.is_dir():
-            shutil.rmtree(legacy_dir, ignore_errors=True)
+    if output_path is not None:
+        dest = Path(output_path).expanduser().resolve()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            artifact_path = project.artifacts_dir.relative_to(project.root).as_posix()
+        except ValueError:
+            artifact_path = str(project.artifacts_dir)
+        content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name=dest.parent.name)
+        dest.write_text(content, encoding="utf-8")
+        return dest
 
-    return dest
+    paths = install_workspace_skills(project_root=project.root, task_config=cfg, config_path=task_path)
+    primary = project.root / ".agents" / "skills" / "ai-harness" / "SKILL.md"
+    return primary if primary in paths else paths[0]
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Inject dynamic competition-specific skill into .agents/skills/")
+    parser = argparse.ArgumentParser(description="Inject dynamic competition-specific skill into .agents/skills/ or globally")
     parser.add_argument("--config", type=str, default="configs/task.yaml", help="Path to task configuration YAML")
     parser.add_argument("--output", type=str, default=None, help="Output path for SKILL.md")
+    parser.add_argument("--global", dest="global_install", action="store_true", help="Install into global Antigravity skills")
     args = parser.parse_args()
 
-    out_p = inject_skill_file(
-        config_path=Path(args.config),
-        output_path=Path(args.output) if args.output else None,
-    )
-    print(f"✔ Successfully injected dynamic task-specific skill into: {out_p}")
+    if args.global_install:
+        written = install_global_skills(task_config=load_task_config(Path(args.config)) if Path(args.config).exists() else None)
+        print(f"✔ Successfully installed {len(written)} global skills into: {get_global_skills_dir()}")
+    else:
+        out_p = inject_skill_file(
+            config_path=Path(args.config),
+            output_path=Path(args.output) if args.output else None,
+        )
+        print(f"✔ Successfully injected dynamic task-specific skill into: {out_p}")
+

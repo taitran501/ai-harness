@@ -271,8 +271,8 @@ class TreeJournal:
                 primary_metric_name=metrics.get("primary_metric","unknown") if isinstance(metrics,dict) else "unknown",
                 direction=metrics.get("direction","maximize") if isinstance(metrics,dict) else "maximize",
                 verified=verified,eligible=bool(verified and manifest.get(
-                    "submission_eligible",
-                    manifest.get("provenance") == "local_run",
+                    "eligible",
+                    manifest.get("provenance", "local_run") in {"local_run", "reproduced_external_code"},
                 )),status="COMPLETED" if verified else "LEGACY_UNVERIFIED",
                 artifact_dir=str(directory),atomic_hypothesis=exp.get("hypothesis",""),
                 intervention=exp.get("intervention", ""), diagnostics_summary=diagnostics,

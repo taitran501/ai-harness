@@ -9,7 +9,13 @@ import unittest
 import urllib.request
 from pathlib import Path
 
-from harness.skill_injector import generate_skill_content, inject_skill_file
+from harness.skill_injector import (
+    generate_modular_skills,
+    generate_skill_content,
+    inject_skill_file,
+    install_global_skills,
+    install_workspace_skills,
+)
 from tests.workspace_fixtures import (
     cleanup_dashboard_workspace,
     prepare_dashboard_workspace,
@@ -143,6 +149,98 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("ai-harness codabench status", content)
         self.assertIn("Quota is a ceiling", content)
         self.assertIn("register_recovery_probe", content)
+
+    def test_generate_modular_skills(self):
+        """Verify modular slash command skills generation."""
+        task_cfg = {
+            "task_name": "Airline Delay Prediction",
+            "platform": "kaggle",
+            "modality": "tabular",
+            "primary_metric": "ROC-AUC",
+            "direction": "maximize",
+            "competition_id": "airline-delay-prediction",
+        }
+        modular = generate_modular_skills(task_cfg)
+        self.assertIn("ai-harness", modular)
+        self.assertIn("ai-harness-resume", modular)
+        self.assertIn("ai-harness-explore", modular)
+        self.assertIn("ai-harness-submit", modular)
+
+        # Resume skill verification
+        resume = modular["ai-harness-resume"]
+        self.assertIn("name: ai-harness-resume", resume)
+        self.assertIn("Safe Session Resumption Protocol", resume)
+        self.assertIn("Anti-Hallucination Quarantine Rule", resume)
+        self.assertIn("ai-harness-agent context", resume)
+        self.assertIn("Stagnation Pause Latch Active", resume)
+
+        # Explore skill verification
+        explore = modular["ai-harness-explore"]
+        self.assertIn("name: ai-harness-explore", explore)
+        self.assertIn("Grounded Exploration & Hypothesis Mining", explore)
+        self.assertIn("ai-harness discussion list airline-delay-prediction", explore)
+        self.assertIn("Single-Mechanism Principle", explore)
+        self.assertIn("plan_research_probe", explore)
+
+        # Submit skill verification
+        submit = modular["ai-harness-submit"]
+        self.assertIn("name: ai-harness-submit", submit)
+        self.assertIn("Submission Governance & Provenance Gate", submit)
+        self.assertIn("Zero Local CV Gain = ZERO Submission", submit)
+        self.assertIn("Prediction Provenance & Recipe Binding", submit)
+        self.assertIn("Candidate Preflight & Diversity Governance", submit)
+        self.assertIn("Backdoor Script Prohibition", submit)
+
+    def test_install_global_skills(self):
+        """Verify installing modular skills into global directory."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = Path(tmp_dir) / "skills"
+            written = install_global_skills(target_dir=target)
+            self.assertEqual(len(written), 5)
+            self.assertTrue((target / "ai-harness" / "SKILL.md").exists())
+            self.assertTrue((target / "ai-experiment-harness" / "SKILL.md").exists())
+            self.assertTrue((target / "ai-harness-resume" / "SKILL.md").exists())
+            self.assertTrue((target / "ai-harness-explore" / "SKILL.md").exists())
+            self.assertTrue((target / "ai-harness-submit" / "SKILL.md").exists())
+
+    def test_install_workspace_skills(self):
+        """Verify installing modular skills into workspace .agents/skills/."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            task_cfg = {
+                "task_name": "Workspace Task",
+                "platform": "kaggle",
+                "modality": "generic",
+                "primary_metric": "F1",
+                "direction": "maximize",
+            }
+            written = install_workspace_skills(project_root=root, task_config=task_cfg)
+            self.assertEqual(len(written), 5)
+            skills_dir = root / ".agents" / "skills"
+            self.assertTrue((skills_dir / "ai-harness" / "SKILL.md").exists())
+            self.assertTrue((skills_dir / "ai-harness-resume" / "SKILL.md").exists())
+            self.assertTrue((skills_dir / "ai-harness-explore" / "SKILL.md").exists())
+            self.assertTrue((skills_dir / "ai-harness-submit" / "SKILL.md").exists())
+
+    def test_cli_install_skills(self):
+        """Verify CLI subcommand ai-harness install-skills."""
+        import os
+        from harness.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = Path(tmp_dir) / "global_skills"
+            prev_env = os.environ.get("GEMINI_SKILLS_DIR")
+            os.environ["GEMINI_SKILLS_DIR"] = str(target)
+            try:
+                rc = main(["install-skills", "--global", "--json"])
+                self.assertEqual(rc, 0)
+                self.assertTrue((target / "ai-harness" / "SKILL.md").exists())
+                self.assertTrue((target / "ai-harness-resume" / "SKILL.md").exists())
+            finally:
+                if prev_env is None:
+                    os.environ.pop("GEMINI_SKILLS_DIR", None)
+                else:
+                    os.environ["GEMINI_SKILLS_DIR"] = prev_env
 
     def test_inject_skill_file(self):
         """Verify writing skill file to disk in a temporary directory."""

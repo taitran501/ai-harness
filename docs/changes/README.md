@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-28 | Modular slash-command skills (`/ai-harness`, `/ai-harness-resume`, `/ai-harness-explore`, `/ai-harness-submit`) and global Antigravity synchronization (`ai-harness install-skills`) | Working tree | [skills-slash-command-sync](skills-slash-command-sync.md) |
 | 2026-10-28 | Candidate provenance, recipe binding, and dispatch script guard | Working tree | [candidate-provenance-dispatch-hardening](candidate-provenance-dispatch-hardening.md) |
 | 2026-10-28 | Epistemic grounding audit and default-context quarantine for research memory | Working tree | [research-memory-epistemic-quarantine](research-memory-epistemic-quarantine.md) |
 | 2026-10-27 | Candidate preflight CLI (`ai-harness preflight`), SubmissionGate candidate blend parity (`--user-approved`), probability metric tolerance, and kernel directory push (`ai-harness kaggle push` / `dispatch-kernel -p`) | Working tree | [candidate-preflight-cli-and-submission-gate-parity](candidate-preflight-cli-and-submission-gate-parity.md) |

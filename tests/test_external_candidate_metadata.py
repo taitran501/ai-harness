@@ -38,8 +38,8 @@ class ExternalCandidateMetadataTests(unittest.TestCase):
         folder = bridge.artifacts_dir / name
         validate_run(folder, task_spec=bridge.task_spec, plugin=bridge.task_plugin)
         _, promoted = bridge.execute_action("promote_candidate", {"exp_id": name})
-        self.assertEqual(promoted.status, "SUCCESS", promoted.summary)
-        self.assertAlmostEqual(promoted.composite_score, registered.composite_score)
+        self.assertEqual(promoted.status, "FAILED", promoted.summary)
+        self.assertIn("EXTERNAL_PREDICTION_NOT_SUBMITTABLE", promoted.summary)
         self.assertEqual(sha256(source), original_hash)
         return pd.read_csv(folder / "oof_predictions.csv")
 

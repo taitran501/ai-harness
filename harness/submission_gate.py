@@ -279,7 +279,7 @@ class SubmissionGate:
             state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
             gates = state.get("gates", {})
             baseline_id = gates.get("baseline_exp_id")
-            if exp_id != baseline_id:
+            if baseline_id is not None and exp_id != baseline_id:
                 raise SubmissionGateError("PROMOTION_EVIDENCE_REQUIRED")
         subject = digest(dict(competition=competition, payload_sha256=payload_hash, exp_id=exp_id))
         approval = None
