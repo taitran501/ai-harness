@@ -135,6 +135,7 @@ def generate_skill_content(
         "> - `/ai-harness-resume`: Safe session restart, grounding audit, and anti-hallucination triage",
         "> - `/ai-harness-explore`: Discussion mining, orthogonal hypothesis formulation, and bounded probe planning",
         "> - `/ai-harness-submit`: Submission governance, local CV improvement mandate, provenance, and preflight check",
+        "> - `/ai-harness-debate`: Adversarial dual-agent debate, citation verification & anti-echo chamber",
     ]
     if exec_locked:
         lines += [
@@ -751,6 +752,99 @@ ai-harness submission dispatch {comp_id} <submission.csv> -m "Exp NNN: <brief de
 """
 
 
+
+def generate_debate_skill_content(
+    task: Dict[str, Any],
+    artifact_path: str = ".ai-harness/artifacts/<task-id>",
+    skill_name: str = "ai-harness-debate",
+) -> str:
+    """Generate Markdown content for the adversarial debate & epistemic verification skill."""
+    task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
+    platform = (task.get("platform") or "generic").capitalize()
+    primary_metric = task.get("primary_metric") or "Score (CV)"
+    direction = task.get("direction") or "maximize"
+
+    return f"""---
+name: {skill_name}
+description: Coordinates adversarial dual-agent cross-examination and epistemic debate. Prevents single-agent echo chambers, audits forum/paper citations against raw disk files, challenges variance/confounders, and forces adversarial consensus before admitting research insights or architectural changes.
+---
+
+# Adversarial Epistemic Debate & Cross-Examination Protocol — {task_name}
+
+> **Active Benchmark**: **{task_name}** ({platform}) | **Metric**: `{primary_metric}` ({direction})
+> **Trigger**: Activate this skill (`/{skill_name}`) whenever an agent synthesizes community discussions, explains score deltas, proposes architectural shifts, or prepares to plan a multi-fold experiment.
+
+---
+
+## 1. The Single-Agent Echo Chamber Trap
+
+When an AI agent operates alone without adversarial pushback, it readily suffers from **Self-Reinforcing Confirmation Bias**:
+1. It reads a casual forum comment or observes noisy leaderboard deltas.
+2. It constructs a speculative narrative and commits it to a document.
+3. Steps later, it reads its own notes, regards the conjecture as "verified community consensus", and compounds the error with multi-variable overhauls.
+4. It fabricates citations (e.g. attributing ideas to topic numbers that discuss something else) and treats random evaluation variance as causal proof.
+
+> [!CAUTION]
+> **Adversarial Gate Mandate**:
+> No insight, hypothesis, or parameter change may enter the authoritative research state (`RESEARCH_PROGRESS.md`) without surviving rigorous, adversarial cross-examination by an independent verifier.
+
+---
+
+## 2. Dual-Agent Debate Architecture
+
+When investigating ideas or brainstorming next steps, operate as two distinct adversarial personas:
+
+### Agent 1: The Proposer (Scout / Synthesizer)
+* **Goal**: Surface high-potential ideas from community discussions, notebooks, logs, and literature.
+* **Mandatory Candidate Insight Card Format**:
+  Every proposed finding MUST explicitly provide:
+  - `insight_id`: `INSIGHT-<family>-<NNN>`
+  - `claimed_mechanism`: Specific mechanism hypothesized to improve `{primary_metric}`.
+  - `source_ref`: Exact file path on disk (e.g. `discussions/topic_750885.json#comment_0`) or verified public reference.
+  - `verbatim_evidence`: An exact, non-paraphrased string quote from that file.
+  - `reported_delta`: The reported score delta, accompanied by sample size ($N$) or error margin ($\\pm \text{{SE}}$).
+  - `confounders_acknowledged`: What other variables or hardware constraints differed in that run.
+
+### Agent 2: The Adversarial Auditor (Skeptic / Red-Team)
+* **Goal**: Falsify and challenge every proposal. Assumes all claims are hallucinations until verified on disk.
+* **Mandatory Four-Step Audit**:
+  1. **Physical Disk & String Verification**:
+     - The Auditor MUST open the referenced file on disk using `read_file` or `grep`.
+     - *If the file does not exist, or the verbatim quote is not present*:
+       Emit `[VERDICT: REJECTED_FABRICATED_CITATION]`. The claim is permanently disqualified.
+  2. **Variance & Statistical Noise Challenge**:
+     - Compare the reported delta against known benchmark variance ($\\sigma$ or $\\pm \text{{SE}}$).
+     - If $\\Delta \\le 2 \times \text{{SE}}$ or evaluated on $N < 3$ runs:
+       Emit `[VERDICT: UNPROVEN_NOISE]`. The claim cannot be cited as a proven directional gain.
+  3. **Attributable Mechanism Isolation**:
+     - Does the proposal combine multiple knobs (e.g., scheduler + memory + timeout + guards)?
+     - If yes:
+       Emit `[VERDICT: CONVOLUTED_PROPOSAL]`. Demand isolating exactly ONE mechanism against a fixed control.
+  4. **Counter-Hypothesis Formulation**:
+     - Propose at least one competing explanation (e.g., token truncation, random seed variance, resource starvation).
+
+---
+
+## 3. Debate Consensus & Escalation Protocol
+
+1. **Exchange Limit**: Maximum 3 debate exchanges between Proposer and Auditor per insight card.
+2. **Acceptance Threshold**: Only insights receiving `[VERDICT: AUDIT_PASSED_EVIDENCE_GROUNDED]` from the Auditor may be admitted into the research progress ledger or used to design an experiment.
+3. **Quarantine**: If ungrounded or contested, the hypothesis is routed to `AssumptionRegister` with status `UNGROUNDED_SPECULATION` and CANNOT be used to justify leaderboard quota expenditure.
+
+---
+
+## 4. Automated Citation Audit Command
+
+Before finalizing any research summary, synthesis artifact, or strategy document, run the automated disk audit:
+```powershell
+ai-harness audit-claims --file <markdown_artifact_path>
+```
+The command verifies that:
+- Every `#<topic_id>` exists as a discussion JSON file on disk.
+- Key technical terms in the claim sentence actually appear in the referenced topic file.
+- Any fabricated or mismatched citation immediately fails preflight.
+"""
+
 def generate_modular_skills(
     task: Dict[str, Any],
     artifact_path: str = ".ai-harness/artifacts/<task-id>",
@@ -761,6 +855,7 @@ def generate_modular_skills(
         "ai-harness-resume": generate_resume_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-resume"),
         "ai-harness-explore": generate_explore_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-explore"),
         "ai-harness-submit": generate_submit_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-submit"),
+        "ai-harness-debate": generate_debate_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-debate"),
     }
 
 

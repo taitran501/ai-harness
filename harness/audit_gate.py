@@ -566,3 +566,127 @@ def compute_mcnemar_significance(
     }
 
 
+
+
+
+_TOPIC_CITATION_PATTERN = re.compile(r"(?:[Tt]opic\s*#?|#|topic_)(\d{5,7})\b")
+_STOPWORDS = {
+    "about", "above", "after", "again", "against", "all", "also", "among", "and", "another",
+    "any", "are", "aren't", "because", "been", "before", "being", "below", "between", "both",
+    "but", "cannot", "could", "couldn't", "did", "didn't", "does", "doesn't", "doing", "don't",
+    "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't",
+    "have", "haven't", "having", "here", "how", "into", "itself", "just", "more", "most", "must",
+    "none", "not", "off", "once", "only", "other", "ought", "our", "ours", "out", "over", "same",
+    "should", "shouldn't", "some", "such", "than", "that", "the", "their", "theirs", "them",
+    "themselves", "then", "there", "these", "they", "this", "those", "through", "too", "under",
+    "until", "very", "was", "wasn't", "were", "weren't", "what", "when", "where", "which",
+    "while", "who", "whom", "why", "with", "won't", "would", "wouldn't", "your", "yours",
+    "level", "score", "scores", "model", "test", "game", "topic", "result", "using", "used",
+    "table", "cluster", "section", "overview", "active", "based", "first", "second", "third",
+    "notes", "paper", "forum", "solution", "approach", "method", "methodology", "competition",
+}
+
+
+def extract_topic_text(raw_json: Any) -> str:
+    """Extract all textual content from a discussion topic JSON or object structure."""
+    parts = []
+    if isinstance(raw_json, dict):
+        for key in ("title", "content", "body", "text", "description"):
+            val = raw_json.get(key)
+            if isinstance(val, str):
+                parts.append(val)
+        for key in ("comments", "messages", "replies"):
+            val = raw_json.get(key)
+            if isinstance(val, list):
+                for item in val:
+                    parts.append(extract_topic_text(item))
+    elif isinstance(raw_json, list):
+        for item in raw_json:
+            parts.append(extract_topic_text(item))
+    return " ".join(parts)
+
+
+def scan_markdown_citations(project_root: str | Path, file_path: Optional[str | Path] = None) -> Dict[str, Any]:
+    """Scan markdown file(s) for topic citations and audit them against raw discussion files on disk."""
+    root = Path(project_root).resolve()
+    target_files: List[Path] = []
+    if file_path:
+        p = Path(file_path)
+        if not p.is_absolute():
+            p = root / p
+        if p.is_file():
+            target_files.append(p)
+    else:
+        for md in root.glob("*.md"):
+            target_files.append(md)
+        aih = root / ".ai-harness"
+        if aih.is_dir():
+            for md in aih.glob("*.md"):
+                target_files.append(md)
+
+    # Build index of discussion topics on disk
+    topic_index: Dict[str, Path] = {}
+    for p in root.glob("**/topic_*.json"):
+        m = re.search(r"topic_(\d{5,7})\.json$", p.name)
+        if m:
+            topic_index[m.group(1)] = p
+
+    findings: List[Dict[str, Any]] = []
+    total_citations = 0
+
+    for md in sorted(target_files):
+        try:
+            content = md.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+
+        rel_md = md.relative_to(root).as_posix() if md.is_relative_to(root) else str(md)
+        for line_no, line in enumerate(content.splitlines(), 1):
+            matches = _TOPIC_CITATION_PATTERN.findall(line)
+            if not matches:
+                continue
+            total_citations += len(matches)
+            for tid in matches:
+                if tid not in topic_index:
+                    findings.append({
+                        "path": rel_md,
+                        "line": line_no,
+                        "topic_id": tid,
+                        "issue": "MISSING_TOPIC_FILE",
+                        "severity": "blocking",
+                        "summary": f"Cited topic #{tid} has no corresponding discussion JSON on disk."
+                    })
+                else:
+                    topic_file = topic_index[tid]
+                    try:
+                        raw = json.loads(topic_file.read_text(encoding="utf-8"))
+                        topic_text = extract_topic_text(raw).lower()
+                    except Exception:
+                        continue
+
+                    # Extract distinctive terms from the markdown claim line
+                    words = re.findall(r"\b[A-Za-z][A-Za-z0-9_-]{3,}\b", line)
+                    suspicious_missing = []
+                    for w in set(words):
+                        w_lower = w.lower()
+                        if w_lower in _STOPWORDS or w_lower.isdigit():
+                            continue
+                        if w_lower not in topic_text:
+                            suspicious_missing.append(w)
+
+                    if len(suspicious_missing) >= 2:
+                        findings.append({
+                            "path": rel_md,
+                            "line": line_no,
+                            "topic_id": tid,
+                            "issue": "UNGROUNDED_TOPIC_CITATION",
+                            "severity": "warning",
+                            "missing_terms": sorted(suspicious_missing),
+                            "summary": f"Line citing #{tid} mentions terms not found in topic: {', '.join(sorted(suspicious_missing)[:5])}"
+                        })
+
+    return {
+        "status": "findings" if findings else "clean",
+        "total_citations": total_citations,
+        "findings": findings,
+    }

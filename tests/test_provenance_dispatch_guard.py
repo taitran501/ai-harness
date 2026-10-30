@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from harness.audit_gate import enforce_dispatch_script_guard, scan_dispatch_scripts
+from harness.audit_gate import enforce_dispatch_script_guard, scan_dispatch_scripts, scan_markdown_citations
 from harness.provenance import (
     PredictionProvenance,
     derive_submission_eligibility,
@@ -44,6 +44,36 @@ class ProvenanceDispatchGuardTests(unittest.TestCase):
             (ack / "acknowledged_dispatch_scripts.json").write_text('{"acknowledged": ["raw.py"]}')
             self.assertEqual(len(scan_dispatch_scripts(root)["findings"]), 1)
             self.assertEqual(enforce_dispatch_script_guard(root)["status"], "clean")
+
+
+
+    def test_scan_markdown_citations_finds_missing_and_ungrounded_topics(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            disc_dir = root / "discussions"
+            disc_dir.mkdir()
+            # Topic 750885 discussing concurrency and cutoff only
+            (disc_dir / "topic_750885.json").write_text(
+                '{"title": "Negative results", "content": "14 streams vs 10 streams on RTX Pro 6000 and 110k token cutoff."}',
+                encoding="utf-8"
+            )
+            # Markdown citing existing topic with fabricated terms and missing topic #999999
+            md_path = root / "summary.md"
+            md_path.write_text(
+                "# Analysis\n"
+                "- Proven scheduler D-prime by shiiin9 prevents high-level starvation (#750885).\n"
+                "- Untracked breakthrough reported in (#999999).\n",
+                encoding="utf-8"
+            )
+            report = scan_markdown_citations(root, file_path=md_path)
+            self.assertEqual(report["status"], "findings")
+            self.assertEqual(report["total_citations"], 2)
+            issues = {f["issue"] for f in report["findings"]}
+            self.assertIn("MISSING_TOPIC_FILE", issues)
+            self.assertIn("UNGROUNDED_TOPIC_CITATION", issues)
+            ungrounded = [f for f in report["findings"] if f["issue"] == "UNGROUNDED_TOPIC_CITATION"][0]
+            self.assertEqual(ungrounded["topic_id"], "750885")
+            self.assertIn("shiiin9", ungrounded["missing_terms"])
 
 
 if __name__ == "__main__":

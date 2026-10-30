@@ -191,17 +191,28 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("Candidate Preflight & Diversity Governance", submit)
         self.assertIn("Backdoor Script Prohibition", submit)
 
+        # Debate skill verification
+        self.assertIn("ai-harness-debate", modular)
+        debate = modular["ai-harness-debate"]
+        self.assertIn("name: ai-harness-debate", debate)
+        self.assertIn("Adversarial Epistemic Debate & Cross-Examination Protocol", debate)
+        self.assertIn("Candidate Insight Card Format", debate)
+        self.assertIn("Physical Disk & String Verification", debate)
+        self.assertIn("Variance & Statistical Noise Challenge", debate)
+        self.assertIn("ai-harness audit-claims", debate)
+
     def test_install_global_skills(self):
         """Verify installing modular skills into global directory."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             target = Path(tmp_dir) / "skills"
             written = install_global_skills(target_dir=target)
-            self.assertEqual(len(written), 5)
+            self.assertEqual(len(written), 6)
             self.assertTrue((target / "ai-harness" / "SKILL.md").exists())
             self.assertTrue((target / "ai-experiment-harness" / "SKILL.md").exists())
             self.assertTrue((target / "ai-harness-resume" / "SKILL.md").exists())
             self.assertTrue((target / "ai-harness-explore" / "SKILL.md").exists())
             self.assertTrue((target / "ai-harness-submit" / "SKILL.md").exists())
+            self.assertTrue((target / "ai-harness-debate" / "SKILL.md").exists())
 
     def test_install_workspace_skills(self):
         """Verify installing modular skills into workspace .agents/skills/."""
@@ -215,12 +226,13 @@ class SkillInjectorTests(unittest.TestCase):
                 "direction": "maximize",
             }
             written = install_workspace_skills(project_root=root, task_config=task_cfg)
-            self.assertEqual(len(written), 5)
+            self.assertEqual(len(written), 6)
             skills_dir = root / ".agents" / "skills"
             self.assertTrue((skills_dir / "ai-harness" / "SKILL.md").exists())
             self.assertTrue((skills_dir / "ai-harness-resume" / "SKILL.md").exists())
             self.assertTrue((skills_dir / "ai-harness-explore" / "SKILL.md").exists())
             self.assertTrue((skills_dir / "ai-harness-submit" / "SKILL.md").exists())
+            self.assertTrue((skills_dir / "ai-harness-debate" / "SKILL.md").exists())
 
     def test_cli_install_skills(self):
         """Verify CLI subcommand ai-harness install-skills."""
@@ -236,6 +248,7 @@ class SkillInjectorTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertTrue((target / "ai-harness" / "SKILL.md").exists())
                 self.assertTrue((target / "ai-harness-resume" / "SKILL.md").exists())
+                self.assertTrue((target / "ai-harness-debate" / "SKILL.md").exists())
             finally:
                 if prev_env is None:
                     os.environ.pop("GEMINI_SKILLS_DIR", None)

@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-31 | Adversarial dual-agent debate skill (`/ai-harness-debate`) and automated claim citation audit (`ai-harness audit-claims`) | Working tree | [adversarial-debate-and-citation-audit](adversarial-debate-and-citation-audit.md) |
 | 2026-10-28 | Modular slash-command skills (`/ai-harness`, `/ai-harness-resume`, `/ai-harness-explore`, `/ai-harness-submit`) and global Antigravity synchronization (`ai-harness install-skills`) | Working tree | [skills-slash-command-sync](skills-slash-command-sync.md) |
 | 2026-10-28 | Candidate provenance, recipe binding, and dispatch script guard | Working tree | [candidate-provenance-dispatch-hardening](candidate-provenance-dispatch-hardening.md) |
 | 2026-10-28 | Epistemic grounding audit and default-context quarantine for research memory | Working tree | [research-memory-epistemic-quarantine](research-memory-epistemic-quarantine.md) |
