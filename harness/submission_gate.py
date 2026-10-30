@@ -206,15 +206,37 @@ class SubmissionGate:
             if gates.get("freeze_locked") or gates.get("finalized"):
                 raise SubmissionGateError("COMPETITION_FROZEN")
         path, exp_id, predictions, evidence = self._resolve_payload(file_name, exp_id=exp_id, user_approved=user_approved, preflight_id=preflight_id)
+        preflight_receipt = None
         if preflight_id:
             from harness.candidate_preflight import load_preflight_receipt
-            receipt_pre = load_preflight_receipt(self.project.root, preflight_id)
-            if not receipt_pre:
+            preflight_receipt = load_preflight_receipt(self.project.root, preflight_id)
+            if not preflight_receipt:
                 raise SubmissionGateError("PREFLIGHT_RECEIPT_NOT_FOUND", f"Preflight receipt {preflight_id} not found.")
-            if receipt_pre.get("candidate", {}).get("sha256") != sha256(path):
+            if preflight_receipt.get("candidate", {}).get("sha256") != sha256(path):
                 raise SubmissionGateError("PREFLIGHT_PAYLOAD_MISMATCH", "Candidate file hash does not match cited preflight receipt.")
             if not exp_id:
                 raise SubmissionGateError("EXPERIMENT_EVIDENCE_REQUIRED")
+        from harness.citation_audit import enforce_citation_admission
+        cfg = evidence.get("cfg") or {}
+        citation_dependencies = list(cfg.get("citation_dependencies") or [])
+        citation_dependencies.extend((cfg.get("research") or {}).get("citation_dependencies") or [])
+        citation_dependencies.extend((cfg.get("grounding") or {}).get("citation_dependencies") or [])
+        citation_claims = list(cfg.get("citation_claims") or [])
+        citation_claims.extend((cfg.get("research") or {}).get("citation_claims") or [])
+        citation_claims.extend((cfg.get("grounding") or {}).get("citation_claims") or [])
+        if preflight_receipt:
+            citation_dependencies.extend(preflight_receipt.get("citation_dependencies") or [])
+            citation_claims.extend(preflight_receipt.get("citation_claims") or [])
+        grounding = cfg.get("grounding") or {}
+        if grounding.get("source_type") == "kaggle_discussion":
+            citation_dependencies.extend(grounding.get("audit_receipts") or [])
+        citation_dependencies = list(dict.fromkeys(citation_dependencies))
+        citation_admission = enforce_citation_admission(
+            self.project.root, {"grounding": grounding, "research": cfg.get("research") or {},
+                                "citation_dependencies": citation_dependencies,
+                                "citation_claims": citation_claims}, action="submission")
+        if citation_admission.get("admission") not in {"allowed", "not_applicable"}:
+            raise SubmissionGateError("CITATION_ADMISSION_BLOCKED", str(citation_admission.get("reason")))
         events, refs, payload_hashes, history_hash = self._history(competition)
         known_refs = {str(r["provider_ref"]) for r in refs if r.get("provider_ref") is not None}
         from harness.reconciliation import _load_acknowledged_refs
@@ -321,7 +343,7 @@ class SubmissionGate:
             if used + pending >= limit:
                 reasons.append("QUOTA_EXHAUSTED")
         states = StagnationController(self.project).reconcile_results()
-        receipt = dict(schema_version=1, receipt_id="gate-" + uuid.uuid4().hex, phase="dispatch",
+        receipt = dict(schema_version=2, receipt_id="gate-" + uuid.uuid4().hex, phase="dispatch",
             purpose="promotion" if refs else "initial", status="fail" if reasons else "pass", workspace_id=digest(str(self.project.root)),
             task_id=self.spec.metadata.get("id") or self.spec.metadata.get("name", "task"), competition=competition, session_id=None,
             policy_sha256=digest(policy.to_dict()), comparison_identity_sha256=digest(evidence["identity"]),
@@ -329,11 +351,13 @@ class SubmissionGate:
             prediction_sha256=diversity["candidate_prediction_sha256"], evidence_sha256=evidence["evidence_sha256"],
             decision_evaluation_ids=evaluation_ids, diversity=diversity, history_snapshot_sha256=history_hash, approval=approval,
             stagnation_state_sha256=digest(states), quota_snapshot=quota_snapshot,
+            citation_admission=citation_admission, citation_dependencies=citation_dependencies,
+            citation_claims=citation_claims,
             checks=dict(integrity="pass", diversity="pass", promotion="pass" if refs else "not_required",
                         approval="pass" if approval else "fail", quota="fail" if any(r.startswith("QUOTA") for r in reasons) else "pass"),
             reason_codes=list(dict.fromkeys(reasons)), created_at=utc_now(), expires_at=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
             framework_commit="working-tree")
-        validate_document("submission_gate_receipt", receipt)
+        validate_document("submission_gate_receipt", receipt, version=2)
         atomic_write_json(self.directory / (receipt["receipt_id"] + ".json"), receipt)
         return receipt, path, exp_id, predictions
 
@@ -343,6 +367,15 @@ class SubmissionGate:
             return {"receipt": receipt, "dry_run": True}
         if receipt["status"] != "pass":
             raise SubmissionGateError(receipt["reason_codes"][0], receipt=receipt)
+        from harness.citation_audit import enforce_citation_admission
+        citation_admission = enforce_citation_admission(
+            self.project.root,
+            {"citation_dependencies": receipt.get("citation_dependencies", []),
+             "citation_claims": receipt.get("citation_claims", [])},
+            action="submission_dispatch_permit",
+        )
+        if citation_admission.get("admission") not in {"allowed", "not_applicable"}:
+            raise SubmissionGateError("CITATION_ADMISSION_CHANGED", str(citation_admission.get("reason")), receipt=receipt)
         # Content-addressed immutable snapshots outside completed evidence folders.
         stage = self.project.root / ".ai-harness/submission_payloads" / receipt["payload"]["sha256"]
         stage.mkdir(parents=True, exist_ok=True)

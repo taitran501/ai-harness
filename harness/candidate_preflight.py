@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from harness.artifacts import sha256
+from harness.artifacts import digest, sha256
 from harness.audit_gate import semantic_prediction_hash
 from harness.io_utils import atomic_write_json
 from harness.policy_schema import validate_document
@@ -116,12 +116,73 @@ def resolve_incumbent_prediction(project: HarnessProject) -> Optional[Path]:
     return None
 
 
+def _citation_dependencies_for_config(config: Dict[str, Any], claim_out: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+    research = config.get("research") or {}
+    grounding = config.get("grounding") or {}
+    values = list(config.get("citation_dependencies") or [])
+    values.extend(research.get("citation_dependencies") or [])
+    values.extend(grounding.get("citation_dependencies") or [])
+    values.extend(grounding.get("audit_receipts") or [])
+    if grounding.get("source_type") == "kaggle_discussion" and not values:
+        values.append("__AI_HARNESS_DISCUSSION_RECEIPT_REQUIRED__")
+    if claim_out is not None:
+        claim_out.extend(config.get("citation_claims") or [])
+        claim_out.extend(research.get("citation_claims") or [])
+        claim_out.extend(grounding.get("citation_claims") or [])
+    return list(dict.fromkeys(values))
+
+
+def _citation_dependencies_from_lineage(project: HarnessProject, prediction_path: Path,
+                                        claim_out: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+    """Recover citation dependencies from a sealed run or candidate lineage."""
+    artifacts = project.artifacts_dir.resolve()
+    try:
+        prediction_path.resolve().relative_to(artifacts)
+    except ValueError:
+        return []
+
+    folder = prediction_path.resolve().parent
+    while folder != artifacts and folder.is_relative_to(artifacts):
+        candidate_manifest_path = folder / "candidate_manifest.json"
+        if candidate_manifest_path.is_file():
+            manifest = json.loads(candidate_manifest_path.read_text(encoding="utf-8-sig"))
+            from harness.candidates import validate_candidate
+            validate_candidate(project, manifest)
+            configs = [project.artifacts_dir / source_id / "run_config.yaml"
+                       for source_id in manifest.get("source_ids", [])]
+            return _dependencies_from_config_paths(configs, claim_out)
+        if (folder / "artifact_manifest.json").is_file() and (folder / "run_config.yaml").is_file():
+            from harness.artifacts import validate_run
+            from harness.plugins import TaskPluginContext, load_task_plugin
+            from harness.task_spec import load_active_task_spec
+            task_spec = load_active_task_spec(project.task_config_path)
+            context = TaskPluginContext(project.root, project.task_config_path, task_spec, project.plugin_id or "default")
+            plugin = load_task_plugin(project.plugin_id, context)
+            validate_run(folder, task_spec, plugin=plugin)
+            return _dependencies_from_config_paths([folder / "run_config.yaml"], claim_out)
+        folder = folder.parent
+    raise ValueError("CITATION_LINEAGE_UNRESOLVED: prediction file is under artifacts but has no sealed run/candidate manifest")
+
+
+def _dependencies_from_config_paths(paths: List[Path], claim_out: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+    import yaml
+
+    dependencies = []
+    for path in paths:
+        if not path.is_file():
+            raise ValueError(f"CITATION_LINEAGE_CONFIG_MISSING: {path}")
+        config = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
+        dependencies.extend(_citation_dependencies_for_config(config, claim_out))
+    return list(dict.fromkeys(dependencies))
+
+
 def run_candidate_preflight(
     project_root: str | Path,
     candidate_path: str | Path,
     incumbent_path: Optional[str | Path] = None,
     id_col: Optional[str] = None,
     pred_col: Optional[str] = None,
+    citation_dependencies: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Perform preflight analysis comparing candidate predictions to an incumbent baseline."""
     if not candidate_path:
@@ -240,8 +301,14 @@ def run_candidate_preflight(
         sem_cand = hashlib.sha256(df_cand.to_csv(index=False).encode("utf-8")).hexdigest()
         sem_inc = hashlib.sha256(df_inc.to_csv(index=False).encode("utf-8")).hexdigest()
 
+    lineage_claims: List[Dict[str, Any]] = []
+    derived_dependencies = _citation_dependencies_from_lineage(project, cand_p, lineage_claims)
+    dependencies = list(dict.fromkeys([*derived_dependencies, *(citation_dependencies or [])]))
+    from harness.citation_audit import enforce_citation_admission
+    citation_admission = enforce_citation_admission(
+        project.root, {"citation_dependencies": dependencies, "citation_claims": lineage_claims}, action="candidate_preflight")
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "preflight_id": "preflight-" + uuid.uuid4().hex,
         "candidate": {
             "path": str(cand_p),
@@ -260,10 +327,14 @@ def run_candidate_preflight(
         "delusion_warning": delusion_warning,
         "recommendation": recommendation,
         "verdict": verdict,
+        "citation_dependencies": dependencies,
+        "citation_claims": lineage_claims,
+        "citation_admission": citation_admission,
         "created_at": _utc_now_iso(),
     }
+    receipt["receipt_digest"] = digest(receipt)
 
-    validate_document("candidate_preflight_receipt", receipt)
+    validate_document("candidate_preflight_receipt", receipt, version=2)
 
     # Persist receipt
     out_dir = project.root / ".ai-harness" / "artifacts" / "preflight"
@@ -282,9 +353,14 @@ def load_preflight_receipt(project_root: str | Path, preflight_id: str) -> Optio
     if not path.is_file():
         return None
     receipt = json.loads(path.read_text(encoding="utf-8"))
-    validate_document("candidate_preflight_receipt", receipt)
+    validate_document("candidate_preflight_receipt", receipt, version=receipt.get("schema_version", 1))
     if receipt.get("preflight_id") != preflight_id:
         raise ValueError("Preflight receipt ID does not match its requested ID.")
+    if receipt.get("schema_version") == 2:
+        unsigned = dict(receipt)
+        receipt_digest = unsigned.pop("receipt_digest", None)
+        if receipt_digest != digest(unsigned):
+            raise ValueError("Preflight receipt digest mismatch.")
     return receipt
 
 
@@ -353,12 +429,15 @@ def validate_candidate_pitch(
     candidate_exp_id: Optional[str] = None,
     incumbent_exp_id: Optional[str] = None,
     paired_oof_evaluation_id: Optional[str] = None,
+    citation_dependencies: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Validate a cited preflight and block near-duplicate pitches without paired OOF gain."""
     project = HarnessProject.discover(Path(project_root).resolve())
     errors: List[str] = []
     warnings: List[str] = []
     citation_bundle: Dict[str, Any] = {"preflight_id": preflight_id}
+    citation_admission = {"status": "not_applicable", "admission": "not_applicable",
+                          "reason": "NO_EXTERNAL_CITATION_DEPENDENCIES", "receipt_digests": []}
     allowed_claim_kinds = {"blend", "temperature_tuning", "submission_candidate", "candidate"}
     if claim_kind not in allowed_claim_kinds:
         errors.append(f"claim_kind must be one of {', '.join(sorted(allowed_claim_kinds))}.")
@@ -377,6 +456,15 @@ def validate_candidate_pitch(
 
     evaluation = None
     if receipt is not None:
+        from harness.citation_audit import enforce_citation_admission
+        dependencies = list(receipt.get("citation_dependencies", []))
+        dependencies.extend(citation_dependencies or [])
+        dependencies = list(dict.fromkeys(dependencies))
+        citation_admission = enforce_citation_admission(
+            project.root, {"citation_dependencies": dependencies,
+                           "citation_claims": receipt.get("citation_claims", [])}, action="candidate_pitch")
+        if citation_admission.get("admission") not in {"allowed", "not_applicable"}:
+            errors.append(f"Citation admission is {citation_admission.get('admission')}: {citation_admission.get('reason')}")
         requested_path = candidate_path or receipt["candidate"]["path"]
         prediction_path = Path(requested_path)
         if not prediction_path.is_absolute():
@@ -392,6 +480,21 @@ def validate_candidate_pitch(
             errors.append(f"Candidate prediction file does not exist: {prediction_path}")
         elif inside_workspace and sha256(prediction_path) != receipt["candidate"]["sha256"]:
             errors.append("Candidate prediction hash differs from the cited preflight receipt; rerun candidate_preflight.")
+        if inside_workspace and prediction_path.is_file():
+            try:
+                lineage_claims: List[Dict[str, Any]] = []
+                dependencies.extend(_citation_dependencies_from_lineage(project, prediction_path, lineage_claims))
+                dependencies = list(dict.fromkeys(dependencies))
+                combined_claims = [*receipt.get("citation_claims", []), *lineage_claims]
+                unique_claims = {(item.get("claim_id"), item.get("claim_text")): item
+                                 for item in combined_claims if isinstance(item, dict)}
+                citation_admission = enforce_citation_admission(
+                    project.root, {"citation_dependencies": dependencies,
+                                   "citation_claims": list(unique_claims.values())}, action="candidate_pitch")
+                if citation_admission.get("admission") not in {"allowed", "not_applicable"}:
+                    errors.append(f"Citation admission is {citation_admission.get('admission')}: {citation_admission.get('reason')}")
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                errors.append(f"Could not revalidate candidate citation lineage: {exc}")
 
         similarity = receipt.get("similarity") or {}
         rho = similarity.get("spearman_rho")
@@ -429,6 +532,7 @@ def validate_candidate_pitch(
         "preflight_id": preflight_id,
         "claim_kind": claim_kind,
         "citation_valid": citation_valid,
+        "citation_admission": citation_admission,
         "allowed": allowed,
         "verdict": receipt.get("verdict") if receipt else "INVALID_CITATION",
         "spearman_rho": (receipt.get("similarity") or {}).get("spearman_rho") if receipt else None,

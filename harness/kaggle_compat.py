@@ -772,13 +772,16 @@ class KaggleClient:
                 t_obj = res.topic
 
                 comments_list = []
+                comments_retrieved = True
+                retrieval_errors = []
                 try:
                     req_c = ApiListCommentsRequest()
                     req_c.topic_id = topic_id
                     comms = disc_client.list_comments(req_c)
                     comments_list = getattr(comms, "comments", []) or []
-                except Exception:
-                    pass
+                except Exception as exc:
+                    comments_retrieved = False
+                    retrieval_errors.append(f"comments: {type(exc).__name__}: {exc}")
 
                 return {
                     "id": topic_id,
@@ -789,6 +792,8 @@ class KaggleClient:
                     "content": _clean_text(getattr(t_obj, "content", "") or ""),
                     "content_raw": getattr(t_obj, "content", "") or "",
                     "comments_count": len(comments_list),
+                    "comments_retrieved": comments_retrieved,
+                    "retrieval_errors": retrieval_errors,
                     "comments": [
                         {
                             "id": getattr(c, "id", None),
@@ -816,6 +821,8 @@ class KaggleClient:
             "content": _clean_text(first_content),
             "content_raw": first_content,
             "comments_count": max(0, len(msgs) - 1),
+            "comments_retrieved": True,
+            "retrieval_errors": [],
             "comments": [
                 {
                     "id": getattr(m, "id", None),

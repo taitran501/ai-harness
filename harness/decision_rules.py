@@ -326,6 +326,23 @@ def prepare_remote_research(project, config_path):
     config_path = project.root / config_path
     cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     research = cfg.get("research", {})
+    from harness.citation_audit import (
+        _audit_scope,
+        build_portable_citation_bundle,
+        enforce_citation_admission,
+    )
+    grounding = cfg.get("grounding") or {}
+    citation_dependencies = list(cfg.get("citation_dependencies") or [])
+    citation_dependencies.extend(research.get("citation_dependencies") or [])
+    citation_dependencies.extend(grounding.get("citation_dependencies") or [])
+    citation_dependencies.extend(grounding.get("audit_receipts") or [])
+    citation_dependencies = list(dict.fromkeys(citation_dependencies))
+    # Keep the selected receipt objects intact for local validation. Their
+    # originating paths are deliberately omitted from the remote capsule.
+    citation_admission = enforce_citation_admission(
+        project.root, cfg, action="remote_research_prepare")
+    if citation_admission.get("admission") == "blocked":
+        raise ValueError("CITATION_ADMISSION_BLOCKED: " + str(citation_admission.get("reason")))
     candidate_id = cfg["experiment"]["id"]
     from harness.macro_research import enforce_retrospective
     enforce_retrospective(project, cfg=cfg, recovery_probe=bool(research.get("recovery_probe_id")))
@@ -333,17 +350,29 @@ def prepare_remote_research(project, config_path):
         recovery_probe_id=research.get("recovery_probe_id"), candidate_id=candidate_id)
     if blocker:
         raise DecisionRuleNotSatisfied(["STAGNATION_PAUSE"])
-    if not research.get("decision_rule_id"):
+    has_rule = bool(research.get("decision_rule_id"))
+    citation_required = bool(citation_dependencies) or grounding.get("source_type") == "kaggle_discussion"
+    if not has_rule and not citation_required:
         return None
-    spec = load_active_task_spec(project.task_config_path)
-    reserve_comparison_slot(project, spec, cfg)
-    registration = load_registration(project, research["decision_rule_id"])
-    rule = _rule(registration["rule"])
-    with transaction(policy_directory(project) / "comparison_families.json", {"families": {}}) as state:
-        slot = state["families"][rule.multiplicity["family_id"]]["slots"][registration["rule_id"] + ":" + candidate_id]
-        slot.update(remote=True, source_config_sha256=sha256(config_path), captured_research=research)
-        capsule = dict(exp_id=candidate_id, source_config_sha256=slot["source_config_sha256"],
-                       registration=registration, reservation=dict(slot))
+    registration, reservation = None, None
+    if has_rule:
+        spec = load_active_task_spec(project.task_config_path)
+        reserve_comparison_slot(project, spec, cfg)
+        registration = load_registration(project, research["decision_rule_id"])
+        rule = _rule(registration["rule"])
+        with transaction(policy_directory(project) / "comparison_families.json", {"families": {}}) as state:
+            slot = state["families"][rule.multiplicity["family_id"]]["slots"][registration["rule_id"] + ":" + candidate_id]
+            slot.update(remote=True, source_config_sha256=sha256(config_path), captured_research=research)
+            reservation = dict(slot)
+    scope = _audit_scope(project.root)
+    citation_bundle = build_portable_citation_bundle(project.root, citation_dependencies) if citation_dependencies else None
+    capsule = dict(schema_version=1, exp_id=candidate_id, source_config_sha256=sha256(config_path),
+                   registration=registration, reservation=reservation,
+                   citation_admission=citation_admission,
+                   citation_bundle=citation_bundle,
+                   citation_bundle_sha256=citation_bundle.get("bundle_sha256") if citation_bundle else None,
+                   citation_scope={"task_id": scope["task_id"], "scorer_sha256": scope["scorer_sha256"]})
+    capsule["capsule_sha256"] = digest(capsule)
     path = project.root / ".ai-harness/research_execution" / (candidate_id + ".json")
     atomic_write_json(path, capsule)
     return path
@@ -352,18 +381,49 @@ def prepare_remote_research(project, config_path):
 def validate_remote_research_capsule(project, config_path, cfg):
     """Validate the dispatched source config before remote training starts."""
     project = _project(project)
-    if os.environ.get("AI_HARNESS_REMOTE_KERNEL") != "1" or not cfg.get("research", {}).get("decision_rule_id"):
+    research = cfg.get("research", {})
+    grounding = cfg.get("grounding") or {}
+    dependencies = list(cfg.get("citation_dependencies") or [])
+    dependencies.extend(research.get("citation_dependencies") or [])
+    dependencies.extend(grounding.get("citation_dependencies") or [])
+    dependencies.extend(grounding.get("audit_receipts") or [])
+    citation_required = bool(dependencies) or grounding.get("source_type") == "kaggle_discussion"
+    has_rule = bool(research.get("decision_rule_id"))
+    if os.environ.get("AI_HARNESS_REMOTE_KERNEL") != "1" or not has_rule and not citation_required:
         return False
     candidate_id = cfg["experiment"]["id"]
     path = project.root / ".ai-harness/research_execution" / (candidate_id + ".json")
     capsule = json.loads(path.read_text(encoding="utf-8"))
-    registration = capsule["registration"]
-    if (capsule["exp_id"] != candidate_id or capsule["source_config_sha256"] != sha256(config_path) or
-        registration["rule_id"] != cfg["research"]["decision_rule_id"] or
-        digest(registration["rule"]) != registration["rule_sha256"] or
-        capsule["reservation"]["captured_research"] != cfg["research"]):
+    capsule_hash = capsule.pop("capsule_sha256", None)
+    if capsule_hash != digest(capsule):
+        raise ValueError("Remote research capsule digest mismatch")
+    capsule["capsule_sha256"] = capsule_hash
+    if capsule.get("exp_id") != candidate_id or capsule.get("source_config_sha256") != sha256(config_path):
         raise ValueError("Remote research capsule/config binding mismatch")
-    return True
+    if has_rule:
+        registration = capsule.get("registration") or {}
+        reservation = capsule.get("reservation") or {}
+        if (registration.get("rule_id") != research["decision_rule_id"] or
+            digest(registration.get("rule")) != registration.get("rule_sha256") or
+            reservation.get("captured_research") != research):
+            raise ValueError("Remote research rule capsule/config binding mismatch")
+    citation_admission = capsule.get("citation_admission") or {"admission": "not_applicable"}
+    if citation_required:
+        from harness.citation_audit import validate_portable_citation_bundle
+        scope = capsule.get("citation_scope") or {}
+        expected_claims = list(cfg.get("citation_claims") or [])
+        expected_claims.extend(research.get("citation_claims") or [])
+        expected_claims.extend(grounding.get("citation_claims") or [])
+        portable = validate_portable_citation_bundle(
+            capsule.get("citation_bundle") or {}, expected_task_id=scope.get("task_id"),
+            expected_scorer_sha256=scope.get("scorer_sha256"), expected_claims=expected_claims)
+        if (portable.get("admission") != "allowed" or
+            portable.get("receipt_digests") != citation_admission.get("receipt_digests")):
+            raise ValueError("Remote citation receipt binding mismatch")
+        citation_admission = portable
+    return {"citation_admission": citation_admission,
+            "citation_bundle_sha256": capsule.get("citation_bundle_sha256"),
+            "research_rule_validated": has_rule}
 
 
 def paired_metric_bootstrap(truth, candidate, control, scorer, *, direction="maximize", confidence_level=.95,

@@ -191,6 +191,64 @@ class HarnessProject:
             manifest=manifest,
         )
 
+    @property
+    def task_id(self) -> Optional[str]:
+        """Stable active task ID used by research and citation scope resolution."""
+        document = _read_yaml(self.task_config_path) if self.task_config_path and self.task_config_path.is_file() else {}
+        task = document.get("task", document)
+        metadata = task.get("metadata", {}) if isinstance(task, dict) else {}
+        value = (task.get("id") or task.get("task_id") or task.get("task_name") or task.get("name")
+                 or (metadata.get("id") if isinstance(metadata, dict) else None))
+        if value is None:
+            return None
+        normalized = re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")
+        return normalized or None
+
+    @property
+    def citation_document_paths(self) -> tuple[Path, ...]:
+        """Explicit additional Markdown documents selected by workspace config."""
+        config = (self.manifest or {}).get("citation_audit", {})
+        values = config.get("documents", []) if isinstance(config, dict) else []
+        if not values:
+            values = (self.manifest or {}).get("citation_documents", [])
+        if not isinstance(values, list):
+            raise ValueError("citation documents must be a list of paths")
+        paths = []
+        for value in values:
+            path = Path(value).expanduser()
+            paths.append((self.root / path).resolve() if not path.is_absolute() else path.resolve())
+        return tuple(paths)
+
+    @property
+    def citation_evidence_dir(self) -> Path:
+        config = (self.manifest or {}).get("citation_audit", {})
+        value = config.get("evidence_dir") if isinstance(config, dict) else None
+        value = value or (self.manifest or {}).get("citation_evidence_dir") or ".ai-harness/evidence"
+        path = Path(value).expanduser()
+        return (self.root / path).resolve() if not path.is_absolute() else path.resolve()
+
+    @property
+    def active_research_progress_path(self) -> Optional[Path]:
+        """Resolve only the active task's progress file, never by artifact traversal order."""
+        explicit = (self.manifest or {}).get("research_progress_path")
+        if explicit:
+            path = Path(explicit).expanduser()
+            resolved = (self.root / path).resolve() if not path.is_absolute() else path.resolve()
+            if not resolved.is_relative_to(self.root):
+                raise ValueError("RESEARCH_PROGRESS_PATH_ESCAPE")
+            return resolved
+        base = Path(self.artifacts_dir or (self.root / ".ai-harness" / "artifacts"))
+        task_id = self.task_id
+        if not task_id:
+            return None
+        # Older manifests may point at the shared artifact base, while current
+        # attachments already point at the task-specific directory.
+        task_artifacts = base if base.name == task_id else base / task_id
+        resolved = (task_artifacts / "RESEARCH_PROGRESS.md").resolve()
+        if not resolved.is_relative_to(self.root):
+            raise ValueError("RESEARCH_PROGRESS_PATH_ESCAPE")
+        return resolved
+
 
 AGENTS_MD_MARKER_START = "<!-- ai-harness:managed:start -->"
 AGENTS_MD_MARKER_END = "<!-- ai-harness:managed:end -->"

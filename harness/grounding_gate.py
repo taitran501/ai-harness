@@ -94,6 +94,8 @@ class GroundingGate:
         config: Dict[str, Any],
         config_path: Optional[str | Path] = None,
         raise_on_error: bool = True,
+        project_root: Optional[str | Path] = None,
+        citation_admission_override: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, List[str], Dict[str, Any]]:
         """Validate config for empirical grounding and explicit assumptions.
 
@@ -202,6 +204,33 @@ class GroundingGate:
                     f"hypothesis; verify the source first and record how."
                 )
 
+            citation_admission = {"status": "not_applicable", "admission": "not_applicable",
+                                  "reason": "NO_EXTERNAL_CITATION_DEPENDENCIES"}
+            if stype == "kaggle_discussion" or grounding.get("citation_dependencies") or grounding.get("audit_receipts"):
+                if citation_admission_override is not None:
+                    citation_admission = citation_admission_override
+                else:
+                    from harness.citation_audit import enforce_citation_admission
+                    from harness.project import resolve_project_root
+
+                    if project_root is None and config_path:
+                        cfg_path = Path(config_path).expanduser().resolve()
+                        project_root = cfg_path.parent.parent if cfg_path.parent.name == "configs" else cfg_path.parent
+                    citation_admission = enforce_citation_admission(
+                        resolve_project_root(project_root),
+                        {"grounding": grounding, "research": config.get("research", {}),
+                         "citation_dependencies": config.get("citation_dependencies", [])},
+                        action="run",
+                    )
+                if citation_admission.get("admission") != "allowed":
+                    errors.append(
+                        "[CITATION ADMISSION BLOCKED] Discussion-backed grounding requires a current "
+                        f"validated claim-support receipt: {citation_admission.get('reason')}"
+                    )
+        else:
+            citation_admission = {"status": "not_applicable", "admission": "not_applicable",
+                                  "reason": "NO_GROUNDING_DECLARED"}
+
         # 3. Inspect Assumption Register (According to 'Ask or Assume?', Edwards & Schuster 2026)
         assumption_reg = config.get("assumption_register") or exp_meta.get("assumption_register")
         if not assumption_reg:
@@ -270,6 +299,7 @@ class GroundingGate:
             "timestamp": datetime.datetime.now().isoformat(),
             "status": "PASSED" if not errors else "FAILED",
             "grounding": grounding,
+            "citation_admission": citation_admission,
             "assumption_register": assumption_reg,
             "error_count": len(errors),
             "errors": errors,

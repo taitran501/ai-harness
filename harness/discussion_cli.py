@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from harness.kaggle_compat import KaggleClient
@@ -49,11 +50,41 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Kaggle competition slug (optional).",
     )
     p_view.add_argument("--raw", action="store_true", help="Include raw HTML content.")
+    p_view.add_argument("--save", default=None, help="Save the complete fetched payload as JSON before display filtering.")
+    p_view.add_argument("--register", action="store_true", help="Register the complete payload in .ai-harness/evidence.")
+    p_view.add_argument("--project-root", default=".", help="Workspace root used by --register.")
+    p_view.add_argument("--snapshot-version", default=None, help="Explicit label when registering changed versions of a topic.")
+
+    p_register = sub.add_parser("register", help="Register one explicitly selected topic JSON file as citation evidence.")
+    p_register.add_argument("topic_id", type=int, help="Numeric topic ID to bind to the payload.")
+    p_register.add_argument("--file", required=True, help="Selected JSON evidence file; no workspace search is performed.")
+    p_register.add_argument("--adapter", required=True,
+                            choices=["normalized_topic_v1", "data_wrapper_v1", "string_list_v1"],
+                            help="Explicit supported source schema adapter.")
+    p_register.add_argument("--project-root", default=".", help="Workspace root used for evidence registry storage.")
+    p_register.add_argument("--competition", default=None, help="Competition slug if known.")
+    p_register.add_argument("--canonical-url", default=None, help="Canonical source URL if known.")
+    p_register.add_argument("--snapshot-version", default=None, help="Explicit label for a conflicting source version.")
+    p_register.add_argument("--incomplete", action="store_true", help="Mark retrieval incomplete, such as failed comment retrieval.")
 
     args = parser.parse_args(argv)
-    client = KaggleClient()
 
     try:
+        if args.action == "register":
+            from harness.citation_sources import SourceRegistry
+
+            record = SourceRegistry(args.project_root).register_topic_source(
+                args.topic_id, None, adapter=args.adapter, source_path=args.file,
+                competition=args.competition, canonical_url=args.canonical_url,
+                snapshot_version=args.snapshot_version, complete=not args.incomplete,
+                retrieval_provenance={"method": "explicit local file registration", "source_path": Path(args.file).name},
+            )
+            _print_payload({"action": "register", "source_id": record["source_id"],
+                            "topic_id": record["topic_id"], "raw_sha256": record["raw_sha256"],
+                            "complete": record["completeness"]["complete"]})
+            return 0
+
+        client = KaggleClient()
         if args.action == "list":
             kwargs: Dict[str, Any] = {}
             if args.page > 1:
@@ -88,6 +119,22 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if args.action == "view":
             topic_data = client.get_topic(args.topic_id, competition=args.competition)
+            if args.save:
+                from harness.io_utils import atomic_write_json
+
+                atomic_write_json(args.save, topic_data, indent=2, ensure_ascii=False)
+            registration = None
+            if args.register:
+                from harness.citation_sources import SourceRegistry
+
+                registration = SourceRegistry(args.project_root).register_topic_source(
+                    args.topic_id, topic_data, adapter="normalized_topic_v1",
+                    competition=args.competition, canonical_url=topic_data.get("url"),
+                    complete=topic_data.get("comments_retrieved", True),
+                    snapshot_version=args.snapshot_version,
+                    retrieval_provenance={"method": "ai-harness discussion view", "comments_retrieved": topic_data.get("comments_retrieved", True),
+                                          "retrieval_errors": topic_data.get("retrieval_errors", [])},
+                )
             if not args.raw:
                 topic_data.pop("content_raw", None)
                 for c in topic_data.get("comments", []):
@@ -97,6 +144,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "action": "view",
                     "competition": args.competition,
                     **topic_data,
+                    **({"registration": {"source_id": registration["source_id"], "raw_sha256": registration["raw_sha256"],
+                                          "complete": registration["completeness"]["complete"]}} if registration else {}),
                 }
             )
             return 0

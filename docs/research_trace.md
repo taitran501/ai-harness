@@ -183,3 +183,34 @@ checks, live evidence invalidation, pagination, old direct results, bridge smoke
 failure linkage, generated workspace skills and phase revisions. These are
 workflow/correctness checks; improved reasoning or competition scores require
 separate bounded evaluations with an actual agent and task.
+
+## External citations and claim review
+
+`source_refs` identify where an idea came from; by themselves they do not verify
+the source or the claim. Register external discussion payloads with an explicit
+schema adapter so the registry can preserve the raw snapshot hash, normalized
+segments, author metadata, stable comment IDs (or snapshot-bound locators), and
+retrieval completeness. Registration is explicit and does not search artifact
+trees for topic files.
+
+For a claim that must pass a strict gate, provide a versioned claim record with
+the exact claim text and one or more evidence references. Each reference pins a
+source version, locator, excerpt, and excerpt offsets. A separate verifier
+execution records the current claim/evidence hashes and a structured verdict;
+persona switching does not count as independent review. Missing execution
+provenance remains `not_reviewed`.
+
+Keep these outcomes distinct:
+
+- **Grounded hypothesis**: the source supports the motivation, and a bounded
+  probe can test local applicability.
+- **External reported result**: the source supports what its author reported;
+  it does not establish a gain on this task.
+- **Demonstrated local gain**: the existing decision-rule evaluator supports the
+  result on comparable, sealed local evidence.
+
+The citation audit reports `complete`, `partial`, or `nothing_scanned` coverage;
+`verified`, `unverified`, or `invalid` evidence integrity; and
+`supported`, `contradicted`, `insufficient`, or `not_reviewed` claim support.
+Keyword matching is advisory lint only. Correct a citation by creating a new
+reviewed version while preserving the prior verdict and receipt.

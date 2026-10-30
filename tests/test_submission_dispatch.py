@@ -162,7 +162,7 @@ class SubmissionGateTests(unittest.TestCase):
         self.assertFalse((self.root / ".ai-harness/submission_events.jsonl").exists())
         from jsonschema import Draft202012Validator
         from pathlib import Path
-        schema = json.loads((Path(__file__).resolve().parents[1] / "harness/schemas/submission_gate_receipt.v1.schema.json").read_text())
+        schema = json.loads((Path(__file__).resolve().parents[1] / "harness/schemas/submission_gate_receipt.v2.schema.json").read_text())
         Draft202012Validator(schema).validate(result["receipt"])
 
     def test_missing_approval_blocks_and_does_not_reserve(self):

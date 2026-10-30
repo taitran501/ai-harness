@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SourceRecordV1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "source_id",
+    "provider",
+    "topic_id",
+    "snapshot_version",
+    "raw_sha256",
+    "schema_adapter",
+    "schema_adapter_version",
+    "normalized_content_sha256",
+    "snapshot_path",
+    "retrieval_provenance",
+    "completeness",
+    "segments"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "topic_id": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "snapshot_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "competition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "canonical_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "schema_adapter": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_adapter_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "normalized_content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "retrieval_provenance": {
+      "type": "object"
+    },
+    "completeness": {
+      "type": "object"
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "kind",
+          "locator",
+          "text",
+          "segment_sha256"
+        ],
+        "properties": {
+          "schema_version": {
+            "const": 1
+          },
+          "kind": {
+            "enum": [
+              "title",
+              "body",
+              "comment"
+            ]
+          },
+          "comment_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "author": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "locator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "segment_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  }
+}

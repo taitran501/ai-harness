@@ -138,3 +138,13 @@ Consumers (such as the candidate pool and dashboard) reject artifacts with missi
 - `verified` describes artifact integrity and scoring. `submission_eligible` is a separate derived decision; `eligible` is only its compatibility mirror. Test predictions and a supported promotion decision are required before dispatch.
 - `ai-harness audit-scripts` scans root Python files and `scratch/` for raw Kaggle submission and kernel push calls. Unacknowledged blocking findings lock submission dispatch with `DISPATCH_BACKDOOR_DETECTED`.
 - User approval and diversity preflight receipts do not substitute for a supported decision evaluation. Submission payloads must resolve to a validated run or candidate manifest.
+
+## 10. Citation Evidence and Admission Contract
+
+- `ai-harness audit-claims` reports scan coverage, evidence integrity, claim support, and admission separately. A clean scan, keyword overlap, or an exact excerpt alone does not establish that a claim is supported.
+- Strict audits require complete selected-document coverage, explicit claim-to-evidence bindings, source and locator validation, and a current review verdict. Empty or failed scans cannot produce a successful verification receipt.
+- Discussion snapshots use explicit versioned schema adapters. Source identity, the snapshot hash, segment locator, excerpt offsets, and excerpt hash are bound into the audit/review records. Authors remain metadata and cannot count as message text.
+- Legacy `source_refs` remain provenance declarations. They are unverified until the source is registered and the specific claim is reviewed. A grounded hypothesis may be eligible for a bounded probe; an external reported result does not establish local performance.
+- Demonstrated local gain still requires the harness's machine-evaluated decision-rule receipt over comparable local evidence. Citation receipts do not replace promotion, diversity, backend-lock, stagnation, approval, or quota gates.
+- Citation dependencies are revalidated at research, direct-run, candidate-pitch, submission-permit, and remote-dispatch boundaries. Subjects without external citation dependencies receive `not_applicable`.
+- Source snapshots and audit receipts are stored outside immutable experiment directories. Receipts detect stale or edited evidence, but do not cryptographically authenticate an actor who can rewrite the complete workspace.

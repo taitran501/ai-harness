@@ -304,8 +304,10 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "record_research_insight": {
         "summary": "Record an empirical research insight into persistent task memory.",
         "required": ["title", "observation", "mechanism", "next_action"],
-        "optional": {"evidence": None, "parent_insight_id": None, "family_id": "unclassified", "source_refs": None},
-        "description": "Registers an empirical observation and its underlying mechanism, creating a tracked insight ID.",
+        "optional": {"evidence": None, "parent_insight_id": None, "family_id": "unclassified", "source_refs": None,
+                      "citation_claims": None, "citation_audit_refs": None, "empirical_status": "hypothesis",
+                      "decision_evaluation_id": None},
+        "description": "Registers a hypothesis or reviewed claim with separate source provenance and local-run evidence status.",
     },
     "plan_research_probe": {
         "summary": "Plan a bounded discriminating probe for a specific insight.",
@@ -552,7 +554,7 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "candidate_preflight": {
         "summary": "Preflight verification of candidate predictions against incumbent baseline.",
         "required": ["candidate_path"],
-        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None},
+        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None, "citation_dependencies": []},
         "description": "Computes Spearman rho, rank swaps, and delta distributions. Flags rho >= 0.995; rank similarity alone does not establish score cause.",
     },
     "validate_candidate_pitch": {
@@ -564,6 +566,7 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "candidate_exp_id": None,
             "incumbent_exp_id": None,
             "paired_oof_evaluation_id": None,
+            "citation_dependencies": None,
         },
         "description": "Requires a current preflight citation. Near-duplicates (rho >= 0.995) require an indexed, machine-supported paired OOF gain tied to candidate and incumbent IDs.",
     },

@@ -147,12 +147,15 @@ class ResearchInvariantTests(unittest.TestCase):
     def test_all_versioned_schemas_are_valid_draft_2020_12(self):
         from jsonschema import Draft202012Validator
         directory = Path(__file__).resolve().parents[1] / "harness/schemas"
-        schemas = list(directory.glob("*.v1.schema.json"))
-        self.assertEqual(len(schemas), 11)
+        schemas = list(directory.glob("*.v*.schema.json"))
+        self.assertGreaterEqual(len(schemas), 11)
         for path in schemas:
             schema = json.loads(path.read_text())
             Draft202012Validator.check_schema(schema)
             self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
+            version = int(path.name.split(".v", 1)[1].split(".", 1)[0])
+            if "schema_version" in schema.get("properties", {}):
+                self.assertEqual(schema["properties"]["schema_version"]["const"], version)
 
     def test_receipt_conforms_to_independent_schema_validator(self):
         from jsonschema import Draft202012Validator

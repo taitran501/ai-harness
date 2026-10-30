@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CitationClaimV1",
+  "type": "object",
+  "required": [
+    "claim_id",
+    "claim_text",
+    "empirical_status",
+    "evidence"
+  ],
+  "properties": {
+    "claim_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "empirical_status": {
+      "enum": [
+        "hypothesis",
+        "external_report",
+        "demonstrated_gain"
+      ]
+    },
+    "topic_id": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "document": {
+      "type": "object",
+      "required": [
+        "path",
+        "start_line",
+        "end_line"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ledger_field": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "topic_id",
+          "locator",
+          "excerpt"
+        ],
+        "properties": {
+          "topic_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "snapshot_version": {
+            "type": "string"
+          },
+          "locator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "excerpt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start_offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "excerpt_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "verdict_ref": {
+      "type": "string"
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "document"
+      ]
+    },
+    {
+      "required": [
+        "ledger_field"
+      ]
+    }
+  ]
+}

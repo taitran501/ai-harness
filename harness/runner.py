@@ -285,9 +285,24 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             raise
 
     def _execute_run(self):
+        is_remote_container = os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1"
+        remote_capsule = None
+        if is_remote_container:
+            from harness.decision_rules import validate_remote_research_capsule
+
+            remote_capsule = validate_remote_research_capsule(self.project, self.config_path, self.cfg)
         _, _, receipt = GroundingGate.verify_config(
-            self.cfg, config_path=self.config_path, raise_on_error=True
+            self.cfg, config_path=self.config_path, raise_on_error=True, project_root=self.project_root,
+            citation_admission_override=(remote_capsule or {}).get("citation_admission") if remote_capsule else None,
         )
+        if remote_capsule:
+            citation_admission = remote_capsule["citation_admission"]
+        else:
+            from harness.citation_audit import enforce_citation_admission
+            citation_admission = enforce_citation_admission(self.project_root, self.cfg, action="run")
+        if citation_admission.get("admission") == "blocked":
+            raise ValueError("CITATION_ADMISSION_BLOCKED: " + str(citation_admission.get("reason")))
+        receipt["citation_admission"] = citation_admission
         GroundingGate.write_receipt(receipt, self.exp_dir / "GROUNDING_RECEIPT.json")
         set_seed(self.seed)
         self.cfg.setdefault("runtime", {})["seed"] = self.seed
@@ -301,7 +316,6 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             from harness.decision_rules import reserve_comparison_slot, validate_remote_research_capsule
             from harness.stagnation import StagnationController
             research = self.cfg.get("research", {})
-            is_remote_container = os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1"
             self.remote_research_execution = validate_remote_research_capsule(self.project, self.config_path, self.cfg)
             if not (is_remote_container and self.remote_research_execution):
                 from harness.macro_research import enforce_retrospective

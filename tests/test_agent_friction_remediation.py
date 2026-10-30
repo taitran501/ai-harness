@@ -138,7 +138,11 @@ class GroundingGateKaggleWhitelistTests(unittest.TestCase):
                         "uncertainty_level": "medium",
                     },
                 }
-                passed, errors, _ = GroundingGate.verify_config(cfg, raise_on_error=False)
+                passed, errors, _ = GroundingGate.verify_config(
+                    cfg,
+                    raise_on_error=False,
+                    citation_admission_override={"admission": "allowed", "status": "verified"},
+                )
                 self.assertTrue(passed, f"Expected pass for {src}, got errors: {errors}")
 
     def test_unverified_sentinel_still_rejected(self):

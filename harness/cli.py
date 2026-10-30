@@ -76,9 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit_scripts = subparsers.add_parser("audit-scripts", help="Scan workspace scripts for raw dispatch calls")
     audit_scripts.add_argument("--project-root", default=".", help="Workspace root")
     audit_scripts.add_argument("--json", action="store_true", help="Emit JSON report")
-    audit_claims = subparsers.add_parser("audit-claims", help="Scan markdown documents for forum topic citations and audit them against raw files on disk")
+    audit_claims = subparsers.add_parser("audit-claims", help="Lint Markdown citations and validate registered evidence and reviewed claims")
     audit_claims.add_argument("--project-root", default=".", help="Workspace root")
-    audit_claims.add_argument("--file", default=None, help="Specific markdown file to audit (defaults to scanning workspace .md files)")
+    audit_claims.add_argument("--file", action="append", default=None, help="Markdown file to audit (repeatable; defaults to task-scoped documents)")
+    audit_claims.add_argument("--claims-file", default=None, help="Versioned JSON claim-to-evidence bindings")
+    audit_claims.add_argument("--strict", action="store_true", help="Require complete coverage and validated support for every citation")
     audit_claims.add_argument("--json", action="store_true", help="Emit JSON report")
 
     status = subparsers.add_parser("status", help="Single-command install + workspace health report (default JSON)")
@@ -428,19 +430,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ))
         return 1 if report["findings"] else 0
     if args.command == "audit-claims":
-        from harness.audit_gate import scan_markdown_citations
-        report = scan_markdown_citations(args.project_root, file_path=args.file)
-        if args.json:
-            print(json.dumps(report, indent=2))
-        else:
-            if report["status"] == "clean":
-                print(f"✔ All {report['total_citations']} citations are verified against disk topics.")
+        from harness.citation_audit import CitationAuditInputError, audit_claims
+        try:
+            report = audit_claims(args.project_root, files=args.file, claims_file=args.claims_file, strict=args.strict)
+        except (CitationAuditInputError, OSError, UnicodeError, ValueError) as exc:
+            report = {"schema_version": 1, "status": "error", "coverage": "nothing_scanned",
+                      "documents_requested": 0, "documents_read": 0, "citations_discovered": 0,
+                      "citations_bound": 0, "sources_read": 0, "findings": [], "error": str(exc),
+                      "strict": bool(args.strict), "strict_pass": False}
+            if args.json:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
             else:
-                print(f"Found {len(report['findings'])} issue(s) across {report['total_citations']} citations:")
+                print(f"Citation audit input error: {exc}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+        else:
+            print(f"Coverage: {report['coverage']} | documents: {report['documents_read']}/{report['documents_requested']} | "
+                  f"citations: {report['citations_discovered']} discovered, {report['citations_bound']} bound | "
+                  f"registered sources read: {report['sources_read']}")
+            if report["status"] == "clean":
+                print("No citation lint or evidence integrity issues were found; claim support is reported separately.")
+            else:
+                print(f"Found {len(report['findings'])} citation finding(s):")
                 for item in report["findings"]:
-                    print(f"  {item['path']}:{item['line']} [{item['severity']}] Topic #{item['topic_id']}: {item['summary']}")
-        has_blocking = any(item.get("severity") == "blocking" for item in report["findings"])
-        return 1 if has_blocking else 0
+                    print(f"  {item.get('path', '<input>')}:{item.get('line', 0)} [{item['severity']}] "
+                          f"Topic #{item.get('topic_id', '?')}: {item['summary']}")
+            if args.strict:
+                print("Strict claim-support admission: " + ("passed" if report["strict_pass"] else "blocked"))
+        blocking = any(item.get("severity") == "blocking" for item in report.get("findings", []))
+        if args.strict:
+            return 0 if report.get("strict_pass") else 1
+        return 1 if blocking else 0
 
     if args.command == "status":
         from harness.status_report import collect_status, render_markdown

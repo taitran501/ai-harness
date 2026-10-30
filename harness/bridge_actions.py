@@ -67,6 +67,7 @@ class ActionHandlerMixin:
                 incumbent_path=params.get("incumbent_path") or params.get("incumbent") or params.get("baseline"),
                 id_col=params.get("id_col"),
                 pred_col=params.get("pred_col"),
+                citation_dependencies=params.get("citation_dependencies"),
             )
         elif act == "validate_candidate_pitch":
             from harness.candidate_preflight import validate_candidate_pitch
@@ -78,6 +79,7 @@ class ActionHandlerMixin:
                 candidate_exp_id=params.get("candidate_exp_id"),
                 incumbent_exp_id=params.get("incumbent_exp_id"),
                 paired_oof_evaluation_id=params.get("paired_oof_evaluation_id"),
+                citation_dependencies=params.get("citation_dependencies"),
             )
         elif act == "reconcile_submissions":
             from harness.reconciliation import reconcile_provider_submissions
@@ -142,6 +144,10 @@ class ActionHandlerMixin:
                 evidence=evidence,
                 parent_insight_id=params.get("parent_insight_id"),
                 family_id=params.get("family_id", "unclassified"), source_refs=params.get("source_refs"),
+                citation_claims=params.get("citation_claims"),
+                citation_audit_refs=params.get("citation_audit_refs"),
+                empirical_status=params.get("empirical_status", "hypothesis"),
+                decision_evaluation_id=params.get("decision_evaluation_id"),
                 session_id=session.session_id,
             )
         elif act == "plan_research_probe":

@@ -58,6 +58,51 @@ class TestCandidatePreflight(unittest.TestCase):
         self.assertIsNotNone(receipt["delusion_warning"])
         self.assertIn("CRITICAL", receipt["delusion_warning"])
 
+    def test_preflight_derives_citation_dependencies_from_sealed_run_config(self):
+        from harness.candidate_preflight import _citation_dependencies_from_lineage
+        from harness.project import HarnessProject
+
+        project = HarnessProject.discover(self.root)
+        run_dir = project.artifacts_dir / "lineage-exp"
+        run_dir.mkdir(parents=True)
+        (run_dir / "artifact_manifest.json").write_text("{}", encoding="utf-8")
+        (run_dir / "run_config.yaml").write_text(
+            "citation_dependencies:\n  - .ai-harness/citation_audits/receipt.json\n"
+            "grounding:\n  source_type: kaggle_discussion\n", encoding="utf-8")
+        predictions = run_dir / "test_predictions.csv"
+        predictions.write_text("id,satisfaction\n1,0.5\n", encoding="utf-8")
+        with patch("harness.artifacts.validate_run", return_value={"schema_version": 2}):
+            dependencies = _citation_dependencies_from_lineage(project, predictions)
+        self.assertEqual(dependencies, [".ai-harness/citation_audits/receipt.json"])
+
+    def test_candidate_preflight_receipt_digest_detects_tampered_dependencies(self):
+        candidate = self.root / "digest-candidate.csv"
+        incumbent = self.root / "digest-incumbent.csv"
+        frame = pd.DataFrame({"id": range(20), "satisfaction": np.linspace(0.1, 0.9, 20)})
+        frame.to_csv(candidate, index=False)
+        frame.to_csv(incumbent, index=False)
+        receipt = run_candidate_preflight(self.root, candidate, incumbent)
+        path = self.root / ".ai-harness" / "artifacts" / "preflight" / f"{receipt['preflight_id']}.json"
+        changed = json.loads(path.read_text(encoding="utf-8"))
+        changed["citation_dependencies"].append(".ai-harness/citation_audits/other.json")
+        path.write_text(json.dumps(changed), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "digest mismatch"):
+            load_preflight_receipt(self.root, receipt["preflight_id"])
+
+    def test_pitch_cannot_omit_receipt_dependencies_with_an_empty_argument(self):
+        candidate = self.root / "cited-candidate.csv"
+        incumbent = self.root / "cited-incumbent.csv"
+        frame = pd.DataFrame({"id": range(20), "satisfaction": np.linspace(0.1, 0.9, 20)})
+        frame.to_csv(candidate, index=False)
+        frame.to_csv(incumbent, index=False)
+        receipt = run_candidate_preflight(
+            self.root, candidate, incumbent,
+            citation_dependencies=[".ai-harness/citation_audits/missing.json"])
+        pitch = validate_candidate_pitch(self.root, receipt["preflight_id"], candidate_path=candidate,
+                                         citation_dependencies=[])
+        self.assertFalse(pitch["allowed"])
+        self.assertTrue(any("Citation admission" in error for error in pitch["errors"]))
+
     def test_preflight_passes_diverse_candidate(self):
         n = 1000
         ids = np.arange(n)

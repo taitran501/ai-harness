@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from harness.audit_gate import enforce_dispatch_script_guard, scan_dispatch_scripts, scan_markdown_citations
+from harness.citation_sources import SourceRegistry
 from harness.provenance import (
     PredictionProvenance,
     derive_submission_eligibility,
@@ -52,17 +53,18 @@ class ProvenanceDispatchGuardTests(unittest.TestCase):
             root = Path(temp)
             disc_dir = root / "discussions"
             disc_dir.mkdir()
-            # Topic 750885 discussing concurrency and cutoff only
-            (disc_dir / "topic_750885.json").write_text(
-                '{"title": "Negative results", "content": "14 streams vs 10 streams on RTX Pro 6000 and 110k token cutoff."}',
-                encoding="utf-8"
+            # Explicitly register a normalized source; audits never crawl arbitrary topic files.
+            SourceRegistry(root).register_topic_source(
+                "750885", {"id": 750885, "title": "Negative results",
+                           "content": "14 streams vs 10 streams on RTX Pro 6000 and 110k token cutoff."},
+                adapter="normalized_topic_v1",
             )
             # Markdown citing existing topic with fabricated terms and missing topic #999999
             md_path = root / "summary.md"
             md_path.write_text(
                 "# Analysis\n"
-                "- Proven scheduler D-prime by shiiin9 prevents high-level starvation (#750885).\n"
-                "- Untracked breakthrough reported in (#999999).\n",
+                "- Proven scheduler D-prime by shiiin9 prevents high-level starvation (Topic #750885).\n"
+                "- Untracked breakthrough reported in (Topic #999999).\n",
                 encoding="utf-8"
             )
             report = scan_markdown_citations(root, file_path=md_path)

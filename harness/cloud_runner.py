@@ -124,6 +124,10 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
     passed, errors, cfg = CloudPreflightInspector.run_full_preflight_check(config, project_root=project.root, full_data_check=False)
     if not passed:
         raise ValueError("Preflight failed: " + "; ".join(errors))
+    from harness.citation_audit import enforce_citation_admission
+    citation_admission = enforce_citation_admission(project.root, cfg, action="cloud_dispatch")
+    if citation_admission.get("admission") == "blocked":
+        raise ValueError("CITATION_ADMISSION_BLOCKED: " + str(citation_admission.get("reason")))
     from harness.cloud_policy import provider_preflight
     provider = provider_preflight(project, backend)
     if not provider.get("cli_installed") or not provider.get("authenticated"):

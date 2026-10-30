@@ -195,11 +195,16 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("ai-harness-debate", modular)
         debate = modular["ai-harness-debate"]
         self.assertIn("name: ai-harness-debate", debate)
-        self.assertIn("Adversarial Epistemic Debate & Cross-Examination Protocol", debate)
-        self.assertIn("Candidate Insight Card Format", debate)
-        self.assertIn("Physical Disk & String Verification", debate)
-        self.assertIn("Variance & Statistical Noise Challenge", debate)
+        self.assertIn("Three permitted outcomes", debate)
+        self.assertIn("Grounded hypothesis", debate)
+        self.assertIn("External reported result", debate)
+        self.assertIn("Demonstrated local gain", debate)
+        self.assertIn(r"\times", debate)
+        self.assertIn(r"\text{SE}", debate)
+        self.assertNotIn("reported_delta", debate)
+        self.assertNotIn("N < 3", debate)
         self.assertIn("ai-harness audit-claims", debate)
+        self.assertIn("/ai-harness-debate", modular["ai-harness-explore"])
 
     def test_install_global_skills(self):
         """Verify installing modular skills into global directory."""

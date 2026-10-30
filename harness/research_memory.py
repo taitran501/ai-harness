@@ -79,6 +79,12 @@ def render_markdown_progress(
     verified_ids = {run.get("exp_id") for run in verified_runs}
     insights = [entry for entry in entries if entry.get("kind") == "insight"]
     for insight in insights:
+        admission = insight.get("citation_admission") or {}
+        insight["citation_status"] = (
+            admission.get("admission", "unverified") if insight.get("citation_audit_refs")
+            else "provenance_declared_unreviewed" if insight.get("source_refs")
+            else "not_applicable"
+        )
         if not insight.get("evidence_currently_verified"):
             insight["evidence_currently_verified"] = bool(
                 set(insight.get("evidence", [])) & verified_ids
@@ -188,8 +194,8 @@ def render_markdown_progress(
         "",
         "## Insight status",
         "",
-        "| Insight | Status | Required step | Next action |",
-        "| --- | --- | --- | --- |",
+        "| Insight | Citation status | Local evidence status | Required step | Next action |",
+        "| --- | --- | --- | --- | --- |",
     ])
     visible_insights = []
     for insight in insights:
@@ -209,6 +215,7 @@ def render_markdown_progress(
         visible_insights.append(insight)
         cells = [
             f"{insight.get('title', 'Untitled')} ({insight.get('id', '')})",
+            insight.get("citation_status", "unverified"),
             state.get("status", "needs evidence review"),
             state.get("required_step", "Review verified results"),
             state.get("next_action", "Plan a bounded probe"),
@@ -230,7 +237,8 @@ def render_markdown_progress(
     )
     labels = (
         "title", "parent_insight_id", "insight_id", "probe_plan_id", "exp_id", "action",
-        "family_id", "source_refs", "review_id", "map_digest", "run_count_at_review",
+        "family_id", "source_refs", "citation_claims", "citation_audit_refs", "empirical_status",
+        "citation_admission", "review_id", "map_digest", "run_count_at_review",
         "changes_since_last_review", "supported_mechanisms", "rejected_mechanisms",
         "highest_priority_untouched", "next_probe_rationale", "budget_limit", "revisit_conditions",
         "observation", "mechanism", "hypothesis", "control", "intervention", "expected_observation",
@@ -398,22 +406,17 @@ class ResearchMemory:
             else:
                 task_spec = {}
         if artifacts_dir is None:
-            meta = getattr(task_spec, "metadata", None) if isinstance(task_spec, dict) else getattr(task_spec, "metadata", None)
-            task_id = ""
-            if isinstance(meta, dict):
-                task_id = str(meta.get("id") or meta.get("task_name") or "").strip()
-            art_base = self.root / ".ai-harness" / "artifacts"
-            found = None
-            if task_id and (art_base / task_id).is_dir():
-                found = art_base / task_id
-            elif art_base.is_dir():
-                for child in art_base.iterdir():
-                    if child.is_dir() and (child / "research_memory.json").exists():
-                        found = child
-                        break
-                    elif child.is_dir() and not found:
-                        found = child
-            artifacts_dir = found or (art_base / task_id if task_id else art_base)
+            from harness.project import HarnessProject
+
+            project = HarnessProject.discover(self.root)
+            progress_path = project.active_research_progress_path
+            if progress_path is not None:
+                artifacts_dir = progress_path.parent
+            else:
+                # No active task can be resolved. Keep direct, task-local legacy
+                # state in the configured base directory; never choose a child by
+                # filesystem enumeration order.
+                artifacts_dir = project.artifacts_dir
 
         self.artifacts = Path(artifacts_dir)
         self.path = self.artifacts / "research_memory.json"
@@ -607,6 +610,13 @@ class ResearchMemory:
                 classification = "hypothesis"
             detail = {**entry, "classification": classification}
             if kind == "insight":
+                admission = entry.get("citation_admission") or {}
+                if entry.get("citation_audit_refs"):
+                    detail["citation_status"] = admission.get("admission", "unverified")
+                elif entry.get("source_refs"):
+                    detail["citation_status"] = "provenance_declared_unreviewed"
+                else:
+                    detail["citation_status"] = "not_applicable"
                 detail["active_probe_plan"] = has_live_plan(entry.get("id"))
                 detail["verified_run_ids"] = sorted(
                     run_id for run_id, run in ((r.get("exp_id"), r) for r in runs)
@@ -900,7 +910,11 @@ class ResearchMemory:
 
     def record_insight(self, *, title, observation, mechanism, next_action, evidence=None,
                        parent_insight_id=None, session_id=None, family_id: Optional[str] = "unclassified",
-                       source_refs: Optional[List[str]] = None):
+                       source_refs: Optional[List[str]] = None,
+                       citation_claims: Optional[List[Dict[str, Any]]] = None,
+                       citation_audit_refs: Optional[List[str]] = None,
+                       empirical_status: str = "hypothesis",
+                       decision_evaluation_id: Optional[str] = None):
         from harness.macro_research import family_id as normalize_family
         if source_refs is not None and (not isinstance(source_refs, list) or
                 any(not isinstance(ref, str) or not ref.strip() for ref in source_refs)):
@@ -908,6 +922,45 @@ class ResearchMemory:
         fields = {key: self._text(value, key) for key, value in {
             "title": title, "observation": observation, "mechanism": mechanism,
             "next_action": next_action}.items()}
+        if empirical_status not in {"hypothesis", "external_report", "demonstrated_gain"}:
+            raise ValueError("empirical_status must be hypothesis, external_report, or demonstrated_gain")
+        if citation_claims is not None and (not isinstance(citation_claims, list) or
+                any(not isinstance(claim, dict) for claim in citation_claims)):
+            raise ValueError("citation_claims must be a list of structured claim objects")
+        if citation_audit_refs is not None and (not isinstance(citation_audit_refs, list) or
+                any(not isinstance(ref, str) or not ref.strip() for ref in citation_audit_refs)):
+            raise ValueError("citation_audit_refs must be a list of receipt paths")
+        citation_admission = {"status": "not_applicable", "admission": "not_applicable"}
+        if empirical_status == "demonstrated_gain":
+            try:
+                from harness.decision_rules import policy_directory, read_decision_evaluation
+
+                evaluation = read_decision_evaluation(
+                    policy_directory(self.root) / f"{decision_evaluation_id}.json") if decision_evaluation_id else None
+                if not evaluation or evaluation.get("evaluation_id") != decision_evaluation_id or evaluation.get("outcome") != "supported":
+                    raise ValueError("MACHINE_EVALUATED_GAIN_RECEIPT_REQUIRED")
+            except (OSError, ValueError, KeyError, TypeError):
+                empirical_status = "hypothesis"
+                citation_admission = {"status": "blocked", "admission": "blocked",
+                                      "reason": "MACHINE_EVALUATED_GAIN_RECEIPT_REQUIRED"}
+        requires_citation_review = empirical_status == "external_report" or bool(source_refs or citation_claims)
+        if requires_citation_review and empirical_status in {"external_report", "demonstrated_gain"}:
+            from harness.citation_audit import enforce_citation_admission
+
+            if empirical_status == "external_report" and not citation_claims:
+                citation_admission = {"status": "blocked", "admission": "blocked",
+                                      "reason": "STRUCTURED_EXTERNAL_CLAIM_REQUIRED"}
+            elif not citation_audit_refs:
+                citation_admission = {"status": "blocked", "admission": "blocked",
+                                      "reason": "REVIEWED_CITATION_RECEIPT_REQUIRED"}
+            else:
+                citation_admission = enforce_citation_admission(
+                    self.root, {"citation_dependencies": list(citation_audit_refs),
+                                "citation_claims": list(citation_claims or [])}, action="record_insight")
+            if citation_admission.get("admission") != "allowed":
+                # Keep the idea, but record it only as a hypothesis until the
+                # claim has current, independently reviewed support.
+                empirical_status = "hypothesis"
         with workspace_lock(self.path.parent):
             if parent_insight_id:
                 self._insight(parent_insight_id)
@@ -918,6 +971,9 @@ class ResearchMemory:
             return self._append("insight", **fields, evidence=evidence_list,
                 parent_insight_id=parent_insight_id, session_id=session_id,
                 family_id=normalize_family(family_id), source_refs=list(source_refs or []),
+                citation_claims=list(citation_claims or []), citation_audit_refs=list(citation_audit_refs or []),
+                empirical_status=empirical_status, citation_admission=citation_admission,
+                decision_evaluation_id=decision_evaluation_id,
                 evidence_status="declared_insight")
 
     def plan_probe(self, *, insight_id, control, intervention, expected_observation,
@@ -929,7 +985,9 @@ class ResearchMemory:
             "alternative_explanation": alternative_explanation,
             "budget": budget, "stop_rule": stop_rule}.items()}
         with workspace_lock(self.path.parent):
-            self._insight(insight_id)
+            insight = self._insight(insight_id)
+            fields["empirical_status"] = insight.get("empirical_status", "hypothesis")
+            fields["citation_admission"] = insight.get("citation_admission", {"admission": "not_applicable"})
             if structured:
                 registration = register_decision_rule(decision_rule, project=self.root, task_spec=self.spec, plugin=self.plugin)
                 fields.update(decision_rule=registration["rule"], registration=registration,
@@ -1098,8 +1156,11 @@ class ResearchMemory:
             trace_state = self.trace(insight_id)["state"]
             if not trace_state["latest_plan_id"]:
                 raise ValueError("Linked insight needs plan_research_probe before implementation or execution")
+        from harness.citation_audit import enforce_citation_admission
+        citation_admission = enforce_citation_admission(self.root, cfg, action="research_config_review")
         return {"fingerprint": fp, "exact_config_matches": exact[:8], "research_trace": trace_state,
                 "related_approaches": neighbors[:8], "mechanism_matches": mechanism_matches[:5],
+                "citation_admission": citation_admission,
                 "revisit_reason": str(revisit_reason).strip(),
                 "allowed": not exact or bool(str(revisit_reason).strip()),
                 "interpretation": "Exact means same declared execution config; related is lexical advisory only; "

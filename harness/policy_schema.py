@@ -11,8 +11,18 @@ import re
 from pathlib import Path
 
 
-def validate_document(name, value):
-    schema = json.loads((Path(__file__).parent / "schemas" / f"{name}.v1.schema.json").read_text(encoding="utf-8"))
+def validate_document(name, value, *, version=1):
+    """Validate a policy document using an explicitly selected schema version.
+
+    Version 1 remains the compatibility default for existing callers. New
+    citation-aware receipts must ask for version 2 explicitly.
+    """
+    if type(version) is not int or version < 1:
+        raise ValueError("Schema version must be a positive integer")
+    schema_path = Path(__file__).parent / "schemas" / f"{name}.v{version}.schema.json"
+    if not schema_path.is_file():
+        raise ValueError(f"Unsupported schema version: {name}.v{version}")
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
     def check(node, obj, path="$", root=schema):
         if "$ref" in node:

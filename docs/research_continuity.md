@@ -178,3 +178,21 @@ repository instructions, and newly attached workspace skills expose this protoco
 Agents bypassing these interfaces can still ignore it; direct runner invocations do
 not enforce the novelty gate. Completed direct runs are discoverable as verified
 history when the bridge is next read. Existing user prompt packs are preserved.
+
+## Citation continuity and evidence status
+
+External citation state lives under `.ai-harness/evidence/` and
+`.ai-harness/citation_audits/`, outside completed run directories. Audit discovery
+uses root Markdown, immediate `.ai-harness/*.md`, explicitly configured files,
+and the active task's resolved `ResearchMemory.progress_path`; it does not choose
+a progress file by traversing other task artifacts. A missing or ambiguous active
+task remains an incomplete scope.
+
+Historical `source_refs` and topic mentions remain provenance declarations until
+their exact source version and claim binding are registered and reviewed. Never
+promote a legacy citation to verified because a topic file happens to exist or a
+keyword appears in it. Revalidate the audit/review receipt when an insight,
+candidate, submission, or remote execution depends on it. A grounded hypothesis
+can proceed to a bounded probe, while external reported results and demonstrated
+local gains retain separate status. Receipt hashes detect edits and stale inputs;
+they do not authenticate a verifier against full-workspace rewrite.

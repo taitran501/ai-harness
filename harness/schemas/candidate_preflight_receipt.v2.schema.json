@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-harness:candidate-preflight-receipt:2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "preflight_id",
+    "candidate",
+    "incumbent",
+    "similarity",
+    "classification",
+    "recommendation",
+    "verdict",
+    "created_at",
+    "citation_admission",
+    "citation_dependencies",
+    "citation_claims",
+    "receipt_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "preflight_id": {
+      "type": "string",
+      "pattern": "^preflight-[a-f0-9]{32}$"
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "semantic_hash",
+        "row_count"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "semantic_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "row_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "incumbent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "semantic_hash",
+        "row_count"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "semantic_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "row_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "similarity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spearman_rho",
+        "pearson_r",
+        "mean_abs_delta",
+        "max_abs_delta",
+        "p95_abs_delta",
+        "rank_swap_count",
+        "rank_swap_ratio"
+      ],
+      "properties": {
+        "spearman_rho": {
+          "type": "number"
+        },
+        "pearson_r": {
+          "type": "number"
+        },
+        "mean_abs_delta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_abs_delta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95_abs_delta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "rank_swap_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rank_swap_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "classification": {
+      "type": "string",
+      "enum": [
+        "TRIVIAL_PERTURBATION",
+        "MINOR_REWEIGHTING",
+        "DIVERSE_CANDIDATE"
+      ]
+    },
+    "delusion_warning": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FLAGGED_NEAR_DUPLICATE"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "citation_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "admission",
+        "reason",
+        "receipt_digests"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "allowed",
+            "blocked",
+            "error",
+            "not_applicable"
+          ]
+        },
+        "admission": {
+          "enum": [
+            "allowed",
+            "blocked",
+            "error",
+            "not_applicable"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receipt_digests": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "action": {
+          "type": "string"
+        }
+      }
+    },
+    "citation_dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "citation_claims": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "receipt_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}
