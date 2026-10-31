@@ -26,6 +26,10 @@ validation scheme when the task declared one in `task.validation`.
 - Validation information comes from the task contract, with legacy field fallback.
 - Skill injector tests reflect the current workflow and cover validation field
   precedence and backward compatibility.
+- Pre-push validation exposed seven failures also reproduced on the parent commit:
+  update legacy alias/HUD assertions to test the canonical skill and current policy,
+  keep the research frontier compact, and reject a nested Kaggle mount owned by a
+  different account when an explicit owner was requested.
 
 ## Approach
 
@@ -42,6 +46,9 @@ real agent; generated instructions alone cannot guarantee it.
 Python files, `git diff --check` passed, and all three regenerated airline skills
 passed `skill-creator`'s `quick_validate.py`. Real Antigravity conversation
 behavior has not been replayed.
+
+The seven full-suite failures were reproduced independently on parent `078cc48`;
+all seven targeted regressions pass after the fixes above.
 
 ## Impact & follow-ups
 

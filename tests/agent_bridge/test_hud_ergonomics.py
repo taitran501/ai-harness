@@ -184,8 +184,8 @@ class TestResearchContinuityHudRendering(unittest.TestCase):
         lines = _research_continuity_hud_lines(memory)
         text = "\n".join(lines)
         self.assertIn("STAGNATION / PLATEAU ADVISORY", text)
-        self.assertIn("Honor the task-scoped stagnation pause", text)
-        self.assertIn("ai-harness discussion list", text)
+        self.assertIn("Honor the task-scoped recovery gate", text)
+        self.assertIn("Continue diagnostics, research notes and bounded recovery probes", text)
 
     def test_empty_memory_renders_without_error(self):
         from harness.agent_bridge import _research_continuity_hud_lines

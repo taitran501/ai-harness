@@ -500,6 +500,9 @@ class KaggleRuntimeTests(unittest.TestCase):
             find_dataset_mount(base, "absent-owner/fixture-data")
         with self.assertRaisesRegex(RuntimeError, "Ambiguous"):
             find_dataset_mount(base, "fixture-data")
+        other.rmdir()
+        with self.assertRaisesRegex(RuntimeError, "missing"):
+            find_dataset_mount(base, "absent-owner/fixture-data")
 
     def test_api_download_imports_flat_output_without_a_cli_process(self):
         output = self.root / "api-output" / self.exp_id
