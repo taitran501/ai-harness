@@ -11,9 +11,11 @@ completed result, and before promotion, submission, or freeze decisions.
 
 ## Keep the competition active
 
-Research continues until the official competition closes or the user explicitly ends
-the work. A high public score, a plateau, a completed session/day, exhausted daily
-quota, a `best` label, or one supported candidate is not a completion signal.
+Research continues through the official competition submission cutoff/endgame. A high
+public score, a plateau, a completed session/day, exhausted daily quota, a `best`
+label, or one supported candidate is not a completion signal. If the user withdraws
+earlier, record a user-directed withdrawal or pause; do not label it a competition
+freeze or finalization.
 
 `freeze_candidate` creates a hard portfolio lock that can stop experiments and
 submissions. It is an endgame operation, not a way to protect a good score. Keep
