@@ -3,8 +3,8 @@
 - **Date**: 2026-10-31
 - **PR**: —
 - **Branch**: `feat/research-workflow-skills`
-- **Status**: Working tree
-- **Commits**: —
+- **Status**: Validated; ready to merge
+- **Commits**: `653ac73`, `a91d7e2`, `b5a634b`
 
 ## Why
 
@@ -53,6 +53,9 @@ The seven initial full-suite failures were reproduced independently on parent
 `078cc48`; all seven targeted regressions pass after the fixes above. A subsequent
 full run exposed a conflicting ownerless-nested-mount expectation, which was
 adjusted to require a verifiable owner instead of guessing from a directory name.
+Final pre-push verification: `python tools/run_tests.py` ran 1,300 tests in
+485.946 seconds (2 skipped, all passing); `ruff check harness/ tools/ tests/`
+passed; `git diff --check` passed.
 
 ## Impact & follow-ups
 
