@@ -131,9 +131,8 @@ def generate_skill_content(
         "> **Scope Notice**: AI-Harness is currently validated and working well ONLY on Natural Language Processing (NLP / Text) tasks. Other modalities (Tabular, Vision, Audio, Multimodal) are experimental works-in-progress (WIP / Roadmap) and NOT yet validated in practice.",
         ">",
         "> [!TIP]",
-        "> **Complementary Slash Commands**:",
+        "> **Complementary Slash Command**:",
         "> - `/debate`: Adversarially review ML hypotheses and audit discussion citations before implementation.",
-        "> - `/submit`: Verify prediction diversity, audit out-of-fold gains, and export safe submissions.",
     ]
     if exec_locked:
         lines += [
@@ -470,6 +469,24 @@ def generate_skill_content(
 
     lines += render_reference().split("\n")
 
+    lines.extend([
+        "---",
+        "",
+        "## 6. Submission Governance & Candidate Preflight Gate",
+        "",
+        "> [!CAUTION]",
+        "> **Zero Local CV Gain = ZERO Submission**:",
+        "> Quota is a finite ceiling, never a playground. Submissions without a machine-verified local CV improvement over the fixed baseline anchor are STRICTLY FORBIDDEN.",
+        "> - 'Testing on public LB to see how it scores' is a critical violation of harness policy.",
+        "> - Even with user approval or a valid preflight receipt, a candidate lacking verified local CV gain CANNOT be dispatched.",
+        "",
+        "- **Candidate Preflight & Diversity Check**: Before promoting or pitching a candidate for submission, run candidate preflight against the active incumbent:",
+        "  ```powershell",
+        "  ai-harness preflight --candidate <test-predictions.csv> --incumbent <incumbent-predictions.csv>",
+        "  ```",
+        "  Candidates with Spearman $\\rho \\ge 0.995$ are near-duplicates and prohibited from submission without verified paired out-of-fold gain.",
+        "- **Attributable Dispatch & Human Confirmation**: All leaderboard dispatches require explicit operator approval (`--user-approved`). Never bypass the framework using raw curl/external scripts.",
+    ])
     return "\n".join(lines)
 
 
@@ -819,7 +836,6 @@ def generate_modular_skills(
     return {
         "harness": generate_skill_content(task, artifact_path=artifact_path, skill_name="harness"),
         "debate": generate_debate_skill_content(task, artifact_path=artifact_path, skill_name="debate"),
-        "submit": generate_submit_skill_content(task, artifact_path=artifact_path, skill_name="submit"),
     }
 
 
@@ -866,6 +882,7 @@ def install_global_skills(
         "ai-harness-explore",
         "ai-harness-submit",
         "ai-harness-debate",
+        "submit",
     )
     for legacy_name in legacy_purge:
         legacy_dir = skills_dir / legacy_name
@@ -932,6 +949,7 @@ def install_workspace_skills(
         "ai-harness-explore",
         "ai-harness-submit",
         "ai-harness-debate",
+        "submit",
     )
     for legacy_name in legacy_purge:
         legacy_dir = skills_dir / legacy_name

@@ -151,7 +151,7 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("register_recovery_probe", content)
 
     def test_generate_modular_skills(self):
-        """Verify lean modular slash command skills generation."""
+        """Verify lean modular slash command skills generation (harness and debate)."""
         task_cfg = {
             "task_name": "Airline Delay Prediction",
             "platform": "kaggle",
@@ -161,7 +161,7 @@ class SkillInjectorTests(unittest.TestCase):
             "competition_id": "airline-delay-prediction",
         }
         modular = generate_modular_skills(task_cfg)
-        self.assertEqual(set(modular.keys()), {"harness", "debate", "submit"})
+        self.assertEqual(set(modular.keys()), {"harness", "debate"})
 
         # Harness skill verification
         harness = modular["harness"]
@@ -169,16 +169,8 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("ML Experiment Harness", harness)
         self.assertIn("ai-harness-agent context", harness)
         self.assertIn("/debate", harness)
-        self.assertIn("/submit", harness)
-
-        # Submit skill verification
-        submit = modular["submit"]
-        self.assertIn("name: submit", submit)
-        self.assertIn("Submission Governance & Provenance Gate", submit)
-        self.assertIn("Zero Local CV Gain = ZERO Submission", submit)
-        self.assertIn("Prediction Provenance & Recipe Binding", submit)
-        self.assertIn("Candidate Preflight & Diversity Governance", submit)
-        self.assertIn("Backdoor Script Prohibition", submit)
+        self.assertIn("Submission Governance & Candidate Preflight Gate", harness)
+        self.assertIn("Zero Local CV Gain = ZERO Submission", harness)
 
         # Debate skill verification
         debate = modular["debate"]
@@ -199,11 +191,12 @@ class SkillInjectorTests(unittest.TestCase):
             target = Path(tmp_dir) / "skills"
             (target / "ai-experiment-harness").mkdir(parents=True)
             (target / "ai-harness-resume").mkdir(parents=True)
+            (target / "submit").mkdir(parents=True)
             written = install_global_skills(target_dir=target)
-            self.assertEqual(len(written), 3)
+            self.assertEqual(len(written), 2)
             self.assertTrue((target / "harness" / "SKILL.md").exists())
             self.assertTrue((target / "debate" / "SKILL.md").exists())
-            self.assertTrue((target / "submit" / "SKILL.md").exists())
+            self.assertFalse((target / "submit").exists())
             self.assertFalse((target / "ai-experiment-harness").exists())
             self.assertFalse((target / "ai-harness-resume").exists())
 
@@ -219,12 +212,12 @@ class SkillInjectorTests(unittest.TestCase):
                 "direction": "maximize",
             }
             written = install_workspace_skills(project_root=root, task_config=task_cfg)
-            self.assertEqual(len(written), 4)  # harness, debate, submit + ai-harness alias
+            self.assertEqual(len(written), 3)  # harness, debate + ai-harness alias
             skills_dir = root / ".agents" / "skills"
             self.assertTrue((skills_dir / "harness" / "SKILL.md").exists())
             self.assertTrue((skills_dir / "debate" / "SKILL.md").exists())
-            self.assertTrue((skills_dir / "submit" / "SKILL.md").exists())
             self.assertTrue((skills_dir / "ai-harness" / "SKILL.md").exists())
+            self.assertFalse((skills_dir / "submit").exists())
             self.assertFalse((skills_dir / "ai-harness-resume").exists())
 
     def test_cli_install_skills(self):
@@ -241,7 +234,7 @@ class SkillInjectorTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertTrue((target / "harness" / "SKILL.md").exists())
                 self.assertTrue((target / "debate" / "SKILL.md").exists())
-                self.assertTrue((target / "submit" / "SKILL.md").exists())
+                self.assertFalse((target / "submit").exists())
             finally:
                 if prev_env is None:
                     os.environ.pop("GEMINI_SKILLS_DIR", None)
