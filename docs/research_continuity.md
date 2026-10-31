@@ -165,13 +165,26 @@ The context counts consecutive non-improvements across sessions; equal scores ar
 not progress even when the meaningful-improvement threshold is zero. Probes and
 execution failures do not contribute to this scientific plateau count.
 
-After three comparable non-improvements, the default advisory is
-`REASSESS_RECOMMENDED`. Inspect verified diagnostic slices, search previous lessons,
-enumerate alternative mechanisms, and choose a cheap probe that distinguishes them.
-Record its control, observable result, promotion criterion, and budget/stop rule.
-The advisory neither freezes the task nor demonstrates that the agent has reached
-a capability ceiling. Explicit resource budgets, user cancellation, freeze approval,
-and configured hard stopping rules retain their existing authority.
+After three comparable non-improvements, `REASSESS_RECOMMENDED` signals that the
+current comparison line needs review. Inspect verified diagnostic slices, search
+previous lessons, retrieve relevant discussions, and identify a distinct mechanism
+with a registered control, observable result, promotion criterion, and budget/stop
+rule.
+
+For competition tasks (Kaggle, Codabench, and similar), the stagnation latch pauses
+promotion and submission of that line but leaves full validation open for distinct,
+preregistered mechanisms. A verified, machine-evaluated supported result can clear
+the latch. Generic non-competition tasks retain the bounded recovery behavior. A
+macro retrospective may temporarily gate costly runs; complete it and resume the
+competition loop. Neither gate means that research is exhausted.
+
+An active competition remains active through its official close. A high score,
+plateau, new session, end of day, exhausted quota, or supported candidate does not
+authorize freeze or finalization. Keep candidate slots provisional. Use
+`freeze_candidate` only for explicit endgame selection at the final submission
+cutoff; it is a
+hard portfolio lock, not a research milestone. See
+[the competition research protocol](competition_research_protocol.md).
 
 The bridge HUD, action observations, dashboard-generated prompts, phase prompts,
 repository instructions, and newly attached workspace skills expose this protocol.

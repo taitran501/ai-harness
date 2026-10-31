@@ -347,7 +347,9 @@ def prepare_remote_research(project, config_path):
     from harness.macro_research import enforce_retrospective
     enforce_retrospective(project, cfg=cfg, recovery_probe=bool(research.get("recovery_probe_id")))
     blocker = StagnationController(project).check_action("run_full_validation",
-        recovery_probe_id=research.get("recovery_probe_id"), candidate_id=candidate_id)
+        recovery_probe_id=research.get("recovery_probe_id"), candidate_id=candidate_id,
+        insight_id=research.get("insight_id"), probe_plan_id=research.get("probe_plan_id"),
+        decision_rule_id=research.get("decision_rule_id"))
     if blocker:
         raise DecisionRuleNotSatisfied(["STAGNATION_PAUSE"])
     has_rule = bool(research.get("decision_rule_id"))

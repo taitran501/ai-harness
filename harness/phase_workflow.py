@@ -21,7 +21,7 @@ PHASES = (
     ("experiment", "Experiment loop"),
     ("select", "Candidate management"),
     ("public_lb", "External evaluation"),
-    ("freeze", "Final selection"),
+    ("freeze", "Final selection at competition close"),
     ("finalization", "Competition closure"),
 )
 PHASE_IDS = tuple(phase_id for phase_id, _ in PHASES)
@@ -58,12 +58,29 @@ def initialize_prompt_pack(project_root: Path | str, force: bool = False) -> Dic
         prompt_rel = f"phases/{index:02d}-{phase_id}.md"
         prompt_path = pack_dir / prompt_rel
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        content = (
-            f"# {title}\n\n"
-            "<!-- Replace this starter with the phase instructions for your task. -->\n\n"
-            "## User prompt\n\n"
-            "Add the task-specific instruction here. The IDE agent owns reasoning and any web search.\n"
-        )
+        if phase_id == "freeze":
+            content = (
+                f"# {title}\n\n"
+                "This is an endgame phase. Do not enter it because an incumbent has a high score, "
+                "experiments plateaued, a session/day ended, or the daily submission quota is exhausted. "
+                "While the official competition remains open, keep candidates provisional and continue "
+                "grounded exploration and validation.\n\n"
+                "At the final submission cutoff/endgame (when the user requests final closure), "
+                "review verified local results, external leaderboard results, submission status and the task metric. "
+                "Select only eligible, audited candidates. Explain uncertainty and keep local validation separate "
+                "from public/private leaderboard evidence. Freeze only through the approval-gated harness action, "
+                "then record final evaluation and reproducibility evidence.\n\n"
+                "## User prompt\n\n"
+                "Follow the repository competition research protocol. The IDE agent owns scientific reasoning "
+                "and may inspect official rules and relevant community discussions.\n"
+            )
+        else:
+            content = (
+                f"# {title}\n\n"
+                "<!-- Replace this starter with the phase instructions for your task. -->\n\n"
+                "## User prompt\n\n"
+                "Add the task-specific instruction here. The IDE agent owns reasoning and any web search.\n"
+            )
         if force or not prompt_path.exists():
             prompt_path.write_text(content, encoding="utf-8")
         phase_docs.append(

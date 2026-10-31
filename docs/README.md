@@ -79,7 +79,7 @@ Competitions progress through eight sequential, evidence-gated lifecycle phases:
 | **Phase 4** | `experiment` | Iterative AIDE UCB exploration loop with single-variable interventions | `create_experiment`, `run_full_validation` |
 | **Phase 5** | `select` | Identifying top models, error diversity, and candidate pool management | `promote_candidate`, `inspect_diagnostics` |
 | **Phase 6** | `public_lb` | Tracking external evaluation scores (e.g., Kaggle public leaderboard) | `record_external_score` |
-| **Phase 7** | `freeze` | Model blending, ensembling, and locking final candidate slots | `build_ensemble`, `freeze_candidate` |
+| **Phase 7** | `freeze` | Endgame-only final portfolio lock; keep candidates provisional while the competition is active | `freeze_candidate` |
 | **Phase 8** | `finalization` | Deterministic submission verification, packaging, and sign-off | `prepare_submission`, `ai-harness-audit` |
 
 ---
@@ -93,6 +93,8 @@ Use the following reading guide based on your current task:
 | **[changes/](changes/README.md)** | Engineers & Agents | **Active change log** — one file per framework-repo change/PR (why/what/approach/evidence/impact). Write a new file here for every change, before committing. |
 | **[architecture.md](architecture.md)** | Engineers & Agents | Understanding the three-layer system design, Solution Tree DAG, and execution backends. |
 | **[agent_workflow.md](agent_workflow.md)** | AI Coding Assistants | Practical guide to interacting with the harness via CLI, reading context HUDs, and managing sessions. |
+| **[competition_research_protocol.md](competition_research_protocol.md)** | AI Coding Assistants | Active competition objectives, orthogonal exploration, quota use, stagnation, and endgame-only portfolio locking. |
+| **[research_continuity.md](research_continuity.md)** | AI Coding Assistants | Durable research memory, hypothesis lineage, evidence-backed decisions, and restart behavior. |
 | **[CORRECTNESS_CONTRACT.md](CORRECTNESS_CONTRACT.md)** | Engineers & Agents | Critical specification on run immutability, manifest hashing, scoring rules, and submission validation. |
 | **[TASK_SPEC_TEMPLATE.md](TASK_SPEC_TEMPLATE.md)** | Engineers & Agents | Schema reference for writing `configs/task.yaml` and human context files (`docs/TASK.md`). |
 | **[plugin_architecture.md](plugin_architecture.md)** | Engineers | Implementing custom task plugins (`TaskPlugin`), entry points, and workspace prompt packs. |

@@ -1298,10 +1298,11 @@ class ResearchMemory:
                             for state in active[:3]]
         progress = self._publish_progress(runs)
         from harness.decision_rules import _project
-        from harness.stagnation import StagnationController
+        from harness.stagnation import StagnationController, is_competition_task
         project = _project(self.root)
         states = StagnationController(project).reconcile_results() if project.artifacts_dir.resolve() == self.artifacts.resolve() else {}
         paused = [state for state in states.values() if state["state"] == "paused_for_stagnation"]
+        competition_task = is_competition_task(self.spec)
         from harness.macro_research import compute_macro_hypothesis_map, retrospective_status
         macro_map = compute_macro_hypothesis_map(self, runs)
         # Context is bounded independently of campaign length. Full evidence IDs
@@ -1327,14 +1328,16 @@ class ResearchMemory:
             "recent_results": [self._compact(r) for r in runs[-4:]],
             "consecutive_non_improvements": stalled, "reassess_recommended": stalled >= max(1, patience),
             "submission_pause": bool(paused), "stagnation_states": paused[:3],
+            "competition_task": competition_task,
             "resume_protocol": ["Read checkpoint and search_research_memory before brainstorming.",
                 "Use review_hypothesis before implementation; explain related approaches and intentional repeats.",
                 "Record each insight with record_research_insight; plan_research_probe before linked implementation. "
                 "Link config.research.insight_id; use trace_research_insight for its history and derived directions.",
                 "Interpret unreviewed results before another brainstorm. Record insight-linked decisions with lesson, "
                 "next_action and revisit_when for rejected/deferred directions; checkpoint active insight_ids.",
-                "Quota is a ceiling. Honor the task-scoped stagnation pause after three failed comparable promotion results. "
-                "Submissions and ordinary full exploration stay paused until a registered bounded recovery probe is verified supported. "
+                "After three failed comparable promotion results, stop promoting/submitting that line and reassess it. "
+                "In competition workspaces, continue full validation for distinct preregistered mechanisms; a machine-evaluated supported result can clear the promotion pause. "
+                "Generic tasks may use a registered bounded recovery probe. A pause never ends the competition or authorizes freeze. "
                 "Proactively mine community discussions ('ai-harness discussion list <comp>') for fresh signals, representations, or external insights. "
                 "Inspect verified diagnostics, retrieve old lessons, enumerate alternative orthogonal mechanisms (different model families, novel representations, risk-hedging ensembles), "
                 "and choose a bounded discriminating probe with an explicit promotion/stop criterion. "

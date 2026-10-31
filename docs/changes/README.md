@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-10-31 | Competition research remains open through official close; Antigravity skill and repeated HUD/action reminders carry the directive across sessions and results | Working tree | [competition-research-drive-and-endgame-freeze](competition-research-drive-and-endgame-freeze.md) |
 | 2026-10-31 | Lean slash command skills (/harness, /debate, /submit), simplified names and human-friendly descriptions | Working tree | [lean-slash-command-skills](lean-slash-command-skills.md) |
 | 2026-10-31 | Hardened citation audit, content-addressed evidence registry, explicit claim review, typed admission, and debate outcomes | Working tree | [hardened-citation-audit-and-admission](hardened-citation-audit-and-admission.md) |
 | 2026-10-31 | Adversarial dual-agent debate skill (`/ai-harness-debate`) and automated claim citation audit (`ai-harness audit-claims`) | Working tree | [adversarial-debate-and-citation-audit](adversarial-debate-and-citation-audit.md) |

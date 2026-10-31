@@ -91,6 +91,22 @@ def load_task_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     return data.get("task", data)
 
 
+def generate_compatibility_skill_content(task: Dict[str, Any]) -> str:
+    """Generate a compact alias that routes legacy /ai-harness calls to /harness."""
+    task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
+    return f"""---
+name: ai-harness
+description: Compatibility entry point for AI-Harness. For an active competition, use at session start or resume, after results, and before experiment, quota, promotion, submission, or freeze decisions; route to the canonical /harness skill.
+---
+
+# AI-Harness Compatibility Entry — {task_name}
+
+`/harness` is the canonical workflow skill. Use it for the full task and competition protocol so the alias does not duplicate the entire instruction set.
+
+For an active competition, start with `ai-harness-agent context`; carry forward the latest user target and correction; continue testing distinct grounded mechanisms through official endgame. A high score, plateau, session boundary, or quota state is not a stop signal. Keep candidates provisional. Use the task's registered promotion gates and harness dispatch; keep local CV, public leaderboard, and private leaderboard evidence separate.
+"""
+
+
 def generate_skill_content(
     task: Dict[str, Any],
     artifact_path: str = ".ai-harness/artifacts/<task-id>",
@@ -98,6 +114,8 @@ def generate_skill_content(
 ) -> str:
     """Generate Markdown content for SKILL.md dynamically tailored to the target task."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
+    if skill_name == "ai-harness":
+        return generate_compatibility_skill_content(task)
     platform = (task.get("platform") or "generic").capitalize()
     task_type = task.get("task_type") or task.get("type") or "Supervised Learning"
     modality = (task.get("modality") or "generic").lower()
@@ -119,10 +137,22 @@ def generate_skill_content(
     lines: List[str] = [
         "---",
         f"name: {skill_name}",
-        f"description: Run ML experiments for {task_name}: inspect data, build baselines, test hypotheses, run cross-validation, and track progress.",
+        "description: Use for every new or resumed Antigravity session in an active ML competition and whenever selecting experiments, interpreting high scores or plateaus, using submission quota, promoting a candidate, or considering a freeze. Keeps research active through official close using verified harness state.",
         "---",
         "",
         f"# ML Experiment Harness — {task_name}",
+        "",
+        "## 🔁 Mandatory Active-Competition Loop — Read First",
+        "",
+        "This skill governs every research and submission decision while a competition is open. Activate `/harness` at session start/resume, after a completed candidate result, and before promotion, submission, or freeze decisions.",
+        "",
+        "1. **Re-orient from live state**: run `ai-harness-agent context`; carry forward the latest user target and correction from the active conversation, then check verified runs, the research map, current deadline/metric/rank, submission status, and remaining quota. Treat unavailable external state as unknown; do not fill gaps from memory.",
+        "2. **Keep searching until endgame**: a high score, plateau, current-best label, new chat, session budget, or exhausted daily quota never ends competition research. Keep candidates provisional until the official submission cutoff/endgame. Freeze only there, with explicit operator approval.",
+        "3. **Use each result to choose the next direction**: after a run, compare its preregistered rule with verified evidence, record the decision and lesson, and identify the highest-priority untested mechanism. A plateau calls for diagnostics, discussion retrieval, and an orthogonal preregistered full validation; it does not close the search.",
+        "4. **Use quota to learn and compete**: daily submission slots create room to test meaningfully distinct, evidence-backed candidates. Do not conserve a safe incumbent just because it already scores well, and do not spend slots on a coefficient grid or unsupported guess. Keep local CV, public leaderboard, and private leaderboard evidence separate.",
+        "5. **Separate research from promotion**: during an active competition, stagnation pauses promotion/submission of the stalled line. A distinct full validation remains open when it links the exact insight, probe plan, and registered decision rule. Dispatch and freeze still use their normal harness approval gates.",
+        "",
+        "If this skill is active, do not give a terminal 'best result' recommendation while the official competition is still open. State the next experiment or evidence check that keeps the loop moving.",
         "",
         f"> **Active Benchmark**: **{task_name}** | **Platform**: {platform} | **Modality**: {mod_info['title']}",
         f"> **Objective**: {direction.capitalize()} `{primary_metric}` across cross-validation folds.",
@@ -143,7 +173,7 @@ def generate_skill_content(
     lines += [
         "",
         "Use this skill whenever planning model architectures, engineering features, formulating hypotheses,",
-        f"auditing predictions, or registering verified submissions for **{task_name}**.",
+        f"auditing predictions, or registering verified submissions for **{task_name}**. For a live competition, keep the continuation loop above active throughout the work.",
         "",
         "---",
         "",
@@ -250,7 +280,7 @@ def generate_skill_content(
         "    ai-harness-agent act --action <typed_action> --param-file params.json  # complex params on PowerShell (never inline JSON)",
         "    ```",
         "- **Layer 3 — Task State & Execution Runtime (`harness/competition_state.py`, `ai-harness-run`, `harness/cloud_runner.py`)**:",
-        "  - **8-Phase Journey**: `1. Setup` -> `2. Understand` -> `3. Baseline Anchor` -> **Parallel Iteration Tracks** (`4. Experiment Loop` || `5. Candidate Management` || `6. External Evaluation`) -> `7. Freeze (Lock Candidate Portfolio & Mutations)` -> `8. Closure`.",
+        "  - **8-Phase Journey**: `1. Setup` -> `2. Understand` -> `3. Baseline Anchor` -> **Parallel Iteration Tracks** (`4. Experiment Loop` || `5. Candidate Management` || `6. External Evaluation`) -> `7. Final Selection at Official Competition Close (explicit portfolio lock)` -> `8. Closure`.",
         "  - **Execution Backends**: Local (`ai-harness-run`); remote backends require the selected task adapter to be installed remotely.",
         "",
         "---",
@@ -264,13 +294,15 @@ def generate_skill_content(
         "  ai-harness-agent context",
         "  ```",
         "",
-        "### 3.2 The Anti-Pivot & Branch Exploration Rule (AIDE UCB Tree Search)",
-        "- **DO NOT** make speculative guesses or pivot arbitrarily without mathematical justification.",
-        "- Query the optimal branch recommendation according to Upper Confidence Bound (UCB):",
+        "### 3.2 Evidence-Led Branch Selection (UCB Is Advice, Not a Veto)",
+        "- Use the UCB recommendation as one signal; it must not override the user's latest objective, a documented correction, or a well-grounded untouched mechanism.",
+        "- Pivot when diagnostics, task evidence, or a relevant external source supports a different mechanism. Do not stay on a safe branch merely because its score is currently high.",
+        "- Query the branch recommendation and research frontier:",
         "  ```powershell",
         "  ai-harness-agent context --format json",
         "  ```",
         "- Use one attributable scientific mechanism against a fixed comparable control; coordinated edits are allowed. Document confounders and ablations.",
+        "- Before pitching an idea as new, compare its mechanism with the recent research ledger, candidate recipes, and submissions. A coefficient tweak or remix of existing prediction vectors is a variant, not a breakthrough; call it a sensitivity probe only when its decision rule tests a predeclared question.",
         "",
         "### 3.3 Epistemic Grounding & Assumption Register Protocol (Anti-Hallucination)",
         f"- **MANDATORY RETRIEVAL**: Before formulating a new model configuration for {mod_info['title']}:",
@@ -309,27 +341,34 @@ def generate_skill_content(
         "- **AUTO_WITH_LIMIT (Session Budget Tracked)**: `establish_baseline_anchor`, `run_full_validation`, `promote_candidate`, `synthesize_candidate`, `build_ensemble`, `optimize_blend`, `register_external_prediction`, `generate_microdose_probe`",
         "- **USER_APPROVAL (Mandatory Human Confirmation)**: `prepare_submission`, `record_external_score`, `freeze_candidate`, `emergency_unfreeze`, `finalize_competition`",
         "",
-        "### 3.7 Stagnation Pause Protocol & Proactive Discussion Mining",
-        "- **PROACTIVE DISCUSSION RETRIEVAL**: When experiencing consecutive non-improvements, or before finalizing daily submissions, proactively retrieve top community discussions:",
+        "### 3.7 Competition Research Drive & Proactive Discussion Mining",
+        "- **Refresh the competition state** at session start/resume and before a submission decision: verify official deadline, metric/direction, current leaderboard, submission status, and remaining quota. Do not rely on stale chat summaries or cached rank/quota values.",
+        "- Read the latest user objective and corrections from the active context/checkpoint. A correction such as 'stop mixing; test a new mechanism' is a constraint on the next action, not a cue to agree and then repeat the old approach.",
+        "- Treat available daily quota as room to evaluate meaningfully distinct, preregistered candidates; do not preserve a safe incumbent just because it already scores well. Use a slot when the candidate passes the task's promotion and dispatch gates; there is no obligation to submit every slot. Do not turn quota into a coefficient grid or submit an unsupported candidate solely to fish for a public-LB score.",
+        "- Before each candidate, state its mechanism family, evidence/source, nearest prior approach and the concrete mechanistic difference, fixed control, expected observation, decision/stop rule, and intended use of the result. Keep candidate portfolio slots provisional while the competition is open.",
+        "- Separate verified local CV evidence, external discussion claims, public leaderboard observations, and hypotheses. A public score/rank change is external evidence, not proof of causality or private-LB performance. Avoid hype or unsupported certainty; call a result a breakthrough only after its registered rule supports that claim.",
+        "- **PROACTIVE DISCUSSION RETRIEVAL**: When experiencing consecutive non-improvements, when the user asks for a new direction, or before choosing a submission candidate, retrieve relevant recent discussions:",
         "  ```powershell",
-        "  ai-harness discussion list <competition_id> --sort-by hot --page-size 15",
+        "  ai-harness discussion list <competition_id> --sort-by hotness --page-size 15",
         "  ai-harness discussion view <topic_id>",
         "  ```",
         "  Extract competitor signals, leakages, representation fixes, and orthogonal model architectures.",
         "- **AUTONOMOUS SCIENTIFIC INITIATIVE**: Do NOT dump decision paralysis or passive option lists on the human operator. Formulate the highest-expected-value grounded hypothesis, plan a bounded probe, and execute it autonomously.",
+        "- A high score, plateau, session/day boundary, remaining quota, or candidate called 'best' never ends competition research. Do not recommend or invoke `freeze_candidate` before the final submission cutoff/endgame (or an explicit user request to close); freezing locks work and is not a progress milestone.",
         "- **INTERACTIVE GATEWAY & IDLE WATCHDOG**: In code competitions with streaming or interactive evaluation gateways (e.g. ARC Prize Hearth gateway), startup latency (weights downloading, heavy shard loading, compilation) exceeding 15 minutes of inactivity before the first action causes immediate watchdog termination (`0.00` score). Always use `from harness.gateway_keepalive import GatewayKeepaliveDaemon; keepalive = GatewayKeepaliveDaemon(); keepalive.start()` (or `with GatewayKeepaliveDaemon(): ...`) during model initialization to guarantee background heartbeat pulses until solver evaluation begins.",
         "",
         "---",
         "",
         "### Stagnation Pause Protocol",
-        "- Quota is a ceiling. After three consecutive comparable completed candidates fail the promotion rule, submissions and ordinary full exploration pause across session restarts.",
-        "- Continue diagnostics, notes, smoke tests and a registered bounded recovery probe. Use `register_recovery_probe` with diagnosis, an orthogonal mechanism, a predeclared rule and stop criterion. Only verified supported recovery resumes submissions; a pause never authorizes freeze.",
+        "- After three consecutive comparable completed candidates fail the promotion rule, the task-scoped latch pauses promotion/submission of that line. For an active competition, it does NOT block full validation of a distinct, preregistered mechanism; complete any due macro retrospective first. Generic non-competition tasks retain their configured recovery gate.",
+        "- Reassess the failed mechanism, mine discussions, inspect diagnostics, and select an untouched family or explain the mechanistic difference. A registered bounded recovery probe is available when a deliberately small probe budget is useful; it is not the only path to continue competition research.",
+        "- A machine-evaluated supported result can clear the competition promotion pause. A new session, narrative, public score, or prediction diversity alone cannot clear it. A pause never ends a competition or authorizes an early freeze.",
         "- `plan_research_probe` accepts a structured DecisionRuleV1 mapping via `--param-file`. Include `research.probe_plan_id` and `research.decision_rule_id` before the run. Text rules remain unverified. `supported` is machine-derived, never self-awarded.",
         "- Prediction diversity uses signed Spearman across every prior competition submission (default 0.995); it is separate from metric improvement. Dispatch requires verified evidence, exact-payload approval and quota, followed by a short-lived single-use permit.",
         "",
         "## 4. Standard Operating Procedure (SOP) for AI Agent",
         "",
-        "1. **Read Bridge Context Packet**: Run `ai-harness-agent context` to inspect the 8-Phase Competition State, active `BridgeSession`, UCB branch recommendation, and parent `DIAGNOSTICS` bottlenecks.",
+        "1. **Recover state before planning**: Run `ai-harness-agent context`, read the verified `RESEARCH_PROGRESS.md` resume state and latest user corrections, then refresh official competition status/metric/deadline, current leaderboard and quota when the task has an external competition.",
         "2. **Start / Configure Session (Optional Budgets)**: Run `ai-harness-agent start-session --goal \"...\" --max-experiments 3`.",
         "3. **Create Grounded Experiment**: Run `ai-harness-agent act --action create_experiment --branch <branch> --descriptor <descriptor>` (or write `configs/exp<NNN>_<branch>_<descriptor>.yaml` and verify via `harness/grounding_gate.py`).",
         "4. **Execute Smoke Test** (always runs locally — fast single-fold config validation): Run `ai-harness-agent act --action run_smoke_test --config-path configs/<exp>.yaml`.",
@@ -339,13 +378,14 @@ def generate_skill_content(
         "6. **Observe & Decide Next Step**: The agent analyzes `ActionObservation` (`metric_delta`, `composite_score`, `diagnostics_bottlenecks`, `consecutive_rejections`). Promote candidates via `promote_candidate` (single experiment) OR `synthesize_candidate` (multi-model composition/specialist router).",
         "7. **Endgame Blending & Post-Processing**: Run `ai-harness-agent act --action optimize_blend --components \"exp001,exp002\"` or `optimize_threshold --exp-id <exp> --metric f1`.",
         "   Threshold search requires a verified full run with one binary target and probability/class-order metadata. Supported metrics: f1, accuracy, kappa. It returns a recommendation for `positive_class` (the last declared class); apply it in new predictions, never edit completed evidence. This auxiliary score does not replace the task's official metric.",
-        "8. **Human-Gated Submission / Freeze**: Request user confirmation before invoking `prepare_submission` or `freeze_candidate` with `--user-approved`.",
+        "8. **Human-Gated Submission / Endgame Lock**: Follow current candidate preflight and exact-payload approval before submission. Keep candidates provisional during active research. Only invoke `freeze_candidate` with explicit approval at the final submission cutoff/endgame; never infer that request from a high score or plateau.",
         "9. **Gates** (one-time, before the first run): `confirm_task_spec --user-approved`, then `inspect_data_readiness`, then `confirm_data_risks --user-approved`.",
-        "10. **Research continuity protocol** — after restart/compaction, read the latest checkpoint before brainstorming; search the full history with `search_research_memory`; use `review_hypothesis` before implementation (related approaches need a mechanism comparison; exact repeats require `revisit_reason`); record each insight with `record_research_insight` (use `parent_insight_id` for derived directions); `plan_research_probe` before linked implementation and link `config.research.insight_id`; recover history with `trace_research_insight`; interpret `research_frontier` and `unreviewed_results` before rebrainstorming. After each result, `record_research_decision` (outcome, conclusion, evidence run IDs, next_action; plus lesson and revisit_when for rejected/deferred) and `record_research_checkpoint` (summary, next_action, open_questions, insight_ids). Read the generated `RESEARCH_PROGRESS.md` (path in `context`) as the human-readable journal. On stagnation: do NOT declare freeze or give up; proactively inspect community discussions (`ai-harness discussion list <comp>`), compare alternative orthogonal mechanisms, then choose a bounded discriminating probe with a promotion/stop criterion — a plateau never authorizes freeze.",
+        "10. **Research continuity protocol** — after restart/compaction, read the latest checkpoint and user corrections; search the full history with `search_research_memory`; use `review_hypothesis` for semantic novelty (exact repeats need `revisit_reason`, related approaches need a mechanism comparison); record insights before experiments and link `research.insight_id`. Record machine-evaluated decisions and a checkpoint after results. On stagnation, stop repeating/submitting the failed line, refresh discussions/diagnostics, and keep active-competition full validation moving through distinct preregistered mechanisms. Complete due macro reviews and resume; never turn the review or pause into a terminal decision.",
         "11. **Phase workflow & EDA**: render the next phase prompt with `ai-harness phase render`, validate with `ai-harness phase validate`, record with `ai-harness phase record`; run privacy-conscious EDA with `ai-harness eda run`.",
         "12. **Metacognition & retrospective cadence**: inspect the Macro Hypothesis Map at start/resume. After five verified full-run results or a new stagnation pause, call `get_macro_hypothesis_map` then `record_macro_review`. Cite live machine-evaluated evidence, a sourced untouched direction and an orthogonal bounded next mechanism. `RETROSPECTIVE_REQUIRED` blocks ordinary full runs/submissions; diagnostics, smoke tests and registered stagnation recovery probes remain available. See the action contract below.",
         "**Principle 12 — Authority boundary, candidate preflight & citation mandate**: all cloud runs and submissions must go strictly through harness dispatch. Never write ad-hoc scripts or call provider APIs directly; unexplained external submissions lock the workspace ('UNEXPLAINED_EXTERNAL_DISPATCH'). Call 'candidate_preflight' before promotion. Before proposing a blend, temperature tuning, or submission candidate in conversation, cite a verified 'preflight_id' and validate it with 'validate_candidate_pitch'. Never pitch a Spearman rho >= 0.995 near-duplicate without verified paired OOF gain; rank similarity alone does not establish why a score changed.",
-        "13. **Workspace Confinement & Anti-Dredging**: absolutely do not traverse or inspect '<appDataDir>\\brain\\<other-conversation-id>' or old chat transcripts. Consume context strictly through 'ai-harness-agent context' and files inside the active workspace root. This prompt rule is not an OS security boundary; tool permissions must also confine filesystem access to the active workspace.",
+        "13. **Competition remains active**: when asked to continue submissions/research, keep the loop active through the official close. A locally supported candidate permits promotion but does not end exploration. Use directed quota for distinct candidates, preserve the current rank target, and report local CV, public LB and private LB as separate evidence.",
+        "14. **Workspace Confinement & Anti-Dredging**: absolutely do not traverse or inspect '<appDataDir>\\brain\\<other-conversation-id>' or old chat transcripts. Consume context strictly through 'ai-harness-agent context' and files inside the active workspace root. This prompt rule is not an OS security boundary; tool permissions must also confine filesystem access to the active workspace.",
         "",
         "---",
         "",
@@ -434,7 +474,7 @@ def generate_skill_content(
         "**Community discussions & submission auditing (native CLI):**",
         "",
         "```bash",
-        "ai-harness discussion list <competition> [--sort-by hot|recent|top] [--page N] [--page-size N]",
+        "ai-harness discussion list <competition> [--sort-by hotness|recent|top|active] [--page N] [--page-size N]",
         "ai-harness discussion view <topic_id>",
         "ai-harness submission list <competition> [--limit N]",
         "```",
@@ -472,17 +512,15 @@ def generate_skill_content(
     lines.extend([
         "---",
         "",
-        "## 6. Submission Governance & Candidate Preflight Gate",
+        "## 6. Evidence-Gated Candidate Dispatch",
         "",
         "> [!CAUTION]",
-        "> **Zero Local CV Gain = ZERO Submission**:",
-        "> Quota is a finite ceiling, never a playground. Submissions without a machine-verified local CV improvement over the fixed baseline anchor are STRICTLY FORBIDDEN.",
-        "> - 'Testing on public LB to see how it scores' is a critical violation of harness policy.",
-        "> - Even with user approval or a valid preflight receipt, a candidate lacking verified local CV gain CANNOT be dispatched.",
+        "> **Use the task's registered promotion rule**: after the initial baseline, candidate dispatch requires supported machine-evaluated evidence against the current comparable incumbent, candidate preflight, and exact-payload approval. The initial dispatch follows the task's explicit baseline route. User approval or a preflight receipt alone cannot replace the promotion rule.",
+        "> Public leaderboard results are valid external observations for choosing the next experiment after an eligible dispatch; they do not establish local causality or private-leaderboard performance.",
         "",
         "- **Candidate Preflight & Diversity Check**: Before promoting or pitching a candidate for submission, run candidate preflight against the active incumbent:",
         "  ```powershell",
-        "  ai-harness preflight --candidate <test-predictions.csv> --incumbent <incumbent-predictions.csv>",
+        "  ai-harness preflight <test-predictions.csv> --incumbent <incumbent-predictions.csv>",
         "  ```",
         "  Candidates with Spearman $\\rho \\ge 0.995$ are near-duplicates and prohibited from submission without verified paired out-of-fold gain.",
         "- **Attributable Dispatch & Human Confirmation**: All leaderboard dispatches require explicit operator approval (`--user-approved`). Never bypass the framework using raw curl/external scripts.",
@@ -549,12 +587,12 @@ Before taking ANY action or responding with hypotheses:
 2. **Check Consecutive Rejections**:
    - If `consecutive_rejections >= 3`:
      > [!WARNING]
-     > **Stagnation Pause Latch Active**: Quota is a ceiling. Submissions and ordinary full exploration are paused across session restarts.
-     > You CANNOT run ordinary full runs or submit to the public leaderboard.
+     > **Stagnation Promotion Pause Active**: Do not repeat or promote the stalled line. In active competition tasks, a distinct preregistered full validation remains allowed; generic tasks use the configured recovery gate.
      > Permitted actions:
      > - Error diagnostics (`inspect_diagnostics`)
      > - Community discussion mining (`ai-harness discussion list <comp>`)
-     > - Register bounded recovery probe (`register_recovery_probe` with orthogonal mechanism)
+     > - Distinct full validation in competition tasks, or a bounded recovery probe where required
+     > - Candidate dispatch only after a verified, machine-evaluated supported result clears the latch
 3. **Check Retrospective Cadence**:
    - If `RETROSPECTIVE_REQUIRED` is flagged:
      - Run `get_macro_hypothesis_map` and record retrospective via `record_macro_review` before proceeding.
@@ -582,6 +620,7 @@ Provide a concise, grounded status summary (under 20 lines):
 3. **Evidence Status**: Count of verified full runs vs quarantined legacy entries.
 4. **Stagnation / Latch Status**: Clean / Paused (with consecutive rejection count).
 5. **Immediate Recommended Next Action**: Single bounded next step.
+6. **Competition objective**: Latest user target/correction, official deadline, current rank/leaderboard, quota, and highest-priority untested mechanism. Keep candidates provisional until official close.
 """
 
 
@@ -599,7 +638,7 @@ def generate_explore_skill_content(
 
     return f"""---
 name: {skill_name}
-description: Guides grounded research, discussion mining, and hypothesis formulation. Enforces proactive Kaggle/community discussion retrieval, bounded probe preregistration with DecisionRuleV1, single-fold smoke tests before full runs, and halts stagnation loops.
+description: Guides grounded research, discussion mining, and hypothesis formulation. Enforces proactive discussion retrieval, bounded probe preregistration with DecisionRuleV1, and redirects stalled competition work toward distinct mechanisms.
 ---
 
 # Grounded Exploration & Hypothesis Mining — {task_name}
@@ -608,6 +647,14 @@ description: Guides grounded research, discussion mining, and hypothesis formula
 > **Trigger**: Activate this skill (`/{skill_name}`) whenever the operator asks to "brainstorm", "tìm hướng mới", "explore features", "check discussions", or when stuck on a score plateau.
 
 For claim and evidence review, follow `/ai-harness-debate`. The debate skill defines what citation audits establish and how independent review is recorded.
+
+Before proposing a direction, carry forward the latest user correction and compare
+the idea with verified runs, prior candidate recipes, submissions, and the macro
+hypothesis map. A nearby coefficient or rank nudge is a variant, not an orthogonal
+mechanism. When the user asks for a new direction, prioritize an untested mechanism
+and execute a bounded preregistered probe; do not agree and then repeat the prior
+blend family. Keep local CV, public leaderboard, and private leaderboard evidence
+separate, and do not call a result a breakthrough until its decision rule supports it.
 
 ---
 
@@ -618,7 +665,7 @@ For claim and evidence review, follow `/ai-harness-debate`. The debate skill def
 
 Retrieve community insights using native harness commands:
 ```powershell
-ai-harness discussion list {comp_id} --sort-by hot --page-size 15
+ai-harness discussion list {comp_id} --sort-by hotness --page-size 15
 ai-harness discussion view <topic_id>
 ```
 Look for:
@@ -705,13 +752,12 @@ description: Verify prediction diversity, audit out-of-fold gains, and export sa
 
 ---
 
-## 1. Local CV Improvement Mandate (Quota Conservation)
+## 1. Registered Promotion Evidence and Competition Quota
 
 > [!CAUTION]
-> **Zero Local CV Gain = ZERO Submission**:
-> Quota is a finite ceiling, never a playground. Submissions without a machine-verified local CV improvement over the fixed baseline anchor are STRICTLY FORBIDDEN.
-> - "Testing on public LB to see how it scores" is a critical violation of harness policy.
-> - Even with user approval or a valid preflight receipt, a candidate lacking verified local CV gain CANNOT be dispatched.
+> After the initial baseline, candidate dispatch must satisfy the active task's registered machine-evaluated promotion rule against the current comparable incumbent, diversity gate, and operator approval. A public-LB score alone cannot replace local promotion evidence; the initial dispatch follows the task's explicit baseline route.
+
+Available quota is room to evaluate distinct eligible candidates, not a reason to protect a high-scoring incumbent or submit unverified guesses. A public leaderboard observation can guide the next hypothesis; record it separately from local CV and private-LB evidence.
 
 ---
 
@@ -762,7 +808,7 @@ ai-harness submission dispatch {comp_id} <submission.csv> -m "Exp NNN: <brief de
 ```
 
 **Information to present to the user before asking for confirmation**:
-1. Incumbent CV score vs Candidate CV score (must show positive gain).
+1. Incumbent and candidate results under the registered metric and comparison rule; state whether the rule is supported.
 2. Preflight verification ID and Spearman $\\rho$.
 3. Constituent models and provenance.
 4. Current daily quota usage and remaining submissions.
