@@ -15,7 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
-| 2026-10-31 | Add task-aware research skill, preserve intent across skills, and render task validation accurately | Working tree | [skill-intent-continuity](skill-intent-continuity.md) |
+| 2026-10-31 | Add task-aware research skill, preserve intent across skills, and render task validation accurately | [#134](https://github.com/taitran501/ai-harness/pull/134) | [skill-intent-continuity](skill-intent-continuity.md) |
 | 2026-10-31 | Competition research remains open through official close; Antigravity skill and repeated HUD/action reminders carry the directive across sessions and results | Working tree | [competition-research-drive-and-endgame-freeze](competition-research-drive-and-endgame-freeze.md) |
 | 2026-10-31 | Lean slash command skills (/harness, /debate, /submit), simplified names and human-friendly descriptions | Working tree | [lean-slash-command-skills](lean-slash-command-skills.md) |
 | 2026-10-31 | Hardened citation audit, content-addressed evidence registry, explicit claim review, typed admission, and debate outcomes | Working tree | [hardened-citation-audit-and-admission](hardened-citation-audit-and-admission.md) |
