@@ -277,6 +277,7 @@ def run_training_remote(config_path: str, exp_id: str):
     # Tell the runner it is already inside the dispatched kernel so the
     # task contract's cloud backend is not re-applied (no nested dispatch).
     os.environ["AI_HARNESS_REMOTE_KERNEL"] = "1"
+    os.environ["PYTHONPATH"] = "/opt/ai-harness:" + os.environ.get("PYTHONPATH", "")
     cmd = ["python", "-u", "-m", "harness.runner", "--project-root", ".", "--task-config", {task_config_rel!r}, "--config", config_path]
     _remote_job_id = {job_id!r}
     if _remote_job_id:
