@@ -68,7 +68,7 @@ class SkillInjectorTests(unittest.TestCase):
             "languages": ["EN", "IT", "NL"],
         }
         content = generate_skill_content(task_cfg)
-        self.assertIn("name: ai-harness", content)
+        self.assertIn("name: harness", content)
         self.assertIn("My NLP Benchmark", content)
         self.assertIn("Codabench", content)
         self.assertIn("Macro-F1 (CV)", content)
@@ -151,7 +151,7 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("register_recovery_probe", content)
 
     def test_generate_modular_skills(self):
-        """Verify modular slash command skills generation."""
+        """Verify lean modular slash command skills generation."""
         task_cfg = {
             "task_name": "Airline Delay Prediction",
             "platform": "kaggle",
@@ -161,30 +161,19 @@ class SkillInjectorTests(unittest.TestCase):
             "competition_id": "airline-delay-prediction",
         }
         modular = generate_modular_skills(task_cfg)
-        self.assertIn("ai-harness", modular)
-        self.assertIn("ai-harness-resume", modular)
-        self.assertIn("ai-harness-explore", modular)
-        self.assertIn("ai-harness-submit", modular)
+        self.assertEqual(set(modular.keys()), {"harness", "debate", "submit"})
 
-        # Resume skill verification
-        resume = modular["ai-harness-resume"]
-        self.assertIn("name: ai-harness-resume", resume)
-        self.assertIn("Safe Session Resumption Protocol", resume)
-        self.assertIn("Anti-Hallucination Quarantine Rule", resume)
-        self.assertIn("ai-harness-agent context", resume)
-        self.assertIn("Stagnation Pause Latch Active", resume)
-
-        # Explore skill verification
-        explore = modular["ai-harness-explore"]
-        self.assertIn("name: ai-harness-explore", explore)
-        self.assertIn("Grounded Exploration & Hypothesis Mining", explore)
-        self.assertIn("ai-harness discussion list airline-delay-prediction", explore)
-        self.assertIn("Single-Mechanism Principle", explore)
-        self.assertIn("plan_research_probe", explore)
+        # Harness skill verification
+        harness = modular["harness"]
+        self.assertIn("name: harness", harness)
+        self.assertIn("ML Experiment Harness", harness)
+        self.assertIn("ai-harness-agent context", harness)
+        self.assertIn("/debate", harness)
+        self.assertIn("/submit", harness)
 
         # Submit skill verification
-        submit = modular["ai-harness-submit"]
-        self.assertIn("name: ai-harness-submit", submit)
+        submit = modular["submit"]
+        self.assertIn("name: submit", submit)
         self.assertIn("Submission Governance & Provenance Gate", submit)
         self.assertIn("Zero Local CV Gain = ZERO Submission", submit)
         self.assertIn("Prediction Provenance & Recipe Binding", submit)
@@ -192,9 +181,8 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("Backdoor Script Prohibition", submit)
 
         # Debate skill verification
-        self.assertIn("ai-harness-debate", modular)
-        debate = modular["ai-harness-debate"]
-        self.assertIn("name: ai-harness-debate", debate)
+        debate = modular["debate"]
+        self.assertIn("name: debate", debate)
         self.assertIn("Three permitted outcomes", debate)
         self.assertIn("Grounded hypothesis", debate)
         self.assertIn("External reported result", debate)
@@ -204,20 +192,20 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertNotIn("reported_delta", debate)
         self.assertNotIn("N < 3", debate)
         self.assertIn("ai-harness audit-claims", debate)
-        self.assertIn("/ai-harness-debate", modular["ai-harness-explore"])
 
     def test_install_global_skills(self):
-        """Verify installing modular skills into global directory."""
+        """Verify installing lean modular skills into global directory and purging legacy."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             target = Path(tmp_dir) / "skills"
+            (target / "ai-experiment-harness").mkdir(parents=True)
+            (target / "ai-harness-resume").mkdir(parents=True)
             written = install_global_skills(target_dir=target)
-            self.assertEqual(len(written), 6)
-            self.assertTrue((target / "ai-harness" / "SKILL.md").exists())
-            self.assertTrue((target / "ai-experiment-harness" / "SKILL.md").exists())
-            self.assertTrue((target / "ai-harness-resume" / "SKILL.md").exists())
-            self.assertTrue((target / "ai-harness-explore" / "SKILL.md").exists())
-            self.assertTrue((target / "ai-harness-submit" / "SKILL.md").exists())
-            self.assertTrue((target / "ai-harness-debate" / "SKILL.md").exists())
+            self.assertEqual(len(written), 3)
+            self.assertTrue((target / "harness" / "SKILL.md").exists())
+            self.assertTrue((target / "debate" / "SKILL.md").exists())
+            self.assertTrue((target / "submit" / "SKILL.md").exists())
+            self.assertFalse((target / "ai-experiment-harness").exists())
+            self.assertFalse((target / "ai-harness-resume").exists())
 
     def test_install_workspace_skills(self):
         """Verify installing modular skills into workspace .agents/skills/."""
@@ -231,13 +219,13 @@ class SkillInjectorTests(unittest.TestCase):
                 "direction": "maximize",
             }
             written = install_workspace_skills(project_root=root, task_config=task_cfg)
-            self.assertEqual(len(written), 6)
+            self.assertEqual(len(written), 4)  # harness, debate, submit + ai-harness alias
             skills_dir = root / ".agents" / "skills"
+            self.assertTrue((skills_dir / "harness" / "SKILL.md").exists())
+            self.assertTrue((skills_dir / "debate" / "SKILL.md").exists())
+            self.assertTrue((skills_dir / "submit" / "SKILL.md").exists())
             self.assertTrue((skills_dir / "ai-harness" / "SKILL.md").exists())
-            self.assertTrue((skills_dir / "ai-harness-resume" / "SKILL.md").exists())
-            self.assertTrue((skills_dir / "ai-harness-explore" / "SKILL.md").exists())
-            self.assertTrue((skills_dir / "ai-harness-submit" / "SKILL.md").exists())
-            self.assertTrue((skills_dir / "ai-harness-debate" / "SKILL.md").exists())
+            self.assertFalse((skills_dir / "ai-harness-resume").exists())
 
     def test_cli_install_skills(self):
         """Verify CLI subcommand ai-harness install-skills."""
@@ -251,9 +239,9 @@ class SkillInjectorTests(unittest.TestCase):
             try:
                 rc = main(["install-skills", "--global", "--json"])
                 self.assertEqual(rc, 0)
-                self.assertTrue((target / "ai-harness" / "SKILL.md").exists())
-                self.assertTrue((target / "ai-harness-resume" / "SKILL.md").exists())
-                self.assertTrue((target / "ai-harness-debate" / "SKILL.md").exists())
+                self.assertTrue((target / "harness" / "SKILL.md").exists())
+                self.assertTrue((target / "debate" / "SKILL.md").exists())
+                self.assertTrue((target / "submit" / "SKILL.md").exists())
             finally:
                 if prev_env is None:
                     os.environ.pop("GEMINI_SKILLS_DIR", None)

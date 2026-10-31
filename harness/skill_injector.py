@@ -94,7 +94,7 @@ def load_task_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
 def generate_skill_content(
     task: Dict[str, Any],
     artifact_path: str = ".ai-harness/artifacts/<task-id>",
-    skill_name: str = "ai-harness",
+    skill_name: str = "harness",
 ) -> str:
     """Generate Markdown content for SKILL.md dynamically tailored to the target task."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
@@ -119,10 +119,10 @@ def generate_skill_content(
     lines: List[str] = [
         "---",
         f"name: {skill_name}",
-        f"description: Manages ML experiments for {task_name} on {platform} via AIDE tree search, enforces SWE-agent deterministic audit gate, and mandates Epistemic Grounding & Assumption Registers.",
+        f"description: Run ML experiments for {task_name}: inspect data, build baselines, test hypotheses, run cross-validation, and track progress.",
         "---",
         "",
-        f"# AI Experiment Harness Skill — {task_name}",
+        f"# ML Experiment Harness — {task_name}",
         "",
         f"> **Active Benchmark**: **{task_name}** | **Platform**: {platform} | **Modality**: {mod_info['title']}",
         f"> **Objective**: {direction.capitalize()} `{primary_metric}` across cross-validation folds.",
@@ -131,11 +131,9 @@ def generate_skill_content(
         "> **Scope Notice**: AI-Harness is currently validated and working well ONLY on Natural Language Processing (NLP / Text) tasks. Other modalities (Tabular, Vision, Audio, Multimodal) are experimental works-in-progress (WIP / Roadmap) and NOT yet validated in practice.",
         ">",
         "> [!TIP]",
-        "> **Modular Slash Command Skills**:",
-        "> - `/ai-harness-resume`: Safe session restart, grounding audit, and anti-hallucination triage",
-        "> - `/ai-harness-explore`: Discussion mining, orthogonal hypothesis formulation, and bounded probe planning",
-        "> - `/ai-harness-submit`: Submission governance, local CV improvement mandate, provenance, and preflight check",
-        "> - `/ai-harness-debate`: Adversarial dual-agent debate, citation verification & anti-echo chamber",
+        "> **Complementary Slash Commands**:",
+        "> - `/debate`: Adversarially review ML hypotheses and audit discussion citations before implementation.",
+        "> - `/submit`: Verify prediction diversity, audit out-of-fold gains, and export safe submissions.",
     ]
     if exec_locked:
         lines += [
@@ -669,7 +667,7 @@ ai-harness-agent act --action run_full_validation --config-path configs/exp<NNN>
 def generate_submit_skill_content(
     task: Dict[str, Any],
     artifact_path: str = ".ai-harness/artifacts/<task-id>",
-    skill_name: str = "ai-harness-submit",
+    skill_name: str = "submit",
 ) -> str:
     """Generate Markdown content for the submission slash command skill."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
@@ -680,7 +678,7 @@ def generate_submit_skill_content(
 
     return f"""---
 name: {skill_name}
-description: Enforces strict submission governance and candidate provenance. Rejects quota-spending without verified local CV gain, validates prediction origin (no raw external blend / leak), requires candidate_preflight diversity check, audits against backdoor dispatch scripts, and mandates operator approval.
+description: Verify prediction diversity, audit out-of-fold gains, and export safe competition submissions.
 ---
 
 # Submission Governance & Provenance Gate — {task_name}
@@ -758,7 +756,7 @@ ai-harness submission dispatch {comp_id} <submission.csv> -m "Exp NNN: <brief de
 def generate_debate_skill_content(
     task: Dict[str, Any],
     artifact_path: str = ".ai-harness/artifacts/<task-id>",
-    skill_name: str = "ai-harness-debate",
+    skill_name: str = "debate",
 ) -> str:
     """Generate the executable claim review and debate contract."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
@@ -768,7 +766,7 @@ def generate_debate_skill_content(
 
     return f"""---
 name: {skill_name}
-description: Separates citation lint, evidence integrity, independent claim review, and local empirical results.
+description: Adversarially review ML hypotheses, debate ideas between agents, and audit discussion citations to prevent hallucinations.
 ---
 
 # Claim Review and Debate Protocol ? {task_name}
@@ -817,13 +815,11 @@ def generate_modular_skills(
     task: Dict[str, Any],
     artifact_path: str = ".ai-harness/artifacts/<task-id>",
 ) -> Dict[str, str]:
-    """Generate all modular skills for the task."""
+    """Generate lean modular slash skills for the task."""
     return {
-        "ai-harness": generate_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness"),
-        "ai-harness-resume": generate_resume_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-resume"),
-        "ai-harness-explore": generate_explore_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-explore"),
-        "ai-harness-submit": generate_submit_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-submit"),
-        "ai-harness-debate": generate_debate_skill_content(task, artifact_path=artifact_path, skill_name="ai-harness-debate"),
+        "harness": generate_skill_content(task, artifact_path=artifact_path, skill_name="harness"),
+        "debate": generate_debate_skill_content(task, artifact_path=artifact_path, skill_name="debate"),
+        "submit": generate_submit_skill_content(task, artifact_path=artifact_path, skill_name="submit"),
     }
 
 
@@ -850,6 +846,8 @@ def install_global_skills(
         "primary_metric": "Score (CV)",
         "direction": "maximize",
     }
+    import shutil
+
     modular = generate_modular_skills(cfg)
     written: List[Path] = []
     for skill_name, content in modular.items():
@@ -857,12 +855,22 @@ def install_global_skills(
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
         written.append(dest)
-        if skill_name == "ai-harness":
-            twin_dest = skills_dir / "ai-experiment-harness" / "SKILL.md"
-            twin_dest.parent.mkdir(parents=True, exist_ok=True)
-            twin_content = generate_skill_content(cfg, skill_name="ai-experiment-harness")
-            twin_dest.write_text(twin_content, encoding="utf-8")
-            written.append(twin_dest)
+
+    # Purge bloated/legacy skills from global directory so slash command menu stays lean
+    legacy_purge = (
+        "ml-harness",
+        "ml-experiment-harness",
+        "ai-experiment-harness",
+        "ai-harness",
+        "ai-harness-resume",
+        "ai-harness-explore",
+        "ai-harness-submit",
+        "ai-harness-debate",
+    )
+    for legacy_name in legacy_purge:
+        legacy_dir = skills_dir / legacy_name
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir, ignore_errors=True)
     return written
 
 
@@ -907,15 +915,25 @@ def install_workspace_skills(
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
         written.append(dest)
-        if skill_name == "ai-harness":
-            twin_dest = skills_dir / "ai-experiment-harness" / "SKILL.md"
-            twin_dest.parent.mkdir(parents=True, exist_ok=True)
-            twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name="ai-experiment-harness")
-            twin_dest.write_text(twin_content, encoding="utf-8")
-            written.append(twin_dest)
 
-    # Purge legacy skills so agent hosts do not inject obsolete ml-harness prompts
-    for legacy_name in ("ml-harness", "ml-experiment-harness"):
+    # For backward compatibility in workspace: also write ai-harness/SKILL.md as alias
+    twin_dest = skills_dir / "ai-harness" / "SKILL.md"
+    twin_dest.parent.mkdir(parents=True, exist_ok=True)
+    twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name="ai-harness")
+    twin_dest.write_text(twin_content, encoding="utf-8")
+    written.append(twin_dest)
+
+    # Purge legacy/bloated skills so workspace stays clean
+    legacy_purge = (
+        "ml-harness",
+        "ml-experiment-harness",
+        "ai-experiment-harness",
+        "ai-harness-resume",
+        "ai-harness-explore",
+        "ai-harness-submit",
+        "ai-harness-debate",
+    )
+    for legacy_name in legacy_purge:
         legacy_dir = skills_dir / legacy_name
         if legacy_dir.is_dir():
             shutil.rmtree(legacy_dir, ignore_errors=True)
@@ -947,7 +965,7 @@ def inject_skill_file(
         return dest
 
     paths = install_workspace_skills(project_root=project.root, task_config=cfg, config_path=task_path)
-    primary = project.root / ".agents" / "skills" / "ai-harness" / "SKILL.md"
+    primary = project.root / ".agents" / "skills" / "harness" / "SKILL.md"
     return primary if primary in paths else paths[0]
 
 
