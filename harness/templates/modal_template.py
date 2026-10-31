@@ -173,9 +173,19 @@ def generate_modal_script(
         "xgboost>=2.0.0",
     ]
     runtime_requirements.extend(runtime_manifest.get("requirements", []))
+    task_runtime = task.get("runtime") or {}
+    task_extra_requirements = task_runtime.get("requirements", [])
+    if isinstance(task_extra_requirements, list):
+        runtime_requirements.extend(task_extra_requirements)
     plugin_install = (runtime_manifest.get("plugin") or {}).get("install") or {}
     if plugin_install.get("type") == "index":
         runtime_requirements.append(plugin_install["requirement"])
+    deduped_requirements = list(
+        dict.fromkeys(
+            r.strip() for r in runtime_requirements if isinstance(r, str) and r.strip()
+        )
+    )
+    uv_cmd = "uv pip install --system " + " ".join(f"'{req}'" for req in deduped_requirements)
     plugin_wheel_local = None
     plugin_wheel_remote = None
     if plugin_install.get("type") == "wheel":
@@ -199,10 +209,11 @@ from pathlib import Path
 
 app = modal.App({app_name!r})
 
-# 1. Container Image definition
+# 1. Container Image definition (optimized with uv for rapid package resolution and caching)
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install(*{runtime_requirements!r})
+    .pip_install("uv")
+    .run_commands({uv_cmd!r})
 )
 def _ignore_workspace_path(path):
     candidate = Path(path).resolve()

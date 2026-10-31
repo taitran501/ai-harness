@@ -485,6 +485,19 @@ class UniversalTaskSpec:
         return self.metadata.get("submission_spec")
 
     @property
+    def runtime_requirements(self) -> List[str]:
+        """Runtime pip requirements declared in task contract."""
+        runtime_cfg = self.metadata.get("runtime", {})
+        if isinstance(runtime_cfg, dict):
+            reqs = runtime_cfg.get("requirements", [])
+            if isinstance(reqs, list):
+                return [str(r).strip() for r in reqs if str(r).strip()]
+        reqs = self.metadata.get("requirements", [])
+        if isinstance(reqs, list):
+            return [str(r).strip() for r in reqs if str(r).strip()]
+        return []
+
+    @property
     def execution_config(self) -> Dict[str, Any]:
         """Execution policy declared in the task contract.
 

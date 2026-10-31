@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-11-01 | Modal fast uv image building, dynamic task runtime requirements, and job ID normalization | Working tree | [modal-uv-and-dynamic-runtime-requirements](modal-uv-and-dynamic-runtime-requirements.md) |
 | 2026-11-01 | Modal attached live-stream and cloud detached modes with volume persistence and recovery | Working tree | [modal-attached-and-cloud-detached-modes](modal-attached-and-cloud-detached-modes.md) |
 | 2026-10-31 | Add task-aware research skill, preserve intent across skills, and render task validation accurately | [#134](https://github.com/taitran501/ai-harness/pull/134) | [skill-intent-continuity](skill-intent-continuity.md) |
 | 2026-10-31 | Competition research remains open through official close; Antigravity skill and repeated HUD/action reminders carry the directive across sessions and results | Working tree | [competition-research-drive-and-endgame-freeze](competition-research-drive-and-endgame-freeze.md) |

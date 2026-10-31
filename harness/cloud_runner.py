@@ -596,6 +596,8 @@ def main() -> None:
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     try:
         if args.job_id:
+            if not args.job_id.startswith("job_"):
+                args.job_id = f"job_{args.job_id}"
             update_worker_state(project.root, args.job_id, status="RUNNING", provider_status="STARTING")
         if args.backend == "modal":
             run_via_modal(args.config, gpu=args.gpu, project_root=project.root, job_id=args.job_id, keep_staging=args.keep_staging, detach=args.detach)

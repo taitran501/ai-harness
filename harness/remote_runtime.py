@@ -62,11 +62,14 @@ def resolve_remote_runtime(project: HarnessProject) -> Dict[str, Any]:
                     f"Cannot pin remote runtime dependency {distribution_name} because it is not installed locally."
                 ) from exc
 
+    task_requirements = task_spec.runtime_requirements
+    combined_requirements = list(dict.fromkeys([*core_requirements, *task_requirements]))
+
     runtime: Dict[str, Any] = {
         "schema_version": 1,
         "core": {"distribution": "ai-harness", "version": core_version, "source": "bundled"},
         "plugin": {"id": plugin_id, "version": str(plugin.version), "distribution": None, "install": None},
-        "requirements": core_requirements,
+        "requirements": combined_requirements,
         "bundle_files": [],
     }
     if plugin_id == "default":
@@ -125,6 +128,6 @@ def resolve_remote_runtime(project: HarnessProject) -> Dict[str, Any]:
             raise ValueError(f"Declared adapter bundle file is in a protected path: {path}")
         normalized_files.append(str(path))
     runtime["plugin"].update(distribution=str(distribution), version=str(version))
-    runtime["requirements"] = [*core_requirements, *[item.strip() for item in requirements]]
+    runtime["requirements"] = list(dict.fromkeys([*combined_requirements, *[item.strip() for item in requirements]]))
     runtime["bundle_files"] = normalized_files
     return runtime
