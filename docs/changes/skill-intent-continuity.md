@@ -29,7 +29,9 @@ validation scheme when the task declared one in `task.validation`.
 - Pre-push validation exposed seven failures also reproduced on the parent commit:
   update legacy alias/HUD assertions to test the canonical skill and current policy,
   keep the research frontier compact, and reject a nested Kaggle mount owned by a
-  different account when an explicit owner was requested.
+  different account when an explicit owner was requested. Flat mounts still work;
+  a nested directory with no matching owner cannot be safely identified by name
+  alone and now fails closed.
 
 ## Approach
 
@@ -47,8 +49,10 @@ Python files, `git diff --check` passed, and all three regenerated airline skill
 passed `skill-creator`'s `quick_validate.py`. Real Antigravity conversation
 behavior has not been replayed.
 
-The seven full-suite failures were reproduced independently on parent `078cc48`;
-all seven targeted regressions pass after the fixes above.
+The seven initial full-suite failures were reproduced independently on parent
+`078cc48`; all seven targeted regressions pass after the fixes above. A subsequent
+full run exposed a conflicting ownerless-nested-mount expectation, which was
+adjusted to require a verifiable owner instead of guessing from a directory name.
 
 ## Impact & follow-ups
 
