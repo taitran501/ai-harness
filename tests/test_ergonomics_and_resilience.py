@@ -122,11 +122,12 @@ class ErgonomicsAndResilienceTests(unittest.TestCase):
             found_ci = find_dataset_mount(base, "user/AIH-KAGGLE-TEST-DATASET")
             self.assertEqual(found_ci, ds_dir)
 
-            # 3. Nested layout without owner direct parent
+            # 3. A nested layout without the declared owner cannot be identified
+            # safely from the directory name alone.
             nested = base / "datasets" / "some_hash" / "nested-ds"
             nested.mkdir(parents=True)
-            found_nested = find_dataset_mount(base, "user/nested-ds")
-            self.assertEqual(found_nested, nested)
+            with self.assertRaisesRegex(RuntimeError, "missing"):
+                find_dataset_mount(base, "user/nested-ds")
 
 
 if __name__ == "__main__":

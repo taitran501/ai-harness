@@ -311,7 +311,7 @@ class TestSkillPolicyDocs(unittest.TestCase):
                  "from harness.skill_injector import inject_skill_file;"
                  "attach_project(str(Path('COMP')), force=True);"
                  "inject_skill_file(config_path=Path('COMP/configs/task.yaml'));"
-                 "t = Path('COMP/.agents/skills/ai-harness/SKILL.md').read_text(encoding='utf-8');"
+                 "t = Path('COMP/.agents/skills/harness/SKILL.md').read_text(encoding='utf-8');"
                  "assert 'AI_HARNESS_ALLOW_MANUAL' in t, 'override missing';"
                  "assert 'report the failure' in t, 'report policy missing';"
                  "assert 'Manual runs & bypass policy' in t, 'section missing';"

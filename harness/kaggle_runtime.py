@@ -158,9 +158,7 @@ def find_dataset_mount(input_base, dataset_slug):
         candidates = [path for path in base.rglob("*") if path.is_dir() and path.name.lower() == folder_lower]
 
     if owner:
-        owner_filtered = [path for path in candidates if path.parent.name.lower() == owner.lower()]
-        if owner_filtered:
-            candidates = owner_filtered
+        candidates = [path for path in candidates if path.parent.name.lower() == owner.lower()]
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1:

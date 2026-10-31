@@ -142,16 +142,16 @@ class SkillInjectorTests(unittest.TestCase):
             "direction": "maximize",
         }
         content = generate_skill_content(task_cfg)
-        self.assertIn("3.7 Stagnation Pause Protocol & Proactive Discussion Mining", content)
+        self.assertIn("Competition Research Drive & Proactive Discussion Mining", content)
         self.assertIn("ai-harness discussion list", content)
         self.assertIn("ai-harness discussion view", content)
         self.assertIn("ai-harness submission list", content)
         self.assertIn("ai-harness codabench status", content)
-        self.assertIn("Quota is a ceiling", content)
-        self.assertIn("register_recovery_probe", content)
+        self.assertIn("there is no obligation to submit every slot", content)
+        self.assertIn("registered bounded recovery probe", content)
 
     def test_generate_modular_skills(self):
-        """Verify lean modular slash command skills generation (harness and debate)."""
+        """Verify task-aware modular slash skill generation."""
         task_cfg = {
             "task_name": "Airline Delay Prediction",
             "platform": "kaggle",
@@ -161,7 +161,7 @@ class SkillInjectorTests(unittest.TestCase):
             "competition_id": "airline-delay-prediction",
         }
         modular = generate_modular_skills(task_cfg)
-        self.assertEqual(set(modular.keys()), {"harness", "debate"})
+        self.assertEqual(set(modular.keys()), {"harness", "debate", "research"})
 
         # Harness skill verification
         harness = modular["harness"]
@@ -169,8 +169,9 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertIn("ML Experiment Harness", harness)
         self.assertIn("ai-harness-agent context", harness)
         self.assertIn("/debate", harness)
-        self.assertIn("Submission Governance & Candidate Preflight Gate", harness)
-        self.assertIn("Zero Local CV Gain = ZERO Submission", harness)
+        self.assertIn("/research", harness)
+        self.assertIn("Candidate Preflight & Diversity Check", harness)
+        self.assertIn("registered promotion rule", harness)
 
         # Debate skill verification
         debate = modular["debate"]
@@ -185,17 +186,25 @@ class SkillInjectorTests(unittest.TestCase):
         self.assertNotIn("N < 3", debate)
         self.assertIn("ai-harness audit-claims", debate)
 
+        research = modular["research"]
+        self.assertIn("name: research", research)
+        self.assertIn("Airline Delay Prediction", research)
+        self.assertIn("ROC-AUC", research)
+        self.assertIn("/harness", research)
+        self.assertIn("/debate", research)
+
     def test_install_global_skills(self):
-        """Verify installing lean modular skills into global directory and purging legacy."""
+        """Verify installing modular skills into global directory and purging legacy."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             target = Path(tmp_dir) / "skills"
             (target / "ai-experiment-harness").mkdir(parents=True)
             (target / "ai-harness-resume").mkdir(parents=True)
             (target / "submit").mkdir(parents=True)
             written = install_global_skills(target_dir=target)
-            self.assertEqual(len(written), 2)
+            self.assertEqual(len(written), 3)
             self.assertTrue((target / "harness" / "SKILL.md").exists())
             self.assertTrue((target / "debate" / "SKILL.md").exists())
+            self.assertTrue((target / "research" / "SKILL.md").exists())
             self.assertFalse((target / "submit").exists())
             self.assertFalse((target / "ai-experiment-harness").exists())
             self.assertFalse((target / "ai-harness-resume").exists())
@@ -212,10 +221,11 @@ class SkillInjectorTests(unittest.TestCase):
                 "direction": "maximize",
             }
             written = install_workspace_skills(project_root=root, task_config=task_cfg)
-            self.assertEqual(len(written), 3)  # harness, debate + ai-harness alias
+            self.assertEqual(len(written), 4)  # harness, debate, research + compatibility alias
             skills_dir = root / ".agents" / "skills"
             self.assertTrue((skills_dir / "harness" / "SKILL.md").exists())
             self.assertTrue((skills_dir / "debate" / "SKILL.md").exists())
+            self.assertTrue((skills_dir / "research" / "SKILL.md").exists())
             self.assertTrue((skills_dir / "ai-harness" / "SKILL.md").exists())
             self.assertFalse((skills_dir / "submit").exists())
             self.assertFalse((skills_dir / "ai-harness-resume").exists())
@@ -234,6 +244,7 @@ class SkillInjectorTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertTrue((target / "harness" / "SKILL.md").exists())
                 self.assertTrue((target / "debate" / "SKILL.md").exists())
+                self.assertTrue((target / "research" / "SKILL.md").exists())
                 self.assertFalse((target / "submit").exists())
             finally:
                 if prev_env is None:
@@ -257,7 +268,22 @@ class SkillInjectorTests(unittest.TestCase):
             self.assertTrue(out_path.exists())
             text = out_path.read_text(encoding="utf-8")
             self.assertIn("Test Benchmark", text)
-            self.assertIn("AIDE UCB Tree Search", text)
+            self.assertIn("UCB Is Advice", text)
+
+    def test_validation_spec_uses_task_contract_before_legacy_data_fields(self):
+        content = generate_skill_content({
+            "task_name": "Validation fixture",
+            "data_config": {"train_path": "train.csv", "n_folds": 3, "split_strategy": "legacy"},
+            "validation": {"strategy": "kfold", "num_folds": 5},
+        })
+        self.assertIn("`kfold` (5 folds", content)
+        self.assertNotIn("`legacy` (3 folds", content)
+
+        legacy = generate_skill_content({
+            "task_name": "Legacy fixture",
+            "data_config": {"train_path": "train.csv", "n_folds": 3, "split_strategy": "legacy"},
+        })
+        self.assertIn("`legacy` (3 folds", legacy)
 
 
 class SkillInjectorAPITests(unittest.TestCase):

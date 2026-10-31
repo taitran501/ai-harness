@@ -174,7 +174,7 @@ class TestRunSync(unittest.TestCase):
             self.assertEqual(rc, 0)
             manifest = ws / ".ai-harness" / "project.yaml"
             self.assertTrue(manifest.is_file())
-            skill = ws / ".agents" / "skills" / "ai-harness" / "SKILL.md"
+            skill = ws / ".agents" / "skills" / "harness" / "SKILL.md"
             self.assertTrue(skill.is_file())
             self.assertIn("Execution Backend LOCKED", skill.read_text(encoding="utf-8"))
             self.assertIn("## 5. Execution Backends", skill.read_text(encoding="utf-8"))

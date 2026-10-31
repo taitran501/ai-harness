@@ -1296,6 +1296,9 @@ class ResearchMemory:
         active.sort(key=lambda state: order.get(state["status"], 5))
         compact_frontier = [{key: value for key, value in state.items() if key != "exp_ids"}
                             for state in active[:3]]
+        for state in compact_frontier:
+            for field in ("observation", "mechanism"):
+                state[field] = state[field][:160]
         progress = self._publish_progress(runs)
         from harness.decision_rules import _project
         from harness.stagnation import StagnationController, is_competition_task

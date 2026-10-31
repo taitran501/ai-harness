@@ -196,7 +196,9 @@ class SkillConsolidationTests(unittest.TestCase):
             (root / "configs").mkdir()
             (root / "configs/task.yaml").write_text(yaml.safe_dump(_TASK))
             attach_project(root, task_config=root / "configs/task.yaml", force=True)
-            written = (root / ".agents/skills/ai-harness/SKILL.md").read_text(encoding="utf-8")
+            written = (root / ".agents/skills/harness/SKILL.md").read_text(encoding="utf-8")
+            alias = (root / ".agents/skills/ai-harness/SKILL.md").read_text(encoding="utf-8")
+            self.assertIn("`/harness`", alias)
             generated = generate_skill_content(_TASK, artifact_path=".ai-harness/artifacts/<task-id>")
             for probe in (
                 "Research continuity action contracts",
