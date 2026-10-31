@@ -11,7 +11,7 @@ This directory contains system prompts and execution contracts for AI coding ass
 | **Phases 1–3** | **Onboarding, EDA, and Baseline Anchor** | [`onboarding.md`](onboarding.md) | `bootstrap_task`, `establish_baseline_anchor` |
 | **Phase 4** | **AIDE UCB Experimentation Loop** | [`experiment_iteration.md`](experiment_iteration.md) | `create_experiment`, `run_smoke_test`, `run_full_validation` |
 | **Phases 5–6** | **Candidate Selection and Ensembling** | [`candidate_ensemble.md`](candidate_ensemble.md) | `promote_candidate`, `build_ensemble` |
-| **Phases 7–8** | **Pre-Submission Audit and Freeze** | [`submission_audit.md`](submission_audit.md) | `freeze_candidate`, `prepare_submission`, `audit` |
+| **Phases 7–8** | **Endgame Selection and Final Audit** (at the final submission cutoff) | [`submission_audit.md`](submission_audit.md) | `freeze_candidate`, `prepare_submission`, `audit` |
 
 ---
 
@@ -30,6 +30,7 @@ This directory contains system prompts and execution contracts for AI coding ass
    - `AUTO`: Safe inspection, configuration creation, and single-fold smoke tests.
    - `AUTO_WITH_LIMIT`: Session-budgeted full cross-validation and ensemble builds.
    - `USER_APPROVAL`: High-stakes irreversible actions requiring explicit user consent (`freeze_candidate`, `prepare_submission`, `emergency_unfreeze`).
+   - `freeze_candidate` is an endgame lock. Do not use it during an active research loop because the public score is high, a plateau occurred, or a session/day ended.
 
 5. **Verification Scope**:
    AI-Harness is strictly verified on Natural Language Processing (NLP / Text) benchmarks. Non-NLP modalities are experimental work-in-progress on the roadmap.

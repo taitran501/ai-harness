@@ -215,9 +215,9 @@ class CompetitionStateMachine:
             {
                 "index": 7,
                 "id": "freeze",
-                "title": f"7. Freeze & {final_label}",
-                "short_title": "Freeze",
-                "question": f"Chốt danh mục tối đa {max_cands} ứng viên nào để khóa cho {final_label}?",
+                "title": f"7. Final selection at competition close ({final_label})",
+                "short_title": "Endgame",
+                "question": f"Khi cuộc thi đóng, tối đa {max_cands} ứng viên đã được xác minh nào sẽ khóa cho {final_label}?",
             },
             {
                 "index": 8,
@@ -1397,18 +1397,6 @@ class CompetitionStateMachine:
                     "message": f"Used {subs_today}/{daily_quota} submissions today (0 remaining). Continue iterating locally.",
                 }
             )
-        if not gates.get("freeze_locked") and baseline_ready:
-            blockers.append(
-                {
-                    "code": "FINAL_PORTFOLIO_UNFROZEN",
-                    "title": "Final selection not yet frozen",
-                    "severity": "info",
-                    "phase": 7,
-                    "action_label": "Select final candidates",
-                    "message": f"Up to {max_final_slots} final candidate slots can be locked before competition closure.",
-                }
-            )
-
         # 4. NEXT RECOMMENDED ACTION + AGENT CO-PILOT PLAN
         if not gates.get("spec_confirmed"):
             next_action = {
@@ -1478,15 +1466,16 @@ class CompetitionStateMachine:
             }
         elif not gates.get("freeze_locked"):
             next_action = {
-                "target_phase": 7,
-                "action_id": "FREEZE_FOR_PRIVATE_LB",
-                "title": f"Select & freeze up to {max_final_slots} candidates for Final Evaluation",
-                "detail": "Lock your risk-balanced portfolio (Stable CV + Diverse Ensemble) with SHA-256 verification.",
-                "cta_label": "Review final selection",
+                "target_phase": 4,
+                "action_id": "CONTINUE_COMPETITION_RESEARCH",
+                "title": "Competition active — continue research and validation",
+                "detail": "Candidates remain provisional while the competition is open. Refresh the current rules, leaderboard and quota; prioritize an untested mechanism and keep the research loop active.",
+                "cta_label": "Continue research",
                 "agent_plan": [
-                    "Rank candidates by fold stability and ensemble diversity",
-                    f"Select optimal {max_final_slots}-slot portfolio per Final Selection Policy",
-                    "Generate cryptographic freeze lock (FROZEN_FINAL_LOCK.json)",
+                    "Refresh official deadline, metric, leaderboard status and remaining submissions",
+                    "Review verified runs, user corrections, diagnostics and the macro hypothesis map",
+                    "Mine relevant recent discussions and identify the highest-priority untested mechanism",
+                    "Preregister a bounded comparison, run it through the harness, and keep candidate slots provisional",
                 ],
             }
         else:

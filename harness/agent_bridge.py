@@ -185,13 +185,20 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
     if memory.get("progress_warning"):
         lines.append(f"- \u26a0\ufe0f {memory['progress_warning']}")
     if memory.get("reassess_recommended") or streak >= 2:
-        lines.append(
-            "- \u26a0\ufe0f STAGNATION / PLATEAU ADVISORY: Quota is a ceiling. Honor the task-scoped stagnation pause; continue diagnostics and bounded recovery probes. "
-            "Run 'ai-harness discussion list <comp>' to harvest competitor insights, explore orthogonal model families, "
-            "and execute bounded discriminating probes autonomously."
-        )
+        if memory.get("competition_task"):
+            lines.append(
+                "- \u26a0\ufe0f STAGNATION / PLATEAU ADVISORY: Stop repeating the stalled mechanism, not competition research. "
+                "Inspect diagnostics and recent discussions, choose a distinct mechanism, preregister its insight/probe/decision rule, and continue full validation."
+            )
+        else:
+            lines.append(
+                "- \u26a0\ufe0f STAGNATION / PLATEAU ADVISORY: Honor the task-scoped recovery gate. Continue diagnostics, research notes and bounded recovery probes; do not treat the pause as a freeze."
+            )
     if memory.get("submission_pause"):
-        lines.append("- STAGNATION_PAUSE: submissions and ordinary full exploration are paused. Use register_recovery_probe with a diagnosis, fixed incumbent, structured rule and bounded stop criterion.")
+        if memory.get("competition_task"):
+            lines.append("- STAGNATION_PAUSE: promotion/submission of the stalled line is paused. Full validation remains open for distinct preregistered competition mechanisms; a machine-evaluated supported result can clear the pause. A new session or narrative cannot clear it.")
+        else:
+            lines.append("- STAGNATION_PAUSE: promotion/submission and ordinary full validation are paused for this non-competition task. Register the bounded recovery probe; diagnostics and smoke tests remain available.")
     rec_path = Path(memory.get("root", ".")) / ".ai-harness" / "reconciliation_report.json"
     if rec_path.is_file():
         try:
@@ -1195,6 +1202,43 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
     # =========================================================================
     # 2. CONTEXT BRIDGE (STRUCTURED CONTEXT PACKET FOR ANTIGRAVITY IN IDE)
     # =========================================================================
+    def _competition_research_directive(self) -> Optional[Dict[str, Any]]:
+        """Return the compact competition reminder repeated at agent decision points."""
+        from harness.stagnation import is_competition_task
+
+        if not is_competition_task(self.task_spec):
+            return None
+        return {
+            "active": True,
+            "objective": (
+                "Continue competition research through the official submission cutoff/endgame; "
+                "a high score, plateau, current-best label, session boundary, or quota state is not a stop signal."
+            ),
+            "session_entry": (
+                "Read this Context HUD, preserve the latest user target/correction from the active conversation, "
+                "and refresh verified competition state before choosing work."
+            ),
+            "after_each_result": (
+                "Evaluate the preregistered rule, record outcome and lesson, then choose the highest-priority "
+                "untested mechanism and its next bounded probe."
+            ),
+            "stagnation": (
+                "Pause promotion/submission of the stalled line, not competition research. "
+                "Continue a distinct full validation only with its linked insight, probe plan, and registered decision rule."
+            ),
+            "quota": (
+                "Use available daily slots to learn from meaningfully distinct, evidence-backed candidates; "
+                "do not conserve a safe incumbent solely because it already scores well or burn slots on near-duplicate guesses."
+            ),
+            "freeze": (
+                "Keep candidates provisional while the competition is open. Freeze only at verified endgame/cutoff "
+                "with explicit operator approval."
+            ),
+            "evidence_boundary": (
+                "Report local CV, public leaderboard, and private leaderboard separately; unavailable live facts remain unknown."
+            ),
+        }
+
     def get_context_packet(
         self,
         session_id: Optional[str] = None,
@@ -1317,6 +1361,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
                     snap["candidate_pool"]["synthesized_candidates"]
                 ),
             },
+            "competition_research_directive": self._competition_research_directive(),
             "available_typed_actions": DEFAULT_ACTION_APPROVAL_TIERS,
         }
         try:
@@ -1353,6 +1398,21 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             f"- **Baseline Anchor**: `{best['baseline']['id']}` (`{baseline_label}`)",
             f"- **Current Best CV**: `{best['cv_best']['id']}` (`{current_label}`, Δ `{delta_label}`)",
         ]
+        directive = pkt.get("competition_research_directive")
+        if directive:
+            lines.extend(
+                [
+                    "",
+                    "## 🔁 ACTIVE COMPETITION REMINDER — read before the next action",
+                    f"- **Objective**: {directive['objective']}",
+                    f"- **At this session boundary**: {directive['session_entry']}",
+                    f"- **After each result**: {directive['after_each_result']}",
+                    f"- **If stalled**: {directive['stagnation']}",
+                    f"- **Quota**: {directive['quota']}",
+                    f"- **Freeze**: {directive['freeze']}",
+                    f"- **Evidence**: {directive['evidence_boundary']}",
+                ]
+            )
         if contract_backend:
             suffix = (
                 " **LOCKED** (never run training locally; dispatch with "
@@ -1372,8 +1432,8 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             if rem_quota and rem_quota > 0:
                 lines.append(
                     f"> ℹ️ **Daily Quota Ceiling ({rem_quota} slot{'s' if rem_quota != 1 else ''} available)**: "
-                    "Per Principle 10, quota is a ceiling, never an obligation to spend. "
-                    "Submit only when backed by verified local CV improvement; never burn quota on speculative micro-blends."
+                    "Use available slots for meaningfully distinct candidates that pass the task's promotion and dispatch gates; "
+                    "do not preserve a safe incumbent solely because it already scores well. There is no obligation to spend every slot."
                 )
 
         subs = pkt.get("recent_submissions") or []
@@ -1420,7 +1480,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             if sess.get("reassess_recommended"):
                 lines.append(
                     "- ⚠️ **SOFT ADVISORY (`REASSESS_RECOMMENDED`)**: Multiple consecutive iterations did not reach "
-                    "`min_meaningful_improvement`. Re-examine parent `DIAGNOSTICS.md` or pivot branch before running heavy CV."
+                    "`min_meaningful_improvement`. Re-examine diagnostics and the research map; choose an untested mechanism rather than another nearby variant."
                 )
             if sess.get("pending_approval_action"):
                 pa = sess["pending_approval_action"]
@@ -1472,8 +1532,8 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
                     "",
                     "> [!IMPORTANT]",
                     "> 🔍 **AUTONOMOUS DISCUSSION MINING MANDATE (Stagnation Countermeasure)**:",
-                    "> Consecutive validation rejections detected. You are strictly forbidden from micro-tuning hyperparameters or passively returning decision lists to the user.",
-                    "> You must immediately run `ai-harness discussion list <comp> --sort-by hot`, inspect the top topics with `ai-harness discussion view <id>`, and formulate an orthogonal hypothesis.",
+                    "> Consecutive validation rejections detected. Do not micro-tune the same mechanism or return a passive option list.",
+                    "> Refresh relevant discussions and diagnostics, select an untested mechanism, preregister its control and decision rule, then continue full validation. In a competition workspace, stagnation pauses promotion/submission of the stalled line, not research.",
                 ]
             )
 
@@ -1582,8 +1642,12 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             cfg = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
             recovery_id = cfg.get("research", {}).get("recovery_probe_id")
             candidate_id = cfg.get("experiment", {}).get("id")
+        research = cfg.get("research", {}) if action == "run_full_validation" else {}
         pause = StagnationController(self.project).check_action(action,
-            recovery_probe_id=recovery_id, candidate_id=candidate_id)
+            recovery_probe_id=recovery_id, candidate_id=candidate_id,
+            insight_id=research.get("insight_id"),
+            probe_plan_id=research.get("probe_plan_id"),
+            decision_rule_id=research.get("decision_rule_id"))
         if pause:
             return ("STOP_POLICY_TRIGGERED", "STAGNATION_PAUSE: " + pause["message"])
 
@@ -1932,6 +1996,19 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             if continuity["reassess_recommended"]:
                 session.reassess_recommended = True
                 obs.advisory = "REASSESS_RECOMMENDED"
+        if action in {
+            "run_full_validation",
+            "wait_cloud_job",
+            "inspect_cloud_job",
+            "record_research_decision",
+            "promote_candidate",
+            "prepare_submission",
+            "record_external_score",
+            "freeze_candidate",
+        }:
+            directive = self._competition_research_directive()
+            if directive:
+                obs.data["competition_research_directive"] = directive
         session.observations.append(asdict(obs))
 
         self._reconcile_session_usage(session)

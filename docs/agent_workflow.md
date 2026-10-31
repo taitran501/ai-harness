@@ -25,7 +25,10 @@ This guide describes how AI coding assistants (such as Antigravity, Claude Code,
 
 ## 2. The 8-Phase Competition Journey
 
-AI-Harness organizes competition work into eight sequential, evidence-gated lifecycle phases.
+AI-Harness organizes competition work into eight evidence-gated phases. Experiment,
+candidate management, and external evaluation remain parallel while the competition
+is open; final selection is an endgame action at official close, not an automatic
+phase transition after a good score or plateau.
 
 ```text
 1. setup        -> Configure task specifications, locate datasets, and verify dependencies.
@@ -34,7 +37,7 @@ AI-Harness organizes competition work into eight sequential, evidence-gated life
 4. experiment   -> Execute iterative AIDE UCB exploration cycles with atomic interventions.
 5. select       -> Review diagnostic failure slices, error diversity, and candidate pool promotions.
 6. public_lb    -> Track external competition scores (e.g., Kaggle public leaderboard).
-7. freeze       -> Blend diverse models into ensembles and freeze final candidate slots.
+7. final selection -> At the final submission cutoff/endgame, lock validated final candidates when the user asks to close. Keep the portfolio provisional during active research.
 8. finalization -> Perform deterministic pre-submission audits and package final deliverables.
 ```
 
@@ -119,9 +122,13 @@ ai-harness-agent act --action promote_candidate --exp-id exp001 --name candidate
 #    synthesize.json: {"name": "ens_v1", "candidates": ["candidate_v1", "candidate_v2"]}
 ai-harness-agent act --action build_ensemble --param-file synthesize.json
 
-# 5. Freeze a final candidate (requires user approval)
+# 5. At final submission cutoff/endgame, freeze a final candidate (requires user approval)
 ai-harness-agent act --action freeze_candidate --user-approved --slot-1-id candidate_v1 --notes "Best validation score"
 ```
+
+Do not freeze candidates because the public score is high, recent experiments plateaued,
+the day ended, or the daily quota is exhausted. While a competition is open, keep
+research and validation active; see the [competition research protocol](competition_research_protocol.md).
 
 > Smoke tests always run locally (`run_smoke_test`, single fold) even in
 > backend-locked workspaces; full validation dispatches through the task's

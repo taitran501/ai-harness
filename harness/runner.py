@@ -322,7 +322,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 enforce_retrospective(self.project, cfg=self.cfg,
                     recovery_probe=bool(research.get("recovery_probe_id")))
                 blocker = StagnationController(self.project).check_action("run_full_validation",
-                    recovery_probe_id=research.get("recovery_probe_id"), candidate_id=self.cfg["experiment"]["id"])
+                    recovery_probe_id=research.get("recovery_probe_id"), candidate_id=self.cfg["experiment"]["id"],
+                    insight_id=research.get("insight_id"), probe_plan_id=research.get("probe_plan_id"),
+                    decision_rule_id=research.get("decision_rule_id"))
                 if blocker:
                     raise ValueError("STAGNATION_PAUSE: " + blocker["message"])
                 reserve_comparison_slot(self.project, self.task_spec, self.cfg, plugin=self.task_plugin)

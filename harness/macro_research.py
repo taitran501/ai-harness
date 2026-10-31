@@ -261,7 +261,9 @@ def enforce_retrospective(project_root, *, cfg=None, recovery_probe=False):
         if (probe and research.get("decision_rule_id") == probe["rule_id"]
             and any(s.get("state") == "paused_for_stagnation" and s["comparison_identity_sha256"] == probe["comparison_identity_sha256"]
                     and s["generation"] == probe["generation"] for s in states.values())
-            and controller.check_action("run_full_validation", recovery_probe_id=rid, candidate_id=candidate) is None):
+            and controller.check_action("run_full_validation", recovery_probe_id=rid, candidate_id=candidate,
+                insight_id=research.get("insight_id"), probe_plan_id=research.get("probe_plan_id"),
+                decision_rule_id=research.get("decision_rule_id")) is None):
             return
     raise GateViolationError("RETROSPECTIVE_REQUIRED: 5 verified runs completed since last review. "
         "You must call record_macro_review before launching costly runs. Trigger: " + reason)

@@ -341,6 +341,8 @@ def main(argv: list[str] | None = None) -> int:
         from harness.hygiene import scan_workspace_hygiene
 
         packet = bridge.get_context_packet(session_id=sess.session_id) or {}
+        if packet.get("competition_research_directive"):
+            payload["competition_research_directive"] = packet["competition_research_directive"]
         memory = packet.get("research_memory") or {}
         if memory.get("macro_hypothesis_map"):
             payload["macro_hypothesis_map"] = memory["macro_hypothesis_map"]
