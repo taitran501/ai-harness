@@ -237,6 +237,7 @@ def run_via_modal(
     project_root: Optional[str | Path] = None,
     job_id: Optional[str] = None,
     keep_staging: bool = False,
+    detach: bool = False,
 ) -> Dict[str, Any]:
     """Upload consented task data, dispatch Modal, verify returned artifact identity, and sync the journal."""
     print("===========================================================")
@@ -289,17 +290,56 @@ def run_via_modal(
         modal_script_path.write_text(code_content, encoding="utf-8")
 
         # 3. Execute Modal Run
-        cmd = ["modal", "run", str(modal_script_path)]
-        print(f"Executing: {' '.join(cmd)}")
+        cmd = ["modal", "run"]
+        if detach:
+            cmd.append("--detach")
+        cmd.append(str(modal_script_path))
+        print(f"Executing: {' '.join(cmd)}", flush=True)
         if managed_job_id:
             update_worker_state(
                 project.root, managed_job_id, status="RUNNING", provider_status="RUNNING",
                 exp_id=exp_id, config_sha256=context["config_sha256"],
             )
-        ret = subprocess.run(cmd, cwd=str(project.root))
 
+        ret = subprocess.run(cmd, cwd=str(project.root))
         if ret.returncode != 0:
             raise RuntimeError(f"Modal execution failed with code {ret.returncode}")
+
+        if detach:
+            detected_app_id = None
+            try:
+                list_proc = subprocess.run(["modal", "app", "list", "--json"], capture_output=True, text=True, timeout=15)
+                if list_proc.returncode == 0:
+                    apps = json.loads(list_proc.stdout)
+                    for a in apps:
+                        desc = a.get("description", "")
+                        if exp_id in desc or (managed_job_id and managed_job_id in desc):
+                            detected_app_id = a.get("app_id")
+                            break
+            except Exception:
+                pass
+
+            print("\n✔ Modal app successfully dispatched in detached cloud mode.")
+            if detected_app_id:
+                print(f"  App ID: {detected_app_id}")
+                print(f"  Live logs: modal app logs -f {detected_app_id}")
+                print(f"  Inspect: ai-harness-agent act --action inspect_cloud_job --job-id {managed_job_id or detected_app_id}")
+            result = {
+                "backend": "modal",
+                "job_id": job_id,
+                "remote_id": detected_app_id,
+                "status": "RUNNING",
+                "detached": True,
+                "exp_id": exp_id,
+                "upload_fingerprint": context["fingerprint"]["fingerprint"],
+            }
+            if managed_job_id:
+                update_worker_state(
+                    project.root, managed_job_id, status="RUNNING", provider_status="RUNNING",
+                    remote_id=detected_app_id, exp_id=exp_id, config_sha256=context["config_sha256"],
+                )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return result
 
         print("\n✔ Modal remote execution finished successfully.")
         artifact_dir = project.artifacts_dir / exp_id
@@ -536,6 +576,7 @@ def main() -> None:
     parser.add_argument("--timeout-seconds", type=float, default=86400.0, help="Maximum Kaggle kernel wait")
     parser.add_argument("--keep-staging", action="store_true", help="Retain staging for debugging")
     parser.add_argument("--gpu", default="A10", help="Modal GPU type (A10, A100, H100, T4, L4)")
+    parser.add_argument("--detach", action="store_true", help="Run Modal job in detached cloud mode without blocking local terminal")
     parser.add_argument(
         "--auto-submit",
         action="store_true",
@@ -557,7 +598,7 @@ def main() -> None:
         if args.job_id:
             update_worker_state(project.root, args.job_id, status="RUNNING", provider_status="STARTING")
         if args.backend == "modal":
-            run_via_modal(args.config, gpu=args.gpu, project_root=project.root, job_id=args.job_id, keep_staging=args.keep_staging)
+            run_via_modal(args.config, gpu=args.gpu, project_root=project.root, job_id=args.job_id, keep_staging=args.keep_staging, detach=args.detach)
         else:
             run_via_kaggle(
                 args.config, project_root=project.root, job_id=args.job_id,

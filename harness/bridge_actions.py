@@ -1299,6 +1299,7 @@ class ActionHandlerMixin:
                 auto_audit=bool(params.get("auto_audit", True)),
                 auto_sync=True,
                 baseline_csv=params.get("baseline_csv"),
+                detach=bool(params.get("detach", False)),
             )
             session.compute_usage["experiments_used"] = (
                 int(session.compute_usage.get("experiments_used", 0)) + 1
@@ -1529,6 +1530,33 @@ class ActionHandlerMixin:
                     ),
                     summary=f"Cloud kernel `{slug}` is {status}.",
                     data={"job": {"job_id": slug, "kernel_slug": slug, "provider": "kaggle", "status": status, **k_res}},
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+            elif str(job_id).startswith("ap-"):
+                from harness.templates.modal_template import ModalAppManager
+
+                app_id = str(job_id)
+                effective_timeout = wait_seconds if wait_seconds > 0 else 3600.0
+                if act == TypedActionName.WAIT_CLOUD_JOB.value:
+                    m_res = ModalAppManager.wait_for_app(
+                        app_id=app_id,
+                        poll_interval=poll_seconds,
+                        timeout_seconds=effective_timeout,
+                    )
+                else:
+                    m_res = ModalAppManager.get_app_status(app_id=app_id)
+
+                status = m_res.get("status", "UNKNOWN")
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status=(
+                        "SUCCESS"
+                        if status not in {"FAILED", "CANCELLED", "ERROR", "TIMEOUT"}
+                        else "FAILED"
+                    ),
+                    summary=f"Modal App `{app_id}` is {status}.",
+                    data={"job": {"job_id": app_id, "app_id": app_id, "provider": "modal", "status": status, **m_res}},
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
             raise ValueError(

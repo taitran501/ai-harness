@@ -1167,6 +1167,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="(cloud backends only) Build and print the dispatch plan without pushing or consuming cloud quota",
     )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="Run remote cloud job in detached mode (e.g. Modal) and return immediately without keeping the local process alive",
+    )
+    parser.add_argument(
+        "--gpu",
+        type=str,
+        default="A10",
+        help="Target GPU type for cloud backends (e.g. Modal: A10, A100, H100, T4, L4)",
+    )
     return parser
 
 
@@ -1317,6 +1328,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             config_path=str(config_path),
             project_root=project.root,
             job_id=getattr(args, "job_id", None),
+            gpu=getattr(args, "gpu", "A10"),
+            detach=getattr(args, "detach", False),
         )
         return 0
     elif args.backend == "kaggle":
