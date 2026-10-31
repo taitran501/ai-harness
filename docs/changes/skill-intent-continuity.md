@@ -1,9 +1,9 @@
 # Skill intent and research continuity
 
 - **Date**: 2026-10-31
-- **PR**: —
+- **PR**: [#134](https://github.com/taitran501/ai-harness/pull/134)
 - **Branch**: `feat/research-workflow-skills`
-- **Status**: Validated; ready to merge
+- **Status**: Merged
 - **Commits**: `653ac73`, `a91d7e2`, `b5a634b`
 
 ## Why
