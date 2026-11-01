@@ -13,6 +13,7 @@ from tools.agent_bridge_cli import (
     _coerce_value,
     _format_action_schema,
     _parse_dynamic_kv_args,
+    _safe_json_loads,
 )
 
 
@@ -42,8 +43,13 @@ class PreserveSubmissionTests(unittest.TestCase):
         self.assertEqual(entry.status, "PRESERVED_UNVERIFIED")
         self.assertEqual(entry.exp_id, "preserved")
         self.assertEqual(entry.payload_sha256, expected_hash)
-        self.assertEqual(entry.official_scores, {"reported_public": 0.895})
+        # official_scores must be strictly empty for unverified entries
+        self.assertEqual(entry.official_scores, {})
+        self.assertEqual(entry.reported_scores, {"reported_public": 0.895})
         self.assertEqual(entry.official_score_source, "user_reported_unverified")
+
+        # Invariant: verify payload archive was not overwritten by receipt or metadata writes
+        self.assertEqual(sha256(Path(entry.archive_path)), expected_hash)
 
         # Verify receipt
         receipt_path = Path(entry.receipt_path)
@@ -63,21 +69,42 @@ class PreserveSubmissionTests(unittest.TestCase):
         self.assertIn("📦 `PRESERVED_UNVERIFIED`", md_text)
         self.assertIn(f"| `{entry.id}` | `preserved` | 📦 `PRESERVED` |", md_text)
         self.assertNotIn(f"| `{entry.id}` | `preserved` | 🔒 `LOCAL_VERIFIED` |", md_text)
+        # Official LB column should show '-' and reported score should be in notes
+        self.assertIn("| - | - | [`zip`]", md_text)
+        self.assertIn("Reported: reported_public:0.895", md_text)
 
     def test_preserve_file_submission_validation_errors(self):
         # Non-existent file
         with self.assertRaises(FileNotFoundError):
             self.mgr.preserve_file_submission(file_path=self.p / "does_not_exist.csv")
 
-        # Valid file for subsequent error tests
+        # Source file outside project root (containment security check)
+        with tempfile.TemporaryDirectory() as external_tmp:
+            ext_file = Path(external_tmp) / "external.csv"
+            ext_file.write_text("x,y\n1,2\n", encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                self.mgr.preserve_file_submission(file_path=ext_file)
+            self.assertIn("project root", str(ctx.exception))
+
+        # Reserved metadata filenames must be rejected
+        for reserved in ("PRESERVATION_RECEIPT.json", "metadata.json", "registry.json"):
+            res_file = self.p / reserved
+            res_file.write_text("{}", encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                self.mgr.preserve_file_submission(file_path=res_file)
+            self.assertIn("reserved metadata filename", str(ctx.exception))
+
+        # Valid file for score tests
         valid_file = self.p / "valid_name.csv"
         valid_file.write_text("a,b\n1,2\n", encoding="utf-8")
 
-        # Non-finite scores
+        # Non-finite scores and booleans
         with self.assertRaises(ValueError):
             self.mgr.preserve_file_submission(file_path=valid_file, reported_score=float("nan"))
         with self.assertRaises(ValueError):
             self.mgr.preserve_file_submission(file_path=valid_file, reported_score=float("inf"))
+        with self.assertRaises(ValueError):
+            self.mgr.preserve_file_submission(file_path=valid_file, reported_score=True)
 
     def test_bridge_preserve_submission_action(self):
         root, task_config_path = make_workspace(prefix="test_preserve_ws_")
@@ -112,15 +139,36 @@ class PreserveSubmissionTests(unittest.TestCase):
         self.assertIn('ai-harness-agent act --action preserve_submission --file "VALUE"', formatted)
         self.assertIn("PowerShell:", formatted)
 
-        # Dynamic args parsing
-        parsed = _parse_dynamic_kv_args(["--file", "output.zip", "--score", "0.85", "--notes", "test"])
-        self.assertEqual(parsed["file"], "output.zip")
+        # Dynamic args parsing with schema types
+        param_types = schema.get("parameter_types", {})
+        parsed = _parse_dynamic_kv_args(
+            ["--file", "123", "--notes", "false", "--score", "0.85"],
+            parameter_types=param_types,
+        )
+        # Type preservation: file must remain string "123", notes must remain string "false"
+        self.assertEqual(parsed["file"], "123")
+        self.assertIsInstance(parsed["file"], str)
+        self.assertEqual(parsed["notes"], "false")
+        self.assertIsInstance(parsed["notes"], str)
         self.assertEqual(parsed["score"], 0.85)
-        self.assertEqual(parsed["notes"], "test")
+
+        # Boolean passed to finite_float must raise ValueError
+        with self.assertRaises(ValueError):
+            _parse_dynamic_kv_args(["--score", "true"], parameter_types=param_types)
+
+        # Missing value for non-boolean flag must raise ValueError
+        with self.assertRaises(ValueError):
+            _parse_dynamic_kv_args(["--file"], parameter_types=param_types)
 
         # Positional args must raise ValueError
         with self.assertRaises(ValueError):
             _parse_dynamic_kv_args(["unexpected_positional_arg"])
+
+        # JSON non-finite parsing rejection
+        with self.assertRaises(ValueError):
+            _safe_json_loads('{"score": NaN}')
+        with self.assertRaises(ValueError):
+            _safe_json_loads('{"score": Infinity}')
 
         # Coerce values check
         self.assertEqual(_coerce_value("nan"), "nan")
@@ -132,14 +180,20 @@ class PreserveSubmissionTests(unittest.TestCase):
         self.assertTrue(_coerce_value("true"))
         self.assertFalse(_coerce_value("false"))
 
-    def test_runner_custom_scorer_logging(self):
+    def test_runner_notice_and_spec_conflict(self):
         import argparse
         import contextlib
         import io
         import yaml
         from harness.runner import UniversalRunner
+        from tests.fixtures import task_document
 
-        root, task_config_path = make_workspace(prefix="test_runner_notice_")
+        # Create task spec with intentional direction conflict (rmse with maximize)
+        doc = task_document(primary_metric="rmse", direction="maximize")
+        root, task_config_path = make_workspace(
+            prefix="test_runner_notice_",
+            task=doc,
+        )
 
         scorer_py = root / "custom_eval.py"
         scorer_py.write_text("def score(y, p): return 1.0\n", encoding="utf-8")
@@ -166,8 +220,11 @@ class PreserveSubmissionTests(unittest.TestCase):
         with contextlib.redirect_stdout(f):
             UniversalRunner(cfg, str(exp_yaml), args)
         out = f.getvalue()
+        # Custom metric scorer notice must be printed
         self.assertIn("[ai-harness] INFO: Custom metric scorer active:", out)
         self.assertIn("custom_eval:score", out)
+        # Genuine spec conflict warning must NOT be suppressed
+        self.assertIn("[ai-harness] WARNING: spec:", out)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ class SubmissionEntry:
     approval_id: Optional[str] = None
     official_observation_id: Optional[str] = None
     official_score_source: str = "declared"
+    reported_scores: Dict[str, Optional[float]] = field(default_factory=dict)
 
 
 class SubmissionManager:
@@ -337,6 +338,9 @@ class SubmissionManager:
         - Does NOT require an experiment directory or plugin test predictions.
         - Generates a dedicated PRESERVATION_RECEIPT.json (record_type: preservation_only).
         - Status is PRESERVED_UNVERIFIED (dispatch_authorized: False).
+        - Keeps official_scores strictly empty; unverified user scores go to reported_scores.
+        - Constrains sources to the project root to prevent reading external host files.
+        - Rejects reserved metadata names to prevent payload collisions.
         - Fingerprints the exact payload SHA-256 and records byte count.
         """
         import math
@@ -349,11 +353,33 @@ class SubmissionManager:
         if not source.is_file():
             raise FileNotFoundError(f"Submission artifact does not exist: {source}")
 
+        # Security boundary: constrain source file to the project root
+        try:
+            source.relative_to(self.project_root.resolve())
+        except ValueError:
+            raise ValueError(
+                f"Preserved file must be located within the project root ({self.project_root}): {source}"
+            )
+
         safe_name = source.name
         if safe_name in ("", ".", "..") or "/" in safe_name or "\\" in safe_name:
             raise ValueError(
                 "Submission file name must be a simple filename without directories."
             )
+
+        reserved_names = {
+            "PRESERVATION_RECEIPT.json",
+            "PLUGIN_AUDIT_RECEIPT.json",
+            "AUDIT_RECEIPT.json",
+            "metadata.json",
+            "registry.json",
+            "SUBMISSIONS.md",
+        }
+        if safe_name in reserved_names:
+            raise ValueError(
+                f"Submission file name cannot be a reserved metadata filename: {safe_name!r}"
+            )
+
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", safe_name):
             raise ValueError(
                 f"Submission file name contains unsupported characters: {safe_name!r}"
@@ -361,11 +387,12 @@ class SubmissionManager:
 
         if reported_score is not None:
             if (
-                not isinstance(reported_score, (int, float))
+                isinstance(reported_score, bool)
+                or not isinstance(reported_score, (int, float))
                 or math.isnan(reported_score)
                 or math.isinf(reported_score)
             ):
-                raise ValueError("reported_score must be a finite number.")
+                raise ValueError("reported_score must be a finite number and cannot be a boolean.")
 
         sub_id = f"{self.get_next_submission_id()}_preserved"
         target_dir = self.submissions_dir / sub_id
@@ -419,8 +446,9 @@ class SubmissionManager:
                 created_at=time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
                 status="PRESERVED_UNVERIFIED",
                 local_cv_scores={},
-                official_scores=reported_scores_dict,
+                official_scores={},  # Keep official_scores strictly empty for unverified entries
                 score_deltas={},
+                reported_scores=reported_scores_dict,
                 candidate_path=str(source),
                 archive_path=str(target_path),
                 receipt_path=str(receipt_path),
@@ -436,7 +464,7 @@ class SubmissionManager:
             )
             if self.submissions_dir != self.project_root / "submissions":
                 root_target_dir = self.project_root / "submissions" / sub_id
-                root_target_dir.mkdir(parents=True, exist_ok=True)
+                root_target_dir.mkdir(parents=True, exist_ok=False)
                 shutil.copy2(target_path, root_target_dir / safe_name)
                 shutil.copy2(
                     receipt_path, root_target_dir / "PRESERVATION_RECEIPT.json"
@@ -444,6 +472,10 @@ class SubmissionManager:
                 shutil.copy2(
                     target_dir / "metadata.json", root_target_dir / "metadata.json"
                 )
+
+            # Invariant check: verify target_path hash was not mutated by receipt/metadata writes
+            if sha256(target_path) != payload_hash:
+                raise IOError("Preserved file was corrupted during metadata generation")
 
             self.submissions[sub_id] = entry
             self.save()
@@ -665,14 +697,7 @@ class SubmissionManager:
                     else:
                         lb_str = "-"
                 elif s.status == "PRESERVED_UNVERIFIED":
-                    if s.official_scores:
-                        items = [
-                            f"{k}:{v}"
-                            for k, v in list(s.official_scores.items())[:3]
-                        ]
-                        lb_str = " / ".join(items) if items else "-"
-                    else:
-                        lb_str = "-"
+                    lb_str = "-"
                 else:
                     lb_str = "Pending"
 
@@ -698,6 +723,9 @@ class SubmissionManager:
                     else "-"
                 )
                 notes_clean = s.notes or "-"
+                if s.status == "PRESERVED_UNVERIFIED" and s.reported_scores:
+                    rep_str = ", ".join(f"{k}:{v}" for k, v in s.reported_scores.items())
+                    notes_clean = f"Reported: {rep_str} | {s.notes}" if s.notes else f"Reported: {rep_str}"
 
                 lines.append(
                     f"| `{s.id}` | `{s.exp_id}` | {status_icon} | {cv_str} | {lb_str} | {delta_str} | {pkg_link} | {notes_clean} |"

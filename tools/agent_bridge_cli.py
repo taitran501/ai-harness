@@ -102,6 +102,13 @@ def _json_serial(obj: Any) -> Any:
     return str(obj)
 
 
+def _safe_json_loads(val: str) -> Any:
+    """Safe JSON deserialization that rejects non-finite constants (NaN, Infinity)."""
+    def _reject_constant(c: str) -> Any:
+        raise ValueError(f"Non-finite numeric constant '{c}' not allowed in JSON input.")
+    return json.loads(val, parse_constant=_reject_constant)
+
+
 def _coerce_value(val: str) -> Any:
     """Coerce string into int, float, bool, or json dict/list if applicable."""
     val_lower = val.lower()
@@ -121,19 +128,66 @@ def _coerce_value(val: str) -> Any:
         pass
     if (val.startswith("{") and val.endswith("}")) or (val.startswith("[") and val.endswith("]")):
         try:
-            return json.loads(val)
+            return _safe_json_loads(val)
         except Exception:
             pass
     return val
 
 
-def _parse_dynamic_kv_args(args_list: list[str]) -> Dict[str, Any]:
+def _coerce_typed_value(key: str, val: Any, declared_type: str | None) -> Any:
+    """Coerce dynamic CLI flag values according to action schema parameter_types."""
+    flag_name = key.replace("_", "-")
+    if declared_type in ("string", "path"):
+        if val is True:
+            raise ValueError(f"Flag '--{flag_name}' requires a {declared_type} value.")
+        return str(val)
+
+    if declared_type == "finite_float":
+        if val is True or isinstance(val, bool):
+            raise ValueError(f"Flag '--{flag_name}' requires a finite number, got boolean.")
+        try:
+            f = float(val)
+            if math.isnan(f) or math.isinf(f):
+                raise ValueError()
+            return f
+        except (ValueError, TypeError):
+            raise ValueError(f"Flag '--{flag_name}' requires a finite number, got {val!r}.")
+
+    if declared_type == "int":
+        if val is True or isinstance(val, bool):
+            raise ValueError(f"Flag '--{flag_name}' requires an integer, got boolean.")
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            raise ValueError(f"Flag '--{flag_name}' requires an integer, got {val!r}.")
+
+    if declared_type == "bool":
+        if isinstance(val, bool):
+            return val
+        s = str(val).lower().strip()
+        if s in ("true", "1", "yes"):
+            return True
+        if s in ("false", "0", "no"):
+            return False
+        raise ValueError(f"Flag '--{flag_name}' requires a boolean value, got {val!r}.")
+
+    # Fallback to general coercion
+    if isinstance(val, str):
+        return _coerce_value(val)
+    return val
+
+
+def _parse_dynamic_kv_args(
+    args_list: list[str],
+    parameter_types: Dict[str, str] | None = None,
+) -> Dict[str, Any]:
     """Parse dynamic CLI flags (--exp-id value, --weight 0.5, --flag) into a dict.
 
-    Converts kebab-case keys (--config-path) to snake_case (config_path) and parses
-    ints, floats, booleans, and JSON-like strings automatically.
+    Converts kebab-case keys (--config-path) to snake_case (config_path) and applies
+    schema-declared parameter_types when available.
     """
     params: Dict[str, Any] = {}
+    types = parameter_types or {}
     i = 0
     while i < len(args_list):
         arg = args_list[i]
@@ -142,18 +196,22 @@ def _parse_dynamic_kv_args(args_list: list[str]) -> Dict[str, Any]:
             if "=" in arg:
                 key_part, val_part = arg[2:].split("=", 1)
                 key = key_part.replace("-", "_")
-                params[key] = _coerce_value(val_part)
+                decl_type = types.get(key)
+                params[key] = _coerce_typed_value(key, val_part, decl_type)
                 i += 1
                 continue
 
             key = arg[2:].replace("-", "_")
+            decl_type = types.get(key)
             # Peek next token
             if i + 1 < len(args_list) and not args_list[i + 1].startswith("--"):
                 val_part = args_list[i + 1]
-                params[key] = _coerce_value(val_part)
+                params[key] = _coerce_typed_value(key, val_part, decl_type)
                 i += 2
             else:
-                params[key] = True
+                if decl_type and decl_type not in ("bool",):
+                    raise ValueError(f"Flag '--{key.replace('_', '-')}' requires a {decl_type} value.")
+                params[key] = _coerce_typed_value(key, True, decl_type)
                 i += 1
         else:
             raise ValueError(
@@ -167,7 +225,7 @@ def _parse_json_arg(raw: str | None) -> Dict[str, Any]:
         return {}
     # 1. Standard JSON parse
     try:
-        parsed = json.loads(raw)
+        parsed = _safe_json_loads(raw)
         if isinstance(parsed, dict):
             return parsed
     except Exception:
@@ -384,9 +442,11 @@ def main(argv: list[str] | None = None) -> int:
                 raw = path.read_text(encoding="utf-8-sig")
             except OSError as error:
                 parser.error(f"Cannot read --param-file: {error}")
+        schema = get_action_schema(act_name) or {}
+        param_types = schema.get("parameter_types") or {}
         params = _parse_json_arg(raw)
         try:
-            dynamic_params = _parse_dynamic_kv_args(extra_argv)
+            dynamic_params = _parse_dynamic_kv_args(extra_argv, parameter_types=param_types)
         except ValueError as err:
             parser.error(str(err))
         params.update(dynamic_params)
