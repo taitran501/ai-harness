@@ -2152,6 +2152,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         "optimize_threshold": "_handle_optimize_threshold",
         "generate_microdose_probe": "_handle_generate_microdose_probe",
         "prepare_submission": "_handle_prepare_submission",
+        "preserve_submission": "_handle_preserve_submission",
         "record_external_score": "_handle_record_external_score",
         "freeze_candidate": "_handle_freeze_candidate",
         "emergency_unfreeze": "_handle_emergency_unfreeze",

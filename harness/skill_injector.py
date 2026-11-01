@@ -158,7 +158,7 @@ def generate_skill_content(
         "",
         "Treat short continuations, reminders, planning requests and invoked skills in the context of the user's active objective and latest corrections. Recover verified results and current state; preserve user instructions separately from unverified agent narratives. Do not execute an old checkpoint blindly when it conflicts with a newer instruction or current evidence.",
         "Match the requested scope: a request to research or plan calls for research or a plan; a request to continue work calls for the next useful authorized action as well. Choose the appropriate evidence, tools and depth for the problem rather than a fixed experiment recipe. Keep researching through an active competition; a safety gate pauses the gated action, not all useful work. Respect explicit pauses, approval gates and the official competition status.",
-        "Use results from `/debate`, discussion mining and other requested skills to update the current plan and next action. Report uncertainty and genuine blockers; do not treat a role-play debate, source quotation, prediction diversity or an existing artifact as proof of a causal or competitive claim.",
+        "Use results from `/debate`, discussion mining and other requested skills to update the current plan and next action. Close the loop into AI-Harness by recording material findings with `record_research_insight` and preserving unverified submission files with `preserve_submission`. Report uncertainty and genuine blockers; do not treat a role-play debate, source quotation, prediction diversity or an existing artifact as proof of a causal or competitive claim.",
         "",
         f"> **Active Benchmark**: **{task_name}** | **Platform**: {platform} | **Modality**: {mod_info['title']}",
         f"> **Objective**: {direction.capitalize()} `{primary_metric}` across cross-validation folds.",
@@ -885,6 +885,19 @@ ai-harness audit-claims --file <markdown_artifact_path> --claims-file <claims.js
 ```
 
 Keyword overlap is advisory only. A non-strict scan reports citation discovery and registered-source integrity; it does not claim that every statement is supported. Strict mode requires complete coverage, exact evidence from the selected segment, and a current execution-bound `supported` verdict for every citation. Empty scans and missing verifier records never count as successful verification.
+
+## 5. Close the loop into AI-Harness
+
+When adjudication changes a material empirical or experiment-related claim for
+the currently attached AI-Harness task, search for an existing insight first.
+Record a new or refined insight with its verdict, evidence locators, mechanism,
+and next action:
+```powershell
+ai-harness-agent act --action record_research_insight --title "..." --observation "..." --mechanism "..." --next-action "..."
+```
+Link a related insight as its parent. Keep untested findings as hypotheses; a debate verdict alone is not a demonstrated gain.
+
+If this authorized task creates a submission file, preserve it with `preserve_submission` and report the returned ID and SHA-256. Preservation copies a file for safekeeping; it does not validate or dispatch it. If Harness is unavailable or the action fails, report that clearly and do not claim the record was saved.
 """
 
 def generate_research_skill_content(

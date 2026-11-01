@@ -2005,6 +2005,46 @@ class ActionHandlerMixin:
             elapsed_seconds=round(time.time() - t0, 3),
         )
 
+    def _handle_preserve_submission(
+        self,
+        call,
+        session,
+        journal,
+        sub_mgr,
+        act,
+        params,
+        t0,
+    ) -> ActionObservation:
+        file_param = params.get("file")
+        if not file_param:
+            raise ValueError("Action 'preserve_submission' requires 'file' parameter.")
+        notes = params.get("notes", "")
+        reported_score = params.get("score")
+        reported_partition = params.get("partition")
+
+        entry = sub_mgr.preserve_file_submission(
+            file_path=file_param,
+            notes=notes,
+            reported_score=reported_score,
+            reported_partition=reported_partition,
+        )
+        return ActionObservation(
+            step_index=call.step_index,
+            action=act,
+            status="SUCCESS",
+            summary=f"Preserved submission artifact '{entry.id}' (unverified safekeeping only).",
+            artifact_path=entry.archive_path,
+            data={
+                "submission_id": entry.id,
+                "archive_path": entry.archive_path,
+                "sha256": entry.payload_sha256,
+                "receipt_path": entry.receipt_path,
+                "dispatch_authorized": False,
+                "status": entry.status,
+            },
+            elapsed_seconds=round(time.time() - t0, 3),
+        )
+
     def _handle_record_external_score(
         self,
         call,

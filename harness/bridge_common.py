@@ -69,6 +69,7 @@ class TypedActionName(str, Enum):
     OPTIMIZE_THRESHOLD = "optimize_threshold"
     GENERATE_MICRODOSE_PROBE = "generate_microdose_probe"
     PREPARE_SUBMISSION = "prepare_submission"
+    PRESERVE_SUBMISSION = "preserve_submission"
     RECORD_EXTERNAL_SCORE = "record_external_score"
     FREEZE_CANDIDATE = "freeze_candidate"
     EMERGENCY_UNFREEZE = "emergency_unfreeze"
@@ -128,6 +129,7 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.OPTIMIZE_THRESHOLD.value: ApprovalTier.AUTO.value,
     TypedActionName.GENERATE_MICRODOSE_PROBE.value: ApprovalTier.AUTO_WITH_LIMIT.value,
     TypedActionName.PREPARE_SUBMISSION.value: ApprovalTier.USER_APPROVAL.value,
+    TypedActionName.PRESERVE_SUBMISSION.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_EXTERNAL_SCORE.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.FREEZE_CANDIDATE.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.EMERGENCY_UNFREEZE.value: ApprovalTier.USER_APPROVAL.value,
@@ -430,6 +432,18 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "required": [],
         "optional": {"exp_id": None, "candidate_csv": None, "notes": ""},
         "description": "Validates format, columns, and row counts against submission requirements.",
+    },
+    "preserve_submission": {
+        "summary": "Copy and fingerprint a submission artifact for safekeeping.",
+        "required": ["file"],
+        "optional": {"notes": "", "score": None, "partition": None},
+        "parameter_types": {
+            "file": "path",
+            "notes": "string",
+            "score": "finite_float",
+            "partition": "string",
+        },
+        "description": "Preserves an artifact only; does not validate or dispatch it.",
     },
     "inspect_cloud_job": {
         "summary": "Query status and logs of a remote cloud execution job.",

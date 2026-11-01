@@ -212,23 +212,33 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 f"{_mismatch}; {_unsupported_msg}" if _mismatch else _unsupported_msg
             )
         self._skip_generic_base_eval = False
+        hook = cfg.get("paths", {}).get("metrics_evaluator")
+        if hook:
+            print(
+                f"[ai-harness] INFO: Custom metric scorer active: "
+                f"{self.task_spec.primary_metric} via {hook}"
+            )
         if _mismatch:
             _generic_scoring = not self.task_plugin.capabilities().get(
                 "custom_metrics"
             )
-            if cfg.get("paths", {}).get("metrics_evaluator") or not _generic_scoring:
+            if hook or not _generic_scoring:
                 # The generic aggregate provably cannot score this spec: its
                 # pair gate raises before any metric is computed, so a custom
                 # metrics_evaluator is the authoritative scorer. Skip the base
                 # evaluation instead of warning "official evaluation failed"
                 # on every fold.
-                self._skip_generic_base_eval = bool(
-                    cfg.get("paths", {}).get("metrics_evaluator")
-                )
-                print(
-                    f"[ai-harness] WARNING: {_mismatch}; the official score "
-                    "will come from the configured custom scorer"
-                )
+                self._skip_generic_base_eval = bool(hook)
+                if hook:
+                    print(
+                        f"[ai-harness] INFO: Generic aggregate scorer skipped: "
+                        f"{_mismatch}; the configured custom scorer is authoritative"
+                    )
+                else:
+                    print(
+                        f"[ai-harness] WARNING: {_mismatch}; the official score "
+                        "will come from the configured custom scorer"
+                    )
             else:
                 raise ValueError(
                     f"{_mismatch} — align the subtask metric with the spec's "
@@ -237,7 +247,6 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 )
         self.seed = self.task_spec.resolve_seed(cfg.get("runtime", {}).get("seed", 42))
         self.estimator_metadata = []
-        hook = cfg.get("paths", {}).get("metrics_evaluator")
         if hook:
             if str(self.project_root) not in sys.path:
                 sys.path.insert(0, str(self.project_root))

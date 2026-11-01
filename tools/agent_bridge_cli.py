@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from dataclasses import asdict
@@ -62,7 +63,7 @@ def _format_action_schema(name: str, schema: Dict[str, Any]) -> str:
     if req:
         lines.append("Required Parameters:")
         for p in req:
-            lines.append(f"  --{p} <value> (or in --params '{{\"{p}\": ...}}')")
+            lines.append(f"  --{p.replace('_', '-')} <value>")
     else:
         lines.append("Required Parameters: (none)")
     opt = schema.get("optional", {})
@@ -70,11 +71,16 @@ def _format_action_schema(name: str, schema: Dict[str, Any]) -> str:
         lines.append("Optional Parameters:")
         for p, default_val in opt.items():
             def_str = f" [default: {default_val!r}]" if default_val is not None else ""
-            lines.append(f"  --{p} <value>{def_str}")
-    sample_params = {p: f"<{p}_value>" for p in req}
-    json_sample = json.dumps(sample_params) if sample_params else "{}"
+            lines.append(f"  --{p.replace('_', '-')} <value> (optional){def_str}")
+    flags = " ".join(f'--{p.replace("_", "-")} "VALUE"' for p in req)
     lines.append("Example Invocation:")
-    lines.append(f"  ai-harness-agent act --action {name} --params '{json_sample}'")
+    lines.append(
+        f"  ai-harness-agent act --action {name}"
+        + (f" {flags}" if flags else "")
+    )
+    lines.append(
+        "PowerShell: quote values containing spaces. Use --param-file for nested objects or lists."
+    )
     return "\n".join(lines)
 
 
@@ -108,7 +114,9 @@ def _coerce_value(val: str) -> Any:
     try:
         if val.isdigit() or (val.startswith("-") and val[1:].isdigit()):
             return int(val)
-        return float(val)
+        f = float(val)
+        if not math.isnan(f) and not math.isinf(f):
+            return f
     except ValueError:
         pass
     if (val.startswith("{") and val.endswith("}")) or (val.startswith("[") and val.endswith("]")):
@@ -148,7 +156,9 @@ def _parse_dynamic_kv_args(args_list: list[str]) -> Dict[str, Any]:
                 params[key] = True
                 i += 1
         else:
-            i += 1
+            raise ValueError(
+                f"Unrecognized positional argument '{arg}'. All action parameters must be specified as --flag <value>."
+            )
     return params
 
 
@@ -375,7 +385,10 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as error:
                 parser.error(f"Cannot read --param-file: {error}")
         params = _parse_json_arg(raw)
-        dynamic_params = _parse_dynamic_kv_args(extra_argv)
+        try:
+            dynamic_params = _parse_dynamic_kv_args(extra_argv)
+        except ValueError as err:
+            parser.error(str(err))
         params.update(dynamic_params)
         for field in ("rule_id", "candidate_evidence_id", "evidence_kind", "evidence_partition"):
             if getattr(args, field, None) is not None:

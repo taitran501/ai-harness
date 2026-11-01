@@ -323,6 +323,135 @@ class SubmissionManager:
             shutil.rmtree(target_dir, ignore_errors=True)
             raise
 
+    def preserve_file_submission(
+        self,
+        *,
+        file_path: str | Path,
+        notes: str = "",
+        reported_score: Optional[float] = None,
+        reported_partition: Optional[str] = None,
+    ) -> SubmissionEntry:
+        """Preserve an arbitrary submission artifact (zip, csv, etc.) for safekeeping.
+
+        Distinct from `register_plugin_submission`:
+        - Does NOT require an experiment directory or plugin test predictions.
+        - Generates a dedicated PRESERVATION_RECEIPT.json (record_type: preservation_only).
+        - Status is PRESERVED_UNVERIFIED (dispatch_authorized: False).
+        - Fingerprints the exact payload SHA-256 and records byte count.
+        """
+        import math
+        import re
+
+        source = Path(file_path).expanduser()
+        if not source.is_absolute():
+            source = self.project_root / source
+        source = source.resolve()
+        if not source.is_file():
+            raise FileNotFoundError(f"Submission artifact does not exist: {source}")
+
+        safe_name = source.name
+        if safe_name in ("", ".", "..") or "/" in safe_name or "\\" in safe_name:
+            raise ValueError(
+                "Submission file name must be a simple filename without directories."
+            )
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", safe_name):
+            raise ValueError(
+                f"Submission file name contains unsupported characters: {safe_name!r}"
+            )
+
+        if reported_score is not None:
+            if (
+                not isinstance(reported_score, (int, float))
+                or math.isnan(reported_score)
+                or math.isinf(reported_score)
+            ):
+                raise ValueError("reported_score must be a finite number.")
+
+        sub_id = f"{self.get_next_submission_id()}_preserved"
+        target_dir = self.submissions_dir / sub_id
+        target_dir.mkdir(parents=True, exist_ok=False)
+        target_path = target_dir / safe_name
+        receipt_path = target_dir / "PRESERVATION_RECEIPT.json"
+
+        try:
+            shutil.copy2(source, target_path)
+            from harness.artifacts import sha256
+
+            payload_hash = sha256(target_path)
+            byte_count = target_path.stat().st_size
+
+            # Check that copy was uncorrupted
+            if sha256(source) != payload_hash:
+                raise IOError("Preserved file checksum mismatch after copy")
+
+            from harness.io_utils import atomic_write_json
+
+            receipt = {
+                "schema_version": "preservation_receipt.v1",
+                "record_type": "preservation_only",
+                "verification_status": "unverified",
+                "dispatch_authorized": False,
+                "source_file": str(source),
+                "archive_path": str(target_path),
+                "payload_sha256": payload_hash,
+                "byte_count": byte_count,
+                "preserved_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+                "notes": notes,
+                "reported_score": (
+                    float(reported_score) if reported_score is not None else None
+                ),
+                "reported_partition": reported_partition,
+            }
+            atomic_write_json(receipt_path, receipt, indent=2, ensure_ascii=False)
+
+            reported_scores_dict: Dict[str, Optional[float]] = {}
+            if reported_score is not None:
+                key = (
+                    f"reported_{reported_partition}"
+                    if reported_partition
+                    else "reported_score"
+                )
+                reported_scores_dict[key] = float(reported_score)
+
+            entry = SubmissionEntry(
+                id=sub_id,
+                exp_id="preserved",
+                created_at=time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+                status="PRESERVED_UNVERIFIED",
+                local_cv_scores={},
+                official_scores=reported_scores_dict,
+                score_deltas={},
+                candidate_path=str(source),
+                archive_path=str(target_path),
+                receipt_path=str(receipt_path),
+                notes=notes,
+                payload_sha256=payload_hash,
+                official_score_source="user_reported_unverified",
+            )
+            atomic_write_json(
+                target_dir / "metadata.json",
+                asdict(entry),
+                indent=2,
+                ensure_ascii=False,
+            )
+            if self.submissions_dir != self.project_root / "submissions":
+                root_target_dir = self.project_root / "submissions" / sub_id
+                root_target_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target_path, root_target_dir / safe_name)
+                shutil.copy2(
+                    receipt_path, root_target_dir / "PRESERVATION_RECEIPT.json"
+                )
+                shutil.copy2(
+                    target_dir / "metadata.json", root_target_dir / "metadata.json"
+                )
+
+            self.submissions[sub_id] = entry
+            self.save()
+            return entry
+        except Exception:
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise
+
     def record_official_score(
         self,
         sub_id: str,
@@ -483,6 +612,7 @@ class SubmissionManager:
             "> - 🔒 `LOCAL_VERIFIED`: Passed Deterministic & Statistical Audit Gate.",
             "> - ⏳ `SUBMITTED_PENDING`: Uploaded to evaluation portal, awaiting leaderboard score.",
             "> - 🎯 `SCORED`: Official scores recorded with CV vs LB delta analysis.",
+            "> - 📦 `PRESERVED_UNVERIFIED`: Preserved artifact for safekeeping; not verified or dispatch-authorized.",
             "> - ⚠️ `DIVERGENCE`: Local CV significantly over-estimated performance (LB - CV < -0.05).",
             "",
             "| Sub ID | Exp ID | Status | Local CV | Official LB | Delta (LB - CV) | Package | Notes |",
@@ -497,15 +627,16 @@ class SubmissionManager:
             for s in sorted(
                 self.submissions.values(), key=lambda x: x.created_at, reverse=True
             ):
-                status_icon = (
-                    "🎯 `SCORED`"
-                    if s.status == "SCORED"
-                    else (
-                        "⏳ `PENDING`"
-                        if s.status == "SUBMITTED_PENDING"
-                        else "🔒 `LOCAL_VERIFIED`"
-                    )
-                )
+                if s.status == "SCORED":
+                    status_icon = "🎯 `SCORED`"
+                elif s.status == "SUBMITTED_PENDING":
+                    status_icon = "⏳ `PENDING`"
+                elif s.status == "PRESERVED_UNVERIFIED":
+                    status_icon = "📦 `PRESERVED`"
+                elif s.status == "DISQUALIFIED":
+                    status_icon = "❌ `DISQUALIFIED`"
+                else:
+                    status_icon = "🔒 `LOCAL_VERIFIED`"
                 if s.divergence_warning:
                     status_icon += " ⚠️"
 
@@ -529,6 +660,15 @@ class SubmissionManager:
                             f"{k}:{v}"
                             for k, v in list(s.official_scores.items())[:3]
                             if k != "split_type"
+                        ]
+                        lb_str = " / ".join(items) if items else "-"
+                    else:
+                        lb_str = "-"
+                elif s.status == "PRESERVED_UNVERIFIED":
+                    if s.official_scores:
+                        items = [
+                            f"{k}:{v}"
+                            for k, v in list(s.official_scores.items())[:3]
                         ]
                         lb_str = " / ".join(items) if items else "-"
                     else:
