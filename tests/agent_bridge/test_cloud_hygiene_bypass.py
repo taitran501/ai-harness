@@ -147,6 +147,9 @@ class AgentsMdTests(unittest.TestCase):
             self.assertIn(AGENTS_MD_MARKER_END, content)
             self.assertIn("Never push kernels manually", content)
             self.assertIn(".agents/skills/harness/SKILL.md", content)
+            self.assertIn("NO UNGROUNDED BRAINSTORMING", content)
+            self.assertIn("STANDARDIZED SUBMISSIONS", content)
+            self.assertTrue((root / ".agents" / "rules" / "harness.md").is_file())
         finally:
             temp.cleanup()
 

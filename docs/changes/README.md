@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-11-02 | Strengthen managed AGENTS.md directives and mirror rules for coding agents | Working tree | [managed-agents-md-directives-and-rules-mirror](managed-agents-md-directives-and-rules-mirror.md) |
 | 2026-11-02 | Retire /ai-harness alias, align skill producers, and safe alias migration | Working tree | [retire-ai-harness-alias-and-lean-skills](retire-ai-harness-alias-and-lean-skills.md) |
 | 2026-11-01 | Skills bridge, submission preservation, flat action ergonomics, and custom scorer notice | Working tree | [skills-bridge-and-submission-preservation](skills-bridge-and-submission-preservation.md) |
 | 2026-11-01 | Modal fast uv image building, dynamic task runtime requirements, and job ID normalization | Working tree | [modal-uv-and-dynamic-runtime-requirements](modal-uv-and-dynamic-runtime-requirements.md) |
