@@ -68,7 +68,7 @@ Attach the harness to your competition repository:
 ai-harness attach --project-root . --task-config configs/task.yaml
 ```
 
-This writes `.ai-harness/project.yaml` and configures the agent skill under `.agents/skills/ai-harness/`.
+This writes `.ai-harness/project.yaml` and configures the agent skill under `.agents/skills/harness/`.
 
 ### AI agent integration
 

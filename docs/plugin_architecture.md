@@ -1,4 +1,4 @@
-﻿# Task Plugins and Workspace Integration
+# Task Plugins and Workspace Integration
 
 AI-Harness is distributed as an installable Python package. Task-specific competition adapters are separate distributions discovered via Python entry points under the `ai_harness.task_plugins` group.
 
@@ -36,7 +36,7 @@ ai-harness attach --project-root /path/to/competition --task-config configs/task
 
 The `attach` command creates:
 - A local attachment manifest: `.ai-harness/project.yaml`.
-- An agent skill file tailored to the task: `.agents/skills/ai-harness/SKILL.md`.
+- An agent skill file tailored to the task: `.agents/skills/harness/SKILL.md`.
 - Isolated experiment state and artifact directories: `.ai-harness/artifacts/<task-id>/`.
 
 The competition's own `configs/task.yaml` is preserved and not rewritten.

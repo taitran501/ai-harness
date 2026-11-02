@@ -43,7 +43,7 @@ You operate under strict SWE-agent deterministic verification principles: do not
 - Output Configuration: configs/task.yaml
 - Baseline Experiment: configs/exp000_baseline.yaml
 - Cross-Validation Splits: splits/fold_assignments.tsv
-- AI Agent Skill: .agents/skills/ai-harness/SKILL.md
+- AI Agent Skill: .agents/skills/harness/SKILL.md
 </context>
 
 <operating_constraints>
@@ -72,7 +72,7 @@ Verify that the bootstrapper successfully produced:
 - `configs/task.yaml`: Conforms to UniversalTaskSpec v2.0 schema.
 - `configs/exp000_baseline.yaml`: GroundingGate-compliant baseline experiment config.
 - `splits/fold_assignments.tsv`: Deterministic fold allocations enforcing GroupKFold (if groups exist) or StratifiedKFold.
-- `.agents/skills/ai-harness/SKILL.md`: Regenerated skill markdown tailored to this competition's metric.
+- `.agents/skills/harness/SKILL.md`: Regenerated skill markdown tailored to this competition's metric.
 
 STEP 3: BRIDGE SESSION INITIALIZATION
 1. Query the Agent Bridge context packet:

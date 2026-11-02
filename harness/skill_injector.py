@@ -1,6 +1,6 @@
 """Skill Injector Engine for AI-Harness.
 
-Dynamically adapts and injects the AI Agent skill (.agents/skills/ai-harness/SKILL.md)
+Dynamically adapts and injects the AI Agent skill (.agents/skills/harness/SKILL.md)
 to perfectly match any competition or benchmark (Kaggle, Codabench, SemEval, DrivenData, Hugging Face),
 parameterizing task modalities, metrics, subtasks, grounding backbones, and audit rules.
 """
@@ -8,6 +8,7 @@ parameterizing task modalities, metrics, subtasks, grounding backbones, and audi
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -92,7 +93,7 @@ def load_task_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
 
 
 def generate_compatibility_skill_content(task: Dict[str, Any]) -> str:
-    """Generate a compact alias that routes legacy /ai-harness calls to /harness."""
+    """Render the retired alias only to recognize previously generated files."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
     return f"""---
 name: ai-harness
@@ -115,7 +116,7 @@ def generate_skill_content(
     """Generate Markdown content for SKILL.md dynamically tailored to the target task."""
     task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
     if skill_name == "ai-harness":
-        return generate_compatibility_skill_content(task)
+        raise ValueError("/ai-harness is retired; use /harness")
     platform = (task.get("platform") or "generic").capitalize()
     task_type = task.get("task_type") or task.get("type") or "Supervised Learning"
     modality = (task.get("modality") or "generic").lower()
@@ -137,7 +138,7 @@ def generate_skill_content(
     lines: List[str] = [
         "---",
         f"name: {skill_name}",
-        "description: Use for every new or resumed Antigravity session in an active ML competition and whenever selecting experiments, interpreting high scores or plateaus, using submission quota, promoting a candidate, or considering a freeze. Keeps research active through official close using verified harness state.",
+        "description: Start or resume an AI-Harness competition, test ideas, and prepare submissions using verified evidence.",
         "---",
         "",
         f"# ML Experiment Harness — {task_name}",
@@ -978,6 +979,41 @@ def get_global_skills_dir() -> Path:
     return (Path.home() / ".gemini" / "config" / "skills").resolve()
 
 
+def _retire_generated_alias(skills_dir: Path) -> None:
+    """Remove only the generated alias, preserving adjacent and unknown files."""
+    alias_dir = skills_dir / "ai-harness"
+    alias_file = alias_dir / "SKILL.md"
+    if not alias_dir.exists():
+        return
+    if (
+        alias_dir.is_symlink()
+        or alias_dir.resolve() != (skills_dir / "ai-harness").resolve()
+        or alias_file.is_symlink()
+    ):
+        warnings.warn(f"Preserved linked legacy skill: {alias_dir}", stacklevel=2)
+        return
+    if not alias_file.is_file():
+        return
+    content = alias_file.read_text(encoding="utf-8")
+    heading = "# AI-Harness Compatibility Entry — "
+    task_names = [
+        line[len(heading):]
+        for line in content.splitlines()
+        if line.startswith(heading)
+    ]
+    expected = (
+        generate_compatibility_skill_content({"task_name": task_names[0]})
+        if len(task_names) == 1
+        else None
+    )
+    if expected is None or content.replace("\r\n", "\n") != expected.replace("\r\n", "\n"):
+        warnings.warn(f"Preserved unrecognized legacy skill: {alias_file}", stacklevel=2)
+        return
+    alias_file.unlink()
+    if not any(alias_dir.iterdir()):
+        alias_dir.rmdir()
+
+
 def install_global_skills(
     target_dir: Optional[Path] = None,
     task_config: Optional[Dict[str, Any]] = None,
@@ -1003,12 +1039,13 @@ def install_global_skills(
         dest.write_text(content, encoding="utf-8")
         written.append(dest)
 
+    _retire_generated_alias(skills_dir)
+
     # Purge bloated/legacy skills from global directory so slash command menu stays lean
     legacy_purge = (
         "ml-harness",
         "ml-experiment-harness",
         "ai-experiment-harness",
-        "ai-harness",
         "ai-harness-resume",
         "ai-harness-explore",
         "ai-harness-submit",
@@ -1064,12 +1101,7 @@ def install_workspace_skills(
         dest.write_text(content, encoding="utf-8")
         written.append(dest)
 
-    # For backward compatibility in workspace: also write ai-harness/SKILL.md as alias
-    twin_dest = skills_dir / "ai-harness" / "SKILL.md"
-    twin_dest.parent.mkdir(parents=True, exist_ok=True)
-    twin_content = generate_skill_content(cfg, artifact_path=artifact_path, skill_name="ai-harness")
-    twin_dest.write_text(twin_content, encoding="utf-8")
-    written.append(twin_dest)
+    _retire_generated_alias(skills_dir)
 
     # Purge legacy/bloated skills so workspace stays clean
     legacy_purge = (
@@ -1103,7 +1135,10 @@ def inject_skill_file(
     cfg = task_config or load_task_config(task_path)
 
     if output_path is not None:
-        dest = Path(output_path).expanduser().resolve()
+        requested = Path(output_path).expanduser()
+        dest = requested.resolve()
+        if any(p.parent.name.casefold() == "ai-harness" for p in (requested, dest)):
+            raise ValueError("/ai-harness is retired; use a harness/SKILL.md output path")
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             artifact_path = project.artifacts_dir.relative_to(project.root).as_posix()

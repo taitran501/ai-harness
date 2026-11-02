@@ -269,7 +269,7 @@ def render_agents_md_body() -> str:
         "This workspace runs ML experiments through **ai-harness** (framework clone: `./ai-harness`). "
         "All experiment work goes through the harness - there is no supported alternative.",
         "",
-        "1. **Read the SOP first**: `.agents/skills/ai-harness/SKILL.md` (generated per task, always current).",
+        "1. **Read the SOP first**: `.agents/skills/harness/SKILL.md` (generated per task, always current).",
         "2. **Current state** (~1k tokens): `ai-harness-agent --project-root . context`",
         "3. **Experiment lifecycle**: declarative config in `configs/` -> smoke probe "
         "(`ai-harness-run --config configs/<exp>.yaml --debug --fold 0`) -> full validation "
@@ -341,7 +341,7 @@ def attach_project(
         raise ValueError("Task config must be inside the attached project root.") from exc
 
     manifest_path = root / MANIFEST_RELATIVE_PATH
-    skill_path = root / ".agents" / "skills" / "ai-harness" / "SKILL.md"
+    skill_path = root / ".agents" / "skills" / "harness" / "SKILL.md"
 
     if manifest_path.exists() and not force:
         current = _read_yaml(manifest_path)
@@ -353,6 +353,11 @@ def attach_project(
             from harness.phase_workflow import initialize_prompt_pack
             prompt_pack = initialize_prompt_pack(root, force=False)
             agents_md = update_agents_md(root)
+            try:
+                from harness.skill_injector import install_workspace_skills
+                install_workspace_skills(project_root=root, task_config=task_data, config_path=task_path)
+            except Exception:
+                pass
             return {
                 "status": "ALREADY_ATTACHED",
                 "agents_md": agents_md["status"],

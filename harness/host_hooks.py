@@ -97,7 +97,7 @@ def main():
             "(no evidence trail, invisible to the framework). "
             "Run experiments through the harness instead: "
             "`ai-harness-agent act --action create_experiment` -> `run_smoke_test` -> "
-            "`run_full_validation` (contracts in .agents/skills/ai-harness/SKILL.md). "
+            "`run_full_validation` (contracts in .agents/skills/harness/SKILL.md). "
             "If harness dispatch fails, REPORT the failure - do not silently fall back. "
             "Human override: " + HUMAN_OVERRIDE_ENV + "=1 <command>\\n"
         )
