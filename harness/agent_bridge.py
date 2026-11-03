@@ -248,6 +248,156 @@ def _load_reconciliation_report(project_root: Path) -> Optional[Dict[str, Any]]:
         return {"status": "UNKNOWN", "reason_code": "REPORT_UNREADABLE", "checked_at": "unknown"}
 
 
+def _model_assets_hud_summary(
+    project_root: Path,
+    task_id: str,
+    selected_exp_id: Optional[str],
+    competition_rules: Dict[str, Any],
+    artifacts_root: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Read a compact model index and one selected run lock without loading weights.
+
+    The fast path reads aggregate counts only. If the summary is absent or its
+    object-directory generation is stale, it counts filenames and marks all
+    models unverified; it never opens every definition or artifact manifest.
+    """
+    root = Path(project_root)
+    models_root = root / ".ai-harness" / "models"
+    object_dir = models_root / "objects"
+    index_path = models_root / "index.json"
+    try:
+        object_mtime_ns = object_dir.stat().st_mtime_ns
+    except OSError:
+        object_mtime_ns = None
+
+    index: Dict[str, Any] = {}
+    try:
+        if index_path.stat().st_size <= 64 * 1024:
+            parsed = json.loads(index_path.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict) and parsed.get("schema_version") == 1:
+                index = parsed
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    index_current = index.get("objects_mtime_ns") == object_mtime_ns
+    if index_current:
+        registered = int(index.get("registered_count", 0))
+        task_summary = (index.get("tasks") or {}).get(task_id, {})
+        if task_summary.get("competition_rules") == (competition_rules or {}):
+            eligible = int(task_summary.get("eligible_count", 0))
+        else:
+            eligible = 0
+        unverified = int(index.get("unverified_count", registered))
+    else:
+        try:
+            registered = sum(1 for path in object_dir.glob("*.json") if path.is_file())
+        except OSError:
+            registered = 0
+        eligible = 0
+        unverified = registered
+
+    lock: Dict[str, Any] = {}
+    receipt: Dict[str, Any] = {}
+    if selected_exp_id and Path(selected_exp_id).name == selected_exp_id:
+        artifact_base = Path(artifacts_root) if artifacts_root is not None else root / ".ai-harness" / "artifacts"
+        run_dir = artifact_base / selected_exp_id
+        for name, target in (("model_lock.json", lock), ("model_policy_receipt.json", receipt)):
+            path = run_dir / name
+            try:
+                if path.stat().st_size <= 256 * 1024:
+                    document = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(document, dict):
+                        target.update(document)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+    roots = lock.get("roots", [])
+    if not isinstance(roots, list):
+        roots = []
+    selected_roots = []
+    for item in roots:
+        if not isinstance(item, dict):
+            continue
+        phases = item.get("phases")
+        if isinstance(phases, list) and phases and "inference" not in phases:
+            continue
+        selected_roots.append(item)
+
+    parameter_values = []
+    for item in selected_roots:
+        definition = item.get("definition") if isinstance(item.get("definition"), dict) else {}
+        facts = definition.get("parameter_facts") if isinstance(definition.get("parameter_facts"), dict) else {}
+        value = facts.get("exact_param_count")
+        basis = facts.get("count_basis", "logical_total")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0 and basis == "logical_total":
+            parameter_values.append(value)
+        else:
+            parameter_values.append(None)
+    parameter_count = (
+        sum(value for value in parameter_values if value is not None)
+        if parameter_values and all(value is not None for value in parameter_values)
+        else None
+    )
+    limit = competition_rules.get("max_total_parameters")
+    if limit is None:
+        limit = competition_rules.get("max_llm_parameters")
+    cutoff = competition_rules.get("model_weight_release_cutoff")
+    cutoff_status = "missing"
+    if cutoff and selected_roots:
+        cutoff_status = "ok"
+        inclusive = competition_rules.get("weight_cutoff_inclusive", True)
+        try:
+            cutoff_date = datetime.date.fromisoformat(str(cutoff))
+        except ValueError:
+            cutoff_status = "missing"
+        else:
+            for item in selected_roots:
+                definition = item.get("definition") if isinstance(item.get("definition"), dict) else {}
+                if str(definition.get("kind", "")).lower() != "pretrained":
+                    continue
+                release = (definition.get("release") or {}).get("public_release_date")
+                if not release:
+                    cutoff_status = "missing"
+                    break
+                try:
+                    release_date = datetime.date.fromisoformat(str(release))
+                except ValueError:
+                    cutoff_status = "missing"
+                    break
+                after_cutoff = (
+                    release_date > cutoff_date
+                    if inclusive
+                    else release_date >= cutoff_date
+                )
+                if after_cutoff:
+                    cutoff_status = "violation"
+                    break
+
+    def _billions(value: Any) -> str:
+        if not isinstance(value, int) or isinstance(value, bool):
+            return "?"
+        return f"{value / 1_000_000_000:.3f}"
+
+    lock_digest = lock.get("model_lock_digest")
+    summary = (
+        f"Models [{task_id}]: {registered} registered; {eligible} eligible, {unverified} unverified. "
+        f"Plan: {_billions(parameter_count)}B/{_billions(limit)}B; cutoff: {cutoff_status}."
+    )
+    return {
+        "task_id": task_id,
+        "registered": registered,
+        "eligible": eligible,
+        "unverified": unverified,
+        "selected_exp_id": selected_exp_id,
+        "parameter_count": parameter_count,
+        "parameter_limit": limit,
+        "cutoff_status": cutoff_status,
+        "model_lock_digest": lock_digest,
+        "policy_status": receipt.get("status", "unknown"),
+        "summary": summary,
+    }
+
+
 def adoption_gate_lines(
     hygiene: Optional[Dict[str, Any]], total_experiments: int = 0
 ) -> List[str]:
@@ -1247,6 +1397,17 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         journal = self._new_journal(auto_sync=True)
         sub_mgr = self._new_submission_manager()
         snap = self.comp_state.evaluate_journey_snapshot(journal, sub_mgr)
+        current_best_id = (
+            snap["hud"]["what_is_current_best"]["cv_best"].get("id")
+            or snap["hud"]["what_is_current_best"]["baseline"].get("id")
+        )
+        model_assets_summary = _model_assets_hud_summary(
+            self.project_root,
+            self.project.task_id or str(getattr(self.task_spec, "name", "task")),
+            current_best_id,
+            getattr(self.task_spec, "competition_rules", {}) or {},
+            self.artifacts_dir,
+        )
         max_p = self.comp_state.spec.get("competition_rules", {}).get(
             "max_params_limit"
         )
@@ -1341,6 +1502,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             "runtime_owner": "Antigravity (IDE)",
             "active_session": active_session,
             "competition_hud": snap["hud"],
+            "model_assets_summary": model_assets_summary,
             "active_tracks": snap["active_tracks"],
             "gates": snap["gates"],
             "ucb_recommendation": ucb_rec,
@@ -1397,6 +1559,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             f"External Eval=`{where['active_tracks'].get('external_evaluation')}`",
             f"- **Baseline Anchor**: `{best['baseline']['id']}` (`{baseline_label}`)",
             f"- **Current Best CV**: `{best['cv_best']['id']}` (`{current_label}`, Δ `{delta_label}`)",
+            f"- **Model Registry**: {pkt['model_assets_summary']['summary']}",
         ]
         directive = pkt.get("competition_research_directive")
         if directive:
@@ -2158,6 +2321,10 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         "emergency_unfreeze": "_handle_emergency_unfreeze",
         "finalize_competition": "_handle_finalize_competition",
         "get_next_experiment_id": "_handle_get_next_experiment_id",
+        "list_model_assets": "_handle_model_assets_group",
+        "inspect_model_asset": "_handle_model_assets_group",
+        "register_model_asset": "_handle_model_assets_group",
+        "validate_model_plan": "_handle_model_assets_group",
     }
 
 

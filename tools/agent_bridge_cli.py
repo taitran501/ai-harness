@@ -22,6 +22,10 @@ BridgeSession tracking, optional budget enforcement, and USER_APPROVAL governanc
   ai-harness-agent act --action get_macro_hypothesis_map
   ai-harness-agent act --action check_retrospective_status
   ai-harness-agent act --action record_macro_review --param-file retrospective.json
+  ai-harness-agent act --action list_model_assets --limit 20
+  ai-harness-agent act --action inspect_model_asset --model-ref <model-id-or-digest>
+  ai-harness-agent act --action register_model_asset --file configs/models/backbone.yaml
+  ai-harness-agent act --action validate_model_plan --config-path configs/exp012.yaml
 
   # 4. Approve a paused USER_APPROVAL action (submit, freeze, unfreeze, finalize):
   ai-harness-agent approve --session-id session_0001
@@ -292,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Execute a single Typed Harness Action and return ActionObservation",
         allow_abbrev=False,
     )
-    act_p.add_argument("--action", required=True, help="Typed action name (e.g. create_experiment, run_smoke_test)")
+    act_p.add_argument("--action", required=True, help="Typed action name (e.g. create_experiment, list_model_assets, run_smoke_test)")
     act_p.add_argument("--session-id", default=None, help="Target session ID (uses active session if omitted)")
     act_p.add_argument("--goal", default=None, help="Optional goal if creating a new session")
     act_p.add_argument("--rationale", default="", help="Why Antigravity selected this action")

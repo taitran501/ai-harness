@@ -70,14 +70,16 @@ def make_workspace(
     train_csv: str = TRAIN_CSV_4ROW,
     task: Optional[Dict[str, Any]] = None,
     train_path: str = "dataset/train.csv",
+    root_path: Optional[Path] = None,
 ) -> Tuple[Path, Path]:
     """Create a temp workspace: ``configs/task.yaml`` + dataset + attach_project.
 
     Returns ``(root, task_config_path)``. Callers own cleanup of ``root``.
     """
-    root = Path(tempfile.mkdtemp(prefix=prefix))
-    (root / "configs").mkdir()
-    (root / "dataset").mkdir()
+    root = Path(root_path) if root_path is not None else Path(tempfile.mkdtemp(prefix=prefix))
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "configs").mkdir(parents=True, exist_ok=True)
+    (root / "dataset").mkdir(parents=True, exist_ok=True)
     if with_train_file:
         (root / "dataset" / "train.csv").write_text(train_csv, encoding="utf-8")
     doc = task if task is not None else task_document(train_path=train_path)

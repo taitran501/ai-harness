@@ -27,6 +27,82 @@ from harness.grounding_gate import GroundingGate
 class ActionHandlerMixin:
     """The 30 typed action handlers, moved verbatim from ``AgentBridge``."""
 
+    def _handle_model_assets_group(
+        self,
+        call,
+        session,
+        journal,
+        sub_mgr,
+        act,
+        params,
+        t0,
+    ) -> ActionObservation:
+        """Route the local model registry actions through its shared service API."""
+        from harness.model_assets.cli import (
+            inspect_model_asset,
+            list_model_assets,
+            register_model_asset,
+            validate_model_plan,
+        )
+
+        task_config = self.project.task_config_path
+        if act == TypedActionName.LIST_MODEL_ASSETS.value:
+            result = list_model_assets(
+                self.project_root,
+                limit=params.get("limit", 20),
+                offset=params.get("offset", 0),
+                task_config=task_config,
+            )
+        elif act == TypedActionName.INSPECT_MODEL_ASSET.value:
+            model_ref = params.get("model_ref") or params.get("model_id") or params.get("digest")
+            if not model_ref:
+                raise ValueError("model_ref is required (model ID or immutable definition digest)")
+            result = inspect_model_asset(
+                self.project_root,
+                str(model_ref),
+                task_config=task_config,
+            )
+        elif act == TypedActionName.REGISTER_MODEL_ASSET.value:
+            file_path = params.get("file") or params.get("path")
+            if not file_path:
+                raise ValueError("file is required for register_model_asset")
+            result = register_model_asset(
+                self.project_root,
+                file_path,
+                task_config=task_config,
+            )
+        elif act == TypedActionName.VALIDATE_MODEL_PLAN.value:
+            config_path = params.get("config_path") or params.get("config")
+            if not config_path:
+                raise ValueError("config_path is required for validate_model_plan")
+            result = validate_model_plan(
+                self.project_root,
+                config_path,
+                task_config=task_config,
+            )
+        else:
+            raise ValueError(f"Unsupported model registry action: {act}")
+
+        blockers = result.get("blockers", [])
+        failed = result.get("status") in {"blocked", "error"}
+        summary = (
+            f"Model {result.get('operation', act)} {result.get('status', 'completed')}."
+            if not failed
+            else f"Model {result.get('operation', act)} blocked: "
+            + "; ".join(str(item) for item in blockers[:3])
+        )
+        artifact_refs = result.get("artifact_refs") or []
+        return ActionObservation(
+            step_index=call.step_index,
+            action=act,
+            status="FAILED" if failed else "SUCCESS",
+            summary=summary[:600],
+            new_blockers=[str(item)[:300] for item in blockers[:5]],
+            artifact_path=artifact_refs[0] if len(artifact_refs) == 1 else None,
+            data=result,
+            elapsed_seconds=round(time.time() - t0, 3),
+        )
+
     def _handle_research_memory_group(
         self,
         call,
