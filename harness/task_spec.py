@@ -446,6 +446,22 @@ class UniversalTaskSpec:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
+    def competition_rules(self) -> Dict[str, Any]:
+        """Non-mutating dictionary of declared competition rules."""
+        raw = self.metadata.get("competition_rules", {})
+        if not isinstance(raw, dict):
+            return {}
+        return dict(raw)
+
+    @property
+    def model_governance_config(self) -> Dict[str, Any]:
+        """Non-mutating dictionary of declared model governance configuration."""
+        raw = self.metadata.get("model_governance", {})
+        if not isinstance(raw, dict):
+            return {}
+        return dict(raw)
+
+    @property
     def platform(self) -> str:
         """Competition platform (Kaggle, Codabench, etc.)."""
         return self.metadata.get("platform", "")
