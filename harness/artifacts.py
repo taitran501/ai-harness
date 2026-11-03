@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import inspect
 import json
@@ -84,6 +85,39 @@ def digest(value):
     ).hexdigest()
 
 
+def _stable_task_spec_source(source: str) -> str:
+    """Keep non-scoring model policy accessors out of legacy scorer identity."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+
+    lines = source.splitlines(keepends=True)
+    removals = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or node.name != "UniversalTaskSpec":
+            continue
+        for member in node.body:
+            if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if member.name not in {"competition_rules", "model_governance_config"}:
+                continue
+            if not any(
+                isinstance(decorator, ast.Name) and decorator.id == "property"
+                for decorator in member.decorator_list
+            ):
+                continue
+            start = min([member.lineno, *(decorator.lineno for decorator in member.decorator_list)])
+            end = member.end_lineno or member.lineno
+            if end < len(lines) and not lines[end].strip():
+                end += 1
+            removals.append((start - 1, end))
+
+    for start, end in sorted(removals, reverse=True):
+        del lines[start:end]
+    return "".join(lines)
+
+
 def contract_identity(task_spec, plugin=None):
     from harness.plugins import TaskPlugin
 
@@ -96,8 +130,8 @@ def contract_identity(task_spec, plugin=None):
             from harness import evaluation
             from harness import task_spec as task_module
 
-            implementation += inspect.getsource(evaluation) + inspect.getsource(
-                task_module
+            implementation += inspect.getsource(evaluation) + _stable_task_spec_source(
+                inspect.getsource(task_module)
             )
     except (OSError, TypeError):
         raise ValueError("Scorer implementation cannot be identified")

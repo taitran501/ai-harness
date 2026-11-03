@@ -2,17 +2,21 @@
 
 Enables remote training on A10G / A100 / H100 with:
 1. Dataset Volume syncing (`modal volume put`) so dataset/ and splits/ are stored once on Modal.
-2. Live log streaming to the local terminal.
-3. Automatic execution of `run_training_remote.remote()` in `@app.local_entrypoint()`.
-4. Selective lightweight artifact download (`oof_predictions.csv`, `test_predictions.csv`, `metrics.json`, `summary.md`, `run.log`, `EXPERIMENT_CARD.md`) directly into `artifacts/<exp_id>/` without downloading multi-GB model checkpoints.
+2. Live log streaming to the local terminal (attached mode).
+3. Detached execution (`--detach`) for long-running cloud jobs with remote status polling and log inspection.
+4. Automatic persistence of output artifacts to Modal Volume and synchronization to `artifacts/<exp_id>/`.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 
 def push_dataset_to_modal(
@@ -51,6 +55,25 @@ def push_dataset_to_modal(
 
     logs = []
     try:
+        # Check if the volume already has task-data/aih-data-bundle.json
+        check_proc = subprocess.run(
+            ["modal", "volume", "ls", volume_name, "/task-data"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if check_proc.returncode == 0 and "aih-data-bundle.json" in (check_proc.stdout or ""):
+            print(f"✔ Task data matching fingerprint already exists in Modal volume '{volume_name}', skipping upload.", flush=True)
+            logs.append(f"Modal volume '{volume_name}' already contains verified task-data.")
+            return {
+                "success": True,
+                "volume_name": volume_name,
+                "visibility": "private",
+                "skipped_upload": True,
+                "logs": "\n".join(logs),
+            }
+
+        print(f"📦 Staging declared task data for Modal volume '{volume_name}'...", flush=True)
         with tempfile.TemporaryDirectory(prefix="aih-modal-data-") as temp_dir:
             stage = Path(temp_dir)
             staged = stage_declared_data(project, stage)
@@ -67,15 +90,17 @@ def push_dataset_to_modal(
             if create_proc.returncode != 0 and "already exists" not in create_output.casefold():
                 raise RuntimeError(f"Could not create or access the task data volume: {create_output.strip()}")
 
+            print(f"⬆ Uploading {staged['file_count']} declared file(s) to Modal volume '{volume_name}' (this may take a few minutes)...", flush=True)
             put_data = subprocess.run(
                 ["modal", "volume", "put", volume_name, str(stage), "/task-data", "--force"],
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=600,
             )
             logs.append(f"$ modal volume put {volume_name} <task-data> /task-data --force")
             if put_data.returncode != 0:
                 raise RuntimeError((put_data.stderr or put_data.stdout or "Modal volume upload failed.").strip())
+            print(f"✔ Successfully uploaded {staged['file_count']} declared task data file(s) to Modal volume.", flush=True)
             logs.append(f"Uploaded {staged['file_count']} declared task data file(s) to a private Modal volume.")
 
         return {
@@ -107,10 +132,11 @@ def generate_modal_script(
     runtime_manifest: Optional[Dict[str, Any]] = None,
     config_sha256: Optional[str] = None,
     artifacts_rel: Optional[str] = None,
+    base_config_path: Optional[str] = None,
+    model_resource_plan: Optional[Any] = None,
+    model_volume_name: Optional[str] = None,
 ) -> str:
     """Generate an isolated Modal job that returns identity-checked task artifacts."""
-    import hashlib
-
     import yaml
 
     from harness.data_bundle import declared_data_roots
@@ -123,6 +149,15 @@ def generate_modal_script(
         config_file = root / config_file
     config_file = config_file.resolve()
     config_rel = config_file.relative_to(root).as_posix()
+    base_config_rel = None
+    if base_config_path:
+        base_file = Path(base_config_path).expanduser()
+        if not base_file.is_absolute():
+            base_file = root / base_file
+        base_file = base_file.resolve()
+        base_config_rel = base_file.relative_to(root).as_posix()
+        if not base_file.is_file():
+            raise FileNotFoundError(f"Base config does not exist: {base_file}")
     config_sha256 = config_sha256 or hashlib.sha256(config_file.read_bytes()).hexdigest()
     task_config_rel = project.task_config_path.relative_to(root).as_posix()
     artifacts_rel = artifacts_rel or project.artifacts_dir.relative_to(root).as_posix()
@@ -140,6 +175,28 @@ def generate_modal_script(
         volume_name = private_upload_resource_names(project)["modal_volume_name"]
     app_name = f"aih-{t_slug}-{exp_id}-{(job_id or 'job').replace('_', '-')}"
     cache_name = f"aih-{t_slug}-hf-cache"
+    if model_resource_plan is None:
+        model_resource_plan_data = {}
+    elif isinstance(model_resource_plan, dict):
+        model_resource_plan_data = dict(model_resource_plan)
+    else:
+        to_dict = getattr(model_resource_plan, "to_dict", None)
+        if not callable(to_dict):
+            raise ValueError("model_resource_plan must be a mapping or a backend resource plan")
+        model_resource_plan_data = to_dict()
+    model_resources = model_resource_plan_data.get("required_sources") or []
+    declared_model_volumes = {
+        str(item.get("volume_name"))
+        for item in model_resources
+        if isinstance(item, dict) and item.get("volume_name")
+    }
+    if model_volume_name:
+        declared_model_volumes.add(str(model_volume_name))
+    if len(declared_model_volumes) > 1:
+        raise ValueError("A Modal job can mount one model volume per resource plan")
+    selected_model_volume = next(iter(declared_model_volumes), None)
+    if model_resources and not selected_model_volume:
+        selected_model_volume = f"aih-{t_slug}-models"
     runtime_requirements = [
         "numpy>=1.24.0",
         "pandas>=2.0.0",
@@ -150,9 +207,19 @@ def generate_modal_script(
         "xgboost>=2.0.0",
     ]
     runtime_requirements.extend(runtime_manifest.get("requirements", []))
+    task_runtime = task.get("runtime") or {}
+    task_extra_requirements = task_runtime.get("requirements", [])
+    if isinstance(task_extra_requirements, list):
+        runtime_requirements.extend(task_extra_requirements)
     plugin_install = (runtime_manifest.get("plugin") or {}).get("install") or {}
     if plugin_install.get("type") == "index":
         runtime_requirements.append(plugin_install["requirement"])
+    deduped_requirements = list(
+        dict.fromkeys(
+            r.strip() for r in runtime_requirements if isinstance(r, str) and r.strip()
+        )
+    )
+    uv_cmd = "uv pip install --system " + " ".join(f"'{req}'" for req in deduped_requirements)
     plugin_wheel_local = None
     plugin_wheel_remote = None
     if plugin_install.get("type") == "wheel":
@@ -164,21 +231,24 @@ def generate_modal_script(
     enable_internet = bool((task.get("runtime") or {}).get("enable_internet", False))
     data_roots = declared_data_roots(project)
     task_data_paths = [relative for _, relative in data_roots]
-    excluded_data_roots = [str(path).replace("\\", "/") for path, _ in data_roots]
+    excluded_data_roots = [relative for _, relative in data_roots]
 
     return f'''import modal
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 app = modal.App({app_name!r})
+MODEL_RESOURCE_PLAN = {model_resource_plan_data!r}
 
-# 1. Container Image definition
+# 1. Container Image definition (optimized with uv for rapid package resolution and caching)
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install(*{runtime_requirements!r})
+    .pip_install("uv")
+    .run_commands({uv_cmd!r})
 )
 def _ignore_workspace_path(path):
     candidate = Path(path).resolve()
@@ -188,7 +258,11 @@ def _ignore_workspace_path(path):
         relative = candidate
     normalized = relative.as_posix().lstrip("./")
     blocked_parts = {{".git", ".env", ".kaggle", ".modal", "__pycache__", "venv", ".venv", "node_modules", "artifacts", "dashboard", "tmp"}}
-    return any(part.casefold() in blocked_parts for part in relative.parts) or any(
+    if any(part.casefold() in blocked_parts for part in relative.parts):
+        return True
+    if len(relative.parts) >= 2 and relative.parts[0].casefold() == ".ai-harness" and relative.parts[1].casefold() == "models":
+        return True
+    return any(
         normalized == root or normalized.startswith(root.rstrip("/") + "/")
         for root in {excluded_data_roots!r}
     )
@@ -205,16 +279,24 @@ if {plugin_wheel_local!r}:
 # 2. Persistent Volumes for HuggingFace cache and Dataset
 hf_cache = modal.Volume.from_name({cache_name!r}, create_if_missing=True)
 data_volume = modal.Volume.from_name({volume_name!r}, create_if_missing=True)
+model_volume = (
+    modal.Volume.from_name({selected_model_volume!r}, create_if_missing=False)
+    if {bool(model_resources)!r}
+    else None
+)
+volume_mounts = {{
+    "/root/.cache/huggingface": hf_cache,
+    "/mnt/cloud_data": data_volume,
+}}
+if model_volume is not None:
+    volume_mounts["/vol/models"] = model_volume
 
 @app.function(
     image=image,
     gpu={gpu!r},
     timeout=14400,
     block_network={not enable_internet!r},
-    volumes={{
-        "/root/.cache/huggingface": hf_cache,
-        "/mnt/cloud_data": data_volume,
-    }},
+    volumes=volume_mounts,
 )
 def run_training_remote(config_path: str, exp_id: str):
     import os
@@ -223,7 +305,16 @@ def run_training_remote(config_path: str, exp_id: str):
     sys.path.insert(0, "/opt/ai-harness")
     os.chdir("/root/workspace")
 
-    # Symlink dataset/ and splits/ from Modal Volume if not mounted directly
+    if MODEL_RESOURCE_PLAN:
+        from harness.model_assets.resolver import BackendResourcePlan, ModelResolver
+        resource_plan = BackendResourcePlan.from_dict(MODEL_RESOURCE_PLAN)
+        if resource_plan.backend != "modal":
+            raise RuntimeError("The dispatched model resource plan is not for Modal.")
+        resolver = ModelResolver()
+        if not resolver.verify_runtime_resources(resource_plan):
+            raise RuntimeError("Modal model resources failed verification: " + "; ".join(resolver.verification_errors))
+
+    # Symlink/copy dataset and splits from Modal Volume if not mounted directly
     task_data_root = Path("/mnt/cloud_data/task-data")
     for relative in {task_data_paths!r}:
         source = task_data_root / relative
@@ -231,7 +322,10 @@ def run_training_remote(config_path: str, exp_id: str):
         if not source.exists():
             raise RuntimeError(f"Uploaded task data path is missing: {{relative}}")
         if target.exists():
-            raise RuntimeError(f"Uploaded task data conflicts with bundled task code: {{relative}}")
+            if target.is_dir() and not any(target.iterdir()):
+                target.rmdir()
+            else:
+                raise RuntimeError(f"Uploaded task data conflicts with bundled task code: {{relative}}")
         target.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():
             shutil.copytree(source, target)
@@ -248,7 +342,11 @@ def run_training_remote(config_path: str, exp_id: str):
     # Tell the runner it is already inside the dispatched kernel so the
     # task contract's cloud backend is not re-applied (no nested dispatch).
     os.environ["AI_HARNESS_REMOTE_KERNEL"] = "1"
+    os.environ["PYTHONPATH"] = "/opt/ai-harness:" + os.environ.get("PYTHONPATH", "")
     cmd = ["python", "-u", "-m", "harness.runner", "--project-root", ".", "--task-config", {task_config_rel!r}, "--config", config_path]
+    _base_config = {base_config_rel!r}
+    if _base_config:
+        cmd += ["--base-config", _base_config]
     _remote_job_id = {job_id!r}
     if _remote_job_id:
         cmd += ["--job-id", _remote_job_id]
@@ -285,6 +383,11 @@ def run_training_remote(config_path: str, exp_id: str):
         "run.log",
         "EXPERIMENT_CARD.md",
         "run_config.yaml",
+        "model_lock.json",
+        "model_policy_receipt.json",
+        "loaded_models.json",
+        "model_outputs.json",
+        "model_lineage.json",
     ]
 
     metrics_path = exp_dir / "metrics.json"
@@ -312,6 +415,17 @@ def run_training_remote(config_path: str, exp_id: str):
         "files": {{name: hashlib.sha256(value).hexdigest() for name, value in bundle.items()}},
     }})
     bundle["artifact_manifest.json"] = json.dumps(artifact_manifest, indent=2).encode("utf-8")
+
+    # Persist lightweight output artifacts to Modal Volume for detached retrieval
+    try:
+        volume_exp_dir = Path("/mnt/cloud_data/artifacts") / exp_id
+        volume_exp_dir.mkdir(parents=True, exist_ok=True)
+        for fname, content in bundle.items():
+            (volume_exp_dir / fname).write_bytes(content)
+        data_volume.commit()
+        print(f"[Modal Remote] Persisted {{len(bundle)}} artifact files to Modal Volume for detached retrieval.")
+    except Exception as exc:
+        print(f"[Modal Remote] Warning: Could not persist artifacts to Modal Volume: {{exc}}")
 
     print(f"[Modal Remote] Returning {{len(bundle)}} lightweight artifact files to local host.")
     return bundle
@@ -353,3 +467,228 @@ def main():
 
     print(f"Pulled {{len(saved_files)}} artifacts into {{local_exp_dir}}: {{', '.join(saved_files)}}")
 '''
+
+
+class ModalAppManager:
+    """Manages Modal app status polling, log retrieval, and artifact synchronization."""
+
+    @classmethod
+    def get_app_status(cls, app_id: str) -> Dict[str, Any]:
+        """Check status of a Modal App via `modal app list --json`."""
+        try:
+            proc = subprocess.run(
+                ["modal", "app", "list", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if proc.returncode != 0:
+                return {
+                    "success": False,
+                    "app_id": app_id,
+                    "status": "ERROR",
+                    "raw_output": (proc.stderr or proc.stdout).strip(),
+                }
+            apps = json.loads(proc.stdout)
+            match = next((a for a in apps if a.get("app_id") == app_id), None)
+            if not match:
+                log_proc = subprocess.run(
+                    ["modal", "app", "logs", app_id, "--tail", "15"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if log_proc.returncode == 0:
+                    output = (log_proc.stdout or "") + (log_proc.stderr or "")
+                    if any(err in output for err in ("RuntimeError", "Traceback", "Stopping app")):
+                        status = "FAILED"
+                    else:
+                        status = "COMPLETED"
+                    return {
+                        "success": True,
+                        "app_id": app_id,
+                        "status": status,
+                        "raw_output": output,
+                    }
+                return {
+                    "success": False,
+                    "app_id": app_id,
+                    "status": "UNKNOWN",
+                    "raw_output": f"App {app_id} not found in modal app list",
+                }
+
+            state = str(match.get("state") or "").lower()
+            if state in {"running", "deployed", "initializing", "ephemeral"}:
+                status = "RUNNING"
+            elif state in {"stopped", "detached_stopped"}:
+                log_proc = subprocess.run(
+                    ["modal", "app", "logs", app_id, "--tail", "30"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                log_out = (log_proc.stdout or "") + (log_proc.stderr or "")
+                if any(err in log_out for err in ("Traceback (most recent call last)", "Stopping app - uncaught exception", "RuntimeError:")):
+                    status = "FAILED"
+                else:
+                    status = "COMPLETED"
+            else:
+                status = "UNKNOWN"
+
+            return {
+                "success": True,
+                "app_id": app_id,
+                "status": status,
+                "state": state,
+                "created_at": match.get("created_at"),
+                "stopped_at": match.get("stopped_at"),
+                "raw_output": str(match),
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "app_id": app_id,
+                "status": "ERROR",
+                "raw_output": str(exc),
+            }
+
+    @classmethod
+    def fetch_app_logs(cls, app_id: str, tail: int = 100) -> str:
+        """Fetch latest logs from a running or stopped Modal App."""
+        try:
+            proc = subprocess.run(
+                ["modal", "app", "logs", app_id, "--tail", str(tail)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return (proc.stdout or "") + "\n" + (proc.stderr or "")
+        except Exception as exc:
+            return f"Error fetching logs for {app_id}: {exc}"
+
+    @classmethod
+    def wait_for_app(
+        cls,
+        app_id: str,
+        *,
+        poll_interval: float = 5.0,
+        timeout_seconds: float = 86400,
+        status_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        """Poll until Modal reports a terminal state (COMPLETED, FAILED, CANCELLED)."""
+        deadline = time.monotonic() + timeout_seconds
+        last: Dict[str, Any] = {
+            "success": False,
+            "status": "UNKNOWN",
+            "app_id": app_id,
+        }
+        while time.monotonic() < deadline:
+            res = cls.get_app_status(app_id)
+            last = res
+            if status_callback:
+                try:
+                    status_callback(res)
+                except Exception:
+                    pass
+            status = res.get("status")
+            if status in {"COMPLETED", "FAILED", "CANCELLED"}:
+                return res
+            time.sleep(poll_interval)
+        last["status"] = "TIMEOUT"
+        return last
+
+    @classmethod
+    def pull_app_output(
+        cls,
+        exp_id: str,
+        volume_name: str,
+        artifact_dir: Path,
+        expected_identity: Dict[str, Any],
+        project_root: Optional[Path | str] = None,
+    ) -> Dict[str, Any]:
+        """Download output artifacts from Modal volume into artifact_dir and verify identity."""
+        root = Path(project_root or Path.cwd()).resolve()
+        artifact_dir = Path(artifact_dir)
+        if not artifact_dir.is_absolute():
+            artifact_dir = root / artifact_dir
+
+        with tempfile.TemporaryDirectory(prefix="aih-modal-artifacts-") as temp_stage:
+            stage_path = Path(temp_stage)
+            dl_proc = subprocess.run(
+                ["modal", "volume", "get", volume_name, f"/artifacts/{exp_id}", str(stage_path), "--force"],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if dl_proc.returncode != 0:
+                return {
+                    "success": False,
+                    "error": f"Failed to download artifacts from Modal volume: {(dl_proc.stderr or dl_proc.stdout).strip()}",
+                }
+
+            # Locate downloaded artifact directory
+            source_dir = stage_path / exp_id if (stage_path / exp_id).is_dir() else stage_path
+            manifest_path = source_dir / "artifact_manifest.json"
+            if not manifest_path.is_file():
+                # Search subdirectories if any
+                found = list(stage_path.rglob("artifact_manifest.json"))
+                if found:
+                    manifest_path = found[0]
+                    source_dir = manifest_path.parent
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Downloaded artifacts missing artifact_manifest.json in Modal volume '/artifacts/{exp_id}'",
+                    }
+
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "error": f"Unreadable artifact_manifest.json: {exc}",
+                }
+
+            # Verify identity
+            for key, exp_val in expected_identity.items():
+                if exp_val is not None:
+                    act_val = manifest.get(key)
+                    if act_val != exp_val:
+                        return {
+                            "success": False,
+                            "error": f"Identity mismatch for {key}: expected {exp_val}, got {act_val}",
+                        }
+
+            # Verify sha256 of all files
+            files_dict = manifest.get("files") or {}
+            for fname, exp_hash in files_dict.items():
+                p = source_dir / fname
+                if not p.is_file():
+                    return {
+                        "success": False,
+                        "error": f"Artifact file {fname} declared in manifest but missing on disk",
+                    }
+                act_hash = hashlib.sha256(p.read_bytes()).hexdigest()
+                if act_hash != exp_hash:
+                    return {
+                        "success": False,
+                        "error": f"Artifact file {fname} SHA-256 mismatch: expected {exp_hash}, got {act_hash}",
+                    }
+
+            # Copy to destination
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            migrated_files = []
+            for item in source_dir.iterdir():
+                dest = artifact_dir / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dest)
+                migrated_files.append(item.name)
+
+            return {
+                "success": True,
+                "artifact_dir": str(artifact_dir),
+                "migrated_files": migrated_files,
+                "manifest": manifest,
+            }

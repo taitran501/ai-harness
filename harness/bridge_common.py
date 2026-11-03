@@ -69,6 +69,7 @@ class TypedActionName(str, Enum):
     OPTIMIZE_THRESHOLD = "optimize_threshold"
     GENERATE_MICRODOSE_PROBE = "generate_microdose_probe"
     PREPARE_SUBMISSION = "prepare_submission"
+    PRESERVE_SUBMISSION = "preserve_submission"
     RECORD_EXTERNAL_SCORE = "record_external_score"
     FREEZE_CANDIDATE = "freeze_candidate"
     EMERGENCY_UNFREEZE = "emergency_unfreeze"
@@ -78,6 +79,10 @@ class TypedActionName(str, Enum):
     VALIDATE_CANDIDATE_PITCH = "validate_candidate_pitch"
     RECONCILE_SUBMISSIONS = "reconcile_submissions"
     ACKNOWLEDGE_EXTERNAL_SUBMISSIONS = "acknowledge_external_submissions" 
+    LIST_MODEL_ASSETS = "list_model_assets"
+    INSPECT_MODEL_ASSET = "inspect_model_asset"
+    REGISTER_MODEL_ASSET = "register_model_asset"
+    VALIDATE_MODEL_PLAN = "validate_model_plan"
 
 
 # Session history caps: keep `sessions_dir/*.json` bounded for long
@@ -91,6 +96,10 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     "candidate_preflight": ApprovalTier.AUTO.value,
     "validate_candidate_pitch": ApprovalTier.AUTO.value,
     "reconcile_submissions": ApprovalTier.AUTO.value,
+    TypedActionName.LIST_MODEL_ASSETS.value: ApprovalTier.AUTO.value,
+    TypedActionName.INSPECT_MODEL_ASSET.value: ApprovalTier.AUTO.value,
+    TypedActionName.REGISTER_MODEL_ASSET.value: ApprovalTier.AUTO.value,
+    TypedActionName.VALIDATE_MODEL_PLAN.value: ApprovalTier.AUTO.value,
     "acknowledge_external_submissions": ApprovalTier.USER_APPROVAL.value,
     "record_macro_review": ApprovalTier.AUTO.value,
     "get_macro_hypothesis_map": ApprovalTier.AUTO.value,
@@ -128,6 +137,7 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.OPTIMIZE_THRESHOLD.value: ApprovalTier.AUTO.value,
     TypedActionName.GENERATE_MICRODOSE_PROBE.value: ApprovalTier.AUTO_WITH_LIMIT.value,
     TypedActionName.PREPARE_SUBMISSION.value: ApprovalTier.USER_APPROVAL.value,
+    TypedActionName.PRESERVE_SUBMISSION.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_EXTERNAL_SCORE.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.FREEZE_CANDIDATE.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.EMERGENCY_UNFREEZE.value: ApprovalTier.USER_APPROVAL.value,
@@ -272,6 +282,34 @@ _TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName) | frozen
 
 
 TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "list_model_assets": {
+        "summary": "List a bounded page of model definitions registered in the active task workspace.",
+        "required": [],
+        "optional": {"limit": 20, "offset": 0},
+        "parameter_types": {"limit": "int", "offset": "int"},
+        "description": "Reads the local content-addressed registry only; it does not discover or hash model weights.",
+    },
+    "inspect_model_asset": {
+        "summary": "Inspect one registered model definition by ID or immutable digest.",
+        "required": ["model_ref"],
+        "optional": {},
+        "parameter_types": {"model_ref": "string"},
+        "description": "Returns declared facts, artifact verification status, and task-scoped backend mappings.",
+    },
+    "register_model_asset": {
+        "summary": "Validate and register one bounded model definition.",
+        "required": ["file"],
+        "optional": {},
+        "parameter_types": {"file": "path"},
+        "description": "Accepts a strict YAML/JSON declaration up to 16 KiB. Registration does not verify artifacts or establish competition eligibility.",
+    },
+    "validate_model_plan": {
+        "summary": "Preflight an experiment's selected model closure against task policy.",
+        "required": ["config_path"],
+        "optional": {},
+        "parameter_types": {"config_path": "path"},
+        "description": "Resolves inherited config locally and returns the policy receipt and immutable model lock without dispatch.",
+    },
     "record_macro_review": {
         "summary": "Record an evidence-linked macro retrospective and advance its milestone.",
         "required": ["map_digest", "changes_since_last_review", "supported_mechanisms", "rejected_mechanisms",
@@ -431,6 +469,18 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "optional": {"exp_id": None, "candidate_csv": None, "notes": ""},
         "description": "Validates format, columns, and row counts against submission requirements.",
     },
+    "preserve_submission": {
+        "summary": "Copy and fingerprint a submission artifact for safekeeping.",
+        "required": ["file"],
+        "optional": {"notes": "", "score": None, "partition": None},
+        "parameter_types": {
+            "file": "path",
+            "notes": "string",
+            "score": "finite_float",
+            "partition": "string",
+        },
+        "description": "Preserves an artifact only; does not validate or dispatch it.",
+    },
     "inspect_cloud_job": {
         "summary": "Query status and logs of a remote cloud execution job.",
         "required": ["job_id"],
@@ -554,7 +604,7 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "candidate_preflight": {
         "summary": "Preflight verification of candidate predictions against incumbent baseline.",
         "required": ["candidate_path"],
-        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None, "citation_dependencies": []},
+        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None, "citation_dependencies": [], "source_exp_id": None},
         "description": "Computes Spearman rho, rank swaps, and delta distributions. Flags rho >= 0.995; rank similarity alone does not establish score cause.",
     },
     "validate_candidate_pitch": {

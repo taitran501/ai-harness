@@ -267,6 +267,10 @@ class CloudJobManager:
             recovered = self._recover_kaggle_job(job)
             if recovered:
                 return job
+        if job.backend == "modal" and job.remote_id:
+            recovered = self._recover_modal_job(job)
+            if recovered:
+                return job
 
         artifact_dir = (
             Path(job.artifact_dir)
@@ -422,6 +426,81 @@ class CloudJobManager:
             self._persist_job(job)
             return True
 
+    def _recover_modal_job(self, job: CloudJob) -> bool:
+        """Resume Modal provider polling and output import after local worker was lost."""
+        if not job.remote_id:
+            return False
+        try:
+            from harness.templates.modal_template import ModalAppManager
+
+            status = ModalAppManager.get_app_status(job.remote_id)
+            provider_status = str(status.get("status") or "UNKNOWN").upper()
+            job.provider_status = provider_status
+            if provider_status in {"RUNNING", "QUEUED", "UNKNOWN"}:
+                self._persist_job(job)
+                return True
+            if provider_status in {"FAILED", "CANCELLED"}:
+                job.status = provider_status
+                logs = ModalAppManager.fetch_app_logs(job.remote_id, tail=25)
+                job.error_message = (
+                    f"Modal App {job.remote_id} {provider_status.lower()}: {logs.strip()}"
+                )
+                job.ended_at = job.ended_at or time.time()
+                self._persist_job(job)
+                return True
+            if provider_status != "COMPLETED":
+                return False
+
+            from harness.cloud_policy import dataset_fingerprint, private_upload_resource_names
+
+            fingerprint = (
+                {"fingerprint": job.upload_fingerprint}
+                if job.upload_fingerprint
+                else dataset_fingerprint(self.project)
+            )
+            resources = private_upload_resource_names(
+                self.project, fingerprint_data=fingerprint
+            )
+            volume_name = resources["modal_volume_name"]
+
+            from harness.remote_runtime import resolve_remote_runtime
+
+            runtime = resolve_remote_runtime(self.project)
+            expected_identity = {
+                "job_id": job.job_id,
+                "task_id": job.task_id,
+                "exp_id": job.exp_id,
+                "config_sha256": job.config_sha256,
+                "core_version": runtime["core"]["version"],
+                "plugin_id": runtime["plugin"]["id"],
+            }
+            target_artifact_dir = self.artifacts_dir / job.exp_id
+            result = ModalAppManager.pull_app_output(
+                exp_id=job.exp_id,
+                volume_name=volume_name,
+                artifact_dir=target_artifact_dir,
+                expected_identity=expected_identity,
+                project_root=self.project.root,
+            )
+            if not result.get("success"):
+                raise RuntimeError(
+                    result.get("error") or "Modal artifact pull failed."
+                )
+
+            self._verify_remote_artifacts(job)
+            job.status = "COMPLETED"
+            job.ended_at = job.ended_at or time.time()
+            job.error_message = None
+            self._handle_post_run(job)
+            self._persist_job(job)
+            return True
+        except Exception as exc:
+            job.status = "FAILED"
+            job.error_message = f"Could not resume Modal output collection: {exc}"
+            job.ended_at = job.ended_at or time.time()
+            self._persist_job(job)
+            return True
+
     def start_job(
         self,
         backend: str,
@@ -431,6 +510,7 @@ class CloudJobManager:
         auto_sync: bool = True,
         baseline_csv: Optional[str] = None,
         extra_args: Optional[List[str]] = None,
+        detach: bool = False,
     ) -> CloudJob:
         """Launch an asynchronous execution job."""
         state_path = self.artifacts_dir / "competition_state.json"
@@ -595,8 +675,11 @@ class CloudJobManager:
                     job_id,
                 ]
             )
-            if backend == "modal" and gpu:
-                cmd.extend(["--gpu", gpu])
+            if backend == "modal":
+                if gpu:
+                    cmd.extend(["--gpu", gpu])
+                if detach or (extra_args and "--detach" in extra_args):
+                    cmd.append("--detach")
         elif backend == "local":
             if config_path.endswith(".py"):
                 script_path = (
@@ -650,10 +733,7 @@ class CloudJobManager:
         )
         popen_kwargs: Dict[str, Any] = {}
         if sys.platform == "win32":
-            popen_kwargs["creationflags"] = (
-                subprocess.CREATE_NEW_PROCESS_GROUP
-                | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-            )
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             popen_kwargs["start_new_session"] = True
 

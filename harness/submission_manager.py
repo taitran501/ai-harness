@@ -40,6 +40,7 @@ class SubmissionEntry:
     approval_id: Optional[str] = None
     official_observation_id: Optional[str] = None
     official_score_source: str = "declared"
+    reported_scores: Dict[str, Optional[float]] = field(default_factory=dict)
 
 
 class SubmissionManager:
@@ -323,6 +324,166 @@ class SubmissionManager:
             shutil.rmtree(target_dir, ignore_errors=True)
             raise
 
+    def preserve_file_submission(
+        self,
+        *,
+        file_path: str | Path,
+        notes: str = "",
+        reported_score: Optional[float] = None,
+        reported_partition: Optional[str] = None,
+    ) -> SubmissionEntry:
+        """Preserve an arbitrary submission artifact (zip, csv, etc.) for safekeeping.
+
+        Distinct from `register_plugin_submission`:
+        - Does NOT require an experiment directory or plugin test predictions.
+        - Generates a dedicated PRESERVATION_RECEIPT.json (record_type: preservation_only).
+        - Status is PRESERVED_UNVERIFIED (dispatch_authorized: False).
+        - Keeps official_scores strictly empty; unverified user scores go to reported_scores.
+        - Constrains sources to the project root to prevent reading external host files.
+        - Rejects reserved metadata names to prevent payload collisions.
+        - Fingerprints the exact payload SHA-256 and records byte count.
+        """
+        import math
+        import re
+
+        source = Path(file_path).expanduser()
+        if not source.is_absolute():
+            source = self.project_root / source
+        source = source.resolve()
+        if not source.is_file():
+            raise FileNotFoundError(f"Submission artifact does not exist: {source}")
+
+        # Security boundary: constrain source file to the project root
+        try:
+            source.relative_to(self.project_root.resolve())
+        except ValueError:
+            raise ValueError(
+                f"Preserved file must be located within the project root ({self.project_root}): {source}"
+            )
+
+        safe_name = source.name
+        if safe_name in ("", ".", "..") or "/" in safe_name or "\\" in safe_name:
+            raise ValueError(
+                "Submission file name must be a simple filename without directories."
+            )
+
+        reserved_names = {
+            "PRESERVATION_RECEIPT.json",
+            "PLUGIN_AUDIT_RECEIPT.json",
+            "AUDIT_RECEIPT.json",
+            "metadata.json",
+            "registry.json",
+            "SUBMISSIONS.md",
+        }
+        if safe_name in reserved_names:
+            raise ValueError(
+                f"Submission file name cannot be a reserved metadata filename: {safe_name!r}"
+            )
+
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", safe_name):
+            raise ValueError(
+                f"Submission file name contains unsupported characters: {safe_name!r}"
+            )
+
+        if reported_score is not None:
+            if (
+                isinstance(reported_score, bool)
+                or not isinstance(reported_score, (int, float))
+                or math.isnan(reported_score)
+                or math.isinf(reported_score)
+            ):
+                raise ValueError("reported_score must be a finite number and cannot be a boolean.")
+
+        sub_id = f"{self.get_next_submission_id()}_preserved"
+        target_dir = self.submissions_dir / sub_id
+        target_dir.mkdir(parents=True, exist_ok=False)
+        target_path = target_dir / safe_name
+        receipt_path = target_dir / "PRESERVATION_RECEIPT.json"
+
+        try:
+            shutil.copy2(source, target_path)
+            from harness.artifacts import sha256
+
+            payload_hash = sha256(target_path)
+            byte_count = target_path.stat().st_size
+
+            # Check that copy was uncorrupted
+            if sha256(source) != payload_hash:
+                raise IOError("Preserved file checksum mismatch after copy")
+
+            from harness.io_utils import atomic_write_json
+
+            receipt = {
+                "schema_version": "preservation_receipt.v1",
+                "record_type": "preservation_only",
+                "verification_status": "unverified",
+                "dispatch_authorized": False,
+                "source_file": str(source),
+                "archive_path": str(target_path),
+                "payload_sha256": payload_hash,
+                "byte_count": byte_count,
+                "preserved_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+                "notes": notes,
+                "reported_score": (
+                    float(reported_score) if reported_score is not None else None
+                ),
+                "reported_partition": reported_partition,
+            }
+            atomic_write_json(receipt_path, receipt, indent=2, ensure_ascii=False)
+
+            reported_scores_dict: Dict[str, Optional[float]] = {}
+            if reported_score is not None:
+                key = (
+                    f"reported_{reported_partition}"
+                    if reported_partition
+                    else "reported_score"
+                )
+                reported_scores_dict[key] = float(reported_score)
+
+            entry = SubmissionEntry(
+                id=sub_id,
+                exp_id="preserved",
+                created_at=time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+                status="PRESERVED_UNVERIFIED",
+                local_cv_scores={},
+                official_scores={},  # Keep official_scores strictly empty for unverified entries
+                score_deltas={},
+                reported_scores=reported_scores_dict,
+                candidate_path=str(source),
+                archive_path=str(target_path),
+                receipt_path=str(receipt_path),
+                notes=notes,
+                payload_sha256=payload_hash,
+                official_score_source="user_reported_unverified",
+            )
+            atomic_write_json(
+                target_dir / "metadata.json",
+                asdict(entry),
+                indent=2,
+                ensure_ascii=False,
+            )
+            if self.submissions_dir != self.project_root / "submissions":
+                root_target_dir = self.project_root / "submissions" / sub_id
+                root_target_dir.mkdir(parents=True, exist_ok=False)
+                shutil.copy2(target_path, root_target_dir / safe_name)
+                shutil.copy2(
+                    receipt_path, root_target_dir / "PRESERVATION_RECEIPT.json"
+                )
+                shutil.copy2(
+                    target_dir / "metadata.json", root_target_dir / "metadata.json"
+                )
+
+            # Invariant check: verify target_path hash was not mutated by receipt/metadata writes
+            if sha256(target_path) != payload_hash:
+                raise IOError("Preserved file was corrupted during metadata generation")
+
+            self.submissions[sub_id] = entry
+            self.save()
+            return entry
+        except Exception:
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise
+
     def record_official_score(
         self,
         sub_id: str,
@@ -483,6 +644,7 @@ class SubmissionManager:
             "> - 🔒 `LOCAL_VERIFIED`: Passed Deterministic & Statistical Audit Gate.",
             "> - ⏳ `SUBMITTED_PENDING`: Uploaded to evaluation portal, awaiting leaderboard score.",
             "> - 🎯 `SCORED`: Official scores recorded with CV vs LB delta analysis.",
+            "> - 📦 `PRESERVED_UNVERIFIED`: Preserved artifact for safekeeping; not verified or dispatch-authorized.",
             "> - ⚠️ `DIVERGENCE`: Local CV significantly over-estimated performance (LB - CV < -0.05).",
             "",
             "| Sub ID | Exp ID | Status | Local CV | Official LB | Delta (LB - CV) | Package | Notes |",
@@ -497,15 +659,16 @@ class SubmissionManager:
             for s in sorted(
                 self.submissions.values(), key=lambda x: x.created_at, reverse=True
             ):
-                status_icon = (
-                    "🎯 `SCORED`"
-                    if s.status == "SCORED"
-                    else (
-                        "⏳ `PENDING`"
-                        if s.status == "SUBMITTED_PENDING"
-                        else "🔒 `LOCAL_VERIFIED`"
-                    )
-                )
+                if s.status == "SCORED":
+                    status_icon = "🎯 `SCORED`"
+                elif s.status == "SUBMITTED_PENDING":
+                    status_icon = "⏳ `PENDING`"
+                elif s.status == "PRESERVED_UNVERIFIED":
+                    status_icon = "📦 `PRESERVED`"
+                elif s.status == "DISQUALIFIED":
+                    status_icon = "❌ `DISQUALIFIED`"
+                else:
+                    status_icon = "🔒 `LOCAL_VERIFIED`"
                 if s.divergence_warning:
                     status_icon += " ⚠️"
 
@@ -533,6 +696,8 @@ class SubmissionManager:
                         lb_str = " / ".join(items) if items else "-"
                     else:
                         lb_str = "-"
+                elif s.status == "PRESERVED_UNVERIFIED":
+                    lb_str = "-"
                 else:
                     lb_str = "Pending"
 
@@ -558,6 +723,9 @@ class SubmissionManager:
                     else "-"
                 )
                 notes_clean = s.notes or "-"
+                if s.status == "PRESERVED_UNVERIFIED" and s.reported_scores:
+                    rep_str = ", ".join(f"{k}:{v}" for k, v in s.reported_scores.items())
+                    notes_clean = f"Reported: {rep_str} | {s.notes}" if s.notes else f"Reported: {rep_str}"
 
                 lines.append(
                     f"| `{s.id}` | `{s.exp_id}` | {status_icon} | {cv_str} | {lb_str} | {delta_str} | {pkg_link} | {notes_clean} |"

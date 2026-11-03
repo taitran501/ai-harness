@@ -226,7 +226,8 @@ class TestBootstrapAttachSeamless(unittest.TestCase):
         )
         self.assertEqual(report["status"], "SUCCESS")
         self.assertTrue((self.root / ".ai-harness" / "project.yaml").is_file())
-        self.assertTrue((self.root / ".agents" / "skills" / "ai-harness" / "SKILL.md").is_file())
+        self.assertTrue((self.root / ".agents" / "skills" / "harness" / "SKILL.md").is_file())
+        self.assertFalse((self.root / ".agents" / "skills" / "ai-harness").exists())
 
         # Calling attach_project afterwards should NOT crash with FileExistsError
         attach_res = attach_project(

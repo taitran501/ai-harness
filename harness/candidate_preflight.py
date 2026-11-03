@@ -176,6 +176,134 @@ def _dependencies_from_config_paths(paths: List[Path], claim_out: Optional[List[
     return list(dict.fromkeys(dependencies))
 
 
+def _source_model_manifest(project: HarnessProject, exp_id: str, spec: Any) -> Dict[str, Any]:
+    """Load one source run's sealed model records for candidate binding."""
+    from harness.artifacts import validate_run
+
+    run_dir = project.artifacts_dir / exp_id
+    context = None
+    plugin = None
+    from harness.plugins import TaskPluginContext, load_task_plugin
+
+    context = TaskPluginContext(
+        project.root, project.task_config_path, spec, project.plugin_id or "default"
+    )
+    plugin = load_task_plugin(project.plugin_id, context)
+    manifest = validate_run(run_dir, task_spec=spec, plugin=plugin, expected={"exp_id": exp_id})
+    source = dict(manifest)
+    manifest_path = run_dir / "artifact_manifest.json"
+    source["source_manifest_digest"] = sha256(manifest_path)
+    source["exp_id"] = exp_id
+    lock_path = run_dir / "model_lock.json"
+    if lock_path.is_file():
+        source["model_lock"] = json.loads(lock_path.read_text(encoding="utf-8"))
+        source["model_lock_path"] = str(lock_path)
+    receipt_path = run_dir / "model_policy_receipt.json"
+    if receipt_path.is_file():
+        source["model_policy_receipt"] = json.loads(receipt_path.read_text(encoding="utf-8"))
+        source["model_policy_receipt_path"] = str(receipt_path)
+    return source
+
+
+def _preflight_model_binding(
+    project: HarnessProject,
+    candidate_path: Path,
+    candidate_frame: pd.DataFrame,
+    *,
+    source_exp_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve the candidate subject and current model-policy assessment."""
+    from harness.model_assets.lineage import (
+        CandidateSubject,
+        evaluate_candidate_model_policy,
+        model_policy_digest,
+        resolve_candidate_model_closure,
+        semantic_candidate_prediction_hash,
+    )
+    from harness.task_spec import load_active_task_spec
+
+    spec = load_active_task_spec(project.task_config_path)
+    task_id = str(spec.metadata.get("id") or spec.metadata.get("name") or "task")
+    policy = spec.competition_rules
+    policy_digest = model_policy_digest(policy, spec.model_governance_config)
+    try:
+        semantic_hash = semantic_candidate_prediction_hash(candidate_frame, spec)
+    except (TypeError, ValueError):
+        import hashlib
+
+        semantic_hash = hashlib.sha256(
+            candidate_frame.to_csv(index=False).encode("utf-8")
+        ).hexdigest()
+    governance_required = str(spec.model_governance_config.get("mode", "legacy")).lower() == "required"
+
+    candidate_manifest_path = None
+    run_id = source_exp_id
+    if run_id is None:
+        try:
+            candidate_path.resolve().relative_to(project.artifacts_dir.resolve())
+        except ValueError:
+            pass
+        else:
+            folder = candidate_path.resolve().parent
+            while folder != project.artifacts_dir and folder.is_relative_to(project.artifacts_dir):
+                if (folder / "candidate_manifest.json").is_file():
+                    candidate_manifest_path = folder / "candidate_manifest.json"
+                    break
+                if (folder / "artifact_manifest.json").is_file() and (folder / "run_config.yaml").is_file():
+                    run_id = folder.name
+                    break
+                folder = folder.parent
+
+    if run_id and (project.artifacts_dir / run_id / "candidate_manifest.json").is_file():
+        candidate_manifest_path = project.artifacts_dir / run_id / "candidate_manifest.json"
+        run_id = None
+
+    if candidate_manifest_path is not None:
+        from harness.candidates import validate_candidate
+
+        candidate_manifest = json.loads(candidate_manifest_path.read_text(encoding="utf-8"))
+        validate_candidate(project, candidate_manifest)
+        recipe = {
+            "mode": candidate_manifest.get("mode"),
+            "source_ids": list(candidate_manifest.get("source_ids") or []),
+            "details": candidate_manifest.get("details") or {},
+        }
+        source_manifests = [
+            _source_model_manifest(project, exp_id, spec)
+            for exp_id in recipe["source_ids"]
+        ]
+    elif run_id:
+        recipe = {"mode": "run", "source_ids": [run_id]}
+        source_manifests = [_source_model_manifest(project, run_id, spec)]
+    else:
+        recipe = {"mode": "unbound_prediction_file", "source_ids": []}
+        source_manifests = []
+
+    closure = resolve_candidate_model_closure(source_manifests, recipe)
+    closure.governance_required = closure.governance_required or governance_required
+    assessment = evaluate_candidate_model_policy(closure, policy)
+    subject = CandidateSubject(
+        task_id=task_id,
+        recipe=recipe,
+        source_manifest_digests=closure.source_manifest_digests,
+        model_lock_digests=closure.model_lock_digests,
+        semantic_prediction_hash=semantic_hash,
+        model_policy_digest=policy_digest,
+        model_lineage_digest=closure.model_lineage_digest,
+    )
+    return {
+        "candidate_subject_digest": subject.candidate_subject_digest,
+        "candidate_subject": subject.to_dict(),
+        "model_lock_digest": closure.model_lock_digest,
+        "model_policy_digest": policy_digest,
+        "model_lineage_digest": closure.model_lineage_digest,
+        "model_compliance_status": assessment.status,
+        "model_compliance_eligible": assessment.eligible,
+        "model_compliance_reasons": list(assessment.reasons),
+        "governance_required": closure.governance_required,
+    }
+
+
 def run_candidate_preflight(
     project_root: str | Path,
     candidate_path: str | Path,
@@ -183,6 +311,7 @@ def run_candidate_preflight(
     id_col: Optional[str] = None,
     pred_col: Optional[str] = None,
     citation_dependencies: Optional[List[str]] = None,
+    source_exp_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Perform preflight analysis comparing candidate predictions to an incumbent baseline."""
     if not candidate_path:
@@ -304,11 +433,14 @@ def run_candidate_preflight(
     lineage_claims: List[Dict[str, Any]] = []
     derived_dependencies = _citation_dependencies_from_lineage(project, cand_p, lineage_claims)
     dependencies = list(dict.fromkeys([*derived_dependencies, *(citation_dependencies or [])]))
+    model_binding = _preflight_model_binding(
+        project, cand_p, df_cand, source_exp_id=source_exp_id
+    )
     from harness.citation_audit import enforce_citation_admission
     citation_admission = enforce_citation_admission(
         project.root, {"citation_dependencies": dependencies, "citation_claims": lineage_claims}, action="candidate_preflight")
     receipt = {
-        "schema_version": 2,
+        "schema_version": 3,
         "preflight_id": "preflight-" + uuid.uuid4().hex,
         "candidate": {
             "path": str(cand_p),
@@ -330,11 +462,16 @@ def run_candidate_preflight(
         "citation_dependencies": dependencies,
         "citation_claims": lineage_claims,
         "citation_admission": citation_admission,
+        "candidate_subject_digest": model_binding["candidate_subject_digest"],
+        "model_lock_digest": model_binding["model_lock_digest"],
+        "model_policy_digest": model_binding["model_policy_digest"],
+        "model_lineage_digest": model_binding["model_lineage_digest"],
+        "model_compliance_status": model_binding["model_compliance_status"],
         "created_at": _utc_now_iso(),
     }
     receipt["receipt_digest"] = digest(receipt)
 
-    validate_document("candidate_preflight_receipt", receipt, version=2)
+    validate_document("candidate_preflight_receipt", receipt, version=3)
 
     # Persist receipt
     out_dir = project.root / ".ai-harness" / "artifacts" / "preflight"
@@ -356,7 +493,7 @@ def load_preflight_receipt(project_root: str | Path, preflight_id: str) -> Optio
     validate_document("candidate_preflight_receipt", receipt, version=receipt.get("schema_version", 1))
     if receipt.get("preflight_id") != preflight_id:
         raise ValueError("Preflight receipt ID does not match its requested ID.")
-    if receipt.get("schema_version") == 2:
+    if receipt.get("schema_version") in {2, 3}:
         unsigned = dict(receipt)
         receipt_digest = unsigned.pop("receipt_digest", None)
         if receipt_digest != digest(unsigned):

@@ -446,6 +446,22 @@ class UniversalTaskSpec:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
+    def competition_rules(self) -> Dict[str, Any]:
+        """Non-mutating dictionary of declared competition rules."""
+        raw = self.metadata.get("competition_rules", {})
+        if not isinstance(raw, dict):
+            return {}
+        return dict(raw)
+
+    @property
+    def model_governance_config(self) -> Dict[str, Any]:
+        """Non-mutating dictionary of declared model governance configuration."""
+        raw = self.metadata.get("model_governance", {})
+        if not isinstance(raw, dict):
+            return {}
+        return dict(raw)
+
+    @property
     def platform(self) -> str:
         """Competition platform (Kaggle, Codabench, etc.)."""
         return self.metadata.get("platform", "")
@@ -483,6 +499,19 @@ class UniversalTaskSpec:
     def submission_spec(self) -> Optional[Dict[str, Any]]:
         """Resolved submission specification from metadata."""
         return self.metadata.get("submission_spec")
+
+    @property
+    def runtime_requirements(self) -> List[str]:
+        """Runtime pip requirements declared in task contract."""
+        runtime_cfg = self.metadata.get("runtime", {})
+        if isinstance(runtime_cfg, dict):
+            reqs = runtime_cfg.get("requirements", [])
+            if isinstance(reqs, list):
+                return [str(r).strip() for r in reqs if str(r).strip()]
+        reqs = self.metadata.get("requirements", [])
+        if isinstance(reqs, list):
+            return [str(r).strip() for r in reqs if str(r).strip()]
+        return []
 
     @property
     def execution_config(self) -> Dict[str, Any]:

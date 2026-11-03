@@ -25,7 +25,6 @@ from harness.diagnostics import DiagnosticEngine
 from harness.grounding_gate import GroundingGate
 from harness.io_utils import (
     get_git_commit_hash,
-    load_yaml_config,
     save_json,
     set_seed,
 )
@@ -64,6 +63,12 @@ from harness.artifacts import (
     sha256,
 )
 from harness.models import call_model
+from harness.model_assets.resolution import (
+    enforce_model_admission,
+    prepare_or_validate_model_plan,
+    resolve_effective_config,
+)
+from harness.model_assets.store import ModelStore
 from harness.oof_revalidation import build_variant_predictions, score_predictions
 
 
@@ -71,12 +76,21 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
     """One execution contract for local and packaged remote runs."""
 
     def __init__(self, cfg, config_path, args):
-        self.cfg, self.config_path, self.args = cfg, config_path, args
         self.project = HarnessProject.discover(
             getattr(args, "project_root", None), getattr(args, "task_config", None)
         )
         self.project_root = self.project.root
         self.task_spec = load_active_task_spec(self.project.task_config_path)
+        self.cfg = resolve_effective_config(self.project, cfg, args)
+        self.config_path, self.args = config_path, args
+        self.model_plan = prepare_or_validate_model_plan(
+            self.task_spec,
+            self.cfg,
+            ModelStore(),
+            project=self.project,
+        )
+        enforce_model_admission(self.model_plan)
+        cfg = self.cfg
         self.exp_id = str(cfg.get("experiment", {}).get("id", Path(config_path).stem))
         if (
             Path(self.exp_id).name != self.exp_id
@@ -141,6 +155,11 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             "plugin_id": self.project.plugin_id or "default",
             **contract_identity(self.task_spec, self.task_plugin),
         }
+        save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
+        save_json(self.exp_dir / "model_lock.json", self.model_plan.to_lock_dict())
+        save_json(self.exp_dir / "model_policy_receipt.json", self.model_plan.to_receipt_dict())
+        self.manifest["model_lock_digest"] = self.model_plan.lock_digest
+        self.manifest["model_policy_status"] = self.model_plan.status
         save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
         self.logger = __import__("logging").getLogger("ai-harness.runner")
         (self.exp_dir / "run.log").write_text("Starting run\n", encoding="utf-8")
@@ -212,23 +231,33 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 f"{_mismatch}; {_unsupported_msg}" if _mismatch else _unsupported_msg
             )
         self._skip_generic_base_eval = False
+        hook = cfg.get("paths", {}).get("metrics_evaluator")
+        if hook:
+            print(
+                f"[ai-harness] INFO: Custom metric scorer active: "
+                f"{self.task_spec.primary_metric} via {hook}"
+            )
         if _mismatch:
             _generic_scoring = not self.task_plugin.capabilities().get(
                 "custom_metrics"
             )
-            if cfg.get("paths", {}).get("metrics_evaluator") or not _generic_scoring:
+            if hook or not _generic_scoring:
                 # The generic aggregate provably cannot score this spec: its
                 # pair gate raises before any metric is computed, so a custom
                 # metrics_evaluator is the authoritative scorer. Skip the base
                 # evaluation instead of warning "official evaluation failed"
                 # on every fold.
-                self._skip_generic_base_eval = bool(
-                    cfg.get("paths", {}).get("metrics_evaluator")
-                )
-                print(
-                    f"[ai-harness] WARNING: {_mismatch}; the official score "
-                    "will come from the configured custom scorer"
-                )
+                self._skip_generic_base_eval = bool(hook)
+                if hook:
+                    print(
+                        f"[ai-harness] INFO: Generic aggregate scorer skipped: "
+                        f"{_mismatch}; the configured custom scorer is authoritative"
+                    )
+                else:
+                    print(
+                        f"[ai-harness] WARNING: {_mismatch}; the official score "
+                        "will come from the configured custom scorer"
+                    )
             else:
                 raise ValueError(
                     f"{_mismatch} — align the subtask metric with the spec's "
@@ -237,7 +266,6 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 )
         self.seed = self.task_spec.resolve_seed(cfg.get("runtime", {}).get("seed", 42))
         self.estimator_metadata = []
-        hook = cfg.get("paths", {}).get("metrics_evaluator")
         if hook:
             if str(self.project_root) not in sys.path:
                 sys.path.insert(0, str(self.project_root))
@@ -668,7 +696,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                         model.seed = self.seed
                     start = time.monotonic()
                     call_model(model, "fit", tr, variant)
-                    ExperimentValidator.assert_parameter_limit(
+                    ExperimentValidator.assert_trainable_parameter_limit(
                         model,
                         max_params=self.cfg.get("constraints", {}).get(
                             "max_params_limit"
@@ -1167,6 +1195,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="(cloud backends only) Build and print the dispatch plan without pushing or consuming cloud quota",
     )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="Run remote cloud job in detached mode (e.g. Modal) and return immediately without keeping the local process alive",
+    )
+    parser.add_argument(
+        "--gpu",
+        type=str,
+        default="A10",
+        help="Target GPU type for cloud backends (e.g. Modal: A10, A100, H100, T4, L4)",
+    )
     return parser
 
 
@@ -1252,30 +1291,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not config_path.is_file():
         parser.error(f"Experiment config does not exist: {config_path}")
 
+    # Resolve and admit one effective model plan before choosing local or cloud
+    # execution. Cloud dispatch receives this same merged mapping.
+    effective_cfg = resolve_effective_config(project, config_path, args)
+    task_spec = load_active_task_spec(project.task_config_path)
+    model_plan = prepare_or_validate_model_plan(
+        task_spec,
+        effective_cfg,
+        ModelStore(),
+        project=project,
+    )
+    enforce_model_admission(model_plan)
+
     # Execution-backend contract: the task spec may declare a default backend
     # (task.execution.backend) and lock it (task.execution.locked). Enforcing
     # here — not only in the agent bridge — stops silent local training when
     # the runner CLI is invoked directly (agent terminal calls, scripts).
-    contract_backend = None
-    backend_locked = False
-    try:
-        from harness.task_spec import load_active_task_spec
-
-        _spec = load_active_task_spec(project.task_config_path)
-        contract_backend = getattr(_spec, "execution_backend", None)
-        backend_locked = bool(getattr(_spec, "execution_locked", False))
-    except Exception:
-        pass  # spec load failure surfaces in UniversalRunner with full context
+    contract_backend = getattr(task_spec, "execution_backend", None)
+    backend_locked = bool(getattr(task_spec, "execution_locked", False))
     requested_backend = args.backend
-    # Probe detection must see validation.sample_limit, which lives in the
-    # experiment config; load it here (UniversalRunner re-validates it).
-    cfg_doc: Optional[Dict[str, Any]] = None
-    try:
-        cfg_doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(cfg_doc, dict):
-            cfg_doc = None
-    except Exception:
-        cfg_doc = None  # config errors surface in UniversalRunner with context
+    # Probe detection must see inherited validation.sample_limit too.
+    cfg_doc: Optional[Dict[str, Any]] = effective_cfg
     is_smoke_run = is_local_only_run(args, cfg_doc)
     # Re-entrancy guard: when this process was started by a dispatched remote
     # kernel (Kaggle/Modal template sets AI_HARNESS_REMOTE_KERNEL=1), we ARE
@@ -1317,6 +1353,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             config_path=str(config_path),
             project_root=project.root,
             job_id=getattr(args, "job_id", None),
+            gpu=getattr(args, "gpu", "A10"),
+            detach=getattr(args, "detach", False),
+            effective_config=effective_cfg,
+            base_config=getattr(args, "base_config", None),
         )
         return 0
     elif args.backend == "kaggle":
@@ -1328,20 +1368,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             job_id=getattr(args, "job_id", None),
             force_import=getattr(args, "force_import", False),
             dry_run=getattr(args, "dry_run", False),
+            effective_config=effective_cfg,
+            base_config=getattr(args, "base_config", None),
         )
         return 0
 
-    # Local execution
-    package_base = Path(__file__).resolve().parent / "defaults" / "base.yaml"
-    workspace_base = project.root / "configs" / "base.yaml"
-    base_path = (
-        resolve_project_path(args.base_config)
-        if args.base_config
-        else (workspace_base if workspace_base.is_file() else package_base)
-    )
-    base_cfg = load_yaml_config(base_path) if base_path.exists() else {}
-    exp_cfg = load_yaml_config(config_path)
-    cfg = merge_configs(base_cfg, exp_cfg)
+    # Local execution consumes the same config already admitted above.
+    cfg = effective_cfg
 
     exp_id = cfg.get("experiment", {}).get("id", config_path.stem)
     args.project_root = str(project.root)

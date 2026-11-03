@@ -47,6 +47,36 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("plugins", help="List installed task plugins")
 
+    model = subparsers.add_parser("model", help="Inspect and govern task-scoped model assets")
+    model_commands = model.add_subparsers(dest="model_command", required=True)
+    model_list = model_commands.add_parser("list", help="List registered models in this task workspace")
+    model_list.add_argument("--project-root", default=".")
+    model_list.add_argument("--task-config", default=None)
+    model_list.add_argument("--limit", type=int, default=20)
+    model_list.add_argument("--offset", type=int, default=0)
+    model_inspect = model_commands.add_parser("inspect", help="Inspect a registered model definition")
+    model_inspect.add_argument("model_ref", help="Model ID or immutable SHA-256 definition digest")
+    model_inspect.add_argument("--project-root", default=".")
+    model_inspect.add_argument("--task-config", default=None)
+    model_register = model_commands.add_parser("register", help="Register a bounded model declaration")
+    model_register.add_argument("--file", required=True, help="YAML or JSON model definition")
+    model_register.add_argument("--project-root", default=".")
+    model_register.add_argument("--task-config", default=None)
+    model_verify = model_commands.add_parser("verify", help="Check local model artifacts and SHA-256 hashes")
+    model_verify.add_argument("model_ref", help="Model ID or immutable SHA-256 definition digest")
+    model_verify.add_argument("--project-root", default=".")
+    model_verify.add_argument("--task-config", default=None)
+    model_validate = model_commands.add_parser("validate-config", help="Check a config against task model policy")
+    model_validate.add_argument("--config", required=True, help="Experiment config path")
+    model_validate.add_argument("--project-root", default=".")
+    model_validate.add_argument("--task-config", default=None)
+    model_resolve = model_commands.add_parser("resolve", help="Plan backend model mount paths without dispatch")
+    model_resolve.add_argument("--config", required=True, help="Experiment config path")
+    model_resolve.add_argument("--backend", required=True, choices=("local", "kaggle", "modal"))
+    model_resolve.add_argument("--dry-run", action="store_true", help="Plan only; never dispatch or mutate provider state")
+    model_resolve.add_argument("--project-root", default=".")
+    model_resolve.add_argument("--task-config", default=None)
+
     install_skills = subparsers.add_parser(
         "install-skills",
         help="Install or update modular slash-command skills globally (~/.gemini/config/skills) and/or in workspace (.agents/skills)",
@@ -209,6 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--incumbent", default=None, help="Incumbent baseline predictions CSV file (auto-resolved if omitted)")
     preflight.add_argument("--id-col", default=None, help="Explicit ID column name")
     preflight.add_argument("--pred-col", default=None, help="Explicit prediction column name")
+    preflight.add_argument("--source-exp-id", default=None, help="Bind the receipt to a validated source run or candidate")
     preflight.add_argument("--pitch", action="store_true", help="Validate candidate pitch governance (reject near-duplicate without paired gain)")
     preflight.add_argument("--claim-kind", default="submission_candidate", choices=("blend", "temperature_tuning", "submission_candidate", "candidate"))
     preflight.add_argument("--candidate-exp-id", default=None)
@@ -418,6 +449,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "plugins":
         print(json.dumps(list_task_plugins(), indent=2, ensure_ascii=False))
         return 0
+
+    if args.command == "model":
+        from harness.model_assets.cli import run_model_command
+
+        return run_model_command(args)
 
     if args.command == "audit-scripts":
         from harness.audit_gate import scan_dispatch_scripts
@@ -695,6 +731,7 @@ def _run_preflight(args) -> int:
             incumbent_path=args.incumbent,
             id_col=args.id_col,
             pred_col=args.pred_col,
+            source_exp_id=args.source_exp_id,
         )
     except Exception as exc:
         if args.json:

@@ -17,6 +17,13 @@ BASE_REQUIREMENTS = [
 ]
 
 REQUIREMENT_CHECK_MODES = ("strict", "warn", "off")
+MODEL_GOVERNANCE_FILES = (
+    "model_lock.json",
+    "model_policy_receipt.json",
+    "loaded_models.json",
+    "model_outputs.json",
+    "model_lineage.json",
+)
 
 
 def _requirement_check_mode(requirement_check, runtime):
@@ -230,10 +237,24 @@ def export_run(exp_dir, output_root, identity):
 
     exp_dir, output_root = Path(exp_dir), Path(output_root)
     manifest = validate_run(exp_dir, expected={"exp_id": identity["exp_id"]})
-    for name in [*manifest["files"], "artifact_manifest.json"]:
+    sealed_files = manifest.get("files") or {}
+    for name in MODEL_GOVERNANCE_FILES:
+        if (exp_dir / name).is_file() and name not in sealed_files:
+            raise RuntimeError(
+                f"Refusing to export unsealed model governance file: {name}"
+            )
+    for name in [*sealed_files, "artifact_manifest.json"]:
         if (output_root / name).exists():
             raise RuntimeError(f"Refusing to overwrite Kaggle output: {name}")
-    for name in manifest["files"]:
+    # The manifest is authoritative; explicitly retain the governance records
+    # that bind this run to its admitted model plan and loaded model lineage.
+    export_files = list(
+        dict.fromkeys(
+            [name for name in MODEL_GOVERNANCE_FILES if name in sealed_files]
+            + list(sealed_files)
+        )
+    )
+    for name in export_files:
         dst = output_root / name
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(exp_dir / name, dst)
