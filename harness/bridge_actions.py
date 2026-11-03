@@ -68,6 +68,7 @@ class ActionHandlerMixin:
                 id_col=params.get("id_col"),
                 pred_col=params.get("pred_col"),
                 citation_dependencies=params.get("citation_dependencies"),
+                source_exp_id=params.get("source_exp_id"),
             )
         elif act == "validate_candidate_pitch":
             from harness.candidate_preflight import validate_candidate_pitch

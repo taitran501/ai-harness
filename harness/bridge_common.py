@@ -568,7 +568,7 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "candidate_preflight": {
         "summary": "Preflight verification of candidate predictions against incumbent baseline.",
         "required": ["candidate_path"],
-        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None, "citation_dependencies": []},
+        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None, "citation_dependencies": [], "source_exp_id": None},
         "description": "Computes Spearman rho, rank swaps, and delta distributions. Flags rho >= 0.995; rank similarity alone does not establish score cause.",
     },
     "validate_candidate_pitch": {

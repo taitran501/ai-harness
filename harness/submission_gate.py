@@ -144,6 +144,94 @@ class SubmissionGate:
             refs.append(dict(id=str(entry.get("id") or entry.get("ref")), path=prediction_path, source="dispatched", exp_id=entry.get("exp_id"), provider_ref=entry.get("ref")))
         return events, refs, payloads, digest({"events": events, "legacy": legacy_entries})
 
+    def _candidate_model_binding(self, exp_id, predictions, evidence):
+        """Rebuild the source model closure and subject from sealed run evidence."""
+        from harness.model_assets.lineage import (
+            CandidateSubject,
+            evaluate_candidate_model_policy,
+            model_policy_digest,
+            resolve_candidate_model_closure,
+            semantic_candidate_prediction_hash,
+        )
+
+        run_dir = self.project.artifacts_dir / exp_id
+        source = dict(evidence["manifest"])
+        source["exp_id"] = exp_id
+        source["source_manifest_digest"] = sha256(run_dir / "artifact_manifest.json")
+        lock_path = run_dir / "model_lock.json"
+        if lock_path.is_file():
+            source["model_lock"] = json.loads(lock_path.read_text(encoding="utf-8"))
+            source["model_lock_path"] = str(lock_path)
+        receipt_path = run_dir / "model_policy_receipt.json"
+        if receipt_path.is_file():
+            source["model_policy_receipt"] = json.loads(receipt_path.read_text(encoding="utf-8"))
+            source["model_policy_receipt_path"] = str(receipt_path)
+
+        recipe = {"mode": "run", "source_ids": [exp_id]}
+        closure = resolve_candidate_model_closure([source], recipe)
+        required = str(self.spec.model_governance_config.get("mode", "legacy")).strip().lower() == "required"
+        closure.governance_required = closure.governance_required or required
+        assessment = evaluate_candidate_model_policy(closure, self.spec.competition_rules)
+        if required and not closure.verified:
+            raise SubmissionGateError(
+                "MODEL_LINEAGE_UNVERIFIED",
+                "; ".join(closure.reasons) or "Required model lineage is not verified.",
+            )
+        if not assessment.eligible:
+            code = assessment.failure_code or "MODEL_POLICY_VIOLATION"
+            if code == "MODEL_LINEAGE_UNVERIFIED":
+                code = "MODEL_LINEAGE_UNVERIFIED"
+            else:
+                code = "MODEL_POLICY_VIOLATION"
+            raise SubmissionGateError(code, "; ".join(assessment.reasons))
+
+        policy_digest = model_policy_digest(
+            self.spec.competition_rules, self.spec.model_governance_config
+        )
+        subject = CandidateSubject(
+            task_id=str(self.spec.metadata.get("id") or self.spec.metadata.get("name") or "task"),
+            recipe=recipe,
+            source_manifest_digests=closure.source_manifest_digests,
+            model_lock_digests=closure.model_lock_digests,
+            semantic_prediction_hash=semantic_candidate_prediction_hash(
+                pd.read_csv(predictions), self.spec
+            ),
+            model_policy_digest=policy_digest,
+            model_lineage_digest=closure.model_lineage_digest,
+        )
+        return {
+            "candidate_subject": subject.to_dict(),
+            "candidate_subject_digest": subject.candidate_subject_digest,
+            "model_lock_digest": closure.model_lock_digest,
+            "model_lineage_digest": closure.model_lineage_digest,
+            "model_policy_digest": policy_digest,
+            "model_compliance_status": assessment.status,
+            "model_compliance_eligible": assessment.eligible,
+            "governance_required": required or closure.governance_required,
+            "assessment": assessment,
+        }
+
+    @staticmethod
+    def _validate_preflight_model_binding(receipt, model_binding):
+        version = receipt.get("schema_version", 1)
+        if version < 3:
+            if model_binding["governance_required"]:
+                raise SubmissionGateError(
+                    "PREFLIGHT_MODEL_BINDING_REQUIRED",
+                    "A v1/v2 receipt cannot satisfy required candidate model bindings; rerun preflight.",
+                )
+            return
+        if receipt.get("candidate_subject_digest") != model_binding["candidate_subject_digest"]:
+            raise SubmissionGateError("PREFLIGHT_SUBJECT_MISMATCH")
+        if receipt.get("model_lock_digest") != model_binding["model_lock_digest"]:
+            raise SubmissionGateError("PREFLIGHT_MODEL_LOCK_MISMATCH")
+        if receipt.get("model_policy_digest") != model_binding["model_policy_digest"]:
+            raise SubmissionGateError("PREFLIGHT_MODEL_POLICY_MISMATCH")
+        if receipt.get("model_compliance_status") != model_binding["model_compliance_status"]:
+            raise SubmissionGateError("PREFLIGHT_MODEL_COMPLIANCE_MISMATCH")
+        if model_binding["governance_required"] and receipt.get("model_compliance_status") != "eligible":
+            raise SubmissionGateError("MODEL_COMPLIANCE_REQUIRED")
+
     def _resolve_payload(self, file_name, exp_id=None, user_approved=False, preflight_id=None):
         path = Path(file_name)
         path = (self.project.root / path).resolve() if not path.is_absolute() else path.resolve()
@@ -174,11 +262,12 @@ class SubmissionGate:
             if sha256(built) != sha256(path):
                 raise SubmissionGateError("PAYLOAD_EVIDENCE_MISMATCH")
         self.plugin.validate_submission(self.context, path)
-        return path, exp_id, predictions, evidence
+        model_binding = self._candidate_model_binding(exp_id, predictions, evidence)
+        return path, exp_id, predictions, evidence, model_binding
 
     def evaluate(self, competition, file_name, *, exp_id=None, rule_id=None, user_approved=False,
                  approval_id=None, kernel=None, kernel_version=None, quota=None, max_spearman=None, provider_refs=None,
-                 preflight_id=None):
+                 preflight_id=None, _include_model_binding=False):
         if kernel or kernel_version:
             raise SubmissionGateError("UNVERIFIED_KERNEL_OUTPUT", "Exact completed kernel version/output binding is required; a local same-named file is insufficient.")
         script_guard = enforce_dispatch_script_guard(self.project.root)
@@ -205,14 +294,14 @@ class SubmissionGate:
             gates = state.get("gates", {})
             if gates.get("freeze_locked") or gates.get("finalized"):
                 raise SubmissionGateError("COMPETITION_FROZEN")
-        path, exp_id, predictions, evidence = self._resolve_payload(file_name, exp_id=exp_id, user_approved=user_approved, preflight_id=preflight_id)
+        path, exp_id, predictions, evidence, model_binding = self._resolve_payload(file_name, exp_id=exp_id, user_approved=user_approved, preflight_id=preflight_id)
         preflight_receipt = None
         if preflight_id:
             from harness.candidate_preflight import load_preflight_receipt
             preflight_receipt = load_preflight_receipt(self.project.root, preflight_id)
             if not preflight_receipt:
                 raise SubmissionGateError("PREFLIGHT_RECEIPT_NOT_FOUND", f"Preflight receipt {preflight_id} not found.")
-            if preflight_receipt.get("candidate", {}).get("sha256") != sha256(path):
+            if preflight_receipt.get("schema_version", 1) < 3 and preflight_receipt.get("candidate", {}).get("sha256") != sha256(path):
                 raise SubmissionGateError("PREFLIGHT_PAYLOAD_MISMATCH", "Candidate file hash does not match cited preflight receipt.")
             if not exp_id:
                 raise SubmissionGateError("EXPERIMENT_EVIDENCE_REQUIRED")
@@ -303,6 +392,8 @@ class SubmissionGate:
             baseline_id = gates.get("baseline_exp_id")
             if baseline_id is not None and exp_id != baseline_id:
                 raise SubmissionGateError("PROMOTION_EVIDENCE_REQUIRED")
+        if preflight_receipt:
+            self._validate_preflight_model_binding(preflight_receipt, model_binding)
         subject = digest(dict(competition=competition, payload_sha256=payload_hash, exp_id=exp_id))
         approval = None
         if approval_id:
@@ -354,15 +445,22 @@ class SubmissionGate:
             citation_admission=citation_admission, citation_dependencies=citation_dependencies,
             citation_claims=citation_claims,
             checks=dict(integrity="pass", diversity="pass", promotion="pass" if refs else "not_required",
-                        approval="pass" if approval else "fail", quota="fail" if any(r.startswith("QUOTA") for r in reasons) else "pass"),
+                        approval="pass" if approval else "fail", quota="fail" if any(r.startswith("QUOTA") for r in reasons) else "pass",
+                        candidate_subject_binding="pass",
+                        model_compliance="pass" if model_binding["model_compliance_status"] == "eligible" else "not_required",
+                        model_policy_current="pass"),
             reason_codes=list(dict.fromkeys(reasons)), created_at=utc_now(), expires_at=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
             framework_commit="working-tree")
         validate_document("submission_gate_receipt", receipt, version=2)
         atomic_write_json(self.directory / (receipt["receipt_id"] + ".json"), receipt)
+        if _include_model_binding:
+            return receipt, path, exp_id, predictions, model_binding
         return receipt, path, exp_id, predictions
 
     def authorize_dispatch(self, competition, file_name, *, dry_run=False, **options):
-        receipt, path, exp_id, predictions = self.evaluate(competition, file_name, **options)
+        receipt, path, exp_id, predictions, model_binding = self.evaluate(
+            competition, file_name, _include_model_binding=True, **options
+        )
         if dry_run:
             return {"receipt": receipt, "dry_run": True}
         if receipt["status"] != "pass":
@@ -392,6 +490,12 @@ class SubmissionGate:
                        history_snapshot_sha256=receipt["history_snapshot_sha256"], session_id=None,
                        file_name=str(staged_payload.resolve()), prediction_snapshot=str(staged_prediction.resolve()),
                        prediction_file_sha256=sha256(staged_prediction), exp_id=exp_id, approval_id=receipt["approval"]["id"],
+                       candidate_subject_digest=model_binding["candidate_subject_digest"],
+                       model_lock_digest=model_binding["model_lock_digest"],
+                       model_lineage_digest=model_binding["model_lineage_digest"],
+                       model_policy_digest=model_binding["model_policy_digest"],
+                       model_compliance_status=model_binding["model_compliance_status"],
+                       preflight_id=options.get("preflight_id"),
                        kernel=None, kernel_version=None)
         with workspace_lock(self.project.root / ".ai-harness"):
             from harness.macro_research import enforce_retrospective
@@ -412,6 +516,35 @@ class SubmissionGate:
                 raise SubmissionGateError("HISTORY_CHANGED", "Dispatch history changed; evaluate again.")
             if digest(resolve_research_policy(self.project, self.spec).to_dict()) != receipt["policy_sha256"]:
                 raise SubmissionGateError("POLICY_CHANGED")
+            from harness.model_assets.lineage import model_policy_digest
+            current_spec = load_active_task_spec(self.project.task_config_path)
+            if model_policy_digest(
+                current_spec.competition_rules, current_spec.model_governance_config
+            ) != model_binding["model_policy_digest"]:
+                raise SubmissionGateError("MODEL_POLICY_CHANGED")
+            _, _, _, _, current_model_binding = self._resolve_payload(
+                file_name, exp_id=exp_id, user_approved=True, preflight_id=options.get("preflight_id")
+            )
+            if any(
+                current_model_binding[key] != model_binding[key]
+                for key in (
+                    "candidate_subject_digest",
+                    "model_lock_digest",
+                    "model_lineage_digest",
+                    "model_policy_digest",
+                    "model_compliance_status",
+                )
+            ):
+                raise SubmissionGateError("MODEL_SUBJECT_CHANGED")
+            if options.get("preflight_id"):
+                from harness.candidate_preflight import load_preflight_receipt
+
+                current_preflight = load_preflight_receipt(
+                    self.project.root, options["preflight_id"]
+                )
+                if not current_preflight:
+                    raise SubmissionGateError("PREFLIGHT_RECEIPT_NOT_FOUND")
+                self._validate_preflight_model_binding(current_preflight, current_model_binding)
             if digest(StagnationController(self.project).reconcile_results()) != receipt["stagnation_state_sha256"]:
                 raise SubmissionGateError("STAGNATION_STATE_CHANGED")
             state_path = self.project.artifacts_dir / "competition_state.json"

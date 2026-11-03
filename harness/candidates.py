@@ -88,6 +88,45 @@ def _stored_recipe_fingerprint(entry):
     return entry.get("recipe_fingerprint")
 
 
+def _candidate_model_binding(project, spec, source_ids, manifests, recipe):
+    """Resolve sealed source model locks and re-assess the combined candidate."""
+    from harness.model_assets.lineage import (
+        evaluate_candidate_model_policy,
+        model_policy_digest,
+        resolve_candidate_model_closure,
+    )
+
+    sources = []
+    for exp_id, manifest in zip(source_ids, manifests):
+        source = dict(manifest)
+        run_dir = project.artifacts_dir / exp_id
+        source["exp_id"] = exp_id
+        source["source_manifest_digest"] = sha256(run_dir / "artifact_manifest.json")
+        lock_path = run_dir / "model_lock.json"
+        if lock_path.is_file():
+            source["model_lock"] = json.loads(lock_path.read_text(encoding="utf-8"))
+            source["model_lock_path"] = str(lock_path)
+        receipt_path = run_dir / "model_policy_receipt.json"
+        if receipt_path.is_file():
+            source["model_policy_receipt"] = json.loads(receipt_path.read_text(encoding="utf-8"))
+            source["model_policy_receipt_path"] = str(receipt_path)
+        sources.append(source)
+
+    closure = resolve_candidate_model_closure(sources, recipe)
+    closure.governance_required = (
+        closure.governance_required
+        or str(spec.model_governance_config.get("mode", "legacy")).strip().lower() == "required"
+    )
+    policy = spec.competition_rules
+    assessment = evaluate_candidate_model_policy(closure, policy)
+    if not assessment.eligible:
+        raise ValueError(
+            "CANDIDATE_MODEL_POLICY_BLOCKED: "
+            + "; ".join(assessment.reasons)
+        )
+    return closure, assessment, model_policy_digest(policy, spec.model_governance_config)
+
+
 def build_candidate(project, name, mode, source_map):
     from harness.provenance import require_allowed_provenance, resolve_run_provenance
     spec = load_active_task_spec(project.task_config_path)
@@ -138,6 +177,10 @@ def build_candidate(project, name, mode, source_map):
         for field in ("task_sha256", "scorer_sha256", "custom_scorer_sha256", "split_sha256", "data_sha256"):
             if manifest.get(field) != manifests[0].get(field):
                 raise ValueError("Source contract/split mismatch: " + field)
+    candidate_recipe = {"mode": mode, "source_ids": list(ids), "details": source_map}
+    model_closure, model_assessment, current_model_policy_digest = _candidate_model_binding(
+        project, spec, ids, manifests, candidate_recipe
+    )
     has_test_preds = all(
         (project.artifacts_dir / exp / "test_predictions.csv").is_file()
         for exp in ids
@@ -328,6 +371,18 @@ def build_candidate(project, name, mode, source_map):
     result = score_predictions(spec, plugin, context, source_config, truth, predictions(merged))
     if len(ids) > 1 and result["utility"] <= max(scores):
         raise ValueError("Superiority guard: ensemble must improve best constituent")
+    from harness.model_assets.lineage import CandidateSubject, semantic_candidate_prediction_hash
+
+    subject_predictions = merged_test if has_test_preds and merged_test is not None else merged
+    candidate_subject = CandidateSubject(
+        task_id=str(spec.metadata.get("id") or spec.metadata.get("name") or "task"),
+        recipe=candidate_recipe,
+        source_manifest_digests=model_closure.source_manifest_digests,
+        model_lock_digests=model_closure.model_lock_digests,
+        semantic_prediction_hash=semantic_candidate_prediction_hash(subject_predictions, spec),
+        model_policy_digest=current_model_policy_digest,
+        model_lineage_digest=model_closure.model_lineage_digest,
+    )
     candidate_id = "cand_" + uuid.uuid4().hex
     folder = project.artifacts_dir / candidate_id
     folder.mkdir(parents=True, exist_ok=True)
@@ -361,6 +416,13 @@ def build_candidate(project, name, mode, source_map):
         # duplicate that an agent might re-submit under a new name to "preserve"
         # a submission or pad the candidate pool.
         "recipe_fingerprint": _candidate_recipe_fingerprint(mode, ids, source_map),
+        "candidate_subject": candidate_subject.to_dict(),
+        "candidate_subject_digest": candidate_subject.candidate_subject_digest,
+        "model_lock_digest": model_closure.model_lock_digest,
+        "model_lineage_digest": model_closure.model_lineage_digest,
+        "model_policy_digest": current_model_policy_digest,
+        "model_compliance_status": model_assessment.status,
+        "model_compliance_eligible": model_assessment.eligible,
         "source_hashes": {
             exp: sha256(project.artifacts_dir / exp / "artifact_manifest.json")
             for exp in ids
@@ -411,10 +473,13 @@ def validate_candidate(project, entry):
         project.root, project.task_config_path, spec, project.plugin_id or "default"
     )
     plugin = load_task_plugin(project.plugin_id, context)
+    source_manifests = []
     for exp, value in manifest["source_hashes"].items():
         source_manifest = resolve_run_provenance(project, exp)
         require_allowed_provenance([source_manifest], purpose="candidate validation")
-        validate_run(project.artifacts_dir / exp, task_spec=spec, plugin=plugin)
+        source_manifests.append(
+            validate_run(project.artifacts_dir / exp, task_spec=spec, plugin=plugin, expected={"exp_id": exp})
+        )
         if sha256(project.artifacts_dir / exp / "artifact_manifest.json") != value:
             raise ValueError("Candidate source changed")
     source_ids = manifest.get("source_ids") or []
@@ -427,6 +492,45 @@ def validate_candidate(project, entry):
                                        for exp in source_ids]})
     if manifest.get("recipe_binding_sha256") != binding:
         raise ValueError("Candidate recipe binding mismatch")
+    candidate_recipe = {
+        "mode": manifest.get("mode"),
+        "source_ids": list(source_ids),
+        "details": manifest.get("details") or {},
+    }
+    closure, assessment, policy_digest = _candidate_model_binding(
+        project, spec, source_ids, source_manifests, candidate_recipe
+    )
+    if closure.governance_required and not manifest.get("candidate_subject_digest"):
+        raise ValueError("CANDIDATE_SUBJECT_UNVERIFIED: governed candidate lacks a sealed subject binding")
+    if manifest.get("candidate_subject_digest"):
+        from harness.model_assets.lineage import CandidateSubject, semantic_candidate_prediction_hash
+
+        prediction_path = (
+            folder / "test_predictions.csv"
+            if (folder / "test_predictions.csv").is_file()
+            else folder / "oof_predictions.csv"
+        )
+        expected_subject = CandidateSubject(
+            task_id=str(spec.metadata.get("id") or spec.metadata.get("name") or "task"),
+            recipe=candidate_recipe,
+            source_manifest_digests=closure.source_manifest_digests,
+            model_lock_digests=closure.model_lock_digests,
+            semantic_prediction_hash=semantic_candidate_prediction_hash(
+                pd.read_csv(prediction_path), spec
+            ),
+            model_policy_digest=policy_digest,
+            model_lineage_digest=closure.model_lineage_digest,
+        )
+        if (
+            manifest.get("candidate_subject_digest") != expected_subject.candidate_subject_digest
+            or manifest.get("candidate_subject") != expected_subject.to_dict()
+            or manifest.get("model_lock_digest") != closure.model_lock_digest
+            or manifest.get("model_lineage_digest") != closure.model_lineage_digest
+            or manifest.get("model_policy_digest") != policy_digest
+            or manifest.get("model_compliance_status") != assessment.status
+            or manifest.get("model_compliance_eligible") is not assessment.eligible
+        ):
+            raise ValueError("Candidate model subject or policy binding mismatch")
     return manifest
 
 

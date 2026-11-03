@@ -209,6 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--incumbent", default=None, help="Incumbent baseline predictions CSV file (auto-resolved if omitted)")
     preflight.add_argument("--id-col", default=None, help="Explicit ID column name")
     preflight.add_argument("--pred-col", default=None, help="Explicit prediction column name")
+    preflight.add_argument("--source-exp-id", default=None, help="Bind the receipt to a validated source run or candidate")
     preflight.add_argument("--pitch", action="store_true", help="Validate candidate pitch governance (reject near-duplicate without paired gain)")
     preflight.add_argument("--claim-kind", default="submission_candidate", choices=("blend", "temperature_tuning", "submission_candidate", "candidate"))
     preflight.add_argument("--candidate-exp-id", default=None)
@@ -695,6 +696,7 @@ def _run_preflight(args) -> int:
             incumbent_path=args.incumbent,
             id_col=args.id_col,
             pred_col=args.pred_col,
+            source_exp_id=args.source_exp_id,
         )
     except Exception as exc:
         if args.json:

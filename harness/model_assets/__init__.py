@@ -80,3 +80,21 @@ __all__ += [
 from harness.model_assets.resolver import BackendResourcePlan, ModelResolver
 
 __all__ += ["BackendResourcePlan", "ModelResolver"]
+
+from harness.model_assets.lineage import (
+    CandidateModelClosure,
+    CandidateSubject,
+    evaluate_candidate_model_policy,
+    model_policy_digest,
+    resolve_candidate_model_closure,
+    semantic_candidate_prediction_hash,
+)
+
+__all__ += [
+    "CandidateModelClosure",
+    "CandidateSubject",
+    "evaluate_candidate_model_policy",
+    "model_policy_digest",
+    "resolve_candidate_model_closure",
+    "semantic_candidate_prediction_hash",
+]
