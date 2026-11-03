@@ -132,6 +132,7 @@ def generate_modal_script(
     runtime_manifest: Optional[Dict[str, Any]] = None,
     config_sha256: Optional[str] = None,
     artifacts_rel: Optional[str] = None,
+    base_config_path: Optional[str] = None,
 ) -> str:
     """Generate an isolated Modal job that returns identity-checked task artifacts."""
     import yaml
@@ -146,6 +147,15 @@ def generate_modal_script(
         config_file = root / config_file
     config_file = config_file.resolve()
     config_rel = config_file.relative_to(root).as_posix()
+    base_config_rel = None
+    if base_config_path:
+        base_file = Path(base_config_path).expanduser()
+        if not base_file.is_absolute():
+            base_file = root / base_file
+        base_file = base_file.resolve()
+        base_config_rel = base_file.relative_to(root).as_posix()
+        if not base_file.is_file():
+            raise FileNotFoundError(f"Base config does not exist: {base_file}")
     config_sha256 = config_sha256 or hashlib.sha256(config_file.read_bytes()).hexdigest()
     task_config_rel = project.task_config_path.relative_to(root).as_posix()
     artifacts_rel = artifacts_rel or project.artifacts_dir.relative_to(root).as_posix()
@@ -290,6 +300,9 @@ def run_training_remote(config_path: str, exp_id: str):
     os.environ["AI_HARNESS_REMOTE_KERNEL"] = "1"
     os.environ["PYTHONPATH"] = "/opt/ai-harness:" + os.environ.get("PYTHONPATH", "")
     cmd = ["python", "-u", "-m", "harness.runner", "--project-root", ".", "--task-config", {task_config_rel!r}, "--config", config_path]
+    _base_config = {base_config_rel!r}
+    if _base_config:
+        cmd += ["--base-config", _base_config]
     _remote_job_id = {job_id!r}
     if _remote_job_id:
         cmd += ["--job-id", _remote_job_id]

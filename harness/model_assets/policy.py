@@ -120,13 +120,18 @@ def evaluate_model_policy(
         or model_def.artifacts.bundle_digest
     )
     exact_count = model_def.parameter_facts.exact_param_count
+    count_basis = getattr(
+        model_def.parameter_facts.count_basis,
+        "value",
+        model_def.parameter_facts.count_basis,
+    )
     facts: Dict[str, Any] = {
         "model_id": model_def.model_id,
         "kind": kind,
         "source_reference_present": source_reference,
         "source_revision": source.revision.strip(),
         "exact_param_count": exact_count,
-        "count_basis": getattr(model_def.parameter_facts.count_basis, "value", model_def.parameter_facts.count_basis),
+        "count_basis": count_basis,
         "max_total_parameters": rules.max_total_parameters,
         "max_llm_parameters": rules.max_llm_parameters,
     }
@@ -166,10 +171,13 @@ def evaluate_model_policy(
     needs_total_count = rules.max_total_parameters is not None
     needs_llm_count = rules.max_llm_parameters is not None and _is_llm(model_def)
     if needs_total_count or needs_llm_count:
-        if exact_count is None or exact_count <= 0:
+        if exact_count is None or exact_count <= 0 or count_basis != "logical_total":
             return _assessment(
                 failure_code=MODEL_PARAMETER_COUNT_UNKNOWN,
-                reason="The exact logical parameter count is unknown; unknown is not zero.",
+                reason=(
+                    "The exact logical parameter count is unknown; unknown is not zero. "
+                    "Trainable or active counts cannot establish the logical total."
+                ),
                 facts=facts,
             )
         if needs_total_count and exact_count > rules.max_total_parameters:
@@ -249,6 +257,11 @@ def evaluate_composition_policy(
         {
             "model_id": model.model_id,
             "exact_param_count": model.parameter_facts.exact_param_count,
+            "count_basis": getattr(
+                model.parameter_facts.count_basis,
+                "value",
+                model.parameter_facts.count_basis,
+            ),
             "is_llm": _is_llm(model),
         }
         for model in models
@@ -258,10 +271,14 @@ def evaluate_composition_policy(
         for model in models
         if model.parameter_facts.exact_param_count is not None
         and model.parameter_facts.exact_param_count > 0
+        and getattr(model.parameter_facts.count_basis, "value", model.parameter_facts.count_basis)
+        == "logical_total"
     )
     unknown_total = any(
         model.parameter_facts.exact_param_count is None
         or model.parameter_facts.exact_param_count <= 0
+        or getattr(model.parameter_facts.count_basis, "value", model.parameter_facts.count_basis)
+        != "logical_total"
         for model in models
     )
     llm_models = [model for model in models if _is_llm(model)]
@@ -270,10 +287,14 @@ def evaluate_composition_policy(
         for model in llm_models
         if model.parameter_facts.exact_param_count is not None
         and model.parameter_facts.exact_param_count > 0
+        and getattr(model.parameter_facts.count_basis, "value", model.parameter_facts.count_basis)
+        == "logical_total"
     )
     unknown_llm_total = any(
         model.parameter_facts.exact_param_count is None
         or model.parameter_facts.exact_param_count <= 0
+        or getattr(model.parameter_facts.count_basis, "value", model.parameter_facts.count_basis)
+        != "logical_total"
         for model in llm_models
     )
     facts: Dict[str, Any] = {

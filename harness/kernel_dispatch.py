@@ -101,6 +101,57 @@ def build_kernel_metadata(
     return meta
 
 
+def _enforce_governed_kernel_model_admission(
+    *,
+    project_root: Optional[str | Path] = None,
+    task_config: Optional[str | Path] = None,
+    config_path: Optional[str | Path] = None,
+    base_config: Optional[str | Path] = None,
+    effective_config: Optional[Dict[str, Any]] = None,
+    model_plan: Any = None,
+    declared_model_assets: Any = None,
+) -> Any:
+    """Apply required task governance before native kernel side effects."""
+    from harness.project import HarnessProject
+    from harness.task_spec import load_active_task_spec
+
+    selected_root = project_root or os.environ.get("HARNESS_PROJECT_ROOT") or Path.cwd()
+    project = HarnessProject.discover(
+        selected_root, task_config or os.environ.get("HARNESS_TASK_CONFIG")
+    )
+    spec = load_active_task_spec(project.task_config_path)
+
+    from harness.model_assets.resolution import (
+        ModelAdmissionError,
+        enforce_model_admission,
+        prepare_or_validate_model_plan,
+        resolve_effective_config,
+    )
+    from harness.model_assets.store import ModelStore
+
+    if effective_config is None and config_path is not None:
+        effective_config = resolve_effective_config(
+            project,
+            config_path,
+            {"base_config": base_config} if base_config is not None else None,
+        )
+    if effective_config is None:
+        effective_config = (
+            {"model_assets": declared_model_assets}
+            if declared_model_assets is not None
+            else {}
+        )
+    resolved_plan = prepare_or_validate_model_plan(
+        spec, effective_config, ModelStore(), project=project
+    )
+    if model_plan is not None and model_plan.lock_digest != resolved_plan.lock_digest:
+        raise ModelAdmissionError(
+            "MODEL_PLAN_INVALID",
+            "Supplied model plan does not match the effective config and active task policy.",
+        )
+    return enforce_model_admission(resolved_plan)
+
+
 def dispatch_kernel(
     notebook_path: str,
     kernel_id: str,
@@ -119,6 +170,12 @@ def dispatch_kernel(
     watch: bool = False,
     poll_interval: float = 15.0,
     watch_timeout: float = 3600.0,
+    project_root: Optional[str | Path] = None,
+    task_config: Optional[str | Path] = None,
+    config_path: Optional[str | Path] = None,
+    base_config: Optional[str | Path] = None,
+    effective_config: Optional[Dict[str, Any]] = None,
+    model_plan: Any = None,
 ) -> Dict[str, Any]:
     """Wrap a local notebook into a Kaggle kernel and push it.
 
@@ -144,6 +201,14 @@ def dispatch_kernel(
         dict with ``ok``, ``ref``, ``url``, ``kernel_id``, ``version_number``,
         ``metadata`` and any ``invalid_*`` source warnings / ``error``.
     """
+    _enforce_governed_kernel_model_admission(
+        project_root=project_root,
+        task_config=task_config,
+        config_path=config_path,
+        base_config=base_config,
+        effective_config=effective_config,
+        model_plan=model_plan,
+    )
     nb = Path(notebook_path)
     if not nb.exists():
         raise FileNotFoundError(f"Notebook not found: {notebook_path}")
@@ -256,6 +321,10 @@ def push_kernel_directory(
     watch: bool = False,
     poll_interval: float = 15.0,
     watch_timeout: float = 3600.0,
+    project_root: Optional[str | Path] = None,
+    task_config: Optional[str | Path] = None,
+    config_path: Optional[str | Path] = None,
+    base_config: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
     """Push a directory containing kernel-metadata.json directly to Kaggle.
 
@@ -271,6 +340,14 @@ def push_kernel_directory(
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise ValueError(f"Invalid kernel-metadata.json in {p}: {exc}") from exc
+
+    _enforce_governed_kernel_model_admission(
+        project_root=project_root,
+        task_config=task_config,
+        config_path=config_path,
+        base_config=base_config,
+        declared_model_assets=meta.get("model_assets"),
+    )
 
     kernel_id = meta.get("id")
     if not kernel_id:
@@ -368,6 +445,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--watch", action="store_true", help="Poll until the dispatched kernel finishes execution.")
     parser.add_argument("--poll", type=float, default=15.0, help="Poll interval in seconds when --watch is used.")
     parser.add_argument("--watch-timeout", type=float, default=3600.0, help="Max wait time in seconds when --watch is used.")
+    parser.add_argument("--project-root", default=None, help="Attached task workspace for model governance.")
+    parser.add_argument("--task-config", default=None, help="Task YAML path inside the workspace.")
+    parser.add_argument("--config", default=None, help="Experiment config declaring governed model assets.")
+    parser.add_argument("--base-config", default=None, help="Base config inherited by --config.")
 
     args = parser.parse_args(argv)
     try:
@@ -377,6 +458,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 watch=args.watch,
                 poll_interval=args.poll,
                 watch_timeout=args.watch_timeout,
+                project_root=args.project_root,
+                task_config=args.task_config,
+                config_path=args.config,
+                base_config=args.base_config,
             )
         else:
             if not args.notebook or not args.kernel_id or not args.title:
@@ -398,6 +483,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             watch=args.watch,
             poll_interval=args.poll,
             watch_timeout=args.watch_timeout,
+            project_root=args.project_root,
+            task_config=args.task_config,
+            config_path=args.config,
+            base_config=args.base_config,
         )
     except Exception as exc:  # noqa: BLE001 - surface any dispatch failure as JSON.
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2, default=str))

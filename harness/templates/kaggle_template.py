@@ -478,6 +478,7 @@ class KaggleKernelManager:
         enable_internet: bool = False,
         bundle_mode: str = "dataset",
         requirement_check: str = "strict",
+        base_config_path: Optional[str] = None,
     ) -> Path:
         """Stage a script and code dataset; embedded mode retains the legacy single-file upload."""
         from harness.project import HarnessProject
@@ -495,6 +496,16 @@ class KaggleKernelManager:
             config_file = root / config_file
         config_file = config_file.resolve()
         config_rel = config_file.relative_to(root).as_posix()
+        base_config_rel = None
+        base_config_file = None
+        if base_config_path:
+            base_config_file = Path(base_config_path).expanduser()
+            if not base_config_file.is_absolute():
+                base_config_file = root / base_config_file
+            base_config_file = base_config_file.resolve()
+            base_config_rel = base_config_file.relative_to(root).as_posix()
+            if not base_config_file.is_file():
+                raise FileNotFoundError(f"Base config does not exist: {base_config_file}")
         config_sha256 = (
             __import__("hashlib").sha256(config_file.read_bytes()).hexdigest()
         )
@@ -570,6 +581,8 @@ class KaggleKernelManager:
                 bundle_cache_key = (
                     config_file.read_bytes(),
                     project.task_config_path.read_bytes(),
+                    base_config_rel,
+                    base_config_file.read_bytes() if base_config_file is not None else b"",
                     tree_digest.hexdigest(),
                     bundle_mode,
                     requirement_check,
@@ -650,6 +663,11 @@ class KaggleKernelManager:
                 if not config_dest.exists():
                     config_dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(config_file, config_dest)
+                if base_config_file is not None:
+                    base_config_dest = bundle_base / base_config_rel
+                    if not base_config_dest.exists():
+                        base_config_dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(base_config_file, base_config_dest)
                 task_config = project.task_config_path
                 if not task_config.is_relative_to(root):
                     raise ValueError("Task config must be inside the task workspace.")
@@ -793,6 +811,9 @@ with tempfile.TemporaryDirectory(prefix="aih-kaggle-work-") as temporary:
         os.environ["AI_HARNESS_REMOTE_KERNEL"] = "1"
         cmd = [sys.executable, "-u", "-m", "harness.runner", "--project-root", ".",
                "--task-config", {task_config_rel!r}, "--config", {config_rel!r}]
+        _base_config = {base_config_rel!r}
+        if _base_config:
+            cmd += ["--base-config", _base_config]
         _remote_job_id = {job_id!r}
         if _remote_job_id:
             cmd += ["--job-id", _remote_job_id]

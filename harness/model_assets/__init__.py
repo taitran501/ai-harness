@@ -11,6 +11,8 @@ from harness.model_assets.types import (
     MODEL_LICENSE_UNRESOLVED,
     MODEL_PARAMETER_COUNT_UNKNOWN,
     MODEL_PARAMETER_LIMIT_EXCEEDED,
+    MODEL_PLAN_INVALID,
+    MODEL_GOVERNANCE_MODE_REQUIRED,
     MODEL_PRETRAINED_PROHIBITED,
     MODEL_REFERENCE_MISSING,
     MODEL_RELEASE_CUTOFF_VIOLATION,
@@ -37,6 +39,8 @@ __all__ = [
     "MODEL_LICENSE_UNRESOLVED",
     "MODEL_PARAMETER_COUNT_UNKNOWN",
     "MODEL_PARAMETER_LIMIT_EXCEEDED",
+    "MODEL_PLAN_INVALID",
+    "MODEL_GOVERNANCE_MODE_REQUIRED",
     "MODEL_PRETRAINED_PROHIBITED",
     "MODEL_REFERENCE_MISSING",
     "MODEL_RELEASE_CUTOFF_VIOLATION",
@@ -53,4 +57,22 @@ __all__ = [
     "evaluate_composition_policy",
     "evaluate_model_policy",
     "normalize_competition_rules",
+]
+
+from harness.model_assets.resolution import (
+    ModelAdmissionError,
+    ModelPlan,
+    enforce_model_admission,
+    prepare_model_plan,
+    prepare_or_validate_model_plan,
+    resolve_effective_config,
+)
+
+__all__ += [
+    "ModelAdmissionError",
+    "ModelPlan",
+    "enforce_model_admission",
+    "prepare_model_plan",
+    "prepare_or_validate_model_plan",
+    "resolve_effective_config",
 ]

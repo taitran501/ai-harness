@@ -36,6 +36,12 @@ from harness.cloud_policy import (
 )
 from harness.data_bundle import declared_data_roots
 from harness.job_state import update_worker_state
+from harness.model_assets.resolution import (
+    enforce_model_admission,
+    prepare_or_validate_model_plan,
+    resolve_effective_config,
+)
+from harness.model_assets.store import ModelStore
 from harness.project import HarnessProject
 from harness.remote_runtime import resolve_remote_runtime
 from harness.templates.kaggle_template import KaggleKernelManager
@@ -102,7 +108,15 @@ def _warn_if_framework_checkout_dirty() -> None:
         )
 
 
-def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[str | Path] = None) -> Dict[str, Any]:
+def _prepare_remote_run(
+    config_path: str,
+    backend: str,
+    project_root: Optional[str | Path] = None,
+    *,
+    effective_config: Optional[Dict[str, Any]] = None,
+    model_plan: Any = None,
+    base_config: Optional[str | Path] = None,
+) -> Dict[str, Any]:
     if os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1":
         raise RuntimeError(
             "Refusing to prepare a remote dispatch: this process is already "
@@ -110,7 +124,6 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
             "Run the experiment locally with the runner CLI instead."
         )
     project = HarnessProject.discover(project_root)
-    _warn_if_framework_checkout_dirty()
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     config = Path(config_path).expanduser()
@@ -121,7 +134,51 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
         config.relative_to(project.root)
     except ValueError as exc:
         raise ValueError("Experiment config must be inside the attached task workspace.") from exc
-    passed, errors, cfg = CloudPreflightInspector.run_full_preflight_check(config, project_root=project.root, full_data_check=False)
+
+    if effective_config is None:
+        effective_config = resolve_effective_config(
+            project,
+            config,
+            {"base_config": base_config} if base_config is not None else None,
+        )
+    elif not isinstance(effective_config, dict):
+        raise ValueError("Effective experiment config must be a mapping")
+    from harness.task_spec import load_active_task_spec
+
+    task_spec = load_active_task_spec(project.task_config_path)
+    resolved_plan = prepare_or_validate_model_plan(
+        task_spec, effective_config, ModelStore(), project=project
+    )
+    if model_plan is not None and model_plan.lock_digest != resolved_plan.lock_digest:
+        from harness.model_assets.resolution import ModelAdmissionError
+
+        raise ModelAdmissionError(
+            "MODEL_PLAN_INVALID",
+            "Supplied model plan does not match the effective config and active task policy.",
+        )
+    model_plan = resolved_plan
+    enforce_model_admission(model_plan)
+
+    base_config_rel = None
+    if base_config is not None:
+        base_path = Path(base_config).expanduser()
+        if not base_path.is_absolute():
+            base_path = project.root / base_path
+        base_path = base_path.resolve()
+        try:
+            base_config_rel = base_path.relative_to(project.root).as_posix()
+        except ValueError as exc:
+            raise ValueError("Cloud base config must be inside the attached task workspace.") from exc
+        if not base_path.is_file():
+            raise FileNotFoundError(f"Base config does not exist: {base_path}")
+
+    _warn_if_framework_checkout_dirty()
+    passed, errors, cfg = CloudPreflightInspector.run_full_preflight_check(
+        config,
+        project_root=project.root,
+        full_data_check=False,
+        effective_config=effective_config,
+    )
     if not passed:
         raise ValueError("Preflight failed: " + "; ".join(errors))
     from harness.citation_audit import enforce_citation_admission
@@ -175,6 +232,11 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
         "data_config": data_config,
         "runtime": runtime,
         "config_sha256": config_sha256,
+        "effective_config_sha256": hashlib.sha256(
+            json.dumps(cfg, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest(),
+        "base_config_rel": base_config_rel,
+        "model_plan": model_plan,
         "task_id": project.manifest.get("task_id") or project.plugin_id or "task",
         "job_id": None,
         "fingerprint": fingerprint,
@@ -238,13 +300,21 @@ def run_via_modal(
     job_id: Optional[str] = None,
     keep_staging: bool = False,
     detach: bool = False,
+    effective_config: Optional[Dict[str, Any]] = None,
+    base_config: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
     """Upload consented task data, dispatch Modal, verify returned artifact identity, and sync the journal."""
     print("===========================================================")
     print(f"🚀 MODAL.COM CLOUD DISPATCH: {config_path}")
     print("===========================================================")
 
-    context = _prepare_remote_run(config_path, "modal", project_root)
+    context = _prepare_remote_run(
+        config_path,
+        "modal",
+        project_root,
+        effective_config=effective_config,
+        base_config=base_config,
+    )
     project = context["project"]
     exp_id = context["exp_id"]
     managed_job_id = job_id
@@ -286,6 +356,7 @@ def run_via_modal(
             task_id=context["task_id"], job_id=job_id,
             runtime_manifest=context["runtime"], config_sha256=context["config_sha256"],
             artifacts_rel=project.artifacts_dir.relative_to(project.root).as_posix(),
+            base_config_path=context.get("base_config_rel"),
         )
         modal_script_path.write_text(code_content, encoding="utf-8")
 
@@ -390,6 +461,9 @@ def _kaggle_dry_run_plan(
         "dataset_slug": dataset_slug,
         "config_rel": context.get("config_rel"),
         "config_sha256": context.get("config_sha256"),
+        "effective_config_sha256": context.get("effective_config_sha256"),
+        "model_lock_digest": getattr(context.get("model_plan"), "lock_digest", None),
+        "model_policy_status": getattr(context.get("model_plan"), "status", None),
         "runtime": runtime,
         "enable_internet": bool((context.get("task", {}).get("runtime") or {}).get("enable_internet", False)),
         "requirement_check": (context.get("task", {}).get("runtime") or {}).get("requirement_check", "strict"),
@@ -417,6 +491,8 @@ def run_via_kaggle(
     timeout_seconds: float = 24 * 60 * 60,
     force_import: bool = False,
     dry_run: bool = False,
+    effective_config: Optional[Dict[str, Any]] = None,
+    base_config: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
     """Push, poll through a terminal Kaggle state, pull identity-checked artifacts, and sync the journal.
 
@@ -428,7 +504,13 @@ def run_via_kaggle(
     print(f"🚀 KAGGLE KERNELS API DISPATCH: {config_path}")
     print("===========================================================")
 
-    context = _prepare_remote_run(config_path, "kaggle", project_root)
+    context = _prepare_remote_run(
+        config_path,
+        "kaggle",
+        project_root,
+        effective_config=effective_config,
+        base_config=base_config,
+    )
     project = context["project"]
     exp_id = context["exp_id"]
     if not dry_run:
@@ -438,13 +520,14 @@ def run_via_kaggle(
     KaggleKernelManager.ensure_cli_ready()
     managed_job_id = job_id
     job_id = job_id or f"kaggle_{exp_id}_{uuid.uuid4().hex[:10]}"
-    if managed_job_id:
+    if managed_job_id and not dry_run:
         update_worker_state(
             project.root, managed_job_id, status="RUNNING", provider_status="PREPARING",
             exp_id=exp_id, config_sha256=context["config_sha256"],
         )
 
-    # Upload task data only after the task/provider/fingerprint consent check.
+    # Determine the dataset source before staging. Dry-run may resolve a slug,
+    # but must return before uploading any dataset or dispatching any kernel.
     dataset_slug = context["external_kaggle_dataset"]
     if dataset_slug and str(dataset_slug).lower() == "none":
         dataset_slug = None
@@ -458,14 +541,15 @@ def run_via_kaggle(
             raise RuntimeError("Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry.")
         data_cfg = context["data_config"]
         license_name = data_cfg.get("license") or data_cfg.get("dataset_license")
-        uploaded = KaggleKernelManager.push_dataset_to_kaggle(
-            dataset_slug=dataset_slug,
-            license_name=license_name,
-            project_root=project.root,
-        )
-        if not uploaded.get("success"):
-            raise RuntimeError(f"Kaggle private dataset upload failed: {uploaded.get('error') or uploaded.get('logs')}")
-        KaggleKernelManager.wait_for_dataset(dataset_slug)
+        if not dry_run:
+            uploaded = KaggleKernelManager.push_dataset_to_kaggle(
+                dataset_slug=dataset_slug,
+                license_name=license_name,
+                project_root=project.root,
+            )
+            if not uploaded.get("success"):
+                raise RuntimeError(f"Kaggle private dataset upload failed: {uploaded.get('error') or uploaded.get('logs')}")
+            KaggleKernelManager.wait_for_dataset(dataset_slug)
 
     # 2. Package exact core/adapter runtime and task code without credentials or dataset bytes.
     stage_dir = Path(tempfile.mkdtemp(prefix="aih-kaggle-job_"))
@@ -480,6 +564,7 @@ def run_via_kaggle(
             enable_internet=bool((context["task"].get("runtime") or {}).get("enable_internet", False)),
             bundle_mode=(context["task"].get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
             requirement_check=(context["task"].get("runtime") or {}).get("requirement_check", "strict"),
+            base_config_path=context.get("base_config_rel"),
         )
 
         print("Preparing private Kaggle code bundle input...")
@@ -569,6 +654,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="AI-Harness Cloud GPU Dispatcher")
     parser.add_argument("--backend", choices=["modal", "kaggle"], default="modal")
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
+    parser.add_argument("--base-config", default=None, help="Optional base config inherited by the experiment")
     parser.add_argument("--project-root", default=None, help="Attached task workspace")
     parser.add_argument("--task-config", default=None, help="Task YAML path inside the workspace")
     parser.add_argument("--job-id", default=None, help="Stable local/cloud job identity")
@@ -600,12 +686,20 @@ def main() -> None:
                 args.job_id = f"job_{args.job_id}"
             update_worker_state(project.root, args.job_id, status="RUNNING", provider_status="STARTING")
         if args.backend == "modal":
-            run_via_modal(args.config, gpu=args.gpu, project_root=project.root, job_id=args.job_id, keep_staging=args.keep_staging, detach=args.detach)
+            run_via_modal(
+                args.config,
+                gpu=args.gpu,
+                project_root=project.root,
+                job_id=args.job_id,
+                keep_staging=args.keep_staging,
+                detach=args.detach,
+                base_config=args.base_config,
+            )
         else:
             run_via_kaggle(
                 args.config, project_root=project.root, job_id=args.job_id,
                 poll_interval=args.poll_interval, timeout_seconds=args.timeout_seconds,
-                keep_staging=args.keep_staging,
+                keep_staging=args.keep_staging, base_config=args.base_config,
             )
     except Exception as exc:
         if args.job_id:
