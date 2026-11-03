@@ -41,6 +41,7 @@ from harness.model_assets.resolution import (
     prepare_or_validate_model_plan,
     resolve_effective_config,
 )
+from harness.model_assets.resolver import ModelResolver
 from harness.model_assets.store import ModelStore
 from harness.project import HarnessProject
 from harness.remote_runtime import resolve_remote_runtime
@@ -212,6 +213,23 @@ def _prepare_remote_run(
     task_doc = __import__("yaml").safe_load(project.task_config_path.read_text(encoding="utf-8")) or {}
     task = task_doc.get("task", task_doc)
     data_config = task.get("data_config") or task.get("data") or {}
+    task_runtime = task.get("runtime") or {}
+    resource_scope = {
+        "root": project.root,
+        "task": task,
+        "runtime": task_runtime,
+        "offline": not bool(task_runtime.get("enable_internet", False)),
+        "model_locations": cfg.get("model_locations") or task.get("model_locations") or {},
+        "model_asset_paths": cfg.get("model_asset_paths") or task.get("model_asset_paths") or {},
+        "model_manifests": cfg.get("model_manifests") or task.get("model_manifests") or {},
+        "model_sources": cfg.get("model_sources") or task.get("model_sources") or [],
+        "model_volume_name": cfg.get("model_volume_name") or task.get("model_volume_name"),
+        "hf_cache_dir": cfg.get("hf_cache_dir") or task.get("hf_cache_dir"),
+        "hf_hub_cache_dir": cfg.get("hf_hub_cache_dir") or task.get("hf_hub_cache_dir"),
+    }
+    model_resource_plan = ModelResolver().plan_backend_resources(
+        model_plan, backend, resource_scope
+    )
     fingerprint = dataset_fingerprint(project)
     consent_store = UploadConsentStore(project)
     external_kaggle_dataset = data_config.get("kaggle_dataset_slug") if backend == "kaggle" else None
@@ -237,6 +255,7 @@ def _prepare_remote_run(
         ).hexdigest(),
         "base_config_rel": base_config_rel,
         "model_plan": model_plan,
+        "model_resource_plan": model_resource_plan,
         "task_id": project.manifest.get("task_id") or project.plugin_id or "task",
         "job_id": None,
         "fingerprint": fingerprint,
@@ -357,6 +376,12 @@ def run_via_modal(
             runtime_manifest=context["runtime"], config_sha256=context["config_sha256"],
             artifacts_rel=project.artifacts_dir.relative_to(project.root).as_posix(),
             base_config_path=context.get("base_config_rel"),
+            model_resource_plan=(
+                context["model_resource_plan"].to_dict()
+                if context.get("model_resource_plan")
+                and context["model_resource_plan"].required_sources
+                else None
+            ),
         )
         modal_script_path.write_text(code_content, encoding="utf-8")
 
@@ -464,6 +489,11 @@ def _kaggle_dry_run_plan(
         "effective_config_sha256": context.get("effective_config_sha256"),
         "model_lock_digest": getattr(context.get("model_plan"), "lock_digest", None),
         "model_policy_status": getattr(context.get("model_plan"), "status", None),
+        "model_resource_plan": (
+            context["model_resource_plan"].to_dict()
+            if context.get("model_resource_plan") is not None
+            else None
+        ),
         "runtime": runtime,
         "enable_internet": bool((context.get("task", {}).get("runtime") or {}).get("enable_internet", False)),
         "requirement_check": (context.get("task", {}).get("runtime") or {}).get("requirement_check", "strict"),
@@ -557,6 +587,16 @@ def run_via_kaggle(
         (stage_dir / STAGING_MARKER).write_text(str(os.getpid()), encoding="ascii")
         runtime = dict(context["runtime"])
         runtime["core"]["version"] = runtime["core"].get("version", "0.2.0")
+        model_resource_plan = context.get("model_resource_plan")
+        if model_resource_plan and model_resource_plan.required_sources:
+            runtime["model_resource_plan"] = model_resource_plan.to_dict()
+        else:
+            runtime.pop("model_resource_plan", None)
+        model_sources = [
+            item["dataset_slug"]
+            for item in (model_resource_plan.required_sources if model_resource_plan else [])
+            if item.get("dataset_slug")
+        ]
         KaggleKernelManager.setup_kernel_package(
             stage_dir, context["config_rel"], exp_id, dataset_slug,
             project_root=project.root, task_config_path=project.task_config_path,
@@ -565,6 +605,7 @@ def run_via_kaggle(
             bundle_mode=(context["task"].get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
             requirement_check=(context["task"].get("runtime") or {}).get("requirement_check", "strict"),
             base_config_path=context.get("base_config_rel"),
+            model_sources=model_sources,
         )
 
         print("Preparing private Kaggle code bundle input...")

@@ -133,6 +133,8 @@ def generate_modal_script(
     config_sha256: Optional[str] = None,
     artifacts_rel: Optional[str] = None,
     base_config_path: Optional[str] = None,
+    model_resource_plan: Optional[Any] = None,
+    model_volume_name: Optional[str] = None,
 ) -> str:
     """Generate an isolated Modal job that returns identity-checked task artifacts."""
     import yaml
@@ -173,6 +175,28 @@ def generate_modal_script(
         volume_name = private_upload_resource_names(project)["modal_volume_name"]
     app_name = f"aih-{t_slug}-{exp_id}-{(job_id or 'job').replace('_', '-')}"
     cache_name = f"aih-{t_slug}-hf-cache"
+    if model_resource_plan is None:
+        model_resource_plan_data = {}
+    elif isinstance(model_resource_plan, dict):
+        model_resource_plan_data = dict(model_resource_plan)
+    else:
+        to_dict = getattr(model_resource_plan, "to_dict", None)
+        if not callable(to_dict):
+            raise ValueError("model_resource_plan must be a mapping or a backend resource plan")
+        model_resource_plan_data = to_dict()
+    model_resources = model_resource_plan_data.get("required_sources") or []
+    declared_model_volumes = {
+        str(item.get("volume_name"))
+        for item in model_resources
+        if isinstance(item, dict) and item.get("volume_name")
+    }
+    if model_volume_name:
+        declared_model_volumes.add(str(model_volume_name))
+    if len(declared_model_volumes) > 1:
+        raise ValueError("A Modal job can mount one model volume per resource plan")
+    selected_model_volume = next(iter(declared_model_volumes), None)
+    if model_resources and not selected_model_volume:
+        selected_model_volume = f"aih-{t_slug}-models"
     runtime_requirements = [
         "numpy>=1.24.0",
         "pandas>=2.0.0",
@@ -218,6 +242,7 @@ import subprocess
 from pathlib import Path
 
 app = modal.App({app_name!r})
+MODEL_RESOURCE_PLAN = {model_resource_plan_data!r}
 
 # 1. Container Image definition (optimized with uv for rapid package resolution and caching)
 image = (
@@ -234,6 +259,8 @@ def _ignore_workspace_path(path):
     normalized = relative.as_posix().lstrip("./")
     blocked_parts = {{".git", ".env", ".kaggle", ".modal", "__pycache__", "venv", ".venv", "node_modules", "artifacts", "dashboard", "tmp"}}
     if any(part.casefold() in blocked_parts for part in relative.parts):
+        return True
+    if len(relative.parts) >= 2 and relative.parts[0].casefold() == ".ai-harness" and relative.parts[1].casefold() == "models":
         return True
     return any(
         normalized == root or normalized.startswith(root.rstrip("/") + "/")
@@ -252,16 +279,24 @@ if {plugin_wheel_local!r}:
 # 2. Persistent Volumes for HuggingFace cache and Dataset
 hf_cache = modal.Volume.from_name({cache_name!r}, create_if_missing=True)
 data_volume = modal.Volume.from_name({volume_name!r}, create_if_missing=True)
+model_volume = (
+    modal.Volume.from_name({selected_model_volume!r}, create_if_missing=False)
+    if {bool(model_resources)!r}
+    else None
+)
+volume_mounts = {{
+    "/root/.cache/huggingface": hf_cache,
+    "/mnt/cloud_data": data_volume,
+}}
+if model_volume is not None:
+    volume_mounts["/vol/models"] = model_volume
 
 @app.function(
     image=image,
     gpu={gpu!r},
     timeout=14400,
     block_network={not enable_internet!r},
-    volumes={{
-        "/root/.cache/huggingface": hf_cache,
-        "/mnt/cloud_data": data_volume,
-    }},
+    volumes=volume_mounts,
 )
 def run_training_remote(config_path: str, exp_id: str):
     import os
@@ -269,6 +304,15 @@ def run_training_remote(config_path: str, exp_id: str):
     import shutil
     sys.path.insert(0, "/opt/ai-harness")
     os.chdir("/root/workspace")
+
+    if MODEL_RESOURCE_PLAN:
+        from harness.model_assets.resolver import BackendResourcePlan, ModelResolver
+        resource_plan = BackendResourcePlan.from_dict(MODEL_RESOURCE_PLAN)
+        if resource_plan.backend != "modal":
+            raise RuntimeError("The dispatched model resource plan is not for Modal.")
+        resolver = ModelResolver()
+        if not resolver.verify_runtime_resources(resource_plan):
+            raise RuntimeError("Modal model resources failed verification: " + "; ".join(resolver.verification_errors))
 
     # Symlink/copy dataset and splits from Modal Volume if not mounted directly
     task_data_root = Path("/mnt/cloud_data/task-data")
@@ -339,6 +383,11 @@ def run_training_remote(config_path: str, exp_id: str):
         "run.log",
         "EXPERIMENT_CARD.md",
         "run_config.yaml",
+        "model_lock.json",
+        "model_policy_receipt.json",
+        "loaded_models.json",
+        "model_outputs.json",
+        "model_lineage.json",
     ]
 
     metrics_path = exp_dir / "metrics.json"

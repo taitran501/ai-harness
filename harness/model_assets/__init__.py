@@ -76,3 +76,7 @@ __all__ += [
     "prepare_or_validate_model_plan",
     "resolve_effective_config",
 ]
+
+from harness.model_assets.resolver import BackendResourcePlan, ModelResolver
+
+__all__ += ["BackendResourcePlan", "ModelResolver"]

@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-11-03 | Backend model resource plans, offline integrity verification, and Kaggle/Modal governance preservation (Phase 3) | Working tree | [native-model-assets-phase3](native-model-assets-phase3.md) |
 | 2026-11-03 | Shared model execution plan, pre-run admission across local/cloud/kernel paths, logical-total accounting, and Kaggle dry-run safety (Phase 2) | Working tree | [native-model-assets-phase2](native-model-assets-phase2.md) |
 | 2026-11-03 | Native model asset types, bounded content-addressed store, and competition policy evaluation (Phase 1) | Working tree | [native-model-assets-phase1](native-model-assets-phase1.md) |
 | 2026-11-02 | Strengthen managed AGENTS.md directives and mirror rules for coding agents | Working tree | [managed-agents-md-directives-and-rules-mirror](managed-agents-md-directives-and-rules-mirror.md) |

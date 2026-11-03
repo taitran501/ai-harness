@@ -29,6 +29,46 @@ from typing import Any, Callable, Dict, List, Optional
 # a callable so repeated identical bundle builds (copy+zip of the source tree,
 # ~1s each) are computed once per process. See tests/test_kaggle_runtime.py.
 _BUNDLE_BYTES_CACHE: Optional[Dict[tuple, bytes]] = None
+_MODEL_WEIGHT_SUFFIXES = {
+    ".bin",
+    ".ckpt",
+    ".gguf",
+    ".h5",
+    ".keras",
+    ".model",
+    ".msgpack",
+    ".npy",
+    ".npz",
+    ".onnx",
+    ".pb",
+    ".pkl",
+    ".pickle",
+    ".pt",
+    ".pth",
+    ".safetensors",
+    ".tflite",
+    ".weights",
+}
+_MODEL_WEIGHT_DIRS = {"checkpoints", "hf_cache", "model_cache", "model_weights", "weights"}
+
+
+def _is_model_asset_path(path: Path) -> bool:
+    return path.suffix.casefold() in _MODEL_WEIGHT_SUFFIXES or any(
+        part.casefold() in _MODEL_WEIGHT_DIRS for part in path.parts[:-1]
+    )
+
+
+def _ignore_model_assets(directory, names):
+    """Keep model binaries out of the Kaggle code ZIP; mount them as Datasets."""
+    parent = Path(directory)
+    ignored = []
+    for name in names:
+        path = parent / name
+        if path.is_dir() and name.casefold() in _MODEL_WEIGHT_DIRS:
+            ignored.append(name)
+        elif path.is_file() and _is_model_asset_path(path):
+            ignored.append(name)
+    return ignored
 
 
 def _is_critical_identity_mismatch(key: str, mismatch: Dict[str, Any]) -> bool:
@@ -437,6 +477,7 @@ class KaggleKernelManager:
         enable_internet: bool = True,
         dataset_sources: Optional[List[str]] = None,
         competition_sources: Optional[List[str]] = None,
+        model_sources: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Generate kernel-metadata.json configuration dictionary."""
         username = cls.get_authenticated_username()
@@ -445,7 +486,15 @@ class KaggleKernelManager:
             owner, kernel_slug = kernel_slug.split("/", 1)
         kernel_slug = cls._bounded_slug(kernel_slug)
         full_kernel_id = f"{owner}/{kernel_slug}"
-        clean_datasets = [s for s in (dataset_sources or []) if s and s.lower() != "none"]
+        clean_datasets = []
+        dataset_values = [dataset_sources] if isinstance(dataset_sources, str) else (dataset_sources or [])
+        model_values = [model_sources] if isinstance(model_sources, str) else (model_sources or [])
+        for source in [*dataset_values, *model_values]:
+            if not isinstance(source, str):
+                continue
+            source = source.strip()
+            if source and source.lower() != "none" and source not in clean_datasets:
+                clean_datasets.append(source)
         return {
             "id": full_kernel_id,
             "title": full_kernel_id.split("/")[-1].replace("-", " ").title(),
@@ -479,6 +528,7 @@ class KaggleKernelManager:
         bundle_mode: str = "dataset",
         requirement_check: str = "strict",
         base_config_path: Optional[str] = None,
+        model_sources: Optional[List[str]] = None,
     ) -> Path:
         """Stage a script and code dataset; embedded mode retains the legacy single-file upload."""
         from harness.project import HarnessProject
@@ -575,7 +625,7 @@ class KaggleKernelManager:
                     tree_dir = root / tree
                     if tree_dir.is_dir():
                         for p in sorted(tree_dir.rglob("*")):
-                            if p.is_file():
+                            if p.is_file() and not _is_model_asset_path(p.relative_to(tree_dir)):
                                 tree_digest.update(p.name.encode("utf-8"))
                                 tree_digest.update(p.read_bytes())
                 bundle_cache_key = (
@@ -623,7 +673,12 @@ class KaggleKernelManager:
                 for rel in ("src", "configs"):
                     source = root / rel
                     if source.is_dir():
-                        shutil.copytree(source, bundle_base / rel, dirs_exist_ok=True)
+                        shutil.copytree(
+                            source,
+                            bundle_base / rel,
+                            dirs_exist_ok=True,
+                            ignore=_ignore_model_assets,
+                        )
                 capsule_source = root / ".ai-harness/research_execution" / (exp_id + ".json")
                 if capsule_source.is_file():
                     capsule_dest = bundle_base / ".ai-harness/research_execution" / capsule_source.name
@@ -761,6 +816,7 @@ if hashlib.sha256(bundle_bytes).hexdigest() != {bundle_sha256!r}:
             kernel_slug=slug, code_file="run_kaggle.py", dataset_sources=sources,
             competition_sources=competition_sources,
             enable_internet=enable_internet,
+            model_sources=model_sources,
         )
         (stage / "kernel-metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
@@ -801,6 +857,15 @@ with tempfile.TemporaryDirectory(prefix="aih-kaggle-work-") as temporary:
         helpers = runpy.run_path(str(workspace / "harness" / "kaggle_runtime.py"))
         runtime_path = Path("ai-harness-runtime.json")
         runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+        model_resource_plan = runtime.get("model_resource_plan")
+        if model_resource_plan:
+            from harness.model_assets.resolver import BackendResourcePlan, ModelResolver
+            resource_plan = BackendResourcePlan.from_dict(model_resource_plan)
+            if resource_plan.backend != "kaggle":
+                raise RuntimeError("The dispatched model resource plan is not for Kaggle.")
+            resolver = ModelResolver()
+            if not resolver.verify_runtime_resources(resource_plan):
+                raise RuntimeError("Kaggle model resources failed verification: " + "; ".join(resolver.verification_errors))
         helpers["ensure_dependencies"](runtime, enable_internet={enable_internet!r}, requirement_check={requirement_check!r})
         if {bool(resolved_dataset)!r}:
             input_root = helpers["find_dataset_mount"](Path("/kaggle/input"), {resolved_dataset!r})
