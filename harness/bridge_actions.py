@@ -1113,7 +1113,18 @@ class ActionHandlerMixin:
                 ),
             },
             "data": {
-                "folds": params.get("folds", [0, 1, 2, 3, 4]),
+                "folds": params.get(
+                    "folds",
+                    list(range(self.task_spec.validation.get("num_folds")))
+                    if isinstance(getattr(self.task_spec, "validation", None), dict)
+                    and isinstance(self.task_spec.validation.get("num_folds"), int)
+                    and self.task_spec.validation.get("num_folds") > 0
+                    else list(range(getattr(self.task_spec.validation, "num_folds")))
+                    if hasattr(getattr(self.task_spec, "validation", None), "num_folds")
+                    and isinstance(getattr(self.task_spec.validation, "num_folds"), int)
+                    and getattr(self.task_spec.validation, "num_folds") > 0
+                    else [0, 1, 2, 3, 4]
+                ),
                 "input_variants": input_variants,
                 "selection_variant": params.get("selection_variant", input_variants[0]),
             },

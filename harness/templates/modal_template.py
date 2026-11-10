@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -23,13 +24,14 @@ def push_dataset_to_modal(
     volume_name: Optional[str] = None,
     *,
     project_root: Optional[Path | str] = None,
+    environment_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create an isolated task Modal Volume and upload only declared task data and splits."""
     from harness.data_bundle import stage_declared_data
     from harness.project import HarnessProject
 
     root = Path(project_root or Path.cwd()).expanduser().resolve()
-    project = HarnessProject.discover(root)
+    project = HarnessProject.discover(root, os.environ.get('HARNESS_TASK_CONFIG'))
     from harness.cloud_policy import (
         UploadConsentStore,
         dataset_fingerprint,
@@ -54,6 +56,7 @@ def push_dataset_to_modal(
     volume_name = generated_volume_name
 
     logs = []
+    provider_env = {**os.environ, "MODAL_ENVIRONMENT": environment_name} if environment_name else None
     try:
         # Check if the volume already has task-data/aih-data-bundle.json
         check_proc = subprocess.run(
@@ -61,6 +64,7 @@ def push_dataset_to_modal(
             capture_output=True,
             text=True,
             timeout=30,
+            env=provider_env,
         )
         if check_proc.returncode == 0 and "aih-data-bundle.json" in (check_proc.stdout or ""):
             print(f"✔ Task data matching fingerprint already exists in Modal volume '{volume_name}', skipping upload.", flush=True)
@@ -82,6 +86,7 @@ def push_dataset_to_modal(
                 capture_output=True,
                 text=True,
                 timeout=30,
+                env=provider_env,
             )
             create_output = (create_proc.stdout or "") + "\n" + (create_proc.stderr or "")
             logs.append(f"$ modal volume create {volume_name}")
@@ -96,6 +101,7 @@ def push_dataset_to_modal(
                 capture_output=True,
                 text=True,
                 timeout=600,
+                env=provider_env,
             )
             logs.append(f"$ modal volume put {volume_name} <task-data> /task-data --force")
             if put_data.returncode != 0:
@@ -119,6 +125,11 @@ def push_dataset_to_modal(
         }
 
 
+def modal_app_name(task_id, exp_id, job_id):
+    slug = ''.join(c if c.isalnum() else '_' for c in str(task_id).lower()).strip('_') or 'task'
+    return f"aih-{slug}-{exp_id}-{(job_id or 'job').replace('_', '-')}"
+
+
 def generate_modal_script(
     config_path: str,
     gpu: str = "A10G",
@@ -135,6 +146,8 @@ def generate_modal_script(
     base_config_path: Optional[str] = None,
     model_resource_plan: Optional[Any] = None,
     model_volume_name: Optional[str] = None,
+    owned_job_volume: bool = False,
+    probe_selection: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generate an isolated Modal job that returns identity-checked task artifacts."""
     import yaml
@@ -161,6 +174,14 @@ def generate_modal_script(
     config_sha256 = config_sha256 or hashlib.sha256(config_file.read_bytes()).hexdigest()
     task_config_rel = project.task_config_path.relative_to(root).as_posix()
     artifacts_rel = artifacts_rel or project.artifacts_dir.relative_to(root).as_posix()
+    probe_cli = []
+    run_relative = exp_id
+    if probe_selection is not None:
+        from harness.cloud_probe import probe_arguments, probe_relative_path
+        if not job_id:
+            raise ValueError('Remote probe requires a stable run/job identity')
+        probe_cli = probe_arguments(probe_selection)
+        run_relative = probe_relative_path(exp_id, job_id).as_posix()
     task_id = task_id or project.manifest.get("task_id") or project.plugin_id or "task"
     runtime_manifest = runtime_manifest or {
         "core": {"distribution": "ai-harness", "version": "0.2.0"},
@@ -169,11 +190,14 @@ def generate_modal_script(
     }
     task_doc = yaml.safe_load(project.task_config_path.read_text(encoding="utf-8")) or {}
     task = task_doc.get("task", task_doc)
+    timeout_seconds = (task.get('runtime') or {}).get('modal_timeout_seconds', 14400)
+    if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 14400:
+        raise ValueError('Modal timeout must be an integer between1and14400seconds')
     t_slug = "".join(c if c.isalnum() else "_" for c in str(task_id).lower()).strip("_") or "task"
     if volume_name is None:
         from harness.cloud_policy import private_upload_resource_names
         volume_name = private_upload_resource_names(project)["modal_volume_name"]
-    app_name = f"aih-{t_slug}-{exp_id}-{(job_id or 'job').replace('_', '-')}"
+    app_name = modal_app_name(task_id, exp_id, job_id)
     cache_name = f"aih-{t_slug}-hf-cache"
     if model_resource_plan is None:
         model_resource_plan_data = {}
@@ -195,6 +219,9 @@ def generate_modal_script(
     if len(declared_model_volumes) > 1:
         raise ValueError("A Modal job can mount one model volume per resource plan")
     selected_model_volume = next(iter(declared_model_volumes), None)
+    if owned_job_volume and (not model_resources or selected_model_volume != volume_name):
+        raise ValueError('Owned job volume must match the selected model volume')
+    data_mount_path = '/vol/models' if owned_job_volume else '/mnt/cloud_data'
     if model_resources and not selected_model_volume:
         selected_model_volume = f"aih-{t_slug}-models"
     runtime_requirements = [
@@ -232,6 +259,23 @@ def generate_modal_script(
     data_roots = declared_data_roots(project)
     task_data_paths = [relative for _, relative in data_roots]
     excluded_data_roots = [relative for _, relative in data_roots]
+    # Governed model weights are mounted separately, not shipped in the code image.
+    # Keep sibling metadata/manifest files in the workspace bundle.
+    locations = (task.get("model_governance") or {}).get("model_locations") or {}
+    for source in model_resources:
+        location = (locations.get(source.get("model_id")) or {}).get("local") or {}
+        local_path = location.get("path") if isinstance(location, dict) else location
+        if not local_path:
+            continue
+        candidate = Path(local_path).expanduser()
+        candidate = (candidate if candidate.is_absolute() else root / candidate).resolve()
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError:
+            continue  # Outside the code tree already.
+        if not relative.parts:
+            raise ValueError("A separately mounted model cannot use the whole task workspace as its local root")
+        excluded_data_roots.append(relative.as_posix())
 
     return f'''import modal
 import hashlib
@@ -260,7 +304,7 @@ def _ignore_workspace_path(path):
     blocked_parts = {{".git", ".env", ".kaggle", ".modal", "__pycache__", "venv", ".venv", "node_modules", "artifacts", "dashboard", "tmp"}}
     if any(part.casefold() in blocked_parts for part in relative.parts):
         return True
-    if len(relative.parts) >= 2 and relative.parts[0].casefold() == ".ai-harness" and relative.parts[1].casefold() == "models":
+    if len(relative.parts) >= 2 and relative.parts[0].casefold() == ".ai-harness" and relative.parts[1].casefold() in {{"models", "cloud-model-staging"}}:
         return True
     return any(
         normalized == root or normalized.startswith(root.rstrip("/") + "/")
@@ -277,24 +321,25 @@ if {plugin_wheel_local!r}:
     image = image.add_local_file({plugin_wheel_local!r}, remote_path={plugin_wheel_remote!r})
 
 # 2. Persistent Volumes for HuggingFace cache and Dataset
-hf_cache = modal.Volume.from_name({cache_name!r}, create_if_missing=True)
-data_volume = modal.Volume.from_name({volume_name!r}, create_if_missing=True)
+hf_cache = None if {owned_job_volume!r} else modal.Volume.from_name({cache_name!r}, create_if_missing=True)
+data_volume = modal.Volume.from_name({volume_name!r}, create_if_missing={not owned_job_volume!r})
 model_volume = (
-    modal.Volume.from_name({selected_model_volume!r}, create_if_missing=False)
+    (data_volume if {owned_job_volume!r} else modal.Volume.from_name({selected_model_volume!r}, create_if_missing=False))
     if {bool(model_resources)!r}
     else None
 )
 volume_mounts = {{
-    "/root/.cache/huggingface": hf_cache,
-    "/mnt/cloud_data": data_volume,
+    {data_mount_path!r}: data_volume,
 }}
-if model_volume is not None:
+if hf_cache is not None:
+    volume_mounts["/root/.cache/huggingface"] = hf_cache
+if model_volume is not None and not {owned_job_volume!r}:
     volume_mounts["/vol/models"] = model_volume
 
 @app.function(
     image=image,
     gpu={gpu!r},
-    timeout=14400,
+    timeout={timeout_seconds!r},
     block_network={not enable_internet!r},
     volumes=volume_mounts,
 )
@@ -315,7 +360,7 @@ def run_training_remote(config_path: str, exp_id: str):
             raise RuntimeError("Modal model resources failed verification: " + "; ".join(resolver.verification_errors))
 
     # Symlink/copy dataset and splits from Modal Volume if not mounted directly
-    task_data_root = Path("/mnt/cloud_data/task-data")
+    task_data_root = Path({data_mount_path!r}) / "task-data"
     for relative in {task_data_paths!r}:
         source = task_data_root / relative
         target = Path(relative)
@@ -350,6 +395,7 @@ def run_training_remote(config_path: str, exp_id: str):
     _remote_job_id = {job_id!r}
     if _remote_job_id:
         cmd += ["--job-id", _remote_job_id]
+    cmd += {probe_cli!r}
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -358,17 +404,29 @@ def run_training_remote(config_path: str, exp_id: str):
         bufsize=1,
     )
 
-    for line in iter(process.stdout.readline, ""):
-        print(line, end="", flush=True)
+    runner_log = Path("/tmp") / ("harness-" + exp_id + ".log")
+    with runner_log.open("w", encoding="utf-8") as log:
+        for line in iter(process.stdout.readline, ""):
+            log.write(line)
+            log.flush()
+            print(line, end="", flush=True)
 
     process.stdout.close()
     ret = process.wait()
 
     if ret != 0:
+        from harness.failure_evidence import snapshot_failed_run
+        import uuid
+        failure_dir = Path({data_mount_path!r}) / "failures" / exp_id / uuid.uuid4().hex
+        snapshot_failed_run(Path({artifacts_rel!r}) / {run_relative!r}, failure_dir,
+            {{"exp_id": exp_id, "task_id": {task_id!r}, "job_id": {job_id!r},
+              "config_sha256": {config_sha256!r}}}, ret, runner_log)
+        data_volume.commit()
+        print(f"[Modal Remote] Saved partial failure evidence: {{failure_dir}}", flush=True)
         raise RuntimeError(f"Remote training failed with exit code: {{ret}}")
 
     # Package lightweight output artifacts (no heavy .safetensors / .bin weights)
-    exp_dir = Path({artifacts_rel!r}) / exp_id
+    exp_dir = Path({artifacts_rel!r}) / {run_relative!r}
     essential_files = [
         "metrics.json",
         "summary.csv",
@@ -388,6 +446,20 @@ def run_training_remote(config_path: str, exp_id: str):
         "loaded_models.json",
         "model_outputs.json",
         "model_lineage.json",
+        "validation_partitions.json",
+        "splits.tsv",
+        "adapter_receipt.json",
+        "data_receipt.json",
+        "script_trace.jsonl",
+        "script_progress.jsonl",
+        "script_metrics.json",
+        "script_pilot_gate.json",
+        "script_inputs.jsonl",
+        "script_outcomes.jsonl",
+        "script_test_inputs.jsonl",
+        "script_test_outcomes.jsonl",
+        "script_test_trace.jsonl",
+        "script_asr_cache.json",
     ]
 
     metrics_path = exp_dir / "metrics.json"
@@ -402,8 +474,25 @@ def run_training_remote(config_path: str, exp_id: str):
         p = exp_dir / fname
         if p.exists():
             bundle[fname] = p.read_bytes()
+    # Script adapters may write episode evidence inside per-fold directories.
+    for p in exp_dir.rglob("*"):
+        if p.is_file() and p.name in essential_files:
+            if p.is_symlink() or not p.resolve().is_relative_to(exp_dir.resolve()):
+                raise RuntimeError("Artifact export escapes the run directory")
+            bundle[p.relative_to(exp_dir).as_posix()] = p.read_bytes()
 
     artifact_manifest = json.loads((exp_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+    if {probe_selection is not None!r}:
+        from harness.cloud_probe import verify_probe_artifacts
+        verify_probe_artifacts(exp_dir,
+            expected={{"exp_id": exp_id, "run_id": {job_id!r}}}, selection={probe_selection!r})
+        # Preserve every original hashed file for probe verification after download.
+        # A full candidate must never be inferred from this small-sample result.
+        for fname in artifact_manifest["files"]:
+            path = (exp_dir / fname).resolve()
+            if not path.is_relative_to(exp_dir.resolve()):
+                raise RuntimeError("Probe artifact escapes run directory")
+            bundle[fname] = path.read_bytes()
     artifact_manifest.update({{
         "schema_version": 2,
         "job_id": {job_id!r},
@@ -418,9 +507,10 @@ def run_training_remote(config_path: str, exp_id: str):
 
     # Persist lightweight output artifacts to Modal Volume for detached retrieval
     try:
-        volume_exp_dir = Path("/mnt/cloud_data/artifacts") / exp_id
+        volume_exp_dir = Path({data_mount_path!r}) / "artifacts" / {run_relative!r}
         volume_exp_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in bundle.items():
+            (volume_exp_dir / fname).parent.mkdir(parents=True, exist_ok=True)
             (volume_exp_dir / fname).write_bytes(content)
         data_volume.commit()
         print(f"[Modal Remote] Persisted {{len(bundle)}} artifact files to Modal Volume for detached retrieval.")
@@ -437,7 +527,7 @@ def main():
     print(f"Dispatching remote job '{{exp_id}}' to Modal GPU ({gpu})...")
     bundle = run_training_remote.remote(config_path, exp_id)
 
-    local_exp_dir = Path({artifacts_rel!r}) / exp_id
+    local_exp_dir = Path({artifacts_rel!r}) / {run_relative!r}
     if local_exp_dir.exists() and any(local_exp_dir.iterdir()):
         raise RuntimeError(f"Refusing to overwrite existing experiment artifact directory: {{local_exp_dir}}")
     local_exp_dir.mkdir(parents=True, exist_ok=True)
@@ -446,6 +536,8 @@ def main():
         "job_id": {job_id!r}, "task_id": {task_id!r}, "exp_id": exp_id,
         "config_sha256": {config_sha256!r},
     }}
+    if {probe_selection is not None!r}:
+        expected.update({{"run_id": {job_id!r}, "run_kind": "probe"}})
     manifest = json.loads((bundle or {{}}).get("artifact_manifest.json", b"{{}}"))
     mismatches = {{key: {{"expected": value, "actual": manifest.get(key)}} for key, value in expected.items() if value is not None and manifest.get(key) != value}}
     if mismatches:
@@ -460,10 +552,15 @@ def main():
         if fname == "artifact_manifest.json":
             continue
         out_path = local_exp_dir / fname
+        if not out_path.resolve().is_relative_to(local_exp_dir.resolve()):
+            raise RuntimeError("Downloaded artifact escapes output directory")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(content)
         saved_files.append(fname)
     (local_exp_dir / "artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    if {probe_selection is not None!r}:
+        from harness.cloud_probe import verify_probe_artifacts
+        verify_probe_artifacts(local_exp_dir, expected=expected, selection={probe_selection!r})
 
     print(f"Pulled {{len(saved_files)}} artifacts into {{local_exp_dir}}: {{', '.join(saved_files)}}")
 '''

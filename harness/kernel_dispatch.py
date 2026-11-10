@@ -229,11 +229,15 @@ def dispatch_kernel(
         pass
     try:
         shutil.copy2(nb, staging / code_file)
+        is_gpu = bool(machine_shape and any(g in machine_shape.upper() for g in ['GPU', 'T4', 'P100', 'V100', 'A100', 'NVIDIA']))
+        is_tpu = bool(machine_shape and 'TPU' in machine_shape.upper())
         meta = build_kernel_metadata(
             kernel_id=kernel_id,
             title=title,
             code_file=code_file,
             machine_shape=machine_shape,
+            enable_gpu=is_gpu,
+            enable_tpu=is_tpu,
             dataset_sources=dataset_sources,
             competition_sources=competition_sources,
             kernel_sources=kernel_sources,

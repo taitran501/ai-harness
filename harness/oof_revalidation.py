@@ -142,7 +142,10 @@ def score_predictions(
         # Normalize the hook before adding generic diagnostics: a generic
         # primary_score must never shadow the hook's named official metric.
         result = resolve_evaluation(task_spec, result, len(truth))
-        if not skip_generic_base_eval:
+        interactive_only = bool(task_spec.subtasks) and all(
+            st.task_type == 'interactive_agent' for st in task_spec.subtasks.values()
+        )
+        if not skip_generic_base_eval and not interactive_only:
             try:
                 base_result = plugin.evaluate_predictions(plugin_context, truth, predictions)
                 result = {**base_result, **result}

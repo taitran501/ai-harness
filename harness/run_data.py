@@ -296,6 +296,16 @@ class RunDataMixin:
             result = [x for x in result if str(x[0]) == str(requested)]
             if not result:
                 raise ValueError("Requested fold does not exist")
+        elif 'folds' in self.cfg.get('data', {}) and strategy not in ("holdout", "external_holdout"):
+            configured = self.cfg['data']['folds']
+            if not isinstance(configured, list) or not configured:
+                raise ValueError('data.folds must be a nonempty list')
+            wanted = [str(value) for value in configured]
+            if len(set(wanted)) != len(wanted):
+                raise ValueError('data.folds contains duplicate folds')
+            if set(wanted) - {str(part[0]) for part in result}:
+                raise ValueError('Configured fold does not exist')
+            result = [part for part in result if str(part[0]) in wanted]
         for fold, train, dev in result:
             if train.empty or dev.empty:
                 raise ValueError("Empty training or validation partition")

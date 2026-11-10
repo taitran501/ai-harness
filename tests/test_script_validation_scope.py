@@ -100,3 +100,26 @@ class ScriptValidationScopeTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "OOF prediction IDs"):
                     runner.run()
                 self.assertEqual(runner.manifest["status"], "FAILED")
+
+    def test_configured_fold_limits_full_script_manifest(self):
+        runner = self.make_runner('script')
+        runner.cfg['data'] = {'folds': [0]}
+        result = runner.run()
+        self.assertEqual(result['n_samples'], 6)
+        scope = json.loads((runner.exp_dir / 'validation_partitions.json').read_text())
+        self.assertEqual([p['fold'] for p in scope['partitions']], [0])
+
+    def test_cli_fold_overrides_configured_folds(self):
+        runner = self.make_runner('script', fold=0, debug=True)
+        runner.cfg['data'] = {'folds': [1]}
+        runner.run()
+        scope = json.loads((runner.exp_dir / 'validation_partitions.json').read_text())
+        self.assertEqual([p['fold'] for p in scope['partitions']], [0])
+
+    def test_invalid_configured_folds_fail(self):
+        for value in ([], [0, 0], [99], '0'):
+            with self.subTest(value=value):
+                runner = self.make_runner('script')
+                runner.cfg['data'] = {'folds': value}
+                with self.assertRaisesRegex(ValueError, 'fold'):
+                    runner._resolve_validation_splits(runner._load_training_data(), 'kfold')

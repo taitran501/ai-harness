@@ -15,6 +15,9 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-11-09 | Preserve lightweight script diagnostics in Modal bundles | Working tree | [script diagnostics](2026-11-09-script-diagnostic-export.md) |
+| 2026-11-09 | Honor declarative fold selection in full script validation | Working tree | [declarative folds](2026-11-09-declarative-fold-selection.md) |
+| 2026-11-09 | Preserve ragged interactive episode payloads in prediction validation | Working tree | [interactive predictions](2026-11-09-interactive-ragged-predictions.md) |
 | 2026-11-03 | Native model asset CLI, typed Agent Bridge actions, rebuildable HUD summary, and local verification (Phase 5) | Working tree | [native-model-assets-phase5](native-model-assets-phase5.md) |
 | 2026-11-03 | Candidate model closure, aggregate policy checks, preflight receipt v3, and SubmissionGate subject binding (Phase 4) | Working tree | [native-model-assets-phase4](native-model-assets-phase4.md) |
 | 2026-11-03 | Backend model resource plans, offline integrity verification, and Kaggle/Modal governance preservation (Phase 3) | Working tree | [native-model-assets-phase3](native-model-assets-phase3.md) |

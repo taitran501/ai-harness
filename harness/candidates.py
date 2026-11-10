@@ -371,9 +371,23 @@ def build_candidate(project, name, mode, source_map):
     result = score_predictions(spec, plugin, context, source_config, truth, predictions(merged))
     if len(ids) > 1 and result["utility"] <= max(scores):
         raise ValueError("Superiority guard: ensemble must improve best constituent")
+    candidate_id = "cand_" + uuid.uuid4().hex
+    folder = project.artifacts_dir / candidate_id
+    folder.mkdir(parents=True, exist_ok=True)
+    merged["input_variant"] = mode
+    merged.to_csv(folder / "oof_predictions.csv", index=False)
+    if has_test_preds and merged_test is not None:
+        merged_test["input_variant"] = mode
+        merged_test.to_csv(folder / "test_predictions.csv", index=False)
+
     from harness.model_assets.lineage import CandidateSubject, semantic_candidate_prediction_hash
 
-    subject_predictions = merged_test if has_test_preds and merged_test is not None else merged
+    saved_pred_path = (
+        folder / "test_predictions.csv"
+        if has_test_preds and (folder / "test_predictions.csv").is_file()
+        else folder / "oof_predictions.csv"
+    )
+    subject_predictions = pd.read_csv(saved_pred_path)
     candidate_subject = CandidateSubject(
         task_id=str(spec.metadata.get("id") or spec.metadata.get("name") or "task"),
         recipe=candidate_recipe,
@@ -383,14 +397,6 @@ def build_candidate(project, name, mode, source_map):
         model_policy_digest=current_model_policy_digest,
         model_lineage_digest=model_closure.model_lineage_digest,
     )
-    candidate_id = "cand_" + uuid.uuid4().hex
-    folder = project.artifacts_dir / candidate_id
-    folder.mkdir(parents=True, exist_ok=True)
-    merged["input_variant"] = mode
-    merged.to_csv(folder / "oof_predictions.csv", index=False)
-    if has_test_preds and merged_test is not None:
-        merged_test["input_variant"] = mode
-        merged_test.to_csv(folder / "test_predictions.csv", index=False)
     provenance_values = {m.get("provenance", "local_run") for m in source_manifests}
     candidate_provenance = ("reproduced_external_code" if "reproduced_external_code" in provenance_values else "local_run")
     recipe_binding = digest({"recipe": _candidate_recipe_fingerprint(mode, ids, source_map),

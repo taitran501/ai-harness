@@ -947,6 +947,13 @@ def validate_prediction_contract(spec, truth, predictions):
         )
         if values is None or len(values) != len(truth):
             raise ValueError("Missing prediction coverage: " + key)
+        if st.task_type == "interactive_agent":
+            # Episode payloads are structured and naturally ragged. Coverage and
+            # IDs were checked above; their schema/semantics belong to the task's
+            # custom evaluator, not NumPy's rectangular classification contract.
+            if any(value is None for value in values):
+                raise ValueError("Missing interactive prediction: " + key)
+            continue
         array = np.asarray(values)
         if st.task_type in ("regression", "ranking"):
             if (

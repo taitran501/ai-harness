@@ -1218,8 +1218,9 @@ def resolve_cli_backend(
     """Resolve the effective execution backend for the runner CLI.
 
     Explicit ``--backend`` wins; otherwise the task contract's declared
-    backend applies; otherwise local. Smoke tests and bounded probes always
-    run locally. A locked contract rejects a different backend for FULL runs
+    backend applies; otherwise local. Implicit smoke/probe runs default to local;
+    the CLI separately rejects explicit cloud sample probes before dispatch.
+    A locked contract rejects a different backend for FULL runs
     (raises ValueError; the CLI translates that into a parser error).
     """
     if requested is None:
@@ -1260,6 +1261,22 @@ def is_local_only_run(args, cfg_doc: Optional[Dict[str, Any]] = None) -> bool:
         if limit:
             return True
     return False
+
+
+def validate_cloud_probe_boundary(args, cfg_doc):
+    """Only attached bounded Modal probes have selection-aware artifact import."""
+    if (getattr(args, 'backend', None) in {'modal', 'kaggle'}
+            and is_local_only_run(args, cfg_doc)):
+        if getattr(args, 'backend', None) == 'kaggle':
+            if not getattr(args, 'dry_run', False):
+                raise ValueError('Cloud sample probes are not supported for Kaggle')
+            return None
+        if getattr(args, 'detach', False):
+            raise ValueError('Remote probes require attached execution')
+        from harness.cloud_probe import probe_selection
+        return probe_selection(debug=getattr(args, 'debug', False), fold=getattr(args, 'fold', None),
+                               probe_samples=getattr(args, 'probe_samples', None), config=cfg_doc)
+    return None
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1345,6 +1362,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"(contract backend: {contract_backend})"
         )
 
+    try:
+        remote_probe_spec = validate_cloud_probe_boundary(args, effective_cfg)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     # If backend is modal or kaggle, delegate to cloud runner
     if args.backend == "modal":
         from harness.cloud_runner import run_via_modal
@@ -1355,8 +1377,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             job_id=getattr(args, "job_id", None),
             gpu=getattr(args, "gpu", "A10"),
             detach=getattr(args, "detach", False),
+            dry_run=getattr(args, "dry_run", False),
             effective_config=effective_cfg,
             base_config=getattr(args, "base_config", None),
+            probe_spec=remote_probe_spec,
         )
         return 0
     elif args.backend == "kaggle":
