@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-11-12 | Agent ergonomics, backend switching CLI (`set-backend`), PowerShell flat flags, and hygiene allow-list aliases | Working tree | [agent-ergonomics-backend-switching](2026-11-12-agent-ergonomics-backend-switching.md) |
 | 2026-11-10 | Test suite 3-tier consolidation into 38 canonical domain modules, fast tiering, and smoke shims | Working tree | [test-suite-consolidation](2026-11-10-test-suite-3tier-consolidation.md) |
 | 2026-11-09 | Preserve lightweight script diagnostics in Modal bundles | Working tree | [script diagnostics](2026-11-09-script-diagnostic-export.md) |
 | 2026-11-09 | Honor declarative fold selection in full script validation | Working tree | [declarative folds](2026-11-09-declarative-fold-selection.md) |

@@ -125,7 +125,16 @@ def task_allowed_dirs(project_root: Path) -> frozenset:
             return hit
         doc = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
         task = doc.get("task", doc) if isinstance(doc, dict) else {}
-        raw = (task.get("hygiene") or {}).get("allowed_top_dirs") or []
+        hygiene_cfg = task.get("hygiene") or {}
+        raw = (
+            hygiene_cfg.get("allowed_top_dirs")
+            or hygiene_cfg.get("allow_dirs")
+            or hygiene_cfg.get("ignore_dirs")
+            or hygiene_cfg.get("ignore")
+            or []
+        )
+        if isinstance(raw, str):
+            raw = [raw]
         dirs = frozenset(str(x).strip().lower() for x in raw if str(x).strip())
         if len(_TASK_DIR_CACHE) > 8:
             _TASK_DIR_CACHE.clear()

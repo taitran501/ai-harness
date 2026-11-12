@@ -1237,8 +1237,9 @@ def resolve_cli_backend(
         raise ValueError(
             f"Backend lock violation: the task contract locks the execution "
             f"backend to '{contract_backend}' (execution.locked: true) but "
-            f"'{requested}' was requested. Drop the --backend flag "
-            f"(the contract default applies) or change the contract."
+            f"'{requested}' was requested. Run 'ai-harness set-backend {requested} --unlock' "
+            f"to update the contract backend, or drop the --backend flag "
+            f"(the contract default applies)."
         )
     return requested
 

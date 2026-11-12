@@ -465,5 +465,70 @@ class TestStrategyCardsAndSpawner(unittest.TestCase):
         self.assertIn("video_title_ctx", res["next_id"])
 
 
+class TestHygieneAndCliErgonomics(unittest.TestCase):
+    def test_hygiene_allow_dirs_and_ignore_dirs(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            shutil.copytree(Path("configs"), root / "configs")
+            (root / "storage").mkdir()
+            (root / "storage" / "file.txt").write_text("data")
+            (root / "prototypes").mkdir()
+            (root / "prototypes" / "proto.py").write_text("code")
+
+            # Without allow_dirs: flagged
+            res = scan_workspace_hygiene(root)
+            paths = [f["path"] for f in res["findings"]]
+            self.assertIn("storage", paths)
+            self.assertIn("prototypes", paths)
+
+            # With allow_dirs in task.yaml: clean
+            task_cfg = (root / "configs" / "task.yaml")
+            content = task_cfg.read_text(encoding="utf-8")
+            content += "\n  hygiene:\n    allow_dirs: [storage, prototypes]\n"
+            task_cfg.write_text(content, encoding="utf-8")
+
+            res_clean = scan_workspace_hygiene(root)
+            paths_clean = [f["path"] for f in res_clean["findings"]]
+            self.assertNotIn("storage", paths_clean)
+            self.assertNotIn("prototypes", paths_clean)
+
+    def test_cli_flat_flags_and_input_alias(self):
+        from tools.agent_bridge_cli import main as cli_main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            shutil.copytree(Path("configs"), root / "configs")
+            # 1. Test flat flags for record_research_insight
+            rc = cli_main([
+                "--project-root", str(root),
+                "act",
+                "--action", "record_research_insight",
+                "--title", "Flat flag insight",
+                "--observation", "Observed gain",
+                "--mechanism", "Feature scaling",
+                "--next-action", "Run full validation",
+            ])
+            self.assertEqual(rc, 0)
+
+            # 2. Test --input JSON alias for record_research_decision
+            rc = cli_main([
+                "--project-root", str(root),
+                "act",
+                "--action", "record_research_decision",
+                "--input", '{"conclusion": "Promising result", "outcome": "keep"}',
+            ])
+            self.assertEqual(rc, 0)
+
+            # 3. Test checkpoint flat flags
+            rc = cli_main([
+                "--project-root", str(root),
+                "act",
+                "--action", "record_research_checkpoint",
+                "--summary", "Checkpoint 1",
+                "--next-action", "Next step",
+            ])
+            self.assertEqual(rc, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

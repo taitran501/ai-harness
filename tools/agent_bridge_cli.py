@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     act_p.add_argument("--evidence-kind", choices=("full_run", "official_submission"), default=None)
     act_p.add_argument("--evidence-partition", choices=("oof", "holdout", "confirmation", "public", "private"), default=None)
     parameters = act_p.add_mutually_exclusive_group()
-    parameters.add_argument("--params", default=None, help="JSON object of action parameters")
+    parameters.add_argument("--params", "--input", dest="params", default=None, help="JSON object of action parameters")
     parameters.add_argument("--param-file", "--params-file", dest="param_file", default=None,
                             help="UTF-8 JSON object file, absolute or relative to project root (PowerShell friendly)")
     act_p.add_argument(
@@ -381,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     project = HarnessProject.discover(args.project_root, args.task_config)
     from harness.toolchain import ensure_pinned_toolchain
 
-    _pinned = ensure_pinned_toolchain(project.root, "tools.agent_bridge_cli", sys.argv[1:])
+    _pinned = ensure_pinned_toolchain(project.root, "tools.agent_bridge_cli", raw_argv)
     if _pinned is not None:
         return int(_pinned.returncode)
     os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)

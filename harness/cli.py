@@ -171,6 +171,31 @@ def build_parser() -> argparse.ArgumentParser:
     adoption_scan.add_argument("--root", default=None, help="Parent directory containing workspaces (default: parent of current dir)")
     adoption_scan.add_argument("--include", default=None, help="Comma-separated workspace dir names to include; default: every dir with .ai-harness")
 
+    set_backend_cmd = subparsers.add_parser(
+        "set-backend",
+        help="Safely update task contract execution backend and lock state in task.yaml",
+    )
+    set_backend_cmd.add_argument(
+        "backend",
+        choices=["local", "modal", "kaggle"],
+        help="Target execution backend (local, modal, kaggle)",
+    )
+    set_backend_cmd.add_argument(
+        "--project-root",
+        default=".",
+        help="Attached task workspace root (default: current dir)",
+    )
+    set_backend_cmd.add_argument(
+        "--unlock",
+        action="store_true",
+        help="Unlock the execution backend (sets execution.locked: false)",
+    )
+    set_backend_cmd.add_argument(
+        "--lock",
+        action="store_true",
+        help="Lock the execution backend (sets execution.locked: true)",
+    )
+
     validate_task_cmd = subparsers.add_parser(
         "validate-task",
         help="Static task.yaml validation (schema, data files, column cross-checks, fold sanity) without running anything",
@@ -499,6 +524,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 0 if report.get("strict_pass") else 1
         return 1 if blocking else 0
 
+    if args.command == "set-backend":
+        return _set_backend_command(args)
+
     if args.command == "status":
         from harness.status_report import collect_status, render_markdown
 
@@ -786,6 +814,71 @@ def _run_preflight(args) -> int:
         print(f"\nRecommendation:  {receipt['recommendation']}")
 
     return 0 if receipt["verdict"] == "PASS" else (1 if receipt["verdict"] == "FLAGGED_NEAR_DUPLICATE" else 2)
+
+
+def _set_backend_command(args) -> int:
+    import yaml
+    from harness.project import HarnessProject
+    from harness.io_utils import atomic_write_text
+    from harness.task_spec import UniversalTaskSpec
+
+    try:
+        project = HarnessProject.discover(Path(args.project_root))
+        cfg_path = project.task_config_path
+    except Exception as exc:
+        print(f"Error resolving task configuration: {exc}", file=sys.stderr)
+        return 1
+
+    if not cfg_path.is_file():
+        print(f"Task configuration file not found: {cfg_path}", file=sys.stderr)
+        return 1
+
+    try:
+        raw_text = cfg_path.read_text(encoding="utf-8")
+        doc = yaml.safe_load(raw_text) or {}
+    except Exception as exc:
+        print(f"Failed to read task YAML: {exc}", file=sys.stderr)
+        return 1
+
+    has_wrapper = isinstance(doc, dict) and "task" in doc
+    task = doc.get("task", doc) if isinstance(doc, dict) else {}
+    if not isinstance(task, dict):
+        task = {}
+
+    exec_cfg = task.setdefault("execution", {})
+    if not isinstance(exec_cfg, dict):
+        exec_cfg = {}
+        task["execution"] = exec_cfg
+
+    old_backend = exec_cfg.get("backend", "local")
+    old_locked = bool(exec_cfg.get("locked", False))
+
+    exec_cfg["backend"] = args.backend
+    if args.unlock:
+        exec_cfg["locked"] = False
+    elif args.lock:
+        exec_cfg["locked"] = True
+
+    new_backend = exec_cfg["backend"]
+    new_locked = bool(exec_cfg.get("locked", False))
+
+    try:
+        UniversalTaskSpec.from_dict({"task": task})
+    except Exception as exc:
+        print(f"Validation error on updated task contract: {exc}", file=sys.stderr)
+        return 1
+
+    write_doc = {"task": task} if has_wrapper else task
+    atomic_write_text(
+        cfg_path,
+        yaml.safe_dump(write_doc, sort_keys=False, allow_unicode=True),
+    )
+    lock_str = "locked" if new_locked else "unlocked"
+    print(
+        f"[ai-harness] Updated task execution backend: {old_backend} (locked={old_locked}) "
+        f"-> {new_backend} ({lock_str}) at {cfg_path}"
+    )
+    return 0
 
 
 if __name__ == "__main__":

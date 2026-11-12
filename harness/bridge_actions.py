@@ -473,13 +473,28 @@ class ActionHandlerMixin:
         from harness.io_utils import atomic_write_text
         from harness.task_spec import UniversalTaskSpec
 
-        document = params["task"]
+        task_path = self.project.task_config_path
+        existing_raw = task_path.read_text(encoding="utf-8") if task_path.is_file() else ""
+        existing_doc = yaml.safe_load(existing_raw) or {}
+        has_task_wrapper = isinstance(existing_doc, dict) and "task" in existing_doc
+        task_dict = existing_doc.get("task", existing_doc) if isinstance(existing_doc, dict) else {}
+
+        if "task" in params and params["task"]:
+            document = params["task"]
+        else:
+            exec_patch = dict(params.get("execution") or {})
+            if "backend" in params and params["backend"]:
+                exec_patch["backend"] = params["backend"]
+            if "locked" in params and params["locked"] is not None:
+                exec_patch["locked"] = bool(params["locked"])
+            task_dict.setdefault("execution", {}).update(exec_patch)
+            document = task_dict
+
         UniversalTaskSpec.from_dict({"task": document})
+        write_doc = {"task": document} if has_task_wrapper else document
         atomic_write_text(
-            self.project.task_config_path,
-            yaml.safe_dump(
-                {"task": document}, sort_keys=False, allow_unicode=True
-            ),
+            task_path,
+            yaml.safe_dump(write_doc, sort_keys=False, allow_unicode=True),
         )
         self._refresh_task_context()
         return ActionObservation(

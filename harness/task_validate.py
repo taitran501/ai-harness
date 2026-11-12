@@ -255,12 +255,21 @@ def validate_task(config_path: Path, root: Path) -> Dict[str, Any]:
 
     # ---- hygiene allow-list sanity -------------------------------------
     meta = dict(getattr(spec, "metadata", {}) or {})
-    allowed = (meta.get("hygiene", {}) or {}).get("allowed_top_dirs", [])
+    hygiene_meta = meta.get("hygiene", {}) or {}
+    allowed = (
+        hygiene_meta.get("allowed_top_dirs")
+        or hygiene_meta.get("allow_dirs")
+        or hygiene_meta.get("ignore_dirs")
+        or hygiene_meta.get("ignore")
+        or []
+    )
+    if isinstance(allowed, str):
+        allowed = [allowed]
     for d in allowed or []:
         name = str(d).lower()
         if any(name == s or name.startswith(s + "_") for s in SUSPECT_RUN_OUTPUT_DIRS):
             warnings.append(
-                f"hygiene.allowed_top_dirs whitelists {d!r}, which looks like a "
+                f"hygiene allow-list whitelists {d!r}, which looks like a "
                 f"run-output dir — verified runs belong under .ai-harness/artifacts/, "
                 f"not in the allow-list (bypasses would be hidden from the adoption scan)"
             )

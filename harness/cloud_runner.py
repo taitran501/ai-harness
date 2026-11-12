@@ -158,6 +158,17 @@ def _prepare_remote_run(
     from harness.task_spec import load_active_task_spec
 
     task_spec = load_active_task_spec(project.task_config_path)
+    contract_backend = getattr(task_spec, "execution_backend", None)
+    if (
+        bool(getattr(task_spec, "execution_locked", False))
+        and contract_backend
+        and backend != contract_backend
+    ):
+        raise ValueError(
+            f"Backend lock violation: the task contract locks execution to "
+            f"'{contract_backend}' (execution.locked: true) but '{backend}' was requested. "
+            f"Run 'ai-harness set-backend {backend} --unlock' to switch the contract backend."
+        )
     resolved_plan = prepare_or_validate_model_plan(
         task_spec, effective_config, ModelStore(), project=project
     )

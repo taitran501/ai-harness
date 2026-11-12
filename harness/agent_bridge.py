@@ -603,9 +603,8 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             raise ValueError(
                 f"Backend lock violation: the task contract locks the execution "
                 f"backend to '{contract_backend}' (execution.locked: true) but "
-                f"'{requested}' was requested. Drop the 'backend' param (the "
-                f"contract default applies) or change the contract via "
-                f"update_task_contract."
+                f"'{requested}' was requested. Run 'ai-harness set-backend {requested} --unlock' "
+                f"or change the contract via update_task_contract."
             )
         if effective not in {"local", "kaggle", "modal"}:
             raise ValueError(f"Unsupported execution backend: {effective!r}")

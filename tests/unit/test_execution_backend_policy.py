@@ -205,6 +205,32 @@ class TestHudAndGuard(unittest.TestCase):
         self.assertIn(sess.session_id, sess.session_id)
         self.assertTrue(any("Backend lock violation" in str(o) for o in sess.observations))
 
+    def test_update_task_contract_execution_patch(self) -> None:
+        bridge, ws = _make_bridge(LOCKED_TASK)
+        self.addCleanup(shutil.rmtree, ws, True)
+        sess, obs = bridge.execute_action(
+            "update_task_contract",
+            params={"backend": "modal", "locked": False},
+            goal="switch to modal",
+        )
+        self.assertEqual(obs.status, "SUCCESS")
+        spec = load_active_task_spec(ws / "configs" / "task.yaml")
+        self.assertEqual(spec.execution_backend, "modal")
+        self.assertFalse(spec.execution_locked)
+
+    def test_cli_set_backend_command(self) -> None:
+        import argparse
+        from harness.cli import _set_backend_command
+
+        bridge, ws = _make_bridge(LOCKED_TASK)
+        self.addCleanup(shutil.rmtree, ws, True)
+        args = argparse.Namespace(backend="modal", project_root=str(ws), unlock=True, lock=False)
+        rc = _set_backend_command(args)
+        self.assertEqual(rc, 0)
+        spec = load_active_task_spec(ws / "configs" / "task.yaml")
+        self.assertEqual(spec.execution_backend, "modal")
+        self.assertFalse(spec.execution_locked)
+
 
 if __name__ == "__main__":
     unittest.main()
