@@ -92,8 +92,6 @@ class CloudJobManager:
         self.project = HarnessProject.discover(project_root)
         self.project_root = self.project.root
         self.artifacts_dir = self.project.artifacts_dir
-        os.environ["HARNESS_PROJECT_ROOT"] = str(self.project.root)
-        os.environ["HARNESS_TASK_CONFIG"] = str(self.project.task_config_path)
         self._jobs: Dict[str, CloudJob] = {}
         self._processes: Dict[str, subprocess.Popen] = {}
         self._jobs_dir = self.artifacts_dir / "jobs"

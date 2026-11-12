@@ -23,6 +23,7 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 
 from harness.project import attach_project
+from harness.task_spec import UniversalTaskSpec
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -157,3 +158,130 @@ def make_submission_evidence(root, exp_id, *, labels=None, cfg=None):
         resolved_config_sha256=sha256(run_dir / "run_config.yaml"), files=seal_file_map(run_dir))
     (run_dir / "artifact_manifest.json").write_text(__import__("json").dumps(manifest), encoding="utf-8")
     return run_dir
+
+
+def task(kind: str = "regression", metric: str = "rmse", direction: str = "minimize") -> UniversalTaskSpec:
+    """Minimal UniversalTaskSpec factory for contract and prediction tests."""
+    return UniversalTaskSpec.from_dict({
+        "task": {
+            "name": "fixture",
+            "modality": "tabular",
+            "primary_metric": metric,
+            "direction": direction,
+            "data": {"id_column": "id", "group_column": "group", "seed": 13},
+            "inputs": [{"name": "features", "type": "tabular", "source_columns": ["x", "category"]}],
+            "subtasks": [{
+                "id": "target",
+                "column": "target",
+                "task_type": kind,
+                "primary_metric": metric,
+                "direction": direction,
+                "classes": [] if kind == "regression" else ["0", "1"],
+            }],
+        }
+    })
+
+
+def text_task_document() -> Dict[str, Any]:
+    """Text-classification task spec with 'sentiment' subtask and 'text' input."""
+    return {
+        "task": {
+            "name": "continuity-text",
+            "modality": "text",
+            "primary_metric": "macro_f1",
+            "direction": "maximize",
+            "data": {"id_column": "id", "train_path": "dataset/train.csv", "fold_column": "fold"},
+            "validation": {"strategy": "kfold", "num_folds": 2},
+            "inputs": [{"name": "text", "type": "text", "source_columns": ["text"]}],
+            "subtasks": [{
+                "id": "sentiment",
+                "column": "target",
+                "task_type": "binary_classification",
+                "classes": [0, 1],
+                "primary_metric": "macro_f1",
+            }],
+        }
+    }
+
+
+continuity_task_document = text_task_document
+
+
+def research_config(exp_id: str, c: float = 1.0) -> Dict[str, Any]:
+    """Minimal TF-IDF logistic regression experiment config."""
+    return {
+        "experiment": {
+            "id": exp_id,
+            "branch": "baseline",
+            "parent_id": None,
+            "problem_addressed": "Minority recall needs measurement on fixed validation folds.",
+            "hypothesis": "Changing the loss penalty may improve minority recall on fixed folds.",
+            "intervention": "Set the logistic regression penalty strength under fixed inputs.",
+        },
+        "model": {"name": "tfidf_logistic_regression", "params": {"C": c}},
+        "data": {"input_variants": ["text"], "selection_variant": "text"},
+    }
+
+
+config = research_config
+
+
+def rule_document(family: str = "fixture-family", effect: float = 0.05) -> Dict[str, Any]:
+    """Schema v1 superiority decision rule document with paired bootstrap uncertainty."""
+    return {
+        "schema_version": 1,
+        "kind": "superiority",
+        "metric": {"scope": "primary", "subtask_id": None, "name": "accuracy"},
+        "direction": "maximize",
+        "control": {"kind": "full_run", "id": "control", "partition": "oof"},
+        "minimum_effect": {"value": effect, "scale": "absolute"},
+        "comparator": "gte",
+        "score_target": None,
+        "evidence_requirements": {
+            "partition": "oof",
+            "same_data": True,
+            "same_splits": True,
+            "same_scorer": True,
+            "same_coverage": True,
+        },
+        "uncertainty": {
+            "method": "paired_bootstrap",
+            "unit": "row",
+            "unit_column": None,
+            "stratify_column": "label",
+            "confidence_level": 0.95,
+            "resamples": 1000,
+            "seed": 42,
+        },
+        "multiplicity": {
+            "family_id": family,
+            "method": "bonferroni_fixed_horizon",
+            "max_comparisons": 1,
+        },
+    }
+
+
+def review_payload(memory, **overrides) -> Dict[str, Any]:
+    """Construct a valid macro review payload dictionary."""
+    from harness.macro_research import compute_macro_hypothesis_map
+
+    return dict(
+        {
+            "session_id": "session_test",
+            "map_digest": compute_macro_hypothesis_map(memory, memory.sync())["map_digest"],
+            "changes_since_last_review": "Reviewed broad coverage and latest evidence.",
+            "supported_mechanisms": [],
+            "rejected_mechanisms": [],
+            "highest_priority_untouched": {
+                "family_id": "target",
+                "proposed_direction": "Compare target formulations",
+                "rationale": "Unexplored mechanism",
+                "source_ref": "diagnostics:target-distribution",
+            },
+            "next_probe_rationale": "Target formulation changes the learning problem rather than a nearby parameter.",
+            "next_action": "Register a one-fold target probe with a fixed control.",
+            "budget_limit": 1,
+        },
+        **overrides,
+    )
+

@@ -25,13 +25,14 @@ def push_dataset_to_modal(
     *,
     project_root: Optional[Path | str] = None,
     environment_name: Optional[str] = None,
+    task_config: Optional[Path | str] = None,
 ) -> Dict[str, Any]:
     """Create an isolated task Modal Volume and upload only declared task data and splits."""
     from harness.data_bundle import stage_declared_data
     from harness.project import HarnessProject
 
     root = Path(project_root or Path.cwd()).expanduser().resolve()
-    project = HarnessProject.discover(root, os.environ.get('HARNESS_TASK_CONFIG'))
+    project = HarnessProject.discover(root, task_config)
     from harness.cloud_policy import (
         UploadConsentStore,
         dataset_fingerprint,
