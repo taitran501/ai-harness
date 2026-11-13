@@ -512,9 +512,10 @@ class CloudJobManager:
     ) -> CloudJob:
         """Launch an asynchronous execution job."""
         state_path = self.artifacts_dir / "competition_state.json"
-        if state_path.is_file() and json.loads(state_path.read_text()).get(
-            "gates", {}
-        ).get("freeze_locked"):
+        from harness.state_store import read_json_state
+        from harness.competition_state import validate_competition_state
+        state = read_json_state(state_path, default_factory=dict, validate=validate_competition_state)
+        if state.get("gates", {}).get("freeze_locked"):
             raise ValueError("Competition is frozen")
         if backend not in {"local", "modal", "kaggle"}:
             raise ValueError(f"Unsupported execution backend: {backend}")
@@ -530,6 +531,10 @@ class CloudJobManager:
         gate_cfg = (yaml.safe_load(gate_path.read_text(encoding="utf-8")) or {}) if yaml_job else {}
         probe_args, _ = build_parser().parse_known_args(["--config", str(gate_path), *(extra_args or [])])
         is_probe = yaml_job and is_local_only_run(probe_args, gate_cfg)
+        if yaml_job:
+            from harness.run_data import resolve_execution_scope
+            scope = resolve_execution_scope(self.project, gate_cfg, probe_args)
+            is_probe = not scope["complete_selection"]
         if is_probe and backend != "local":
             raise ValueError("Smoke/probe jobs must run locally")
         if not is_probe:

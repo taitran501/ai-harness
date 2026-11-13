@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
 
 from harness.artifacts import seal_file_map, sha256, validate_run
 from harness.endgame_submission import ThresholdOptimizer
+from tests.evidence_fixtures import seal_scope_fixture
 
 
 def _make_run(root: Path, name: str, nested: bool = True) -> Path:
@@ -18,7 +20,7 @@ def _make_run(root: Path, name: str, nested: bool = True) -> Path:
     (run / "stages").mkdir(parents=True)
     (run / "run_config.yaml").write_text("model: {name: fixture}\n", encoding="utf-8")
     (run / "metrics.json").write_text(
-        json.dumps({"primary_score": 0.5, "direction": "minimize", "experiment_id": name}),
+        json.dumps({"primary_score": 0.5, "utility": -0.5, "direction": "minimize", "experiment_id": name}),
         encoding="utf-8",
     )
     (run / "oof_predictions.csv").write_text("id,pred_y\n0,0.5\n", encoding="utf-8")
@@ -44,6 +46,7 @@ def _full_manifest(run: Path, exp_id: str) -> dict:
         "data_sha256": "c" * 64,
         "split_sha256": "d" * 64,
         "resolved_config_sha256": sha256(run / "run_config.yaml"),
+        "validation_scope": seal_scope_fixture(run, SimpleNamespace(id_column="id")),
         "files": seal_file_map(run),
     }
 
@@ -90,6 +93,7 @@ class EvidenceManifestPureLogicTests(unittest.TestCase):
             "data_sha256": "c" * 64,
             "split_sha256": "d" * 64,
             "resolved_config_sha256": sha256(run / "run_config.yaml"),
+        "validation_scope": seal_scope_fixture(run, SimpleNamespace(id_column="id")),
             "files": {
                 p.name: sha256(p) for p in run.iterdir() if p.is_file()
             },

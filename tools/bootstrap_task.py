@@ -205,6 +205,9 @@ def analyze_dataset_schema(df: pd.DataFrame, context: Dict[str, Any]) -> Dict[st
         else:
             task_type = "regression"
 
+    if task_type in {"binary_classification", "multiclass_classification"} and not classes:
+        classes = [str(x) for x in sorted(df[target_col].dropna().unique().tolist())]
+
     # 6. Resolve Primary Metric
     metric = context.get("primary_metric")
     direction = context.get("direction")

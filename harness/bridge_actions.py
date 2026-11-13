@@ -2124,6 +2124,7 @@ class ActionHandlerMixin:
             cand_path,
             task_spec=self.task_spec,
             plugin=self.task_plugin,
+            project_root=self.project_root,
         )
         # Anti-bypass submission guards: dedup, MMES, significance. The
         # agent drives submission through this bridge action; the standalone

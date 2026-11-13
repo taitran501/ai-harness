@@ -1061,6 +1061,8 @@ def _write_run(root: Path, exp_id: str) -> Path:
 
     metrics = {
         "primary_score": EXPECTED_SCORE,
+        "primary_metric": "rmse",
+        "utility": -EXPECTED_SCORE,
         "direction": "minimize",
         "experiment_id": exp_id,
         "selection_variant": "v1",
@@ -1091,6 +1093,9 @@ def _write_run(root: Path, exp_id: str) -> Path:
         },
     }
     (run_dir / "artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    from tests.evidence_fixtures import seal_scope_fixture
+    from tests.fixtures import task
+    seal_scope_fixture(run_dir, task())
     return run_dir
 
 
@@ -1256,6 +1261,7 @@ class RepairIntegrityGateTests(unittest.TestCase):
         metrics_path = run_dir / "metrics.json"
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         metrics["primary_score"] = 0.1
+        metrics["utility"] = -0.1
         metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
 
         rc = repair_mod.run_repair(

@@ -14,6 +14,76 @@ _guard = threading.Lock()
 _local = threading.local()
 
 
+class StateIntegrityError(ValueError):
+    """Existing authoritative state is unreadable or violates its schema."""
+
+    def __init__(self, code, path, field=None, detail=""):
+        self.code, self.path, self.field = code, Path(path), field
+        super().__init__(f"{code}: {path}" + (f" [{field}]" if field else "") + f": {detail}")
+
+
+def _unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate key: {key}")
+        value[key] = item
+    return value
+
+
+def validate_state(value):
+    if not isinstance(value, dict):
+        raise ValueError("expected a JSON object")
+    revision = value.get("revision", 0)
+    if type(revision) is not int or revision < 0:
+        raise ValueError("revision must be a nonnegative integer")
+
+
+def _validate(value, path, validate=None):
+    try:
+        validate_state(value)
+        json.dumps(value, allow_nan=False)
+        if validate:
+            validate(value)
+    except StateIntegrityError as exc:
+        raise StateIntegrityError(exc.code, path, field=exc.field, detail=str(exc)) from exc
+    except (ValueError, TypeError, KeyError) as exc:
+        raise StateIntegrityError("STATE_SCHEMA_INVALID", path, detail=str(exc)) from exc
+
+
+def read_json_state(path, *, default_factory=None, validate=None, migrate=None):
+    path = Path(path)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise StateIntegrityError("STATE_UNREADABLE", path, detail="dangling link") from exc
+        if default_factory is None:
+            raise
+        value = default_factory()
+    except UnicodeError as exc:
+        raise StateIntegrityError("STATE_ENCODING_INVALID", path, detail=str(exc)) from exc
+    except OSError as exc:
+        raise StateIntegrityError("STATE_UNREADABLE", path, detail=str(exc)) from exc
+    else:
+        try:
+            value = json.loads(raw, object_pairs_hook=_unique_object,
+                               parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
+        except ValueError as exc:
+            raise StateIntegrityError("STATE_JSON_INVALID", path, detail=str(exc)) from exc
+    if migrate:
+        try:
+            value = migrate(value)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise StateIntegrityError("STATE_SCHEMA_INVALID", path, detail=str(exc)) from exc
+    _validate(value, path, validate)
+    return value
+
+
 @contextmanager
 def workspace_lock(directory):
     directory = Path(directory).resolve()
@@ -54,25 +124,14 @@ def workspace_lock(directory):
 
 
 @contextmanager
-def transaction(path, default=None):
+def transaction(path, default=None, *, validate=None, migrate=None):
     path = Path(path)
     with workspace_lock(path.parent):
-        if path.is_file():
-            try:
-                loaded = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                loaded = None
-            if isinstance(loaded, dict):
-                value = loaded
-            elif isinstance(loaded, list):
-                value = copy.deepcopy(default or {})
-                value["events"] = loaded
-            else:
-                value = copy.deepcopy(default or {})
-        else:
-            value = copy.deepcopy(default or {})
+        value = read_json_state(path, default_factory=lambda: copy.deepcopy(default or {}),
+                                validate=validate, migrate=migrate)
         yield value
-        value["revision"] = int(value.get("revision", 0)) + 1
+        _validate(value, path, validate)
+        value["revision"] = value.get("revision", 0) + 1
         atomic_write_json(path, value, indent=2, ensure_ascii=False)
 
 
@@ -111,15 +170,23 @@ def merge_changed(current, before, after):
     return current
 
 
-def save_snapshot(path, before, after):
-    with transaction(path, before) as current:
+def save_snapshot(path, before, after, *, validate=None, migrate=None):
+    with transaction(path, after if not before else before, validate=validate, migrate=migrate) as current:
         merge_changed(current, before, after)
         result = copy.deepcopy(current)
     return result
 
 
-def save_registry(path, key, records, before=None):
-    with transaction(path, {key: []}) as value:
+def save_registry(path, key, records, before=None, *, validate=None, migrate=None):
+    def validate_registry(value):
+        rows = value.get(key)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) or not isinstance(row.get("id"), str) for row in rows):
+            raise ValueError(f"{key} must contain records with string IDs")
+        if len({row["id"] for row in rows}) != len(rows):
+            raise ValueError(f"{key} contains duplicate IDs")
+        if validate:
+            validate(value)
+    with transaction(path, {key: []}, validate=validate_registry, migrate=migrate) as value:
         existing = {r["id"]: r for r in value.get(key, [])}
         previous = {r["id"]: r for r in (before or [])}
         for record in records:

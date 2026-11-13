@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import time
@@ -494,6 +493,12 @@ def run_training_remote(config_path: str, exp_id: str):
             if not path.is_relative_to(exp_dir.resolve()):
                 raise RuntimeError("Probe artifact escapes run directory")
             bundle[fname] = path.read_bytes()
+    for fname in artifact_manifest["files"]:
+        payload_path = (exp_dir / fname).resolve()
+        if not payload_path.is_relative_to(exp_dir.resolve()):
+            raise RuntimeError("Artifact export escapes run directory")
+        bundle[fname] = payload_path.read_bytes()
+    bundle.pop("artifact_manifest.json", None)
     artifact_manifest.update({{
         "schema_version": 2,
         "job_id": {job_id!r},
@@ -529,9 +534,12 @@ def main():
     bundle = run_training_remote.remote(config_path, exp_id)
 
     local_exp_dir = Path({artifacts_rel!r}) / {run_relative!r}
-    if local_exp_dir.exists() and any(local_exp_dir.iterdir()):
-        raise RuntimeError(f"Refusing to overwrite existing experiment artifact directory: {{local_exp_dir}}")
-    local_exp_dir.mkdir(parents=True, exist_ok=True)
+    import tempfile
+    from harness.artifacts import publish_run_artifacts
+    from harness.task_spec import load_active_task_spec
+    local_exp_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_context = tempfile.TemporaryDirectory(prefix=".modal-return-", dir=local_exp_dir.parent)
+    staging_dir = Path(staging_context.name)
 
     expected = {{
         "job_id": {job_id!r}, "task_id": {task_id!r}, "exp_id": exp_id,
@@ -552,16 +560,23 @@ def main():
     for fname, content in (bundle or {{}}).items():
         if fname == "artifact_manifest.json":
             continue
-        out_path = local_exp_dir / fname
-        if not out_path.resolve().is_relative_to(local_exp_dir.resolve()):
+        out_path = staging_dir / fname
+        if not out_path.resolve().is_relative_to(staging_dir.resolve()):
             raise RuntimeError("Downloaded artifact escapes output directory")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(content)
         saved_files.append(fname)
-    (local_exp_dir / "artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (staging_dir / "artifact_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if {probe_selection is not None!r}:
         from harness.cloud_probe import verify_probe_artifacts
-        verify_probe_artifacts(local_exp_dir, expected=expected, selection={probe_selection!r})
+        verify_probe_artifacts(staging_dir, expected=expected, selection={probe_selection!r})
+
+    try:
+        publication = publish_run_artifacts(staging_dir, local_exp_dir,
+            task_spec=load_active_task_spec({task_config_rel!r}), expected=expected,
+            project_root=Path.cwd(), run_kind=manifest.get("run_kind", "full"))
+    finally:
+        staging_context.cleanup()
 
     print(f"Pulled {{len(saved_files)}} artifacts into {{local_exp_dir}}: {{', '.join(saved_files)}}")
 '''
@@ -730,7 +745,7 @@ class ModalAppManager:
             if not manifest_path.is_file():
                 # Search subdirectories if any
                 found = list(stage_path.rglob("artifact_manifest.json"))
-                if found:
+                if len(found) == 1:
                     manifest_path = found[0]
                     source_dir = manifest_path.parent
                 else:
@@ -759,34 +774,23 @@ class ModalAppManager:
                             "error": f"Identity mismatch for {key}: expected {exp_val}, got {act_val}",
                         }
 
-            from harness.artifacts import validate_run
-            from harness.state_store import workspace_lock
-
+            from harness.artifacts import publish_run_artifacts
+            from harness.project import HarnessProject
+            from harness.task_spec import load_active_task_spec
             try:
-                validate_run(source_dir, expected={k: v for k, v in expected_identity.items() if v is not None}, project_root=root)
+                project = HarnessProject.discover(root)
+                publication = publish_run_artifacts(source_dir, artifact_dir,
+                    task_spec=load_active_task_spec(project.task_config_path),
+                    expected={k: v for k, v in expected_identity.items() if v is not None},
+                    project_root=root, run_kind=manifest.get("run_kind", "full"))
             except (ValueError, RuntimeError, OSError, KeyError, TypeError) as exc:
                 return {"success": False, "error": f"Downloaded run failed verification: {exc}"}
-
-            def contents(path):
-                return {p.relative_to(path).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
-                        for p in path.rglob("*")}
-
-            migrated_files = [item.name for item in source_dir.iterdir()]
-            artifact_dir.parent.mkdir(parents=True, exist_ok=True)
-            with workspace_lock(artifact_dir.parent):
-                if artifact_dir.exists() or artifact_dir.is_symlink():
-                    if not artifact_dir.is_dir() or contents(artifact_dir) != contents(source_dir):
-                        return {"success": False, "error": f"Run immutability conflict: {artifact_dir} already exists with different contents"}
-                else:
-                    # Publish a complete tree on the destination filesystem.
-                    with tempfile.TemporaryDirectory(prefix=".modal-import-", dir=artifact_dir.parent) as publish:
-                        staged = Path(publish) / "run"
-                        shutil.copytree(source_dir, staged)
-                        staged.rename(artifact_dir)
+            migrated_files = list(publication.files)
 
             return {
                 "success": True,
                 "artifact_dir": str(artifact_dir),
                 "migrated_files": migrated_files,
+                "publication_disposition": publication.disposition,
                 "manifest": manifest,
             }

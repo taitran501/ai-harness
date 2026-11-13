@@ -2,36 +2,32 @@
 
 import json
 
-import pandas as pd
+from harness.evaluation import align_prediction_frame, validate_prediction_batch, PredictionContractError
 
 
 def align_prediction_ids(frame, expected_ids, id_column, *, kind="Test"):
     """Require an exact one-to-one ID set and return rows in dataset order."""
-    expected = pd.Series(list(expected_ids), name=id_column)
-    if expected.isna().any() or expected.duplicated().any():
-        raise ValueError(f"{kind} dataset requires unique, non-null IDs")
-    if id_column not in frame or frame[id_column].isna().any() or frame[id_column].duplicated().any():
-        raise ValueError(f"{kind} predictions require unique, non-null IDs")
-    if set(frame[id_column]) != set(expected):
-        raise ValueError(f"{kind} prediction IDs do not match the declared dataset")
-    return expected.to_frame().merge(frame, on=id_column, how="left", validate="one_to_one")
+    return align_prediction_frame(frame, expected_ids=expected_ids, id_column=id_column, purpose=kind)
 
 
 def extract_test_predictions(frame, task_spec, *, expected_ids=None):
     """Keep model class order alongside labels and probability matrices."""
+    if task_spec.id_column not in frame:
+        raise PredictionContractError("Test predictions require explicit IDs")
     if expected_ids is not None:
         frame = align_prediction_ids(frame, expected_ids, task_spec.id_column)
-    result = {}
+    result = {"ids": frame[task_spec.id_column].tolist()}
     for target in task_spec.subtasks:
         column = f"pred_{target}" if f"pred_{target}" in frame else target
         if column in frame:
-            result[f"pred_{target}"] = frame[column].values
+            result[f"pred_{target}"] = [json.loads(v) if isinstance(v, str) and v.startswith("[") else v for v in frame[column]]
         if f"proba_{target}" in frame:
-            result[f"proba_{target}"] = frame[f"proba_{target}"].values
+            result[f"proba_{target}"] = [json.loads(v) if isinstance(v, str) else v for v in frame[f"proba_{target}"]]
         class_column = f"classes_{target}"
         if class_column in frame:
             if frame[class_column].isna().any() or frame[class_column].nunique() != 1:
-                raise ValueError("Class order changed within test predictions")
+                raise PredictionContractError("Class order changed within test predictions")
             value = frame[class_column].iloc[0]
             result[class_column] = json.loads(value) if isinstance(value, str) else value
+    validate_prediction_batch(task_spec, result, expected_ids=frame[task_spec.id_column], purpose="test")
     return result

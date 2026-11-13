@@ -641,14 +641,14 @@ class RetrospectiveGateTests(unittest.TestCase):
         with self.assertRaises(GateViolationError):
             enforce_retrospective(self.root, cfg={**cfg, "research":{**cfg["research"], "decision_rule_id":"wrong"}}, recovery_probe=True)
 
-    def test_direct_runner_blocks_before_data_load_but_smoke_remains_available(self):
+    def test_direct_runner_blocks_before_training_but_smoke_remains_available(self):
         self.add_runs()
         cfg, path = self.cfg()
         args = build_parser().parse_args(["--config", str(path), "--project-root", str(self.root)])
         runner = UniversalRunner(cfg, str(path), args)
         with mock.patch("harness.runner.GroundingGate.verify_config", return_value=(None, None, {})), \
              mock.patch("harness.runner.GroundingGate.write_receipt"), \
-             mock.patch.object(runner, "_load_training_data", side_effect=RuntimeError("reached training")) as load:
+             mock.patch.object(runner, "_get_model_factory", side_effect=RuntimeError("reached training")) as load:
             with self.assertRaises(GateViolationError):
                 runner.run()
             load.assert_not_called()

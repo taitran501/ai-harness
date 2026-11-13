@@ -1383,34 +1383,26 @@ class KaggleKernelManagerTests(unittest.TestCase):
         self.assertEqual(meta["enable_internet"], "true")
 
     def test_migrate_downloaded_artifacts(self):
+        from tests.fixtures import make_workspace
+        root, _ = make_workspace(root_path=self.p / "workspace", task={"task": task().metadata})
         download_d = self.p / "download"
         download_d.mkdir()
-
-        (download_d / "oof_predictions.csv").write_text(
-            "id,pred\n1,yes\n", encoding="utf-8"
-        )
-        (download_d / "metrics.json").write_text("{}", encoding="utf-8")
         seal_fixture(download_d, task())
-        (download_d / "heavy_model.pt").write_text("BINARY DUMP", encoding="utf-8")
-
-        target_d = self.p / "artifacts" / "exp_test"
-        migrated = KaggleKernelManager.migrate_downloaded_artifacts(
-            download_d, target_d
-        )
-
+        target_d = root / "artifacts/exp_test"
+        extra = download_d / "heavy_model.pt"
+        extra.write_text("BINARY DUMP", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Undeclared"):
+            KaggleKernelManager.migrate_downloaded_artifacts(download_d, target_d, project_root=root)
+        self.assertFalse(target_d.exists())
+        extra.unlink()
+        migrated = KaggleKernelManager.migrate_downloaded_artifacts(download_d, target_d, project_root=root)
         self.assertIn("oof_predictions.csv", migrated)
         self.assertIn("metrics.json", migrated)
-        self.assertNotIn("heavy_model.pt", migrated)
-        self.assertTrue((target_d / "oof_predictions.csv").exists())
-        self.assertFalse((target_d / "heavy_model.pt").exists())
-        with self.assertRaisesRegex(ValueError, "overwrite"):
-            KaggleKernelManager.migrate_downloaded_artifacts(download_d, target_d)
+        self.assertEqual(KaggleKernelManager.migrate_downloaded_artifacts(download_d, target_d, project_root=root), migrated)
         (download_d / "metrics.json").write_text("{}")
-        with self.assertRaisesRegex(ValueError, "hash"):
-            KaggleKernelManager.migrate_downloaded_artifacts(
-                download_d, self.p / "invalid"
-            )
-        self.assertFalse((self.p / "invalid").exists())
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            KaggleKernelManager.migrate_downloaded_artifacts(download_d, root / "invalid", project_root=root)
+        self.assertFalse((root / "invalid").exists())
 
 
 # ---------------------------------------------------------------------------

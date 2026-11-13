@@ -324,3 +324,20 @@ When dropping raw context into `docs/TASK.md`, use this exact Markdown structure
 - **Optimization Direction**: [maximize | minimize]
 - **Submission Output**: [submission.csv]
 ```
+
+## Declaring a complete validation subset
+
+```yaml
+validation:
+  strategy: kfold
+  num_folds: 5
+  complete_folds: [0, 1]  # Optional; task contract only.
+```
+
+Absent `complete_folds`, all generated/declared folds form the complete protocol.
+The list must be nonempty, unique and reference existing folds. Experiment
+`data.folds` selects execution; a proper subset produces probe evidence. Experiment
+validation overrides cannot redefine the task protocol. A single CLI fold can be
+complete only if the task declares that fold as its complete protocol and no
+sampling/debug restriction applies. Complete holdout and time-series protocols
+remain full even when their evaluation rows exclude training-only rows.

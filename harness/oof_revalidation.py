@@ -81,7 +81,7 @@ def build_variant_predictions(selected: pd.DataFrame, task_spec: Any) -> Dict[st
     values, single-value `classes_` columns, subtask probability columns.
     Both paths MUST stay in sync; the runner imports this function.
     """
-    predictions: Dict[str, Any] = {}
+    predictions: Dict[str, Any] = {"ids": selected[task_spec.id_column].tolist()}
     for col in selected:
         if col.startswith("pred_"):
             values = selected[col].tolist()
@@ -98,7 +98,7 @@ def build_variant_predictions(selected: pd.DataFrame, task_spec: Any) -> Dict[st
                     for v in selected[col].tolist()
                 ]
         elif col.startswith("classes_"):
-            if selected[col].nunique() != 1:
+            if selected[col].isna().any() or selected[col].nunique() != 1:
                 raise ValueError("Class order changed across folds")
             predictions[col] = json.loads(selected[col].iloc[0])
     return predictions

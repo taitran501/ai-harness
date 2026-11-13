@@ -238,6 +238,46 @@ class BridgeSession:
     stop_reason: Optional[str] = None
 
 
+def migrate_session(value):
+    """Only the documented legacy `id` alias and optional fields may migrate."""
+    if isinstance(value, dict) and "session_id" not in value and "id" in value:
+        value = {**value, "session_id": value["id"]}
+    return value
+
+
+def validate_session(value):
+    if "schema_version" in value and (type(value["schema_version"]) is not int or value["schema_version"] != 1):
+        from harness.state_store import StateIntegrityError
+        raise StateIntegrityError("STATE_VERSION_UNSUPPORTED", "session.json", field="schema_version")
+    for key in ("session_id", "goal", "status", "created_at", "updated_at"):
+        if not isinstance(value.get(key), str):
+            raise ValueError(f"{key} must be a string")
+    if value["status"] not in {"ACTIVE", "PAUSED_FOR_APPROVAL", "BUDGET_REACHED", "STOPPED", "COMPLETED"}:
+        raise ValueError("unsupported session status")
+    for key in ("budget", "compute_usage", "approval_policy", "starting_state"):
+        if key in value and not isinstance(value[key], dict):
+            raise ValueError(f"{key} must be an object")
+    for key in ("actions", "observations", "experiments_run"):
+        if key in value and not isinstance(value[key], list):
+            raise ValueError(f"{key} must be a list")
+    for key in ("active", "reassess_recommended"):
+        if key in value and type(value[key]) is not bool:
+            raise ValueError(f"{key} must be boolean")
+    for key in ("final_state", "pending_approval_action"):
+        if value.get(key) is not None and not isinstance(value[key], dict):
+            raise ValueError(f"{key} must be an object or null")
+    for key in ("actions", "observations"):
+        if any(not isinstance(item, dict) for item in value.get(key, [])):
+            raise ValueError(f"{key} entries must be objects")
+    for key in ("budget", "compute_usage"):
+        for field_name, number in value.get(key, {}).items():
+            if field_name == "hard_stop_on_consecutive_rejections":
+                if type(number) is not bool:
+                    raise ValueError(f"{key}.{field_name} must be boolean")
+            elif number is not None and (isinstance(number, bool) or not isinstance(number, (int, float)) or number < 0):
+                raise ValueError(f"{key}.{field_name} must be a nonnegative number")
+
+
 ACTION_ALIASES: Dict[str, str] = {
     # Checkpoint aliases
     "checkpoint": "record_research_checkpoint",

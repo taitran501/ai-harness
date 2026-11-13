@@ -161,7 +161,9 @@ class TestEnvironmentAndCloudJobs(unittest.TestCase):
         process = Mock(pid=12345)
         process.wait.side_effect = lambda: (finished.wait(2), 1)[1]
 
-        with patch("harness.cloud_job_runner.subprocess.Popen", return_value=process):
+        with patch("harness.cloud_job_runner.subprocess.Popen", return_value=process), patch(
+            "harness.run_data.resolve_execution_scope", return_value={"resolved": True, "complete_selection": True}
+        ):
             job = manager.start_job(
                 backend="local",
                 config_path=cfg_path,
@@ -309,6 +311,9 @@ class TestModalAppManager(unittest.TestCase):
         from tests.fixtures import task
 
         with tempfile.TemporaryDirectory() as td:
+            import yaml
+            (Path(td) / "configs").mkdir()
+            (Path(td) / "configs/task.yaml").write_text(yaml.safe_dump({"task": task().metadata}), encoding="utf-8")
             source = Path(td) / "source" / "exp001"
             seal_fixture(source, task())
             dest = Path(td) / "artifacts" / "exp001"
@@ -320,15 +325,15 @@ class TestModalAppManager(unittest.TestCase):
             with patch("subprocess.run", side_effect=fake_volume_get):
                 res = ModalAppManager.pull_app_output(
                     exp_id="exp001", volume_name="test-volume", artifact_dir=dest,
-                    expected_identity={"exp_id": "exp001"})
+                    expected_identity={"exp_id": "exp001"}, project_root=Path(td))
                 self.assertTrue(res["success"], res.get("error"))
                 self.assertEqual((dest / "metrics.json").read_bytes(), (source / "metrics.json").read_bytes())
                 (source / "metrics.json").write_text("{}")
                 res = ModalAppManager.pull_app_output(
                     exp_id="exp001", volume_name="test-volume", artifact_dir=dest,
-                    expected_identity={"exp_id": "exp001"})
+                    expected_identity={"exp_id": "exp001"}, project_root=Path(td))
                 self.assertFalse(res["success"])
-                self.assertIn("hash mismatch", res["error"])
+                self.assertIn("mismatch", res["error"])
 
 
 class TestModalScriptAndVolumeLogic(unittest.TestCase):

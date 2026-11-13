@@ -84,17 +84,8 @@ class BlendOptimizerContractTests(unittest.TestCase):
         return AgentBridge(root)
 
     def test_incompatible_class_order_fails_before_reporting_an_optimization(self):
-        bridge = self.make_bridge(reverse_second=True)
-        with self.assertRaisesRegex(ValueError, "EXTERNAL_PREDICTION_NOT_SUBMITTABLE"):
-            find_optimal_blend_weights(bridge.project, ["A", "B"])
-        before = {}
-        for name in ("A", "B"):
-            folder = bridge.artifacts_dir / name
-            validate_run(folder, task_spec=bridge.task_spec, plugin=bridge.task_plugin)
-            before[name] = sha256(folder / "artifact_manifest.json")
-        self.assertFalse(bridge.comp_state.state["candidate_pool"]["synthesized_candidates"])
-        for name in before:
-            self.assertEqual(sha256(bridge.artifacts_dir / name / "artifact_manifest.json"), before[name])
+        with self.assertRaisesRegex(ValueError, "class order"):
+            self.make_bridge(reverse_second=True)
 
     def test_compatible_sources_optimize_and_build_the_reported_candidate(self):
         bridge = self.make_bridge()
@@ -415,6 +406,8 @@ class ExternalCandidateMetadataTests(unittest.TestCase):
         spec = task("binary_classification", "roc_auc", "maximize") if probability else task()
         doc = {"task": copy.deepcopy(spec.metadata)}
         doc["task"]["data"]["train_path"] = "dataset/train.csv"
+        if probability:
+            doc["task"]["subtasks"][0]["classes"] = [1, 0]
         truth = pd.DataFrame({
             "id": range(6),
             "group": range(6),
@@ -437,7 +430,9 @@ class ExternalCandidateMetadataTests(unittest.TestCase):
         )
         self.assertEqual(registered.status, "SUCCESS", registered.summary)
         folder = bridge.artifacts_dir / name
-        validate_run(folder, task_spec=bridge.task_spec, plugin=bridge.task_plugin)
+        with self.assertRaisesRegex(ValueError, "full validation"):
+            validate_run(folder, task_spec=bridge.task_spec, plugin=bridge.task_plugin)
+        validate_run(folder, task_spec=bridge.task_spec, plugin=bridge.task_plugin, _run_kind="external")
         _, promoted = bridge.execute_action("promote_candidate", {"exp_id": name})
         self.assertEqual(promoted.status, "FAILED", promoted.summary)
         self.assertIn("EXTERNAL_PREDICTION_NOT_SUBMITTABLE", promoted.summary)
@@ -540,7 +535,7 @@ class _DetachedContext:
 
 class ScoringImportHermeticTests(unittest.TestCase):
     def test_migrate_with_project_root_imports_scorer_from_detached_cwd(self):
-        ws, _ = make_workspace()
+        ws, _ = make_workspace(task={"task": task().metadata})
         try:
             scorer_sha = _write_scorer(ws)
             with _DetachedContext() as ctx:

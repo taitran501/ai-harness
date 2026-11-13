@@ -21,7 +21,21 @@ import yaml
 
 from harness.artifacts import contract_identity, digest, validate_run
 from harness.io_utils import atomic_write_text
-from harness.state_store import transaction, workspace_lock
+from harness.state_store import transaction, workspace_lock, read_json_state, StateIntegrityError
+
+
+def validate_research_state(value):
+    if type(value.get("schema_version", 1)) is not int or value.get("schema_version", 1) != 1:
+        raise StateIntegrityError("STATE_VERSION_UNSUPPORTED", "research_memory.json")
+    if not isinstance(value.get("entries"), list):
+        raise ValueError("entries must be a list")
+    for entry in value["entries"]:
+        if not isinstance(entry, dict) or any(not isinstance(entry.get(k), str) for k in ("id", "scope", "kind")):
+            raise ValueError("entries require string id, scope, kind")
+    history = value.get("scope_history", {})
+    buckets = history.values() if isinstance(history, dict) else [history]
+    if any(not isinstance(bucket, list) or any(not isinstance(x, str) for x in bucket) for bucket in buckets):
+        raise ValueError("scope_history must contain lists of scope strings")
 
 _SYNC_CACHE: dict = {}
 # Key: (absolute folder path, sync identity digest, per-file (name, mtime_ns,
@@ -401,6 +415,8 @@ class ResearchMemory:
                     from harness.task_spec import load_task_spec
 
                     task_spec = load_task_spec(task_path)
+                except StateIntegrityError:
+                    raise
                 except Exception:
                     task_spec = {}
             else:
@@ -458,9 +474,7 @@ class ResearchMemory:
         return cls(project_root, artifacts_dir=artifacts_dir, task_spec=task_spec, plugin=plugin)
 
     def _read(self):
-        if not self.path.exists():
-            return {"entries": []}
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        return read_json_state(self.path, default_factory=lambda: {"entries": []}, validate=validate_research_state)
 
     def _valid_scopes(self, data) -> set:
         """Current scope plus scopes this task's memory file has known.
@@ -513,7 +527,7 @@ class ResearchMemory:
         entry = {"id": uuid.uuid4().hex, "scope": self.scope, "kind": kind,
                  "timestamp": time.time(), **fields}
         with workspace_lock(self.path.parent):
-            with transaction(self.path, {"schema_version": 1, "entries": []}) as state:
+            with transaction(self.path, {"schema_version": 1, "entries": []}, validate=validate_research_state) as state:
                 history = state.get("scope_history")
                 if history is None:
                     # Migrate the legacy file: attribute every scope present
@@ -548,6 +562,8 @@ class ResearchMemory:
         index_path = directory / "evaluations.json"
         try:
             indexed = set(json.loads(index_path.read_text(encoding="utf-8")).get("evaluations", {}).values())
+        except StateIntegrityError:
+            raise
         except (OSError, ValueError, TypeError):
             return []
 
@@ -560,6 +576,8 @@ class ResearchMemory:
                 continue
             try:
                 receipt = read_decision_evaluation(directory / f"{evaluation_id}.json")
+            except StateIntegrityError:
+                raise
             except (OSError, ValueError, KeyError, TypeError):
                 continue
             if (receipt.get("outcome") != entry.get("outcome")
@@ -689,6 +707,8 @@ class ResearchMemory:
                 "evaluation_id": evaluation_id,
                 "score": receipt.get("candidate_score"),
             }
+        except StateIntegrityError:
+            raise
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
@@ -852,6 +872,8 @@ class ResearchMemory:
                 }
                 _SYNC_CACHE[cache_key] = record
                 runs.append(record)
+            except StateIntegrityError:
+                raise
             except (ValueError, KeyError, OSError, TypeError, yaml.YAMLError):
                 continue
         # Imported/remote completions are evaluated on the canonical workspace,
@@ -939,6 +961,8 @@ class ResearchMemory:
                     policy_directory(self.root) / f"{decision_evaluation_id}.json") if decision_evaluation_id else None
                 if not evaluation or evaluation.get("evaluation_id") != decision_evaluation_id or evaluation.get("outcome") != "supported":
                     raise ValueError("MACHINE_EVALUATED_GAIN_RECEIPT_REQUIRED")
+            except StateIntegrityError:
+                raise
             except (OSError, ValueError, KeyError, TypeError):
                 empirical_status = "hypothesis"
                 citation_admission = {"status": "blocked", "admission": "blocked",

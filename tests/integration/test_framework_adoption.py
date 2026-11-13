@@ -62,6 +62,7 @@ from harness.task_spec import (
 )
 from harness.toolchain import (
     FRAMEWORK_DIR_ENV,
+    FrameworkConfigurationError,
     PIN_DEPTH_ENV,
     PIN_DISABLE_ENV,
     _needs_pin,
@@ -699,6 +700,7 @@ def _make_canonical(tmp: Path, name: str = "canonical") -> Path:
     canonical = tmp / name
     (canonical / "harness").mkdir(parents=True)
     (canonical / "harness" / "__init__.py").write_text("", encoding="utf-8")
+    (canonical / ".git").mkdir()
     return canonical
 
 
@@ -731,16 +733,17 @@ class TestFindFrameworkRoot(unittest.TestCase):
             with mock.patch.dict(os.environ, env, clear=True):
                 self.assertIsNone(find_framework_root(ws))
 
-    def test_invalid_env_falls_back_to_clone(self) -> None:
+    def test_invalid_env_raises_even_when_clone_exists(self) -> None:
         with tempfile.TemporaryDirectory(prefix="test_sif_invalid_") as tmp:
             tmp_path = Path(tmp)
             ws = tmp_path / "ws"
             (ws / "configs").mkdir(parents=True)
-            clone = _make_ws_clone(ws)
+            _make_ws_clone(ws)
             bad = tmp_path / "not-a-framework"
             bad.mkdir()
             with mock.patch.dict(os.environ, {FRAMEWORK_DIR_ENV: str(bad)}):
-                self.assertEqual(find_framework_root(ws), clone)
+                with self.assertRaises(FrameworkConfigurationError):
+                    find_framework_root(ws)
 
 
 class TestCanonicalPin(unittest.TestCase):

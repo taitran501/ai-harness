@@ -27,6 +27,25 @@ import yaml
 from harness.io_utils import safe_relpath
 from harness.submission_manager import SubmissionManager
 from harness.tree_journal import TreeJournal
+from harness.state_store import read_json_state, StateIntegrityError
+
+
+def validate_competition_state(value):
+    if value.get("version", "3.0_universal") != "3.0_universal":
+        raise StateIntegrityError("STATE_VERSION_UNSUPPORTED", "competition_state.json")
+    for key in ("gates", "data_audit_config", "agent_context_config", "candidate_pool",
+                "freeze_selection", "agent_copilot", "finalization"):
+        if key in value and not isinstance(value[key], dict):
+            raise ValueError(f"{key} must be an object")
+    for key in ("spec_confirmed", "data_risks_confirmed", "baseline_locked", "freeze_locked", "finalized"):
+        if key in value.get("gates", {}) and type(value["gates"][key]) is not bool:
+            raise ValueError(f"gates.{key} must be boolean")
+    if not isinstance(value.get("audit_trail", []), list):
+        raise ValueError("audit_trail must be a list")
+    for config in ("data_audit_config", "agent_context_config"):
+        for key, flag in value.get(config, {}).items():
+            if key != "auto_scan_mode" and type(flag) is not bool:
+                raise ValueError(f"{config}.{key} must be boolean")
 
 
 def official_primary_value(entry, primary_metric: str):
@@ -282,24 +301,21 @@ class CompetitionStateMachine:
 
     def _load_or_init_state(self) -> Dict[str, Any]:
         default = self._default_state()
-        if not self.state_file.exists():
+        try:
+            loaded = read_json_state(self.state_file, validate=validate_competition_state)
+        except FileNotFoundError:
             from harness.state_store import transaction
 
-            with transaction(self.state_file, default) as current:
+            with transaction(self.state_file, default, validate=validate_competition_state) as current:
                 default = dict(current)
             return default
-        try:
-            loaded = json.loads(self.state_file.read_text(encoding="utf-8"))
-            for k, v in default.items():
-                if k not in loaded:
-                    loaded[k] = v
-                elif isinstance(v, dict) and isinstance(loaded[k], dict):
-                    for sk, sv in v.items():
-                        if sk not in loaded[k]:
-                            loaded[k][sk] = sv
-            return loaded
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError("Required competition state is unreadable") from error
+        for k, v in default.items():
+            if k not in loaded:
+                loaded[k] = v
+            elif isinstance(v, dict):
+                for sk, sv in v.items():
+                    loaded[k].setdefault(sk, sv)
+        return loaded
 
     def save(self) -> None:
         import copy
@@ -313,7 +329,8 @@ class CompetitionStateMachine:
             datetime.timezone.utc
         ).isoformat()
         self.state = save_snapshot(
-            self.state_file, getattr(self, "_state_snapshot", {}), self.state
+            self.state_file, getattr(self, "_state_snapshot", {}), self.state,
+            validate=validate_competition_state,
         )
         self._state_snapshot = copy.deepcopy(self.state)
 

@@ -448,6 +448,28 @@ def utility(score: float, direction: str) -> float:
     return float(score) if direction == "maximize" else -float(score)
 
 
+class PredictionContractError(ValueError):
+    """Predictions violate the declared identity or payload contract."""
+
+
+def align_prediction_frame(frame, *, expected_ids, id_column, purpose="prediction"):
+    expected = pd.Series(list(expected_ids), name=id_column)
+    if expected.isna().any() or expected.duplicated().any():
+        raise PredictionContractError(f"{purpose}: dataset requires unique, non-null IDs")
+    if id_column not in frame or frame[id_column].isna().any() or frame[id_column].duplicated().any():
+        raise PredictionContractError(f"{purpose}: predictions require unique, non-null IDs")
+    if set(frame[id_column]) != set(expected):
+        raise PredictionContractError(f"{purpose} prediction IDs do not match the declared dataset")
+    return expected.to_frame().merge(frame, on=id_column, how="left", validate="one_to_one")
+
+
+def read_prediction_frame(path, *, expected_ids, id_column, **kwargs):
+    """Parse IDs using the dataset's type, preserving string IDs such as '001'."""
+    ids = list(expected_ids)
+    dtype = {id_column: str} if ids and all(isinstance(value, str) for value in ids) else None
+    return pd.read_csv(path, dtype=dtype, **kwargs)
+
+
 @dataclass
 class PredictionBatch:
     ids: list[Any]
@@ -455,19 +477,28 @@ class PredictionBatch:
     probabilities: dict[str, Any] = field(default_factory=dict)
     class_order: dict[str, list[Any]] = field(default_factory=dict)
 
+    def to_mapping(self):
+        return {"ids": list(self.ids), **self.labels,
+                **{"proba_" + k: v for k, v in self.probabilities.items()},
+                **{"classes_" + k: v for k, v in self.class_order.items()}}
+
     @classmethod
     def from_mapping(cls, predictions: Any, ids: Any) -> "PredictionBatch":
+        ids = list(ids)
+        expected = pd.Series(ids, dtype=object)
+        if expected.isna().any() or expected.duplicated().any():
+            raise PredictionContractError("Expected prediction IDs must be unique and non-null")
         if isinstance(predictions, cls):
             if list(predictions.ids) != list(ids):
-                raise ValueError("Prediction IDs do not match evaluation IDs")
+                raise PredictionContractError("Prediction IDs do not match evaluation IDs")
             return predictions
         if not isinstance(predictions, dict):
             raise TypeError("Predictions must be a mapping or PredictionBatch")
         if "ids" in predictions and list(predictions["ids"]) != list(ids):
-            raise ValueError("Prediction IDs do not match evaluation IDs")
+            raise PredictionContractError("Prediction IDs do not match evaluation IDs")
         if "labels" in predictions and isinstance(predictions["labels"], dict):
             if "ids" in predictions and list(predictions["ids"]) != list(ids):
-                raise ValueError("Prediction IDs mismatch")
+                raise PredictionContractError("Prediction IDs mismatch")
             return cls(
                 list(ids),
                 predictions["labels"],
@@ -576,7 +607,7 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
         or truth[spec.id_column].duplicated().any()
     ):
         raise ValueError("Evaluation IDs must be present, non-null and unique")
-    batch = PredictionBatch.from_mapping(predictions, truth[spec.id_column])
+    batch = validate_prediction_contract(spec, truth, predictions)
     active = [s for s in spec.subtasks.values() if s.weight > 0]
     if not active:
         raise ValueError("At least one positive target weight is required")
@@ -919,26 +950,22 @@ def evaluate(spec: Any, truth: pd.DataFrame, predictions: Any) -> dict:
     ).to_dict()
 
 
-def validate_prediction_contract(spec, truth, predictions):
+def _validate_prediction_batch(spec, predictions, *, expected_ids, purpose):
+    truth = pd.DataFrame({spec.id_column: list(expected_ids)})
     if (
         truth.empty
         or spec.id_column not in truth
         or truth[spec.id_column].isna().any()
         or truth[spec.id_column].duplicated().any()
     ):
-        raise ValueError(
+        raise PredictionContractError(
             "Evaluation requires unique non-null IDs and nonempty coverage"
         )
+    if not isinstance(predictions, PredictionBatch) and "ids" not in predictions:
+        raise PredictionContractError(f"{purpose}: explicit prediction IDs are required")
     batch = PredictionBatch.from_mapping(predictions, truth[spec.id_column])
     for key, st in spec.subtasks.items():
         col = st.column or key
-        columns = (
-            [st.column_prefix + str(c) for c in st.labels]
-            if st.column_prefix
-            else [col]
-        )
-        if not all(c in truth and not truth[c].isna().any() for c in columns):
-            raise ValueError("Missing target: " + key)
         values = next(
             (
                 batch.labels[k]
@@ -948,25 +975,40 @@ def validate_prediction_contract(spec, truth, predictions):
             None,
         )
         if values is None or len(values) != len(truth):
-            raise ValueError("Missing prediction coverage: " + key)
+            raise PredictionContractError("Missing prediction coverage: " + key)
         if st.task_type == "interactive_agent":
             # Episode payloads are structured and naturally ragged. Coverage and
             # IDs were checked above; their schema/semantics belong to the task's
             # custom evaluator, not NumPy's rectangular classification contract.
             if any(value is None for value in values):
-                raise ValueError("Missing interactive prediction: " + key)
+                raise PredictionContractError("Missing interactive prediction: " + key)
             continue
+        proba = next((batch.probabilities[k] for k in (key, col) if k in batch.probabilities), None)
+        order = batch.class_order.get(key, batch.class_order.get(col))
+        declared = list(st.labels or st.classes) if st.task_type == "multilabel_classification" else list(st.classes)
+        if order is not None and [_normalize_class_value(x) for x in order] != [_normalize_class_value(x) for x in declared]:
+            raise PredictionContractError("Changed class order: " + key)
+        if proba is not None:
+            matrix = np.asarray(proba, dtype=float)
+            if order is None or [_normalize_class_value(x) for x in order] != [_normalize_class_value(x) for x in declared]:
+                raise PredictionContractError("Missing or changed class order: " + key)
+            if matrix.shape != (len(truth), len(declared)) or not np.isfinite(matrix).all():
+                raise PredictionContractError("Invalid probability shape or values: " + key)
+            if (matrix < 0).any() or (matrix > 1).any():
+                raise PredictionContractError("Probability outside [0, 1]: " + key)
+            if st.task_type != "multilabel_classification" and not np.allclose(matrix.sum(axis=1), 1, atol=1e-6):
+                raise PredictionContractError("Probability rows must sum to one: " + key)
         array = np.asarray(values)
         if st.task_type in ("regression", "ranking"):
             if (
                 array.shape != (len(truth),)
                 or not np.isfinite(array.astype(float)).all()
             ):
-                raise ValueError("Invalid regression predictions")
+                raise PredictionContractError("Invalid regression predictions")
         elif st.task_type == "multilabel_classification":
             width = len(st.labels or st.classes)
             if array.shape != (len(truth), width) or not np.isin(array, [0, 1]).all():
-                raise ValueError("Invalid multilabel predictions")
+                raise PredictionContractError("Invalid multilabel predictions")
         elif st.classes:
             normalized_classes = set(_normalize_class_value(c) for c in st.classes)
             normalized_array = _normalize_class_array(array)
@@ -978,17 +1020,39 @@ def validate_prediction_contract(spec, truth, predictions):
                     and (array >= 0.0).all()
                     and (array <= 1.0).all()
                 ):
-                    raise ValueError(
+                    raise PredictionContractError(
                         f"Predictions for target '{key}' contain continuous probabilities "
                         f"(range [{array.min():.4f}, {array.max():.4f}]) instead of discrete class labels {st.classes}. "
                         f"For probabilistic evaluation (roc_auc, logloss), provide probabilities as 'proba_{key}' "
                         f"or threshold predictions into discrete class labels."
                     )
-                raise ValueError(
+                raise PredictionContractError(
                     f"Predictions outside target domain for '{key}': "
                     f"found {set(normalized_array) - normalized_classes} not in {normalized_classes}"
                 )
     return batch
+
+def validate_prediction_batch(spec, predictions, *, expected_ids, purpose="oof"):
+    try:
+        return _validate_prediction_batch(spec, predictions, expected_ids=expected_ids, purpose=purpose)
+    except PredictionContractError:
+        raise
+    except (TypeError, ValueError, KeyError) as exc:
+        raise PredictionContractError(f"{purpose}: {exc}") from exc
+
+
+def validate_prediction_contract(spec, truth, predictions):
+    # Legacy direct scorers accept positional mappings; transport boundaries bind
+    # IDs before reaching this API. Explicit IDs are always checked, never replaced.
+    if isinstance(predictions, dict) and "ids" not in predictions:
+        predictions = {**predictions, "ids": truth[spec.id_column].tolist()}
+    batch = validate_prediction_batch(spec, predictions, expected_ids=truth[spec.id_column], purpose="oof")
+    for key, st in spec.subtasks.items():
+        columns = [st.column_prefix + str(c) for c in st.labels] if st.column_prefix else [st.column or key]
+        if not all(c in truth and not truth[c].isna().any() for c in columns):
+            raise PredictionContractError("Missing target: " + key)
+    return batch
+
 
 # Ergonomic alias for evaluate
 evaluate_predictions = evaluate

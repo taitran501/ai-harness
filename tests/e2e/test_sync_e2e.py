@@ -20,6 +20,7 @@ from unittest import mock
 
 from harness.cli import build_parser, main
 from harness.sync import find_framework_repo, run_sync
+from harness.toolchain import FrameworkConfigurationError, find_framework_root
 
 
 def _git(args: list[str], cwd: Path | None = None, env: dict | None = None) -> None:
@@ -102,6 +103,7 @@ def _make_stub_workspace(tmp: Path, framework_dir: str = "ai-harness") -> Path:
     fw = ws / framework_dir
     (fw / ".git").mkdir(parents=True)
     (fw / "harness").mkdir()
+    (fw / "harness/__init__.py").touch()
     (ws / "configs").mkdir(parents=True)
     return ws
 
@@ -119,6 +121,7 @@ class TestFindFrameworkRepo(unittest.TestCase):
             custom.mkdir()
             (custom / ".git").mkdir()
             (custom / "harness").mkdir()
+            (custom / "harness/__init__.py").touch()
             self.assertEqual(find_framework_repo(ws, framework_dir="custom-harness"), custom)
 
     def test_missing_returns_none(self) -> None:
@@ -126,6 +129,18 @@ class TestFindFrameworkRepo(unittest.TestCase):
             ws = Path(tmp) / "empty"
             ws.mkdir()
             self.assertIsNone(find_framework_repo(ws))
+
+    def test_invalid_environment_fails_and_relative_worktree_matches_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = _make_stub_workspace(Path(tmp))
+            with mock.patch.dict(os.environ, {"HARNESS_FRAMEWORK_DIR": "missing"}):
+                with self.assertRaises(FrameworkConfigurationError):
+                    find_framework_repo(ws)
+            git_marker = ws / "ai-harness/.git"
+            git_marker.rmdir()
+            git_marker.write_text("gitdir: elsewhere", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"HARNESS_FRAMEWORK_DIR": "ai-harness"}):
+                self.assertEqual(find_framework_repo(ws), find_framework_root(ws))
 
 
 class TestAttachPinning(unittest.TestCase):

@@ -279,13 +279,18 @@ def load_registration(project, rule_id):
     return value
 
 
-def reserve_comparison_slot(project, task_spec, cfg, *, plugin=None):
+def reserve_comparison_slot(project, task_spec, cfg, *, plugin=None, resolved_scope=None):
     """Called by the runner before training, never by post-hoc decision notes."""
     research = cfg.get("research", {})
     rule_id = research.get("decision_rule_id")
     if not rule_id:
         return None
     project = _project(project)
+    if resolved_scope is None:
+        from harness.run_data import resolve_execution_scope
+        resolved_scope = resolve_execution_scope(project, cfg, task_spec=task_spec, plugin=plugin)
+    if not resolved_scope.get("resolved") or not resolved_scope.get("complete_selection"):
+        raise ValueError("VALIDATION_SCOPE_INCOMPLETE: partial runs cannot reserve full-run comparisons")
     registration = load_registration(project, rule_id)
     if registration.get("probe_plan_id") and research.get("probe_plan_id") != registration["probe_plan_id"]:
         raise ValueError("research.probe_plan_id must match the registered rule's plan")
@@ -325,6 +330,10 @@ def prepare_remote_research(project, config_path, *, effective_config=None):
     project = _project(project)
     config_path = project.root / config_path
     cfg = effective_config if effective_config is not None else (yaml.safe_load(config_path.read_text(encoding="utf-8")) or {})
+    from harness.run_data import resolve_execution_scope
+    scope = resolve_execution_scope(project, cfg)
+    if not scope["complete_selection"]:
+        raise ValueError("VALIDATION_SCOPE_INCOMPLETE: full dispatch requires resolved complete validation")
     research = cfg.get("research", {})
     from harness.citation_audit import (
         _audit_scope,

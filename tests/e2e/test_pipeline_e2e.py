@@ -161,7 +161,7 @@ class TestBoostEndToEnd(unittest.TestCase):
         self.assertEqual(manifest["files"]["test_predictions.csv"], sha256(test_pred_file))
 
         # Check validate_test_prediction passes
-        validated = validate_test_prediction(test_pred_file, task_spec=runner.task_spec, plugin=runner.task_plugin)
+        validated = validate_test_prediction(test_pred_file, task_spec=runner.task_spec, plugin=runner.task_plugin, project_root=runner.project_root)
         self.assertEqual(validated["exp_id"], "exp001")
 
     def test_item1_partitioned_test_inference(self):
@@ -415,6 +415,7 @@ class TestBoostEndToEnd(unittest.TestCase):
             cand_single_folder / "test_predictions.csv",
             task_spec=runner1.task_spec,
             plugin=runner1.task_plugin,
+            project_root=runner1.project_root,
         )
         self.assertEqual(val_cand["id"], cand_single["id"])
 
@@ -550,7 +551,7 @@ class TestBoostEndToEnd(unittest.TestCase):
         self.assertIn("classes_target", test_p.columns)
         self.assertIn("pred_target", test_p.columns)
 
-        val_cand = validate_test_prediction(test_pred_file, task_spec=r1.task_spec, plugin=r1.task_plugin)
+        val_cand = validate_test_prediction(test_pred_file, task_spec=r1.task_spec, plugin=r1.task_plugin, project_root=r1.project_root)
         self.assertEqual(val_cand["id"], cand["id"])
 
 

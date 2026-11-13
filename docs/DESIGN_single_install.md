@@ -152,9 +152,9 @@ pushed to GitHub, then the one-time migration (§7) is run.
 - Generalize `find_workspace_clone(project_root)` → `find_framework_root(
   project_root)`:
   1. If `HARNESS_FRAMEWORK_DIR` is set and valid → return it (the canonical root).
-  2. Else fall back to the current per-workspace clone search (backward
-     compatibility during migration).
-  3. Else `None`.
+  2. An explicitly configured invalid path raises `FrameworkConfigurationError`.
+  3. Only when the variable is unset, search the per-workspace clone; return
+     `None` when no conventional clone exists.
 - `_needs_pin` / `ensure_pinned_toolchain`: pin to the **canonical root** instead
   of the workspace clone. With no clone and no env var, behavior is unchanged
   (no-op). The `AI_HARNESS_PIN_DEPTH` circuit breaker is kept verbatim.
@@ -284,8 +284,9 @@ migration, so rollback never risks experiment evidence.
 ## 11. Verification / Test Plan
 
 **Unit (in the dev repo, on the branch):**
-- `find_framework_root` returns canonical when `HARNESS_FRAMEWORK_DIR` is set;
-  falls back to the workspace clone; returns `None` when neither.
+- `find_framework_root` returns a valid explicitly configured canonical checkout;
+  invalid settings raise. An unset variable permits the workspace-clone fallback;
+  absent both sources, it returns `None`.
 - `ensure_pinned_toolchain` pins to canonical (depth 1) and still fails open at
   depth ≥ 1 (existing PR #74 tests must keep passing).
 - `run_sync` does **not** invoke `pip install` when a canonical repo is present;
@@ -321,3 +322,16 @@ migration, so rollback never risks experiment evidence.
   if "pull only on demand" is preferred.
 - **CI pinning.** Independent of this change: `uv.lock`/constraints for
   reproducible dependencies (tracked separately).
+
+## Explicit configuration errors
+
+`toolchain.resolve_framework_dir` is the shared resolver for runtime routing,
+sync and status. Precedence is `--framework-dir` > `HARNESS_FRAMEWORK_DIR` >
+conventional workspace clone. Relative explicit paths resolve against the project
+root, independent of process cwd. An environment variable that exists but is empty
+or whitespace is configured and invalid. Explicit nonexistent paths, ordinary
+directories without `harness/__init__.py`, regular files and broken links raise
+`FrameworkConfigurationError` (`INVALID_FRAMEWORK_DIR`); they never fall back.
+Sync additionally requires a `.git` directory or worktree file. A valid CLI
+override may supersede an invalid environment value. `AI_HARNESS_TOOLCHAIN_NO_PIN`
+disables re-execution only; configuration validation still runs first.

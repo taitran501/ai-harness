@@ -119,3 +119,16 @@ competition-workspace/
 |   `-- artifacts/<task-id>/      # Isolated run artifacts, manifests, and logs
 `-- .agents/skills/               # Generated assistant skills
 ```
+
+## Prediction transport boundaries
+
+Plugins and persisted prediction files must preserve explicit row IDs. A
+`PredictionBatch` or mapping carrying `ids` must match input order exactly.
+Persisted frames may be shuffled only when their unique, non-null IDs exactly
+match the declared split; the shared validator then aligns them. Positional legacy
+estimators bind IDs at the immediate model-call boundary. Normalization and routing
+must retain identity. OOF, test, candidate and blend sources share payload checks,
+including exact target coverage, finite numeric predictions and declared
+class/label order. Single-label probabilities are normalized; multilabel columns
+are independent. Missing test partitions and malformed existing test files are
+errors, never implicit zero filling or an OOF-only fallback.

@@ -291,7 +291,9 @@ class RuntimeContracts(unittest.TestCase):
                 probe_samples=None,
             )
             cfg = {
-                "experiment": {"id": "llm"},
+                "experiment": {"id": "llm", "approach": "llm_prompt", "branch": "baseline", "parent_id": None,
+                               "problem_addressed": "Verify LLM output contracts", "hypothesis": "Declared labels are validated",
+                               "intervention": "Use mock completion"},
                 "llm": {
                     "prompt_template": "{x}",
                     "model_name": "fixture",
@@ -304,7 +306,7 @@ class RuntimeContracts(unittest.TestCase):
                 return_value={"text": '{"prediction":0}'},
             ) as complete:
                 frame = pd.read_csv(root / "dataset/train.csv")
-                result = runner._run_llm_prompting(frame, "test")
+                result = runner.run()
             self.assertEqual(result["primary_score"], 1)
             self.assertEqual(complete.call_args.kwargs["model_name"], "fixture")
             for response in ("{}", "not json", '{"prediction":"invalid"}'):
@@ -580,6 +582,7 @@ class ScriptPredictionTransportTests(unittest.TestCase):
     def make_runner(self, mode, metric="roc_auc", script=PREDICTION_SCRIPT):
         spec = task("binary_classification", metric, "minimize" if metric == "logloss" else "maximize")
         doc = {"task": copy.deepcopy(spec.metadata)}
+        doc["task"]["subtasks"][0]["classes"] = [1, 0]
         doc["task"]["data"].update(train_path="dataset/train.csv", test_path="dataset/test.csv")
         doc["task"]["validation"] = {"strategy": "kfold", "num_folds": 2}
         frame = pd.DataFrame({"id": range(12), "group": range(12), "x": [.1, .9] * 6,
@@ -615,7 +618,7 @@ class ScriptPredictionTransportTests(unittest.TestCase):
                                              task_spec=runner.task_spec, plugin=runner.task_plugin)
 
     def test_inconsistent_test_class_order_is_rejected(self):
-        frame = pd.DataFrame({"classes_target": ["[0, 1]", "[1, 0]"]})
+        frame = pd.DataFrame({"id": [1, 2], "classes_target": ["[0, 1]", "[1, 0]"]})
         with self.assertRaisesRegex(ValueError, "Class order changed"):
             extract_test_predictions(frame, task())
 

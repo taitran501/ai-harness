@@ -7,6 +7,39 @@ from harness.artifacts import contract_identity, digest, sha256
 from harness.evaluation import utility
 
 
+def seal_scope_fixture(folder, spec):
+    """Declare synthetic partition evidence explicitly, never repair real runs."""
+    import pandas as pd
+    from harness.validation_scope import scope_record
+    from harness.artifacts import seal_file_map
+
+    frame = pd.read_csv(folder / "oof_predictions.csv")
+    if "input_variant" in frame:
+        variant = json.loads((folder / "metrics.json").read_text())["selection_variant"]
+        selected = frame[frame.input_variant == variant].copy()
+    else:
+        selected = frame.copy()
+    key = spec.id_column
+    if key not in frame:
+        return None
+    if "fold" not in frame:
+        frame["fold"] = [i % min(2, len(frame)) for i in range(len(frame))]
+        selected["fold"] = frame["fold"]
+        frame.to_csv(folder / "oof_predictions.csv", index=False)
+    parts = [{"fold": str(f), "train_ids": [], "validation_ids": part[key].tolist()}
+             for f, part in selected.groupby("fold", sort=True)]
+    (folder / "validation_partitions.json").write_text(json.dumps({"schema_version": 1,
+        "id_column": key, "sample_limit": None, "required_partitions": parts, "partitions": parts}))
+    record = scope_record(parts, [p["fold"] for p in parts], selected[key].tolist(), selected.fold.unique().tolist())
+    manifest_path = folder / "artifact_manifest.json"
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text())
+        manifest["validation_scope"] = record
+        manifest["files"] = seal_file_map(folder)
+        manifest_path.write_text(json.dumps(manifest))
+    return record
+
+
 
 def seal_fixture(folder, spec, score=0.75, **identity):
     folder.mkdir(parents=True, exist_ok=True)
@@ -51,6 +84,7 @@ def seal_fixture(folder, spec, score=0.75, **identity):
         **identity,
     }
     (folder / "artifact_manifest.json").write_text(json.dumps(manifest))
+    seal_scope_fixture(folder, spec)
     return metrics
 
 

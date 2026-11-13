@@ -311,6 +311,7 @@ class ValidationSpec:
     split_column: Optional[str] = None
     split_file: Optional[str] = None
     embargo_pct: float = 0.01
+    complete_folds: Optional[List[Any]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> ValidationSpec:
@@ -324,6 +325,7 @@ class ValidationSpec:
             split_column=data.get("split_column"),
             split_file=data.get("split_file"),
             embargo_pct=float(data.get("embargo_pct", 0.01)),
+            complete_folds=data.get("complete_folds"),
         )
 
 

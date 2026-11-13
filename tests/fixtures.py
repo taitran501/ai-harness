@@ -157,6 +157,8 @@ def make_submission_evidence(root, exp_id, *, labels=None, cfg=None):
         **contract_identity(spec, plugin), data_sha256=digest(truth.to_dict("list")), split_sha256=digest("fixture-split"),
         resolved_config_sha256=sha256(run_dir / "run_config.yaml"), files=seal_file_map(run_dir))
     (run_dir / "artifact_manifest.json").write_text(__import__("json").dumps(manifest), encoding="utf-8")
+    from tests.evidence_fixtures import seal_scope_fixture
+    seal_scope_fixture(run_dir, spec)
     return run_dir
 
 

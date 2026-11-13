@@ -48,6 +48,11 @@ class AuditHardeningTests(unittest.TestCase):
 
     def sealed(self):
         run = self.root / "artifacts" / "exp1"
+        run.mkdir(parents=True, exist_ok=True)
+        key = next(iter(self.spec.subtasks), "target")
+        column = (self.spec.subtasks[key].column or key) if key in self.spec.subtasks else key
+        pd.DataFrame({"id": [1, 2], "pred_" + key: [0, 1], "fold": [0, 1], "input_variant": "features"}).to_csv(run / "oof_predictions.csv", index=False)
+        pd.DataFrame({"id": [1, 2], column: [0, 1]}).to_csv(run / "evaluation_truth.csv", index=False)
         seal_fixture(run, self.spec)
         return run
 
@@ -229,6 +234,8 @@ class AuditHardeningTests(unittest.TestCase):
 
     def test_modal_pull_is_idempotent_and_never_overwrites_existing_content(self):
         run = self.sealed()
+        (self.root / "configs").mkdir(exist_ok=True)
+        (self.root / "configs/task.yaml").write_text(yaml.safe_dump(self.doc), encoding="utf-8")
         dest = self.root / "recovered/exp1"
 
         def download(cmd, **kwargs):
@@ -237,7 +244,7 @@ class AuditHardeningTests(unittest.TestCase):
 
         def pull():
             with patch("harness.templates.modal_template.subprocess.run", side_effect=download):
-                return ModalAppManager.pull_app_output("exp1", "volume", dest, {"exp_id": "exp1"})
+                return ModalAppManager.pull_app_output("exp1", "volume", dest, {"exp_id": "exp1"}, project_root=self.root)
 
         self.assertTrue(pull()["success"])
         before = {p.relative_to(dest): (p.read_bytes(), p.stat().st_mtime_ns) for p in dest.rglob("*") if p.is_file()}
@@ -247,7 +254,7 @@ class AuditHardeningTests(unittest.TestCase):
         self.manifest(run, files=seal_file_map(run))
         result = pull()
         self.assertFalse(result["success"])
-        self.assertIn("immutability", result["error"])
+        self.assertIn("ARTIFACT_PUBLICATION_CONFLICT", result["error"])
         self.assertEqual(before, {p.relative_to(dest): (p.read_bytes(), p.stat().st_mtime_ns) for p in dest.rglob("*") if p.is_file()})
 
     def test_remote_research_uses_effective_config(self):

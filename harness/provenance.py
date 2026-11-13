@@ -28,7 +28,13 @@ def resolve_run_provenance(project, exp_id: str, *, require_execution_receipt: b
     from harness.artifacts import validate_run
 
     folder = Path(project.artifacts_dir) / exp_id
-    manifest = validate_run(folder, expected={"exp_id": exp_id})
+    from harness.state_store import read_json_state
+    try:
+        record = read_json_state(folder / "artifact_manifest.json")
+    except FileNotFoundError as exc:
+        raise ValueError("LEGACY_UNVERIFIED: missing manifest v2") from exc
+    kind = "external" if record.get("provenance") == "external_prediction" else "full"
+    manifest = validate_run(folder, expected={"exp_id": exp_id}, _run_kind=kind)
     validate_provenance_record(manifest)
     if require_execution_receipt and manifest["provenance"] == PredictionProvenance.REPRODUCED_EXTERNAL_CODE.value:
         receipt = manifest.get("provenance_record", {}).get("execution_receipt_id")

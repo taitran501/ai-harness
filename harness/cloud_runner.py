@@ -120,6 +120,18 @@ def validate_cloud_recipe(config, backend):
             raise ValueError('Offline recipe backend differs from requested cloud backend')
 
 
+def _discover_dispatch_project(project_root):
+    """Honor a task override only when it belongs to the selected workspace."""
+    project = HarnessProject.discover(project_root)
+    override = os.environ.get("HARNESS_TASK_CONFIG")
+    if override:
+        path = Path(override).expanduser()
+        path = (path if path.is_absolute() else project.root / path).resolve()
+        if path.is_relative_to(project.root) and path.is_file():
+            return HarnessProject.discover(project.root, path)
+    return project
+
+
 def _prepare_remote_run(
     config_path: str,
     backend: str,
@@ -136,7 +148,7 @@ def _prepare_remote_run(
             "inside a dispatched remote kernel (AI_HARNESS_REMOTE_KERNEL=1). "
             "Run the experiment locally with the runner CLI instead."
         )
-    project = HarnessProject.discover(project_root, os.environ.get("HARNESS_TASK_CONFIG"))
+    project = _discover_dispatch_project(project_root)
     config = Path(config_path).expanduser()
     if not config.is_absolute():
         config = project.root / config
@@ -169,6 +181,11 @@ def _prepare_remote_run(
             f"'{contract_backend}' (execution.locked: true) but '{backend}' was requested. "
             f"Run 'ai-harness set-backend {backend} --unlock' to switch the contract backend."
         )
+    if probe_spec is None:
+        from harness.run_data import resolve_execution_scope
+        validation_scope = resolve_execution_scope(project, effective_config, task_spec=task_spec)
+        if not validation_scope["complete_selection"]:
+            raise ValueError("VALIDATION_SCOPE_INCOMPLETE: partial validation cannot dispatch as a full run")
     resolved_plan = prepare_or_validate_model_plan(
         task_spec, effective_config, ModelStore(), project=project
     )
@@ -379,7 +396,7 @@ def run_via_modal(
     if dry_run:
         # Plan before account checks, consent, upload, job state or provider imports.
         from harness.task_spec import load_active_task_spec
-        project = HarnessProject.discover(project_root, os.environ.get("HARNESS_TASK_CONFIG"))
+        project = _discover_dispatch_project(project_root)
         config = Path(config_path).expanduser()
         config = (config if config.is_absolute() else project.root / config).resolve()
         config.relative_to(project.root)

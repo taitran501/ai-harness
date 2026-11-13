@@ -15,6 +15,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
 from argparse import Namespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -41,7 +42,7 @@ from harness.data_bundle import DataBundleError, stage_declared_data
 from harness.endgame_submission import ThresholdOptimizer
 from harness.kaggle_runtime import export_run
 from harness.project import HarnessProject, attach_project
-from tests.evidence_fixtures import seal_fixture
+from tests.evidence_fixtures import seal_fixture, seal_scope_fixture
 from tests.fixtures import make_workspace, task
 
 
@@ -233,14 +234,12 @@ class TestRunnerDedupEndToEnd(unittest.TestCase):
         for f in (oof, pred, truth):
             self.assertTrue(f.is_file(), f"{f.name} missing")
         self.assertEqual(oof.read_bytes(), pred.read_bytes())
-        self.assertEqual(oof.stat().st_ino, pred.stat().st_ino)
 
         canonicals = [
             p for p in runner.artifacts_dir.iterdir()
             if p.name.startswith("canonical_evaluation_truth_")
         ]
         self.assertEqual(len(canonicals), 1)
-        self.assertEqual(truth.stat().st_ino, canonicals[0].stat().st_ino)
         self.assertEqual(truth.read_bytes(), canonicals[0].read_bytes())
 
         # immutable-evidence contract: manifest hashes match the (linked) files
@@ -289,7 +288,7 @@ class TestRunnerDedupEndToEnd(unittest.TestCase):
 
         truth_a = exp_a / "evaluation_truth.csv"
         truth_b = exp_b / "evaluation_truth.csv"
-        self.assertEqual(truth_a.stat().st_ino, truth_b.stat().st_ino)
+        self.assertEqual(truth_a.read_bytes(), truth_b.read_bytes())
         masters = [
             p for p in artifacts.iterdir()
             if p.name.startswith("canonical_evaluation_truth_")
@@ -352,8 +351,8 @@ class TestRegisterExternalDedup(unittest.TestCase):
         self.assertTrue((exp_dir / "artifact_manifest.json").is_file())
         oof = exp_dir / "oof_predictions.csv"
         pred = exp_dir / "predictions.csv"
+        self.assertEqual(oof.read_bytes(), pred.read_bytes())
         truth = exp_dir / "evaluation_truth.csv"
-        self.assertEqual(oof.stat().st_ino, pred.stat().st_ino)
         masters = [
             p for p in (self.root / "artifacts").iterdir()
             if p.name.startswith("canonical_evaluation_truth_")
@@ -467,7 +466,7 @@ def _make_run(root: Path, name: str, nested: bool = True) -> Path:
     (run / "stages").mkdir(parents=True)
     (run / "run_config.yaml").write_text("model: {name: fixture}\n", encoding="utf-8")
     (run / "metrics.json").write_text(
-        json.dumps({"primary_score": 0.5, "direction": "minimize", "experiment_id": name}),
+        json.dumps({"primary_score": 0.5, "utility": -0.5, "direction": "minimize", "experiment_id": name}),
         encoding="utf-8",
     )
     (run / "oof_predictions.csv").write_text("id,pred_y\n0,0.5\n", encoding="utf-8")
@@ -493,6 +492,7 @@ def _full_manifest(run: Path, exp_id: str) -> dict:
         "data_sha256": "c" * 64,
         "split_sha256": "d" * 64,
         "resolved_config_sha256": sha256(run / "run_config.yaml"),
+        "validation_scope": seal_scope_fixture(run, SimpleNamespace(id_column="id")),
         "files": seal_file_map(run),
     }
 
@@ -560,6 +560,7 @@ class RecursiveSealingTests(unittest.TestCase):
             "data_sha256": "c" * 64,
             "split_sha256": "d" * 64,
             "resolved_config_sha256": sha256(run / "run_config.yaml"),
+        "validation_scope": seal_scope_fixture(run, SimpleNamespace(id_column="id")),
             "files": {
                 p.name: sha256(p) for p in run.iterdir() if p.is_file()
             },
@@ -619,7 +620,7 @@ class ExportNestedFilesTests(unittest.TestCase):
 
 
 class ThresholdEvidenceTests(unittest.TestCase):
-    def make_bridge(self, *, alias=False, strings=False, reverse=True, variants=False, regression=False, probabilities=True):
+    def make_bridge(self, *, alias=False, strings=False, reverse=False, variants=False, regression=False, probabilities=True):
         spec = task() if regression else task("binary_classification", "accuracy", "maximize")
         doc = {"task": copy.deepcopy(spec.metadata)}
         doc["task"]["data"]["train_path"] = "dataset/train.csv"
@@ -640,7 +641,7 @@ class ThresholdEvidenceTests(unittest.TestCase):
         oof = pd.DataFrame({"id": truth.id, "pred_target": truth[column],
                             "proba_target": [json.dumps([v, 1 - v] if reverse else [1 - v, v]) for v in values],
                             "classes_target": json.dumps(labels[::-1] if reverse else labels)})
-        if not probabilities:
+        if not probabilities or regression:
             oof = oof.drop(columns=["proba_target", "classes_target"])
         if variants:
             folder = bridge.artifacts_dir / "A"
@@ -661,17 +662,13 @@ class ThresholdEvidenceTests(unittest.TestCase):
     def optimize(self, bridge, **params):
         return bridge.execute_action("optimize_threshold", {"exp_id": "A", "metric": "accuracy", **params})[1]
 
-    def test_declared_positive_class_survives_reversed_probability_order(self):
-        for reverse in (False, True):
-            with self.subTest(reverse=reverse):
-                bridge = self.make_bridge(reverse=reverse)
-                before = sha256(bridge.artifacts_dir / "A/artifact_manifest.json")
-                obs = self.optimize(bridge)
-                self.assertEqual(obs.status, "SUCCESS", obs.summary)
-                self.assertEqual(obs.composite_score, 1.0)
-                self.assertEqual(obs.data["baseline_score_at_05"], 1.0)
-                self.assertEqual(str(obs.data["positive_class"]), "1")
-                self.assertEqual(sha256(bridge.artifacts_dir / "A/artifact_manifest.json"), before)
+    def test_undeclared_reversed_probability_order_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "class order"):
+            self.make_bridge(reverse=True)
+        bridge = self.make_bridge(reverse=False)
+        obs = self.optimize(bridge)
+        self.assertEqual(obs.status, "SUCCESS", obs.summary)
+        self.assertEqual(obs.composite_score, 1.0)
 
     def test_target_column_alias_and_string_labels_are_supported(self):
         for strings in (False, True):

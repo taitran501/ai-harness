@@ -21,14 +21,14 @@ from harness.artifacts import (
     validate_run,
 )
 from harness.ensemble_guard import EnsembleGuard
-from harness.evaluation import resolve_evaluation
+from harness.evaluation import resolve_evaluation, align_prediction_frame, validate_prediction_batch, PredictionContractError
 from harness.plugins import TaskPluginContext, load_task_plugin
 from harness.oof_revalidation import score_predictions
 from harness.task_spec import load_active_task_spec
 
 
-def predictions(frame):
-    result = {}
+def predictions(frame, id_column):
+    result = {"ids": frame[id_column].tolist()}
     for col in frame:
         if col.startswith(("pred_", "proba_")):
             result[col] = [
@@ -36,8 +36,8 @@ def predictions(frame):
                 for v in frame[col]
             ]
         elif col.startswith("classes_"):
-            if frame[col].nunique() != 1:
-                raise ValueError("Inconsistent class order")
+            if frame[col].isna().any() or frame[col].nunique() != 1:
+                raise PredictionContractError("Inconsistent class order")
             result[col] = json.loads(frame[col].iloc[0])
     return result
 
@@ -163,15 +163,13 @@ def build_candidate(project, name, mode, source_map):
         metrics = json.loads((folder / "metrics.json").read_text())
         frame = pd.read_csv(folder / "oof_predictions.csv")
         frame = frame[frame.input_variant == metrics["selection_variant"]].copy()
-        if frame.empty or frame[key].isna().any() or frame[key].duplicated().any():
-            raise ValueError("Invalid source IDs")
+        if frame.empty or key not in frame or frame[key].isna().any() or frame[key].duplicated().any():
+            raise PredictionContractError("Invalid source IDs")
         if frames and set(frame[key]) != set(frames[0][key]):
-            raise ValueError("Source ID sets differ")
-        frames.append(
-            frame.set_index(key)
-            .reindex(frames[0][key] if frames else frame[key])
-            .reset_index()
-        )
+            raise PredictionContractError("Source ID sets differ")
+        frame = align_prediction_frame(frame, expected_ids=frames[0][key] if frames else frame[key], id_column=key, purpose="candidate")
+        validate_prediction_batch(spec, predictions(frame, key), expected_ids=frame[key], purpose="candidate")
+        frames.append(frame)
         scores.append(metrics["utility"])
     for manifest in manifests[1:]:
         for field in ("task_sha256", "scorer_sha256", "custom_scorer_sha256", "split_sha256", "data_sha256"):
@@ -186,20 +184,17 @@ def build_candidate(project, name, mode, source_map):
         for exp in ids
     )
     test_frames = []
-    if has_test_preds:
-        for exp in ids:
-            t_frame = pd.read_csv(project.artifacts_dir / exp / "test_predictions.csv")
-            if t_frame.empty or key not in t_frame or t_frame[key].isna().any() or t_frame[key].duplicated().any():
-                has_test_preds = False
-                break
-            if test_frames and set(t_frame[key]) != set(test_frames[0][key]):
-                has_test_preds = False
-                break
-            test_frames.append(
-                t_frame.set_index(key)
-                .reindex(test_frames[0][key] if test_frames else t_frame[key])
-                .reset_index()
-            )
+    test_ids = None
+    for exp in ids:
+        path = project.artifacts_dir / exp / "test_predictions.csv"
+        if not path.exists():
+            continue
+        if test_ids is None:
+            test_ids = spec.load_dataset_split("test", project_root=project.root)[key].tolist()
+        t_frame = pd.read_csv(path)
+        t_frame = align_prediction_frame(t_frame, expected_ids=test_ids, id_column=key, purpose="test candidate")
+        validate_prediction_batch(spec, predictions(t_frame, key), expected_ids=test_ids, purpose="test")
+        test_frames.append(t_frame)
     merged = frames[0].copy()
     merged_test = test_frames[0].copy() if has_test_preds else None
     if mode == "specialist_router":
@@ -274,7 +269,7 @@ def build_candidate(project, name, mode, source_map):
                 st.task_type == "multilabel_classification"
                 and mode != "probability_blend"
             ):
-                values = np.asarray([predictions(f)[col] for f in frames], float)
+                values = np.asarray([predictions(f, key)[col] for f in frames], float)
                 combined = np.sum(values * weights[:, None, None], axis=0) > 0.5
                 merged[col] = [json.dumps(x.astype(int).tolist()) for x in combined]
                 for prefix in ("proba_", "classes_"):
@@ -282,7 +277,7 @@ def build_candidate(project, name, mode, source_map):
                         columns=[prefix + target], errors="ignore", inplace=True
                     )
                 if has_test_preds:
-                    t_values = np.asarray([predictions(f)[col] for f in test_frames], float)
+                    t_values = np.asarray([predictions(f, key)[col] for f in test_frames], float)
                     t_comb = np.sum(t_values * weights[:, None, None], axis=0) > 0.5
                     merged_test[col] = [json.dumps(x.astype(int).tolist()) for x in t_comb]
                     for prefix in ("proba_", "classes_"):
@@ -299,7 +294,7 @@ def build_candidate(project, name, mode, source_map):
                 if any(x != orders[0] for x in orders):
                     raise ValueError("Probability class orders differ")
                 proba = sum(
-                    w * np.asarray(predictions(f)["proba_" + target], float)
+                    w * np.asarray(predictions(f, key)["proba_" + target], float)
                     for w, f in zip(weights, frames)
                 )
                 merged["proba_" + target] = [json.dumps(x.tolist()) for x in proba]
@@ -319,7 +314,7 @@ def build_candidate(project, name, mode, source_map):
                     if any(x != t_orders[0] for x in t_orders):
                         raise ValueError("Probability class orders differ in test predictions")
                     t_proba = sum(
-                        w * np.asarray(predictions(f)["proba_" + target], float)
+                        w * np.asarray(predictions(f, key)["proba_" + target], float)
                         for w, f in zip(weights, test_frames)
                     )
                     merged_test["proba_" + target] = [json.dumps(np.asarray(x).tolist()) for x in t_proba]
@@ -368,7 +363,9 @@ def build_candidate(project, name, mode, source_map):
     source_config = yaml.safe_load(
         (project.artifacts_dir / ids[0] / "run_config.yaml").read_text(encoding="utf-8")
     ) or {}
-    result = score_predictions(spec, plugin, context, source_config, truth, predictions(merged))
+    if has_test_preds:
+        validate_prediction_batch(spec, predictions(merged_test, key), expected_ids=test_ids, purpose="test")
+    result = score_predictions(spec, plugin, context, source_config, truth, predictions(merged, key))
     if len(ids) > 1 and result["utility"] <= max(scores):
         raise ValueError("Superiority guard: ensemble must improve best constituent")
     candidate_id = "cand_" + uuid.uuid4().hex
@@ -488,6 +485,18 @@ def validate_candidate(project, entry):
         )
         if sha256(project.artifacts_dir / exp / "artifact_manifest.json") != value:
             raise ValueError("Candidate source changed")
+    if not source_manifests:
+        raise PredictionContractError("Candidate has no verified prediction sources")
+    truth = pd.read_csv(project.artifacts_dir / next(iter(manifest["source_hashes"])) / "evaluation_truth.csv")
+    frame = align_prediction_frame(pd.read_csv(folder / "oof_predictions.csv"), expected_ids=truth[spec.id_column],
+                                   id_column=spec.id_column, purpose="candidate")
+    validate_prediction_batch(spec, predictions(frame, spec.id_column), expected_ids=truth[spec.id_column], purpose="candidate")
+    if (folder / "test_predictions.csv").exists():
+        from harness.evaluation import read_prediction_frame
+        test = spec.load_dataset_split("test", project_root=project.root)
+        frame = read_prediction_frame(folder / "test_predictions.csv", expected_ids=test[spec.id_column], id_column=spec.id_column)
+        frame = align_prediction_frame(frame, expected_ids=test[spec.id_column], id_column=spec.id_column, purpose="test candidate")
+        validate_prediction_batch(spec, predictions(frame, spec.id_column), expected_ids=test[spec.id_column], purpose="test")
     source_ids = manifest.get("source_ids") or []
     binding = digest({"recipe": manifest.get("recipe_fingerprint"),
                       "constituents": [{"exp_id": exp,
@@ -581,11 +590,9 @@ def find_optimal_blend_weights(
         metrics = json.loads((folder / "metrics.json").read_text(encoding="utf-8"))
         frame = pd.read_csv(folder / "oof_predictions.csv")
         frame = frame[frame.input_variant == metrics["selection_variant"]].copy()
-        frames.append(
-            frame.set_index(key)
-            .reindex(frames[0][key] if frames else frame[key])
-            .reset_index()
-        )
+        frame = align_prediction_frame(frame, expected_ids=frames[0][key] if frames else frame[key], id_column=key, purpose="candidate")
+        validate_prediction_batch(spec, predictions(frame, key), expected_ids=frame[key], purpose="candidate")
+        frames.append(frame)
         scores.append(float(metrics.get("utility", metrics.get("primary_score", 0.0))))
 
     for manifest in manifests[1:]:
@@ -623,7 +630,7 @@ def find_optimal_blend_weights(
             if any(order != orders[0] for order in orders):
                 raise ValueError("Probability class orders differ")
             class_order = orders[0]
-            proba_arrays = [np.asarray(predictions(f)["proba_" + target], float) for f in frames]
+            proba_arrays = [np.asarray(predictions(f, key)["proba_" + target], float) for f in frames]
             subtask_data[target] = {
                 "type": "probability",
                 "class_order": class_order,
@@ -828,7 +835,7 @@ def register_external_prediction(
     for target in spec.subtasks:
         if f"pred_{target}" not in aligned and target in aligned:
             aligned[f"pred_{target}"] = aligned[target]
-    preds_dict = predictions(aligned)
+    preds_dict = predictions(aligned, spec.id_column)
 
     # 3. Official evaluation
     evaluation = plugin.evaluate_predictions(context, truth, preds_dict)
@@ -931,7 +938,7 @@ def register_external_prediction(
         "provenance_record": {"producer": "harness.candidates.register_external_prediction",
                               "source_sha256": sha256(oof_file),
                               "test_source_sha256": sha256(test_file) if test_file else None},
-        "run_kind": "full",
+        "run_kind": "external",
         **contract_identity(spec, plugin),
         "data_sha256": frame_hash(truth),
         "split_sha256": digest("external_full"),
@@ -951,7 +958,7 @@ def register_external_prediction(
         metrics=eval_resolved,
         primary_metric_name=spec.primary_metric,
         direction=spec.direction,
-        verified=True,
+        verified=False,
         eligible=False,
         status="COMPLETED",
         artifact_dir=str(exp_dir),

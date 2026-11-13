@@ -152,19 +152,11 @@ class EvaluationContracts(unittest.TestCase):
             )
         self.assertIn("sum to one", str(ctx.exception))
 
-    def test_binary_proba_does_not_require_sum_to_one(self):
+    def test_binary_probability_rows_require_normalization(self):
         spec = task("binary_classification", "roc_auc", "maximize")
-        truth = pd.DataFrame({"id": [1, 2, 3, 4], "target": [0, 0, 1, 1]})
-        # Positive class calibrated probabilities [0.1, 0.2, 0.8, 0.9] with arbitrary negative class column
-        result = spec.evaluate_predictions(
-            truth,
-            {
-                "target": [0, 0, 1, 1],
-                "proba_target": [[0.0, 0.1], [0.0, 0.2], [0.0, 0.8], [0.0, 0.9]],
-                "classes_target": [0, 1],
-            },
-        )
-        self.assertEqual(result["primary_score"], 1.0)
+        truth = pd.DataFrame({"id": [1, 2], "target": [0, 1]})
+        with self.assertRaisesRegex(ValueError, "sum to one"):
+            spec.evaluate_predictions(truth, {"target": [0, 1], "proba_target": [[0., .1], [0., .9]], "classes_target": [0, 1]})
 
     def test_native_categorical_transformer_edge_cases(self):
         df = pd.DataFrame({
@@ -238,9 +230,9 @@ class MetricReferenceTests(unittest.TestCase):
 
     def test_declared_non_sorted_probability_order(self):
         truth = pd.DataFrame({"id": [1, 2], "target": [0, 1]})
-        result = task(
-            "binary_classification", "logloss", "minimize"
-        ).evaluate_predictions(
+        spec = task("binary_classification", "logloss", "minimize")
+        spec.subtasks["target"].classes = [1, 0]
+        result = spec.evaluate_predictions(
             truth,
             {
                 "target": [0, 1],

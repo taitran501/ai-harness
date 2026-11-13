@@ -67,6 +67,12 @@ SMOKE_MODULES = (
     "test_grounding_gate",           # anti-hallucination verified_via gate
     "test_research_scope_stability", # research-memory scope stability
     "test_execution_backend_policy", # kaggle backend lock policy
+    "test_framework_resolution",     # explicit configuration fails closed
+    "test_state_integrity",          # corruption never reaches mutation
+    "tests.integration.test_prediction_boundaries",  # unlabeled prediction identity
+    "tests.integration.test_validation_scope",       # complete vs selected protocol
+    "tests.unit.test_artifact_publication",          # local no-replace semantics
+    "test_context_rendering_budget", # adversarial diagnostic budgets
 )
 
 

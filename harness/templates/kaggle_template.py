@@ -1144,15 +1144,6 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                 "exp_id": exp_id,
                 "raw_output": "Artifact destination must be inside the attached workspace.",
             }
-        if target_artifacts_dir.exists() and any(target_artifacts_dir.iterdir()):
-            return {
-                "success": False,
-                "kernel_slug": slug,
-                "exp_id": exp_id,
-                "artifacts_dir": str(target_artifacts_dir),
-                "raw_output": "Refusing to overwrite an existing experiment artifact directory.",
-            }
-
         try:
             with tempfile.TemporaryDirectory(
                 prefix=f"aih-kaggle-{exp_id}-"
@@ -1198,65 +1189,17 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                         for key, value in expected_identity.items()
                         if value is not None and manifest.get(key) != value
                     }
-                    critical_mismatches = {
-                        k: v
-                        for k, v in mismatches.items()
-                        if _is_critical_identity_mismatch(k, v)
-                    }
                     if mismatches:
-                        if force_import:
-                            import logging
-                            logging.getLogger("ai-harness").warning(
-                                f"Overriding identity mismatches due to --force-import: {mismatches}"
-                            )
-                        elif not critical_mismatches:
-                            import logging
-                            non_critical = ", ".join(sorted(mismatches))
-                            logging.getLogger("ai-harness").warning(
-                                f"Kaggle artifact identity mismatch on non-critical field(s) "
-                                f"[{non_critical}]; the remote kernel did not report a concrete "
-                                f"conflicting value. Proceeding with import."
-                            )
-                        else:
-                            return {
-                                "success": False,
-                                "kernel_slug": slug,
-                                "exp_id": exp_id,
+                        return {"success": False, "kernel_slug": slug, "exp_id": exp_id,
                                 "identity_mismatches": mismatches,
-                                "raw_output": f"Downloaded Kaggle artifacts do not match this task/config/job: {critical_mismatches}. Use --force-import to override.",
-                            }
-                    for file_name, expected_hash in (
-                        manifest.get("files") or {}
-                    ).items():
-                        file_path = manifest_path.parent / file_name
-                        unsafe = (
-                            not Path(file_name).parts
-                            or Path(file_name).is_absolute()
-                            or ".." in Path(file_name).parts
-                        )
-                        if (
-                            unsafe
-                            or not file_path.is_file()
-                            or hashlib.sha256(file_path.read_bytes()).hexdigest()
-                            != expected_hash
-                        ):
-                            if force_import:
-                                import logging
-                                logging.getLogger("ai-harness").warning(
-                                    f"File {file_name} failed hash check; proceeding due to --force-import."
-                                )
-                            else:
-                                return {
-                                    "success": False,
-                                    "kernel_slug": slug,
-                                    "exp_id": exp_id,
-                                    "invalid_artifact": file_name,
-                                    "raw_output": "Downloaded Kaggle artifact failed its SHA-256 identity check.",
-                                }
+                                "raw_output": f"Downloaded Kaggle artifacts identity mismatch: {mismatches}"}
                 migrated = cls.migrate_downloaded_artifacts(
                     download_dir, target_artifacts_dir,
-                    project_root=project_root,
+                    project_root=project_root, expected_identity=expected_identity,
+                    return_publication=True,
                 )
+                publication = migrated
+                migrated = list(publication.files)
                 metrics_path = target_artifacts_dir / "metrics.json"
                 metrics_data = None
                 if metrics_path.exists():
@@ -1267,14 +1210,13 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
                     except Exception:
                         pass
                 success = bool(migrated) and metrics_data is not None
-                if not success:
-                    shutil.rmtree(target_artifacts_dir, ignore_errors=True)
                 return {
                     "success": success,
                     "kernel_slug": slug,
                     "exp_id": exp_id,
                     "artifacts_dir": str(target_artifacts_dir),
                     "migrated_files": migrated,
+                    "publication_disposition": publication.disposition,
                     "metrics": metrics_data,
                     "identity_verified": bool(
                         manifest is not None and expected_identity
@@ -1296,6 +1238,8 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
         target_artifacts_dir: Path | str,
         *,
         project_root: Optional[Path | str] = None,
+        expected_identity=None,
+        return_publication=False,
     ) -> List[str]:
         """Import one verified run, preserving every sealed artifact byte.
 
@@ -1304,7 +1248,9 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
         detached processes (journal sync, repair, output import CLI) resolve
         ``src.*`` scorers hermetically instead of relying on ambient cwd/env.
         """
-        from harness.artifacts import validate_run
+        from harness.artifacts import publish_run_artifacts
+        from harness.project import HarnessProject
+        from harness.task_spec import load_active_task_spec
         from harness.hook_ref import ensure_hook_project_roots_on_sys_path
 
         ensure_hook_project_roots_on_sys_path(project_root)
@@ -1312,19 +1258,12 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
         manifests = list(source.rglob("artifact_manifest.json"))
         if len(manifests) != 1:
             raise ValueError("Remote import requires exactly one manifest v2")
-        source_run = manifests[0].parent
-        manifest = validate_run(source_run, project_root=project_root)
-        destination = Path(target_artifacts_dir)
-        if destination.exists() and any(destination.iterdir()):
-            raise ValueError("Refusing to overwrite imported artifacts")
-        destination.mkdir(parents=True, exist_ok=True)
-        names = [*manifest["files"], "artifact_manifest.json"]
-        for name in names:
-            dest_file = destination / name
-            dest_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_run / name, dest_file)
-        validate_run(destination, project_root=project_root)
-        return names
+        project = HarnessProject.discover(project_root)
+        publication = publish_run_artifacts(manifests[0].parent, Path(target_artifacts_dir),
+            task_spec=load_active_task_spec(project.task_config_path),
+            expected=expected_identity or {}, project_root=project.root, run_kind="full")
+        return publication if return_publication else list(publication.files)
+
 
 
 def main(argv=None):

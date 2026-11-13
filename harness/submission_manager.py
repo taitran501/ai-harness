@@ -220,7 +220,7 @@ class SubmissionManager:
         from harness.artifacts import validate_test_prediction
 
         validate_test_prediction(
-            source, task_spec=plugin_context.task_spec, plugin=plugin
+            source, task_spec=plugin_context.task_spec, plugin=plugin, project_root=plugin_context.project_root
         )
         normalized_file_name = str(file_name).replace("\\", "/")
         safe_name = Path(normalized_file_name).name
