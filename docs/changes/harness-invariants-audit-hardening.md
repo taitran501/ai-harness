@@ -1,10 +1,10 @@
 # Enforce harness invariants after the adversarial audit
 
 - **Date**: 2026-11-13
-- **PR**: Pending host review
+- **PR**: #137
 - **Branch**: `fix/harness-invariants-and-audit-hardening`
-- **Status**: Working tree; not committed
-- **Commits**: None
+- **Status**: Open
+- **Commits**: `fe4ce0d`
 
 ## Why
 
