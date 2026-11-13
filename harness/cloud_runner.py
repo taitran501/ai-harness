@@ -443,7 +443,7 @@ def run_via_modal(
     managed_job_id = job_id
     from harness.decision_rules import prepare_remote_research
     if probe_spec is None:
-        prepare_remote_research(project, context["config_rel"])
+        prepare_remote_research(project, context["config_rel"], effective_config=context["cfg"])
     job_id = job_id or f"modal_{exp_id}_{uuid.uuid4().hex[:12]}"
     if managed_job_id:
         update_worker_state(
@@ -706,7 +706,7 @@ def run_via_kaggle(
     exp_id = context["exp_id"]
     if not dry_run:
         from harness.decision_rules import prepare_remote_research
-        prepare_remote_research(project, context["config_rel"])
+        prepare_remote_research(project, context["config_rel"], effective_config=context["cfg"])
     # Fail fast on a missing/broken kaggle CLI before any upload or push.
     KaggleKernelManager.ensure_cli_ready()
     managed_job_id = job_id

@@ -12,6 +12,7 @@ plus the modules used at handler scope.
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from dataclasses import asdict
@@ -22,6 +23,45 @@ import yaml
 
 from harness.bridge_common import ActionObservation, TypedActionName
 from harness.grounding_gate import GroundingGate
+
+
+def parse_boolean(value):
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return True
+    if text in {"false", "0", "no"}:
+        return False
+    raise ValueError(f"Expected a boolean, got {value!r}")
+
+
+def normalize_action_params(params):
+    """Normalize inputs before guards and handlers consume them."""
+    bool_fields = {"locked", "force", "auto_audit", "detach"}
+    list_fields = {"open_questions", "insight_ids", "source_refs", "citation_audit_refs",
+                   "citation_dependencies", "citation_claims", "pinned_candidates"}
+    numeric_fields = {"alpha", "timeout_seconds", "poll_interval", "_deadline_seconds",
+                      "maxiter", "num_thresholds", "limit", "offset", "weight", "score"}
+
+    def normalize(value, key=""):
+        if isinstance(value, dict):
+            return {k: normalize(v, k) for k, v in value.items()}
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(f"{key} must be finite")
+        if key in bool_fields and value is not None:
+            return parse_boolean(value)
+        if key in list_fields and isinstance(value, str):
+            return [value]
+        if key in numeric_fields and isinstance(value, str):
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError(f"{key} must be finite")
+        if isinstance(value, list):
+            return [normalize(v) for v in value]
+        return value
+
+    return normalize(params)
 
 
 class ActionHandlerMixin:
@@ -476,6 +516,8 @@ class ActionHandlerMixin:
         task_path = self.project.task_config_path
         existing_raw = task_path.read_text(encoding="utf-8") if task_path.is_file() else ""
         existing_doc = yaml.safe_load(existing_raw) or {}
+        if not isinstance(existing_doc, dict) or not isinstance(existing_doc.get("task", existing_doc), dict):
+            raise ValueError("Task YAML must contain a mapping")
         has_task_wrapper = isinstance(existing_doc, dict) and "task" in existing_doc
         task_dict = existing_doc.get("task", existing_doc) if isinstance(existing_doc, dict) else {}
 
@@ -486,12 +528,18 @@ class ActionHandlerMixin:
             if "backend" in params and params["backend"]:
                 exec_patch["backend"] = params["backend"]
             if "locked" in params and params["locked"] is not None:
-                exec_patch["locked"] = bool(params["locked"])
+                exec_patch["locked"] = parse_boolean(params["locked"])
+            if "locked" in exec_patch:
+                exec_patch["locked"] = parse_boolean(exec_patch["locked"])
             task_dict.setdefault("execution", {}).update(exec_patch)
             document = task_dict
 
         UniversalTaskSpec.from_dict({"task": document})
-        write_doc = {"task": document} if has_task_wrapper else document
+        if has_task_wrapper:
+            existing_doc["task"] = document
+            write_doc = existing_doc
+        else:
+            write_doc = document
         atomic_write_text(
             task_path,
             yaml.safe_dump(write_doc, sort_keys=False, allow_unicode=True),
@@ -1374,7 +1422,7 @@ class ActionHandlerMixin:
         self._validate_config_path(cfg_path)
 
         backend = str(params.get("backend", "local")).lower()
-        force = bool(params.get("force", False))
+        force = parse_boolean(params.get("force", False))
 
         full_cfg_file = self.project_root / cfg_path
         raw_cfg = (
@@ -1399,10 +1447,10 @@ class ActionHandlerMixin:
                 backend=backend,
                 config_path=cfg_path,
                 gpu=str(params.get("gpu", "A10")),
-                auto_audit=bool(params.get("auto_audit", True)),
+                auto_audit=parse_boolean(params.get("auto_audit", True)),
                 auto_sync=True,
                 baseline_csv=params.get("baseline_csv"),
-                detach=bool(params.get("detach", False)),
+                detach=parse_boolean(params.get("detach", False)),
             )
             session.compute_usage["experiments_used"] = (
                 int(session.compute_usage.get("experiments_used", 0)) + 1

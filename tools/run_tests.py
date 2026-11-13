@@ -46,17 +46,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 #: Modules whose tests run full pipelines / heavy subprocess work.
-#: Membership from per-module timing measurement (2026-10-18, standalone
-#: runs incl. cold start): kaggle_runtime ~27s, sync_command ~15s (after
-#: detection-test clone stubbing), dashboard ~12s, cloud_jobs_and_env
-#: ~12s, harness ~7s, audit_gate ~7s.
+#: Canonical module paths after the unit/integration/e2e consolidation.
+#: The fast tier additionally excludes every e2e module.
 SLOW_MODULES = (
-    "test_kaggle_runtime",      # Kaggle kernel packaging + dispatch contracts
-    "test_dashboard",           # live dashboard server + HTTP endpoints
-    "test_audit_gate",          # audit-gate numerics (diff metrics, t-test, integrity) + CLI receipt tests
-    "test_harness",             # TreeJournal/Validator/AuditGate unit tests + audit-gate CLI subprocesses
-    "test_sync_command",        # sync CLI against throwaway git clones (heavy subprocess work)
-    "test_cloud_jobs_and_env",  # cloud job runner + environment cache (subprocess work)
+    "tests.e2e.test_kaggle_runtime",
+    "tests.e2e.test_dashboard_e2e",
+    "tests.e2e.test_sync_e2e",
+    "tests.e2e.test_cloud_runners",
+    "tests.integration.test_audit_gate_integration",
+    "tests.integration.test_tree_journal",
 )
 
 #: Critical-invariants subset for the <10 s smoke tier, chosen by
@@ -147,7 +145,7 @@ def build_suite(modules: list[str]) -> unittest.TestSuite:
     return suite
 
 
-#: Slow/smoke membership is keyed by module stem (top-level test files).
+#: Smoke references and CLI shorthand can be resolved by module stem.
 def _stem(module: str) -> str:
     return module.rsplit(".", 1)[-1]
 
@@ -334,7 +332,7 @@ def main(argv: list[str]) -> int:
     else:
         modules = all_modules
         if fast:
-            modules = [m for m in modules if _stem(m) not in SLOW_MODULES and not m.startswith("tests.e2e.")]
+            modules = [m for m in modules if m not in SLOW_MODULES and not m.startswith("tests.e2e.")]
 
     if smoke and not args:
         label = "smoke tier (<10s invariants)"

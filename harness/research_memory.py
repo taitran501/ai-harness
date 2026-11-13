@@ -774,7 +774,7 @@ class ResearchMemory:
                 ("hypothesis", "intervention", "problem_addressed")}
 
     def _folder_file_key(self, folder: Path):
-        """Per-file (name, mtime_ns, size) over every top-level artifact file.
+        """Per-file (relative path, mtime_ns, size) over every artifact file.
 
         The previous cache key covered only manifest/config/metrics mtimes, so
         tampering any other sealed artifact (e.g. OOF predictions) between two
@@ -786,8 +786,8 @@ class ResearchMemory:
         propagates to the per-folder handler (the run is skipped, not cached).
         """
         return tuple(
-            (p.name, p.stat().st_mtime_ns, p.stat().st_size)
-            for p in sorted(folder.iterdir())
+            (p.relative_to(folder).as_posix(), p.stat().st_mtime_ns, p.stat().st_size)
+            for p in sorted(folder.rglob("*"))
             if p.is_file()
         )
 
@@ -816,7 +816,7 @@ class ResearchMemory:
                     runs.append(_SYNC_CACHE[cache_key])
                     continue
 
-                manifest = validate_run(folder, task_spec=self.spec, plugin=self.plugin)
+                manifest = validate_run(folder, task_spec=self.spec, plugin=self.plugin, project_root=self.root)
                 cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
                 metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
                 score = float(metrics["primary_score"])
@@ -836,7 +836,7 @@ class ResearchMemory:
                     "score": score,
                     "utility": value,
                     "comparison_group": digest({
-                        key: manifest.get(key)
+                        key: self.identity["task_sha256"] if key == "task_sha256" else manifest.get(key)
                         for key in (
                             "task_sha256",
                             "scorer_sha256",

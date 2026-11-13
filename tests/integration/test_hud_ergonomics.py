@@ -510,14 +510,14 @@ class TestHygieneAndCliErgonomics(unittest.TestCase):
             ])
             self.assertEqual(rc, 0)
 
-            # 2. Test --input JSON alias for record_research_decision
+            # 2. A keep claim without verified evidence fails through --input too.
             rc = cli_main([
                 "--project-root", str(root),
                 "act",
                 "--action", "record_research_decision",
                 "--input", '{"conclusion": "Promising result", "outcome": "keep"}',
             ])
-            self.assertEqual(rc, 0)
+            self.assertEqual(rc, 1)
 
             # 3. Test checkpoint flat flags
             rc = cli_main([

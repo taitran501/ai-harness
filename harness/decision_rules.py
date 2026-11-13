@@ -314,7 +314,7 @@ def reserve_comparison_slot(project, task_spec, cfg, *, plugin=None):
         return reservation
 
 
-def prepare_remote_research(project, config_path):
+def prepare_remote_research(project, config_path, *, effective_config=None):
     """Reserve on the originating workspace before cloud dispatch.
 
     A small capsule travels with code/config, never the control's training data
@@ -324,7 +324,7 @@ def prepare_remote_research(project, config_path):
     from harness.task_spec import load_active_task_spec
     project = _project(project)
     config_path = project.root / config_path
-    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    cfg = effective_config if effective_config is not None else (yaml.safe_load(config_path.read_text(encoding="utf-8")) or {})
     research = cfg.get("research", {})
     from harness.citation_audit import (
         _audit_scope,

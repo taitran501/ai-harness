@@ -21,6 +21,8 @@ REQUIRED = (
 # minor documentation, type hint, or helper edits to harness.evaluation must never
 # invalidate completed full run artifacts.
 CANONICAL_GENERIC_SCORER_HASHES = frozenset({
+    "871e6c3c03de49f111cdb2f95434b79906efc5201e5ab2a65af9f381c396f657",
+    "ac2101968711361422972bb6ebc7553133e65a9715f9a4b8e689aa54c81d1abb",
     "aca79278b34ca0000639c10298c1a0c789281062d3e4b8e03ae2cc46a9ffb87c",
     "8a766ac8f61a6c7fda3f761900b85f732006f3fa6bd4acbe5ec803a56216eaa4",
     "8a766ac8152cb5b10884d3dbe7b11d95c478a514d35e07a68393e8a4a5860255",
@@ -141,9 +143,47 @@ def contract_identity(task_spec, plugin=None):
     elif meta is None:
         meta = {}
     return {
-        "task_sha256": digest(meta),
+        "task_sha256": digest(scientific_task_metadata(meta)),
         "scorer_sha256": digest(implementation),
     }
+
+
+def scientific_task_metadata(meta):
+    """Backend selection and locking do not change the scientific contract."""
+    import copy
+
+    meta = copy.deepcopy(meta)
+    if isinstance(meta, dict):
+        execution = meta.get("execution")
+        if isinstance(execution, dict):
+            execution.pop("backend", None)
+            execution.pop("locked", None)
+            if not execution:
+                meta.pop("execution")
+        elif execution is None:
+            meta.pop("execution", None)
+    return meta
+
+
+def _legacy_task_hashes(task_spec):
+    """Recognize old hashes only for finite, known operational variations."""
+    import copy
+
+    meta = getattr(task_spec, "metadata", {})
+    core = scientific_task_metadata(meta)
+    hashes = {digest(core)}
+    if "execution" not in core:
+        hashes.add(digest({**core, "execution": None}))
+    for backend in (None, "local", "modal", "kaggle"):
+        for locked in (None, False, True):
+            variant = copy.deepcopy(core)
+            execution = variant.setdefault("execution", {})
+            if backend is not None:
+                execution["backend"] = backend
+            if locked is not None:
+                execution["locked"] = locked
+            hashes.add(digest(variant))
+    return hashes
 
 
 def repair_run_dir(*args, **kwargs):
@@ -163,7 +203,7 @@ def run_repair(*args, **kwargs):
     return _impl(*args, **kwargs)
 
 
-def validate_run(directory, task_spec=None, *, plugin=None, expected=None):
+def validate_run(directory, task_spec=None, *, plugin=None, expected=None, project_root=None):
     directory = Path(directory)
     path = directory / "artifact_manifest.json"
     if not path.is_file():
@@ -194,13 +234,15 @@ def validate_run(directory, task_spec=None, *, plugin=None, expected=None):
         checks.update(contract_identity(task_spec, plugin))
     for field, value in checks.items():
         manifest_val = manifest.get(field)
+        if field == "task_sha256" and task_spec is not None and (manifest_val == value or manifest_val in _legacy_task_hashes(task_spec)):
+            continue
         if field == "scorer_sha256":
             if manifest_val == value:
                 continue
             # Built-in generic scorer tolerance: when custom_scorer_sha256 is None/absent
             # in both the manifest and the checks, allow any recognized canonical generic scorer hash.
             if not manifest.get("custom_scorer_sha256") and not checks.get("custom_scorer_sha256"):
-                if manifest_val in CANONICAL_GENERIC_SCORER_HASHES or value in CANONICAL_GENERIC_SCORER_HASHES:
+                if manifest_val in CANONICAL_GENERIC_SCORER_HASHES and value in CANONICAL_GENERIC_SCORER_HASHES:
                     continue
         if manifest_val != value:
             raise ValueError(f"Run identity mismatch: {field}")
@@ -218,19 +260,17 @@ def validate_run(directory, task_spec=None, *, plugin=None, expected=None):
             or sha256(target) != value
         ):
             raise ValueError(f"Artifact hash mismatch: {name}")
-    import importlib
-
     import yaml
 
-    from harness.hook_ref import ensure_hook_project_roots_on_sys_path, resolve_metrics_hook
+    from harness.hook_ref import isolated_metrics_hook, resolve_metrics_hook
 
     cfg = yaml.safe_load((directory / "run_config.yaml").read_text(encoding="utf-8"))
     hook = cfg.get("paths", {}).get("metrics_evaluator")
     if hook:
-        ensure_hook_project_roots_on_sys_path()
         module, name = resolve_metrics_hook(hook)
         try:
-            scorer_func = getattr(importlib.import_module(module), name)
+            with isolated_metrics_hook(hook, project_root) as scorer_func:
+                scorer_hash = digest(inspect.getsource(scorer_func))
         except (ModuleNotFoundError, AttributeError) as exc:
             import os
 
@@ -246,7 +286,7 @@ def validate_run(directory, task_spec=None, *, plugin=None, expected=None):
                 "artifacts outside the workspace (journal sync, repair, Kaggle "
                 "output import) should pass the workspace root explicitly."
             ) from exc
-        if manifest.get("custom_scorer_sha256") != digest(inspect.getsource(scorer_func)):
+        if manifest.get("custom_scorer_sha256") != scorer_hash:
             raise ValueError("Custom scorer implementation changed")
     if sha256(directory / "run_config.yaml") != manifest["resolved_config_sha256"]:
         raise ValueError("Resolved configuration identity mismatch")

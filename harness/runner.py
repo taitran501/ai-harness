@@ -81,6 +81,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         )
         self.project_root = self.project.root
         self.task_spec = load_active_task_spec(self.project.task_config_path)
+        for backend in (getattr(args, "backend", None), self.task_spec.execution_backend):
+            if backend is not None and (not isinstance(backend, str) or backend.strip().lower() not in {"local", "modal", "kaggle"}):
+                raise ValueError(f"Unknown execution backend: {backend!r}")
         self.cfg = resolve_effective_config(self.project, cfg, args)
         self.config_path, self.args = config_path, args
         self.model_plan = prepare_or_validate_model_plan(
@@ -267,14 +270,10 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         self.seed = self.task_spec.resolve_seed(cfg.get("runtime", {}).get("seed", 42))
         self.estimator_metadata = []
         if hook:
-            if str(self.project_root) not in sys.path:
-                sys.path.insert(0, str(self.project_root))
-            from harness.hook_ref import resolve_metrics_hook
+            from harness.hook_ref import isolated_metrics_hook
 
-            module, name = resolve_metrics_hook(hook)
-            self.manifest["custom_scorer_sha256"] = digest(
-                inspect.getsource(getattr(importlib.import_module(module), name))
-            )
+            with isolated_metrics_hook(hook, self.project_root) as scorer:
+                self.manifest["custom_scorer_sha256"] = digest(inspect.getsource(scorer))
 
     def _probe_sample_limit(self):
         """Effective subsample size for probe runs (None = full data).
@@ -1223,6 +1222,10 @@ def resolve_cli_backend(
     A locked contract rejects a different backend for FULL runs
     (raises ValueError; the CLI translates that into a parser error).
     """
+    for backend in (requested, contract_backend):
+        if backend is not None and (not isinstance(backend, str) or backend.strip().lower() not in {"local", "modal", "kaggle"}):
+            raise ValueError(f"Unknown execution backend: {backend!r}")
+    contract_backend = contract_backend.strip().lower() if contract_backend is not None else None
     if requested is None:
         if is_smoke_run:
             return "local"
@@ -1337,21 +1340,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     # re-applied here — it would dispatch a nested kernel from inside the
     # kernel (and fail the upload-consent check, which only exists locally).
     inside_remote_kernel = os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1"
-    if inside_remote_kernel:
-        requested_backend = None
-        contract_backend = None
-        backend_locked = False
-        print(
-            "[ai-harness] inside a dispatched remote kernel "
-            "(AI_HARNESS_REMOTE_KERNEL=1); executing locally instead of "
-            "re-dispatching to the contract backend."
-        )
     try:
         args.backend = resolve_cli_backend(
             requested_backend, contract_backend, backend_locked, is_smoke_run
         )
     except ValueError as exc:
         parser.error(str(exc))
+    if inside_remote_kernel:
+        # Resolve and enforce the lock first. This flag only prevents recursion.
+        args.backend = "local"
+        print("[ai-harness] inside a dispatched remote kernel; executing without re-dispatch")
     if requested_backend is None and contract_backend and not is_smoke_run:
         print(
             f"[ai-harness] backend from task contract: {args.backend}"

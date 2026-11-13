@@ -124,19 +124,16 @@ def score_predictions(
     skip_generic_base_eval: bool = False,
 ) -> dict:
     """Score one variant through the runner's exact evaluation path."""
-    import importlib
-    import sys
-
     from harness.evaluation import resolve_evaluation, validate_prediction_contract
 
     validate_prediction_contract(task_spec, truth, predictions)
     hook = _custom_hook(run_config)
     if hook:
         project_root = getattr(plugin_context, "project_root", None)
-        if project_root is not None and str(project_root) not in sys.path:
-            sys.path.insert(0, str(project_root))
-        module, name = hook
-        result = getattr(importlib.import_module(module), name)(truth, predictions)
+        from harness.hook_ref import isolated_metrics_hook
+
+        with isolated_metrics_hook(":".join(hook), project_root) as scorer:
+            result = scorer(truth, predictions)
         if not isinstance(result, dict):
             raise TypeError("Custom metrics_evaluator must return a metric mapping")
         # Normalize the hook before adding generic diagnostics: a generic

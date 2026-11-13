@@ -426,6 +426,7 @@ class StagingLifecycleTests(unittest.TestCase):
         (self.root / "configs/exp.yaml").write_text("experiment:\n  id: exp001\n", encoding="utf-8")
         self.context = {
             "project": self.project,
+            "cfg": {"experiment": {"id": "exp001"}},
             "exp_id": "exp001",
             "runtime": {"core": {"version": "test"}, "plugin": {"id": "test"}},
             "config_rel": "configs/exp.yaml",

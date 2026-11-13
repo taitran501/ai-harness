@@ -60,7 +60,7 @@ ALLOWED_TOP_DIRS = {
 # Run-output directories produced by Kaggle/cloud dispatches. Individually
 # these are legitimate, but dozens of them pile up at the workspace root;
 # the scanner aggregates them into ONE advisory instead of 30 lines of noise.
-RUN_OUTPUT_DIR_PREFIXES = ("kaggle_sub", "kernel_output")
+RUN_OUTPUT_DIR_PREFIXES = ("kaggle_sub", "kernel_output", "run_")
 RUN_OUTPUT_DIR_EXACT = {"kaggle_results", "kaggle_err_log"}
 
 
@@ -175,8 +175,6 @@ def scan_workspace_hygiene(
         try:
             if entry.is_dir():
                 name_low = entry.name.lower()
-                if name_low in ALLOWED_TOP_DIRS or name_low in task_allowed_dirs(project_root):
-                    continue
                 if _is_run_output_dir(name_low):
                     # Run-output dirs collapse into aggregated advisories
                     # later; count ALL of them (no file-count rglob needed)
@@ -195,8 +193,10 @@ def scan_workspace_hygiene(
                         }
                     )
                     continue
+                if name_low in ALLOWED_TOP_DIRS or name_low in task_allowed_dirs(project_root):
+                    continue
                 if non_run_output >= max_findings:
-                    break
+                    continue
                 try:
                     n_files = sum(1 for _ in entry.rglob("*") if _.is_file())
                 except OSError:
@@ -210,7 +210,7 @@ def scan_workspace_hygiene(
                 non_run_output += 1
             else:
                 if non_run_output >= max_findings:
-                    break
+                    continue
                 finding = None
                 if _is_scratch_file(entry):
                     try:

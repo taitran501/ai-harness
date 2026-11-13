@@ -746,6 +746,8 @@ class ModalAppManager:
                     "success": False,
                     "error": f"Unreadable artifact_manifest.json: {exc}",
                 }
+            if not isinstance(manifest, dict):
+                return {"success": False, "error": "artifact_manifest.json must contain a mapping"}
 
             # Verify identity
             for key, exp_val in expected_identity.items():
@@ -757,32 +759,30 @@ class ModalAppManager:
                             "error": f"Identity mismatch for {key}: expected {exp_val}, got {act_val}",
                         }
 
-            # Verify sha256 of all files
-            files_dict = manifest.get("files") or {}
-            for fname, exp_hash in files_dict.items():
-                p = source_dir / fname
-                if not p.is_file():
-                    return {
-                        "success": False,
-                        "error": f"Artifact file {fname} declared in manifest but missing on disk",
-                    }
-                act_hash = hashlib.sha256(p.read_bytes()).hexdigest()
-                if act_hash != exp_hash:
-                    return {
-                        "success": False,
-                        "error": f"Artifact file {fname} SHA-256 mismatch: expected {exp_hash}, got {act_hash}",
-                    }
+            from harness.artifacts import validate_run
+            from harness.state_store import workspace_lock
 
-            # Copy to destination
-            artifact_dir.mkdir(parents=True, exist_ok=True)
-            migrated_files = []
-            for item in source_dir.iterdir():
-                dest = artifact_dir / item.name
-                if item.is_dir():
-                    shutil.copytree(item, dest, dirs_exist_ok=True)
+            try:
+                validate_run(source_dir, expected={k: v for k, v in expected_identity.items() if v is not None}, project_root=root)
+            except (ValueError, RuntimeError, OSError, KeyError, TypeError) as exc:
+                return {"success": False, "error": f"Downloaded run failed verification: {exc}"}
+
+            def contents(path):
+                return {p.relative_to(path).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+                        for p in path.rglob("*")}
+
+            migrated_files = [item.name for item in source_dir.iterdir()]
+            artifact_dir.parent.mkdir(parents=True, exist_ok=True)
+            with workspace_lock(artifact_dir.parent):
+                if artifact_dir.exists() or artifact_dir.is_symlink():
+                    if not artifact_dir.is_dir() or contents(artifact_dir) != contents(source_dir):
+                        return {"success": False, "error": f"Run immutability conflict: {artifact_dir} already exists with different contents"}
                 else:
-                    shutil.copy2(item, dest)
-                migrated_files.append(item.name)
+                    # Publish a complete tree on the destination filesystem.
+                    with tempfile.TemporaryDirectory(prefix=".modal-import-", dir=artifact_dir.parent) as publish:
+                        staged = Path(publish) / "run"
+                        shutil.copytree(source_dir, staged)
+                        staged.rename(artifact_dir)
 
             return {
                 "success": True,

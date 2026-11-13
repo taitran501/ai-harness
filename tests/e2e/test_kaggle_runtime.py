@@ -416,6 +416,7 @@ class KaggleRuntimeTests(unittest.TestCase):
     def test_dispatch_uses_submitted_id_and_cli_can_be_in_a_separate_environment(self):
         from harness.cloud_runner import run_via_kaggle
         context = {"project": self.project, "exp_id": self.exp_id, "runtime": self.runtime,
+                   "cfg": {"experiment": {"id": self.exp_id}},
                    "config_rel": "configs/exp.yaml", "task_id": "task-fixture",
                    "config_sha256": "sha-fixture", "task": {},
                    "external_kaggle_dataset": "fixture-user/fixture-data",

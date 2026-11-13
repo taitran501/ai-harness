@@ -391,8 +391,12 @@ class ValidateRunCustomHookTests(unittest.TestCase):
     def test_colon_hook_passes_when_root_not_on_sys_path(self):
         self._seal("src.evaluator:evaluate_rhae")
         self.assertNotIn(str(self.root), sys.path)
+        previous = {name: module for name, module in sys.modules.items()
+                    if name == "src" or name.startswith("src.")}
         manifest = self._run_validate()
-        self.assertIn(str(self.root), sys.path)
+        self.assertNotIn(str(self.root), sys.path)
+        self.assertEqual(previous, {name: module for name, module in sys.modules.items()
+                                   if name == "src" or name.startswith("src.")})
         self.assertTrue(manifest["custom_scorer_sha256"])
 
     def test_dot_hook_passes(self):

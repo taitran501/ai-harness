@@ -840,10 +840,10 @@ def _set_backend_command(args) -> int:
         print(f"Failed to read task YAML: {exc}", file=sys.stderr)
         return 1
 
-    has_wrapper = isinstance(doc, dict) and "task" in doc
-    task = doc.get("task", doc) if isinstance(doc, dict) else {}
-    if not isinstance(task, dict):
-        task = {}
+    if not isinstance(doc, dict) or not isinstance(doc.get("task", doc), dict):
+        print("Task YAML must contain a mapping", file=sys.stderr)
+        return 1
+    task = doc.get("task", doc)
 
     exec_cfg = task.setdefault("execution", {})
     if not isinstance(exec_cfg, dict):
@@ -868,7 +868,7 @@ def _set_backend_command(args) -> int:
         print(f"Validation error on updated task contract: {exc}", file=sys.stderr)
         return 1
 
-    write_doc = {"task": task} if has_wrapper else task
+    write_doc = doc
     atomic_write_text(
         cfg_path,
         yaml.safe_dump(write_doc, sort_keys=False, allow_unicode=True),

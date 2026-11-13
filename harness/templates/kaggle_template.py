@@ -1313,7 +1313,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
         if len(manifests) != 1:
             raise ValueError("Remote import requires exactly one manifest v2")
         source_run = manifests[0].parent
-        manifest = validate_run(source_run)
+        manifest = validate_run(source_run, project_root=project_root)
         destination = Path(target_artifacts_dir)
         if destination.exists() and any(destination.iterdir()):
             raise ValueError("Refusing to overwrite imported artifacts")
@@ -1323,7 +1323,7 @@ print("Training completed. Sealed output artifacts copied to working root.", flu
             dest_file = destination / name
             dest_file.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_run / name, dest_file)
-        validate_run(destination)
+        validate_run(destination, project_root=project_root)
         return names
 
 

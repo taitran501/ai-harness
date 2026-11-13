@@ -15,8 +15,60 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Tuple
+
+_HOOK_IMPORT_LOCK = threading.RLock()
+
+
+@contextmanager
+def isolated_metrics_hook(hook, project_root=None):
+    """Import and call workspace hooks without retaining their module graph."""
+    with _HOOK_IMPORT_LOCK:
+        original_path = sys.path[:]
+        before = dict(sys.modules)
+        roots, prefixes = [], set()
+        try:
+            ensure_hook_project_roots_on_sys_path(project_root)
+            if project_root is None:
+                from harness.project import resolve_project_root
+
+                project_root = os.environ.get("HARNESS_PROJECT_ROOT") or resolve_project_root()
+            roots = [Path(project_root).resolve()]
+            root_text = str(roots[0])
+            sys.path[:] = [root_text, *[p for p in sys.path if p != root_text]]
+            for root in roots:
+                if root.is_dir():
+                    prefixes.update(p.stem if p.is_file() else p.name for p in root.iterdir()
+                                    if (p.suffix == ".py" or p.is_dir()) and p.stem.isidentifier())
+            prefixes.discard("harness")
+            if roots[0] == Path(__file__).resolve().parent.parent:
+                prefixes.difference_update({"tests", "tools"})
+            def local_name(name):
+                return name.split(".", 1)[0] in prefixes
+            for name in list(sys.modules):
+                if local_name(name):
+                    del sys.modules[name]
+            importlib.invalidate_caches()
+            module, name = resolve_metrics_hook(hook)
+            yield getattr(importlib.import_module(module), name)
+        finally:
+            sys.path[:] = original_path
+            for name in list(sys.modules):
+                local = name.split(".", 1)[0] in prefixes
+                if name in before and not local:
+                    continue
+                obj = sys.modules[name]
+                file = getattr(obj, "__dict__", {}).get("__file__")
+                from_root = file and any(Path(file).resolve().is_relative_to(root) for root in roots)
+                if local or (name not in before and from_root):
+                    sys.modules.pop(name, None)
+            for name, obj in before.items():
+                if name not in sys.modules:
+                    sys.modules[name] = obj
 
 
 def resolve_metrics_hook(hook: str) -> Tuple[str, str]:

@@ -303,49 +303,32 @@ class TestModalAppManager(unittest.TestCase):
             self.assertEqual(res["status"], "FAILED")
 
     def test_pull_app_output_verifies_manifest_and_hashes(self):
-        import hashlib
+        import shutil
+
+        from tests.evidence_fixtures import seal_fixture
+        from tests.fixtures import task
 
         with tempfile.TemporaryDirectory() as td:
-            dest_dir = Path(td) / "artifacts" / "exp001"
-            exp_id = "exp001"
-            volume_name = "test-volume"
-            content = b"metric: 0.95\n"
-            content_hash = hashlib.sha256(content).hexdigest()
-            manifest = {
-                "schema_version": 2,
-                "job_id": "job_123",
-                "task_id": "task_abc",
-                "exp_id": exp_id,
-                "config_sha256": "abcdef123456",
-                "files": {
-                    "metrics.json": content_hash,
-                },
-            }
+            source = Path(td) / "source" / "exp001"
+            seal_fixture(source, task())
+            dest = Path(td) / "artifacts" / "exp001"
 
             def fake_volume_get(cmd, **kwargs):
-                # cmd: ['modal', 'volume', 'get', volume_name, f'/artifacts/{exp_id}', target_dir, '--force']
-                target = Path(cmd[5])
-                exp_sub = target / exp_id
-                exp_sub.mkdir(parents=True, exist_ok=True)
-                (exp_sub / "metrics.json").write_bytes(content)
-                (exp_sub / "artifact_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+                shutil.copytree(source, Path(cmd[5]) / "exp001")
                 return Mock(returncode=0, stdout="", stderr="")
 
             with patch("subprocess.run", side_effect=fake_volume_get):
                 res = ModalAppManager.pull_app_output(
-                    exp_id=exp_id,
-                    volume_name=volume_name,
-                    artifact_dir=dest_dir,
-                    expected_identity={
-                        "job_id": "job_123",
-                        "task_id": "task_abc",
-                        "exp_id": exp_id,
-                        "config_sha256": "abcdef123456",
-                    },
-                )
-                self.assertTrue(res["success"])
-                self.assertTrue((dest_dir / "metrics.json").is_file())
-                self.assertEqual((dest_dir / "metrics.json").read_bytes(), content)
+                    exp_id="exp001", volume_name="test-volume", artifact_dir=dest,
+                    expected_identity={"exp_id": "exp001"})
+                self.assertTrue(res["success"], res.get("error"))
+                self.assertEqual((dest / "metrics.json").read_bytes(), (source / "metrics.json").read_bytes())
+                (source / "metrics.json").write_text("{}")
+                res = ModalAppManager.pull_app_output(
+                    exp_id="exp001", volume_name="test-volume", artifact_dir=dest,
+                    expected_identity={"exp_id": "exp001"})
+                self.assertFalse(res["success"])
+                self.assertIn("hash mismatch", res["error"])
 
 
 class TestModalScriptAndVolumeLogic(unittest.TestCase):

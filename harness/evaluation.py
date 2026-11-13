@@ -463,6 +463,8 @@ class PredictionBatch:
             return predictions
         if not isinstance(predictions, dict):
             raise TypeError("Predictions must be a mapping or PredictionBatch")
+        if "ids" in predictions and list(predictions["ids"]) != list(ids):
+            raise ValueError("Prediction IDs do not match evaluation IDs")
         if "labels" in predictions and isinstance(predictions["labels"], dict):
             if "ids" in predictions and list(predictions["ids"]) != list(ids):
                 raise ValueError("Prediction IDs mismatch")
@@ -477,7 +479,7 @@ class PredictionBatch:
             {
                 k: v
                 for k, v in predictions.items()
-                if not k.startswith(("proba_", "classes_"))
+                if k != "ids" and not k.startswith(("proba_", "classes_"))
             },
             {k[6:]: v for k, v in predictions.items() if k.startswith("proba_")},
             {

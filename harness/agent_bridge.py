@@ -1995,6 +1995,10 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
 
         # 1. Check Budget & Stop Guardrails
         try:
+            from harness.bridge_actions import normalize_action_params
+
+            params = normalize_action_params(params)
+            call.params = params
             guard_violation = self._check_budget_and_stop_guards(session, action, params)
         except ValueError as guard_error:
             # Contract-level rejection (e.g. execution backend lock violation):
@@ -2248,6 +2252,9 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         act = call.action
         params = call.params
         try:
+            from harness.bridge_actions import normalize_action_params
+
+            params = normalize_action_params(params)
             handler_name = self._TYPED_ACTION_HANDLER_NAMES.get(act)
             if handler_name is None:
                 return ActionObservation(

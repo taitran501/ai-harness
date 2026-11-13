@@ -162,7 +162,7 @@ def _coerce_typed_value(key: str, val: Any, declared_type: str | None) -> Any:
             raise ValueError(f"Flag '--{flag_name}' requires an integer, got boolean.")
         try:
             return int(val)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             raise ValueError(f"Flag '--{flag_name}' requires an integer, got {val!r}.")
 
     if declared_type == "bool":
@@ -476,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
             "observation": asdict(obs),
         }
         print(json.dumps(output, indent=2, ensure_ascii=False, default=_json_serial))
+        return 1 if obs.status == "FAILED" else 0
 
     elif args.command == "approve":
         sess, obs = bridge.approve_pending_action(args.session_id)
@@ -485,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:
             "observation": asdict(obs) if obs else None,
         }
         print(json.dumps(output, indent=2, ensure_ascii=False, default=_json_serial))
+        return 1 if obs and obs.status == "FAILED" else 0
 
     elif args.command == "status":
         if args.session_id:
