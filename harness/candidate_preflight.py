@@ -347,15 +347,22 @@ def run_candidate_preflight(
                 break
 
     if resolved_id_col:
+        if df_cand[resolved_id_col].duplicated().any():
+            raise ValueError(f"Duplicate IDs detected in candidate predictions column '{resolved_id_col}'")
+        if df_inc[resolved_id_col].duplicated().any():
+            raise ValueError(f"Duplicate IDs detected in incumbent predictions column '{resolved_id_col}'")
+
+        cand_ids = set(df_cand[resolved_id_col])
+        inc_ids = set(df_inc[resolved_id_col])
+        if cand_ids != inc_ids:
+            missing = len(inc_ids - cand_ids)
+            extra = len(cand_ids - inc_ids)
+            raise ValueError(
+                f"Candidate and incumbent ID sets do not match: missing {missing}, extra {extra}"
+            )
+
         df_cand = df_cand.sort_values(resolved_id_col).reset_index(drop=True)
         df_inc = df_inc.sort_values(resolved_id_col).reset_index(drop=True)
-        if not (df_cand[resolved_id_col].values == df_inc[resolved_id_col].values).all():
-            # Align by ID
-            common_ids = set(df_cand[resolved_id_col]) & set(df_inc[resolved_id_col])
-            if not common_ids:
-                raise ValueError("No common IDs found between candidate and incumbent!")
-            df_cand = df_cand[df_cand[resolved_id_col].isin(common_ids)].sort_values(resolved_id_col).reset_index(drop=True)
-            df_inc = df_inc[df_inc[resolved_id_col].isin(common_ids)].sort_values(resolved_id_col).reset_index(drop=True)
 
     if len(df_cand) != len(df_inc):
         raise ValueError(f"Row count mismatch after alignment: cand={len(df_cand)}, inc={len(df_inc)}")

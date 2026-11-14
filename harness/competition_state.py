@@ -136,9 +136,17 @@ class CompetitionStateMachine:
         if spec_path.exists():
             try:
                 raw = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-                return raw.get("task", raw)
-            except Exception:
-                pass
+            except Exception as exc:
+                raise StateIntegrityError(
+                    "SPEC_PARSE_FAILED",
+                    f"Failed to parse task config at {spec_path}: {exc}",
+                ) from exc
+            if not isinstance(raw, dict):
+                raise StateIntegrityError(
+                    "SPEC_INVALID_FORMAT",
+                    f"Task config at {spec_path} must be a YAML mapping, got {type(raw).__name__}",
+                )
+            return raw.get("task", raw)
         return {
             "name": "ML Competition Benchmark",
             "primary_metric": "score",

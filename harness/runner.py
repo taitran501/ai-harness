@@ -578,16 +578,18 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             raise RuntimeError(f"Custom script execution failed:\n{err_msg}")
 
         # 4. Verify output artifacts
+        from harness.evaluation import read_prediction_frame
+
         oof_path = self.exp_dir / "oof_predictions.csv"
         if not oof_path.exists():
             pred_fallback = self.exp_dir / "predictions.csv"
             if pred_fallback.exists():
-                oof_df = pd.read_csv(pred_fallback)
+                oof_df = read_prediction_frame(pred_fallback, expected_ids=truth[id_col], id_column=id_col)
                 oof_df.to_csv(oof_path, index=False)
             else:
                 raise FileNotFoundError(f"Custom script must generate '{oof_path.name}' in target experiment dir")
 
-        oof_df = pd.read_csv(oof_path)
+        oof_df = read_prediction_frame(oof_path, expected_ids=truth[id_col], id_column=id_col)
         if id_col not in oof_df.columns:
             raise ValueError(f"OOF predictions file missing ID column '{id_col}'")
 
@@ -633,7 +635,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         fold_test_preds = []
         test_pred_path = self.exp_dir / "test_predictions.csv"
         if test_pred_path.exists() and test_df is not None:
-            t_df = pd.read_csv(test_pred_path)
+            t_df = read_prediction_frame(test_pred_path, expected_ids=test_df[id_col], id_column=id_col)
             from harness.script_predictions import extract_test_predictions
 
             cand_test = extract_test_predictions(t_df, self.task_spec, expected_ids=test_df[id_col])
@@ -968,6 +970,10 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             "fold_metrics": details,
         }
         save_json(self.exp_dir / "metrics.json", result)
+        if rows:
+            for r in rows:
+                if r.get("dev_fold") == "all" and r.get("input_variant") in variants:
+                    r["primary_score"] = variants[r["input_variant"]]["primary_score"]
         summary = pd.DataFrame(
             rows
             or [

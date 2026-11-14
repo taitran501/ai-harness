@@ -20,7 +20,10 @@ DEFAULT_TASK_CONFIG = Path("configs") / "task.yaml"
 def _read_yaml(path: Path) -> Dict[str, Any]:
     if not path.is_file():
         return {}
-    value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
     return value if isinstance(value, dict) else {}
 
 

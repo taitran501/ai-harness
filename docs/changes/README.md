@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-11-14 | Stacking regression continuity, pipeline stage identity/traversal guards, and task spec fail-closed parsing | #137 | [stacking-pipeline-and-spec-hardening](stacking-pipeline-and-spec-hardening.md) |
 | 2026-11-14 | Truthful inspection metrics, Python 3.10 hashing fallback, and declarative submission contracts | #137 | [truthful-observations-and-compatibility](truthful-observations-and-compatibility.md) |
 | 2026-11-14 | Explicit counter merges, atomic provider observations, journal/cancellation integrity, cleanup, and read-only context | #137 | [deep-module-hardening](deep-module-hardening.md) |
 | 2026-11-14 | Fail-closed state/configuration, prediction and validation scope contracts, atomic publication, and bounded context HUD | #137 | [boundary-consolidation](boundary-consolidation.md) |

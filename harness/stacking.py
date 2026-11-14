@@ -68,12 +68,25 @@ def align_prediction_frames(
         raise ValueError(f"id_column '{id_column}' missing from reference DataFrame")
 
     target_ids = reference_df[id_column].values
+    ref_series = pd.Series(list(target_ids))
+    if ref_series.isna().any() or ref_series.duplicated().any():
+        raise ValueError(f"reference_df '{id_column}' must contain unique, non-null IDs")
     aligned_matrix = []
     model_names = []
 
     for idx, df in enumerate(prediction_frames):
         if id_column not in df.columns:
             raise ValueError(f"id_column '{id_column}' missing in prediction DataFrame at index {idx}")
+
+        if df[id_column].isna().any() or df[id_column].duplicated().any():
+            raise ValueError(f"Prediction frame index {idx} contains duplicate or null IDs in '{id_column}'")
+
+        if set(df[id_column]) != set(target_ids):
+            missing_count = len(set(target_ids) - set(df[id_column]))
+            extra_count = len(set(df[id_column]) - set(target_ids))
+            raise ValueError(
+                f"Prediction frame index {idx} ID mismatch: missing {missing_count}, extra {extra_count}"
+            )
 
         # Auto-detect prediction column if not specified
         col = pred_column
@@ -88,10 +101,6 @@ def align_prediction_frames(
 
         # Re-index strictly to target ID sequence
         indexed = df.set_index(id_column)
-        if not set(target_ids).issubset(indexed.index):
-            missing_count = len(set(target_ids) - set(indexed.index))
-            raise ValueError(f"Prediction frame index {idx} missing {missing_count} IDs from reference")
-
         reindexed_series = indexed.loc[target_ids, col]
 
         # Parse string representations of array if present (e.g. "[0.12, 0.88]")
@@ -154,31 +163,39 @@ class L2LogitStacker:
             Tuple of (oof_stacked_predictions, test_stacked_predictions).
         """
         X_oof = np.asarray(X_oof, dtype=np.float64)
-        y = np.asarray(y, dtype=np.int64)
         n_samples, n_models = X_oof.shape
         self.feature_names_ = feature_names or [f"model_{i}" for i in range(n_models)]
 
-        # Transform inputs into logit representation
-        Z_oof = np.column_stack([
-            to_clipped_logit(X_oof[:, i], logit_bounds=self.clip_bounds)
-            for i in range(n_models)
-        ])
-
-        if X_test is not None:
-            X_test = np.asarray(X_test, dtype=np.float64)
-            Z_test = np.column_stack([
-                to_clipped_logit(X_test[:, i], logit_bounds=self.clip_bounds)
+        if self.task_type == "classification":
+            y = np.asarray(y, dtype=np.int64)
+            # Transform inputs into logit representation for probabilities
+            Z_oof = np.column_stack([
+                to_clipped_logit(X_oof[:, i], logit_bounds=self.clip_bounds)
                 for i in range(n_models)
             ])
-            n_test = len(X_test)
-            test_accum = np.zeros(n_test, dtype=np.float64)
-        else:
-            Z_test = None
-            test_accum = None
-
-        if self.task_type == "classification":
+            if X_test is not None:
+                X_test = np.asarray(X_test, dtype=np.float64)
+                Z_test = np.column_stack([
+                    to_clipped_logit(X_test[:, i], logit_bounds=self.clip_bounds)
+                    for i in range(n_models)
+                ])
+                n_test = len(X_test)
+                test_accum = np.zeros(n_test, dtype=np.float64)
+            else:
+                Z_test = None
+                test_accum = None
             cv = StratifiedKFold(n_splits=self.n_splits, shuffle=True, random_state=self.random_state)
         else:
+            y = np.asarray(y, dtype=np.float64)
+            # For regression, predictions are continuous values; use raw member predictions
+            Z_oof = X_oof
+            if X_test is not None:
+                Z_test = np.asarray(X_test, dtype=np.float64)
+                n_test = len(Z_test)
+                test_accum = np.zeros(n_test, dtype=np.float64)
+            else:
+                Z_test = None
+                test_accum = None
             cv = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.random_state)
 
         oof_stacked = np.zeros(n_samples, dtype=np.float64)
@@ -270,7 +287,10 @@ class RankAverager:
             w = np.asarray(weights, dtype=np.float64)
             if len(w) != n_members:
                 raise ValueError(f"Weights length {len(w)} does not match models {n_members}")
-            w = w / np.sum(w)
+            total_w = np.sum(w)
+            if not np.isfinite(total_w) or total_w <= 0.0 or np.any(w < 0):
+                raise ValueError("Weights must be non-negative and sum to a positive finite value")
+            w = w / total_w
 
         blended = np.zeros(length, dtype=np.float64)
         for i in range(n_members):
