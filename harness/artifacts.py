@@ -75,7 +75,12 @@ def _read_artifact_json(path):
 
 def _fresh_sha256(path):
     with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        if hasattr(hashlib, "file_digest"):
+            return hashlib.file_digest(stream, "sha256").hexdigest()
+        digest = hashlib.sha256()
+        while chunk := stream.read(65536):
+            digest.update(chunk)
+        return digest.hexdigest()
 
 
 def _rename_directory_noreplace(source, destination):

@@ -878,21 +878,33 @@ class ActionHandlerMixin:
         exp_id = params.get("exp_id", default_exp_id)
         cand = next(
             (c for c in pool["all_candidates"] if c["id"] == exp_id), None
-        ) or (pool["overall_best"] if pool["overall_best"] else {})
-        cand_score = float(
-            cand.get("composite_score")
-            or cand.get("score")
-            or self.comp_state.spec.get("primary_metric_baseline")
-            or 0.0
         )
+        if cand is None and "exp_id" in params:
+            return ActionObservation(
+                step_index=call.step_index,
+                action=act,
+                status="FAILED",
+                summary=f"Experiment '{exp_id}' not found in candidate pool.",
+                data={"requested_id": exp_id},
+                elapsed_seconds=round(time.time() - t0, 3),
+            )
+        if cand is None:
+            cand = pool.get("overall_best") or {}
+        raw_score = cand.get("composite_score")
+        if raw_score is None:
+            raw_score = cand.get("score")
+        if raw_score is None:
+            raw_score = self.comp_state.spec.get("primary_metric_baseline")
+        cand_score = float(raw_score) if raw_score is not None else None
+        score_label = f"{cand_score:.4f}" if cand_score is not None else "unavailable"
         return ActionObservation(
             step_index=call.step_index,
             action=act,
             status="SUCCESS",
-            summary=f"Inspected '{cand.get('id', exp_id)}': score={cand_score:.4f}, std={cand.get('fold_std', 0.015)}.",
+            summary=f"Inspected '{cand.get('id', exp_id)}': score={score_label}, std={cand.get('fold_std')}.",
             composite_score=cand_score,
-            metric_delta=cand.get("delta_vs_baseline", 0.0),
-            fold_variance=cand.get("fold_std", 0.015),
+            metric_delta=cand.get("delta_vs_baseline"),
+            fold_variance=cand.get("fold_std"),
             data=cand,
             elapsed_seconds=round(time.time() - t0, 3),
         )

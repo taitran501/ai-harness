@@ -65,6 +65,7 @@ UniversalTaskSpec
 | `data_config.train_path` | `string` | **Yes** | `dataset/` | File or directory path to training data (`.parquet`, `.csv`, `.tsv`, `.jsonl`, `.sqlite`, or `.zip`). |
 | `data_config.test_path` | `string` | No | `null` | File or directory path to unlabelled test evaluation data. |
 | `data_config.id_column` | `string` | **Yes** | `id` | Unique instance identifier column (e.g. `PassengerId`, `uid`, `row_id`). |
+| `data_config.id_zfill` | `integer` | No | `null` (`11` for `GEOID`) | Submission ID padding width. When set to a positive width, IDs are converted to strings, their decimal suffix is removed, and they are left-padded with zeroes. Overrides the legacy 11-character `GEOID` default. |
 | `data_config.group_column` | `string` | No | `null` | **Anti-Leakage Group Column**. Identifiers (e.g. `user_id`, `patient_id`, `video_id`) that must never be split across folds. |
 | `data_config.partition_column`| `string` | No | `null` | Partitioning attribute (e.g. `language`, `site`) for partitioned slicing. |
 

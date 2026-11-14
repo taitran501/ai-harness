@@ -1369,10 +1369,10 @@ class TestInspectExperimentHandler(unittest.TestCase):
             call, types.SimpleNamespace(), journal, None
         )
 
-    def test_inspect_experiment_succeeds_with_explicit_id(self) -> None:
+    def test_inspect_experiment_fails_with_missing_explicit_id(self) -> None:
         obs = self._dispatch("inspect_experiment", {"exp_id": "baseline"})
-        self.assertEqual(obs.status, "SUCCESS", msg=obs.summary)
-        self.assertIn("baseline", obs.summary)
+        self.assertEqual(obs.status, "FAILED", msg=obs.summary)
+        self.assertEqual(obs.data, {"requested_id": "baseline"})
 
     def test_inspect_experiment_succeeds_with_default_id(self) -> None:
         obs = self._dispatch("inspect_experiment", {})

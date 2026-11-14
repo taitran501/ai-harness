@@ -15,6 +15,7 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-11-14 | Truthful inspection metrics, Python 3.10 hashing fallback, and declarative submission contracts | #137 | [truthful-observations-and-compatibility](truthful-observations-and-compatibility.md) |
 | 2026-11-14 | Explicit counter merges, atomic provider observations, journal/cancellation integrity, cleanup, and read-only context | #137 | [deep-module-hardening](deep-module-hardening.md) |
 | 2026-11-14 | Fail-closed state/configuration, prediction and validation scope contracts, atomic publication, and bounded context HUD | #137 | [boundary-consolidation](boundary-consolidation.md) |
 | 2026-11-13 | Fix twelve adversarial audit findings in contracts, evidence, dispatch, bridge inputs, discovery, and hygiene | #137 | [harness-invariants-audit-hardening](harness-invariants-audit-hardening.md) |
