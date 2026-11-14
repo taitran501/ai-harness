@@ -17,34 +17,113 @@ class ExperimentValidator:
     """Deterministic constraint validator for ML models and pipelines."""
 
     @staticmethod
-    def count_model_parameters(model: Any) -> int:
-        """Count parameters of PyTorch model or estimate for sklearn/custom model."""
+    def count_trainable_parameters(model: Any) -> Optional[int]:
+        """Count trainable parameters without confusing them with model size."""
         if hasattr(model, "parameters") and callable(getattr(model, "parameters")):
-            return sum(p.numel() for p in model.parameters() if p.requires_grad)
+            return sum(
+                int(parameter.numel())
+                for parameter in model.parameters()
+                if getattr(parameter, "requires_grad", True)
+            )
+        return ExperimentValidator._count_fitted_estimator_parameters(model)
+
+    @staticmethod
+    def count_logical_parameters(model: Any) -> Optional[int]:
+        """Count all logical parameters, including frozen backbone weights.
+
+        ``None`` means that the object does not expose a trustworthy count.
+        A trainable-parameter count is never used as a substitute.
+        """
+        if hasattr(model, "parameters") and callable(getattr(model, "parameters")):
+            return sum(int(parameter.numel()) for parameter in model.parameters())
         if hasattr(model, "num_parameters") and callable(getattr(model, "num_parameters")):
-            return model.num_parameters()
-        # Fallback for sklearn or sparse pipelines
+            try:
+                count = model.num_parameters()
+            except TypeError:
+                return None
+            return int(count) if isinstance(count, int) and not isinstance(count, bool) else None
+        return ExperimentValidator._count_fitted_estimator_parameters(model)
+
+    @staticmethod
+    def _count_fitted_estimator_parameters(model: Any) -> Optional[int]:
+        """Return the known fitted coefficient count for sklearn-style estimators."""
         if hasattr(model, "named_steps"):
             total = 0
-            for step_name, step in model.named_steps.items():
+            found = False
+            for step in model.named_steps.values():
                 if hasattr(step, "coef_"):
-                    total += step.coef_.size
+                    total += int(step.coef_.size)
+                    found = True
                 if hasattr(step, "intercept_") and step.intercept_ is not None:
-                    total += step.intercept_.size
+                    total += int(step.intercept_.size)
+                    found = True
+            return total if found else None
+        if hasattr(model, "coef_"):
+            total = int(model.coef_.size)
+            if hasattr(model, "intercept_") and model.intercept_ is not None:
+                total += int(model.intercept_.size)
             return total
+        return None
+
+    @staticmethod
+    def count_model_parameters(model: Any) -> int:
+        """Backward-compatible alias for the legacy trainable budget count.
+
+        Older callers expect an integer and use this method with the legacy
+        ``max_params_limit`` field. New governance code should use explicit
+        trainable or logical-total methods instead.
+        """
+        count = ExperimentValidator.count_trainable_parameters(model)
+        if count is not None:
+            return count
+        # Preserve the historical estimator protocol for callers that expose
+        # only ``num_parameters``. Governed logical totals use the explicit
+        # method above and the registry's declared count basis.
+        if hasattr(model, "num_parameters") and callable(getattr(model, "num_parameters")):
+            try:
+                value = model.num_parameters()
+            except TypeError:
+                value = None
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
         return 0
 
     @classmethod
-    def assert_parameter_limit(cls, model: Any, max_params: Optional[int] = None) -> int:
-        """Assert that model trainable parameters do not exceed maximum ceiling."""
+    def assert_trainable_parameter_limit(
+        cls, model: Any, max_params: Optional[int] = None
+    ) -> int:
+        """Enforce the legacy training budget against trainable parameters."""
         param_count = cls.count_model_parameters(model)
         if max_params is not None and param_count > max_params:
             raise ValueError(
-                f"[HARD CONSTRAINT VIOLATION] Model has {param_count:,} parameters, "
-                f"which exceeds the allowed limit of {max_params:,} parameters! "
-                f"Agent must reduce hidden dimension, freeze backbone layers, or switch to a lighter model."
+                f"[HARD CONSTRAINT VIOLATION] Model has {param_count:,} trainable parameters, "
+                f"which exceeds the allowed training budget of {max_params:,}."
             )
         return param_count
+
+    @classmethod
+    def assert_logical_parameter_limit(
+        cls, model: Any, max_params: Optional[int] = None
+    ) -> Optional[int]:
+        """Enforce a logical model-size ceiling, failing closed when unknown."""
+        param_count = cls.count_logical_parameters(model)
+        if max_params is None:
+            return param_count
+        if param_count is None:
+            raise ValueError(
+                "MODEL_PARAMETER_COUNT_UNKNOWN: logical total parameter count is unavailable."
+            )
+        if param_count > max_params:
+            raise ValueError(
+                f"MODEL_PARAMETER_LIMIT_EXCEEDED: model has {param_count:,} logical parameters, "
+                f"exceeding the competition limit of {max_params:,}."
+            )
+        return param_count
+
+    @classmethod
+    def assert_parameter_limit(cls, model: Any, max_params: Optional[int] = None) -> int:
+        """Backward-compatible trainable-parameter budget assertion."""
+        return cls.assert_trainable_parameter_limit(model, max_params)
 
     @classmethod
     def assert_no_group_data_leakage(

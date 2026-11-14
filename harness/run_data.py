@@ -15,6 +15,31 @@ from harness.artifacts import digest
 from harness.validator import ExperimentValidator
 
 
+def resolve_execution_scope(project, cfg, args=None, *, task_spec=None, plugin=None):
+    """Resolve real partitions without creating a run or reserving research quota."""
+    from types import SimpleNamespace
+    from harness.task_spec import load_active_task_spec
+    from harness.plugins import TaskPluginContext, load_task_plugin
+
+    resolver = RunDataMixin()
+    resolver.project_root = project.root
+    resolver.task_spec = task_spec or load_active_task_spec(project.task_config_path)
+    resolver.cfg = cfg
+    resolver.args = args or SimpleNamespace(fold=None)
+    resolver.manifest = {}
+    resolver.seed = resolver.task_spec.resolve_seed(cfg.get("runtime", {}).get("seed", 42))
+    resolver.plugin_context = TaskPluginContext(project.root, project.task_config_path, resolver.task_spec,
+                                               project.plugin_id or "default", cfg)
+    resolver.task_plugin = plugin or load_task_plugin(project.plugin_id, resolver.plugin_context)
+    frame = resolver._load_training_data()
+    splits = resolver._resolve_validation_splits(frame, resolver.task_spec.validation.strategy)
+    selected, required = {str(p[0]) for p in splits}, {str(p[0]) for p in resolver._required_validation_splits}
+    sampled = bool(getattr(resolver.args, "debug", False) or getattr(resolver.args, "probe_samples", None)
+                   or cfg.get("validation", {}).get("sample_limit"))
+    return {"resolved": True, "complete_selection": selected == required and not sampled,
+            "selected_folds": sorted(selected), "required_folds": sorted(required)}
+
+
 class RunDataMixin:
     """Training-data loading and validation-split resolution, moved verbatim."""
 
@@ -104,6 +129,13 @@ class RunDataMixin:
         return frame
 
     def _resolve_validation_splits(self, df, strategy):
+        if getattr(self, "_resolved_validation_splits", None) is not None:
+            return self._resolved_validation_splits
+        for field in ("complete_folds", "num_folds", "strategy"):
+            override = self.cfg.get("validation", {}).get(field)
+            declared = getattr(self.task_spec.validation, field)
+            if override is not None and override != declared:
+                raise ValueError("Experiment cannot redefine validation." + field)
         config = {
             **self.task_spec.metadata.get("validation", {}),
             **self.cfg.get("validation", {}),
@@ -280,6 +312,9 @@ class RunDataMixin:
             (int(f) if isinstance(f, (int, np.integer)) else f, train, dev)
             for f, train, dev in result
         ]
+        if strategy != "external_holdout" and strategy not in {"holdout", "zero_shot_eval"}:
+            if len(result) != self.task_spec.validation.num_folds:
+                raise ValueError("Plugin returned incomplete declared validation folds")
         if strategy == "kfold":
             held = [x for _, _, dev in result for x in dev[self.task_spec.id_column]]
             if len(held) != len(set(held)) or set(held) != set(
@@ -291,11 +326,34 @@ class RunDataMixin:
         # Script adapters also need the complete legacy fold map, even when
         # the execution below selects just one fold for a probe.
         self._all_validation_splits = result
+        fold_ids = [str(p[0]) for p in result]
+        if len(fold_ids) != len(set(fold_ids)):
+            raise ValueError("Duplicate validation fold IDs")
+        declared = self.task_spec.validation.complete_folds
+        if declared is not None:
+            if not isinstance(declared, list) or not declared or len(set(map(str, declared))) != len(declared):
+                raise ValueError("validation.complete_folds must be a nonempty list of unique folds")
+            if set(map(str, declared)) - set(fold_ids):
+                raise ValueError("Unknown complete validation fold")
+        required = [p for p in result if declared is None or str(p[0]) in set(map(str, declared))]
+        self._required_validation_splits = required
+        self.required_validation_ids = {x for _, _, dev in required for x in dev[self.task_spec.id_column]}
+        result = required
         requested = getattr(self.args, "fold", None)
         if requested is not None:
             result = [x for x in result if str(x[0]) == str(requested)]
             if not result:
                 raise ValueError("Requested fold does not exist")
+        elif 'folds' in self.cfg.get('data', {}) and strategy not in ("holdout", "external_holdout"):
+            configured = self.cfg['data']['folds']
+            if not isinstance(configured, list) or not configured:
+                raise ValueError('data.folds must be a nonempty list')
+            wanted = [str(value) for value in configured]
+            if len(set(wanted)) != len(wanted):
+                raise ValueError('data.folds contains duplicate folds')
+            if set(wanted) - {str(part[0]) for part in result}:
+                raise ValueError('Configured fold does not exist')
+            result = [part for part in result if str(part[0]) in wanted]
         for fold, train, dev in result:
             if train.empty or dev.empty:
                 raise ValueError("Empty training or validation partition")
@@ -322,6 +380,7 @@ class RunDataMixin:
                 for f, t, v in result
             ]
         )
+        self._resolved_validation_splits = result
         return result
 
     def _prepare_script_validation(self, df, strategy):
@@ -357,6 +416,9 @@ class RunDataMixin:
         save_json(manifest_path, {
             "schema_version": 1, "run_kind": self.run_kind, "id_column": key,
             "sample_limit": limit,
+            "required_partitions": [{"fold": str(fold), "train_ids": train[key].tolist(),
+                                     "validation_ids": dev[key].tolist()}
+                                    for fold, train, dev in self._required_validation_splits],
             "partitions": [{"fold": fold, "train_ids": train[key].tolist(),
                             "validation_ids": dev[key].tolist()} for fold, train, dev in selected],
         })

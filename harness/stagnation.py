@@ -44,6 +44,28 @@ class StagnationController:
         self.project = _project(project)
         self.directory = policy_directory(self.project)
 
+    def read_snapshot(self) -> dict:
+        """Read validated persisted projections and receipts without replay or locking."""
+        from harness.state_store import read_json_state
+        from harness.decision_rules import read_decision_evaluation
+        states = {}
+        for path in sorted((self.directory / "stagnation").glob("*.json")):
+            state = read_json_state(path, validate=lambda value: validate_document("stagnation_state", value))
+            identity = state["comparison_identity_sha256"]
+            if path.stem != identity:
+                raise ValueError("STAGNATION_SNAPSHOT_INTEGRITY: comparison identity mismatch")
+            refs = set(state["trigger_evaluation_ids"])
+            refs.update(state[key] for key in ("incumbent_evaluation_id", "resume_evaluation_id") if state.get(key))
+            for ref in refs:
+                receipt = read_decision_evaluation(self.directory / (ref + ".json"))
+                if receipt["comparison_identity_sha256"] != identity:
+                    raise ValueError("STAGNATION_SNAPSHOT_INTEGRITY: receipt comparison mismatch")
+                if ref == state.get("incumbent_evaluation_id") and (
+                        receipt["outcome"] != "supported" or receipt["candidate"] != state["incumbent_evidence_ref"]):
+                    raise ValueError("STAGNATION_SNAPSHOT_INTEGRITY: incumbent receipt mismatch")
+            states[identity] = state
+        return states
+
     def reconcile_results(self, results=None):
         """Replay canonical completion sequence; repeated notes never add failures."""
         from harness.task_spec import load_active_task_spec

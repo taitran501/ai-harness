@@ -27,6 +27,25 @@ import yaml
 from harness.io_utils import safe_relpath
 from harness.submission_manager import SubmissionManager
 from harness.tree_journal import TreeJournal
+from harness.state_store import read_json_state, StateIntegrityError
+
+
+def validate_competition_state(value):
+    if value.get("version", "3.0_universal") != "3.0_universal":
+        raise StateIntegrityError("STATE_VERSION_UNSUPPORTED", "competition_state.json")
+    for key in ("gates", "data_audit_config", "agent_context_config", "candidate_pool",
+                "freeze_selection", "agent_copilot", "finalization"):
+        if key in value and not isinstance(value[key], dict):
+            raise ValueError(f"{key} must be an object")
+    for key in ("spec_confirmed", "data_risks_confirmed", "baseline_locked", "freeze_locked", "finalized"):
+        if key in value.get("gates", {}) and type(value["gates"][key]) is not bool:
+            raise ValueError(f"gates.{key} must be boolean")
+    if not isinstance(value.get("audit_trail", []), list):
+        raise ValueError("audit_trail must be a list")
+    for config in ("data_audit_config", "agent_context_config"):
+        for key, flag in value.get(config, {}).items():
+            if key != "auto_scan_mode" and type(flag) is not bool:
+                raise ValueError(f"{config}.{key} must be boolean")
 
 
 def official_primary_value(entry, primary_metric: str):
@@ -86,6 +105,8 @@ class CompetitionStateMachine:
         self,
         project_root: Path | str = ".",
         task_config_path: Optional[Path | str] = None,
+        *,
+        read_only: bool = False,
     ):
         from harness.project import HarnessProject
 
@@ -98,14 +119,16 @@ class CompetitionStateMachine:
         self.freeze_lock_file = self.submissions_dir / "FROZEN_FINAL_LOCK.json"
         self.final_report_file = self.artifacts_dir / "FINAL_COMPETITION_REPORT.md"
 
-        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self.submissions_dir.mkdir(parents=True, exist_ok=True)
+        self.read_only = read_only
+        if not read_only:
+            self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+            self.submissions_dir.mkdir(parents=True, exist_ok=True)
 
         self.spec: Dict[str, Any] = self.load_competition_spec()
         self.state: Dict[str, Any] = self._load_or_init_state()
         import copy
 
-        self._state_snapshot = copy.deepcopy(self.state)
+        self._state_snapshot = copy.deepcopy(getattr(self, "_loaded_state_snapshot", self.state))
 
     def load_competition_spec(self) -> Dict[str, Any]:
         """Load the declarative Competition Spec from configs/task.yaml."""
@@ -113,9 +136,17 @@ class CompetitionStateMachine:
         if spec_path.exists():
             try:
                 raw = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
-                return raw.get("task", raw)
-            except Exception:
-                pass
+            except Exception as exc:
+                raise StateIntegrityError(
+                    "SPEC_PARSE_FAILED",
+                    f"Failed to parse task config at {spec_path}: {exc}",
+                ) from exc
+            if not isinstance(raw, dict):
+                raise StateIntegrityError(
+                    "SPEC_INVALID_FORMAT",
+                    f"Task config at {spec_path} must be a YAML mapping, got {type(raw).__name__}",
+                )
+            return raw.get("task", raw)
         return {
             "name": "ML Competition Benchmark",
             "primary_metric": "score",
@@ -282,29 +313,32 @@ class CompetitionStateMachine:
 
     def _load_or_init_state(self) -> Dict[str, Any]:
         default = self._default_state()
-        if not self.state_file.exists():
+        try:
+            loaded = read_json_state(self.state_file, validate=validate_competition_state)
+        except FileNotFoundError:
+            if self.read_only:
+                return default
             from harness.state_store import transaction
 
-            with transaction(self.state_file, default) as current:
+            with transaction(self.state_file, default, validate=validate_competition_state) as current:
                 default = dict(current)
             return default
-        try:
-            loaded = json.loads(self.state_file.read_text(encoding="utf-8"))
-            for k, v in default.items():
-                if k not in loaded:
-                    loaded[k] = v
-                elif isinstance(v, dict) and isinstance(loaded[k], dict):
-                    for sk, sv in v.items():
-                        if sk not in loaded[k]:
-                            loaded[k][sk] = sv
-            return loaded
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError("Required competition state is unreadable") from error
+        import copy
+        self._loaded_state_snapshot = copy.deepcopy(loaded)
+        for k, v in default.items():
+            if k not in loaded:
+                loaded[k] = v
+            elif isinstance(v, dict):
+                for sk, sv in v.items():
+                    loaded[k].setdefault(sk, sv)
+        return loaded
 
     def save(self) -> None:
+        if self.read_only:
+            raise ValueError("CompetitionStateMachine is read-only")
         import copy
 
-        from harness.state_store import save_snapshot
+        from harness.state_store import save_snapshot, workspace_lock
 
         # Stamp freshness on every persist: consumers (dashboard, HUD) read
         # `updated_at` to detect stale state, and it previously stayed at the
@@ -312,9 +346,17 @@ class CompetitionStateMachine:
         self.state["updated_at"] = datetime.datetime.now(
             datetime.timezone.utc
         ).isoformat()
-        self.state = save_snapshot(
-            self.state_file, getattr(self, "_state_snapshot", {}), self.state
-        )
+        with workspace_lock(self.state_file.parent):
+            before = copy.deepcopy(getattr(self, "_state_snapshot", {}))
+            latest = read_json_state(self.state_file, default_factory=lambda: self.state,
+                                     validate=validate_competition_state)
+            if before:
+                if "updated_at" in latest:
+                    before["updated_at"] = latest["updated_at"]
+                else:
+                    before.pop("updated_at", None)
+            self.state = save_snapshot(self.state_file, before, self.state,
+                                       validate=validate_competition_state)
         self._state_snapshot = copy.deepcopy(self.state)
 
     def _append_audit_event(
@@ -339,6 +381,8 @@ class CompetitionStateMachine:
         self, custom_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Run declarative data checks defined in CompetitionSpec (`configs/task.yaml`)."""
+        if self.read_only:
+            raise ValueError("CompetitionStateMachine is read-only")
         if custom_config:
             self.state["data_audit_config"].update(custom_config)
             self.save()
@@ -622,13 +666,18 @@ class CompetitionStateMachine:
         atomic_write_json(self.data_report_file, report, indent=2, ensure_ascii=False)
         return report
 
-    def get_data_readiness_report(self) -> Dict[str, Any]:
-        if not self.data_report_file.exists():
+    def get_data_readiness_report(self, *, refresh: bool = False) -> Dict[str, Any]:
+        if refresh:
+            if self.read_only:
+                raise ValueError("CompetitionStateMachine is read-only")
             return self.run_data_readiness_audit()
         try:
-            return json.loads(self.data_report_file.read_text(encoding="utf-8"))
-        except Exception:
-            return self.run_data_readiness_audit()
+            report = json.loads(self.data_report_file.read_text(encoding="utf-8"))
+            if not isinstance(report, dict) or not isinstance(report.get("status"), str):
+                raise ValueError("Invalid data readiness report")
+            return report
+        except (OSError, UnicodeError, ValueError) as exc:
+            return {"status": "UNAVAILABLE", "reason": "missing_or_corrupt_report", "detail": str(exc)[:200]}
 
     # =========================================================================
     # PHASE 5: UNIVERSAL CANDIDATE MANAGEMENT POOL & STRATEGIES

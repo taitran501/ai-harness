@@ -81,7 +81,7 @@ def build_variant_predictions(selected: pd.DataFrame, task_spec: Any) -> Dict[st
     values, single-value `classes_` columns, subtask probability columns.
     Both paths MUST stay in sync; the runner imports this function.
     """
-    predictions: Dict[str, Any] = {}
+    predictions: Dict[str, Any] = {"ids": selected[task_spec.id_column].tolist()}
     for col in selected:
         if col.startswith("pred_"):
             values = selected[col].tolist()
@@ -98,7 +98,7 @@ def build_variant_predictions(selected: pd.DataFrame, task_spec: Any) -> Dict[st
                     for v in selected[col].tolist()
                 ]
         elif col.startswith("classes_"):
-            if selected[col].nunique() != 1:
+            if selected[col].isna().any() or selected[col].nunique() != 1:
                 raise ValueError("Class order changed across folds")
             predictions[col] = json.loads(selected[col].iloc[0])
     return predictions
@@ -124,25 +124,25 @@ def score_predictions(
     skip_generic_base_eval: bool = False,
 ) -> dict:
     """Score one variant through the runner's exact evaluation path."""
-    import importlib
-    import sys
-
     from harness.evaluation import resolve_evaluation, validate_prediction_contract
 
     validate_prediction_contract(task_spec, truth, predictions)
     hook = _custom_hook(run_config)
     if hook:
         project_root = getattr(plugin_context, "project_root", None)
-        if project_root is not None and str(project_root) not in sys.path:
-            sys.path.insert(0, str(project_root))
-        module, name = hook
-        result = getattr(importlib.import_module(module), name)(truth, predictions)
+        from harness.hook_ref import isolated_metrics_hook
+
+        with isolated_metrics_hook(":".join(hook), project_root) as scorer:
+            result = scorer(truth, predictions)
         if not isinstance(result, dict):
             raise TypeError("Custom metrics_evaluator must return a metric mapping")
         # Normalize the hook before adding generic diagnostics: a generic
         # primary_score must never shadow the hook's named official metric.
         result = resolve_evaluation(task_spec, result, len(truth))
-        if not skip_generic_base_eval:
+        interactive_only = bool(task_spec.subtasks) and all(
+            st.task_type == 'interactive_agent' for st in task_spec.subtasks.values()
+        )
+        if not skip_generic_base_eval and not interactive_only:
             try:
                 base_result = plugin.evaluate_predictions(plugin_context, truth, predictions)
                 result = {**base_result, **result}

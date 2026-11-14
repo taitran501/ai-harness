@@ -46,17 +46,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 #: Modules whose tests run full pipelines / heavy subprocess work.
-#: Membership from per-module timing measurement (2026-10-18, standalone
-#: runs incl. cold start): kaggle_runtime ~27s, sync_command ~15s (after
-#: detection-test clone stubbing), dashboard ~12s, cloud_jobs_and_env
-#: ~12s, harness ~7s, audit_gate ~7s.
+#: Canonical module paths after the unit/integration/e2e consolidation.
+#: The fast tier additionally excludes every e2e module.
 SLOW_MODULES = (
-    "test_kaggle_runtime",      # Kaggle kernel packaging + dispatch contracts
-    "test_dashboard",           # live dashboard server + HTTP endpoints
-    "test_audit_gate",          # audit-gate numerics (diff metrics, t-test, integrity) + CLI receipt tests
-    "test_harness",             # TreeJournal/Validator/AuditGate unit tests + audit-gate CLI subprocesses
-    "test_sync_command",        # sync CLI against throwaway git clones (heavy subprocess work)
-    "test_cloud_jobs_and_env",  # cloud job runner + environment cache (subprocess work)
+    "tests.e2e.test_kaggle_runtime",
+    "tests.e2e.test_dashboard_e2e",
+    "tests.e2e.test_sync_e2e",
+    "tests.e2e.test_cloud_runners",
+    "tests.integration.test_audit_gate_integration",
+    "tests.integration.test_tree_journal",
 )
 
 #: Critical-invariants subset for the <10 s smoke tier, chosen by
@@ -69,6 +67,12 @@ SMOKE_MODULES = (
     "test_grounding_gate",           # anti-hallucination verified_via gate
     "test_research_scope_stability", # research-memory scope stability
     "test_execution_backend_policy", # kaggle backend lock policy
+    "test_framework_resolution",     # explicit configuration fails closed
+    "test_state_integrity",          # corruption never reaches mutation
+    "tests.integration.test_prediction_boundaries",  # unlabeled prediction identity
+    "tests.integration.test_validation_scope",       # complete vs selected protocol
+    "tests.unit.test_artifact_publication",          # local no-replace semantics
+    "test_context_rendering_budget", # adversarial diagnostic budgets
 )
 
 
@@ -76,7 +80,8 @@ def discover_modules() -> list[str]:
     """All test modules as dotted names (``tests.test_x``).
 
     Recursive: modules may live in subpackages
-    (``tests/agent_bridge/test_y.py`` -> ``tests.agent_bridge.test_y``).
+    (``tests/agent_bridge/test_y.py`` -> ``tests.agent_bridge.test_y``,
+     ``tests/unit/test_z.py`` -> ``tests.unit.test_z``).
     """
     test_dir = REPO_ROOT / "tests"
     return sorted(
@@ -85,15 +90,68 @@ def discover_modules() -> list[str]:
     )
 
 
+def resolve_module_name(name: str, all_modules: list[str]) -> str:
+    """Resolve a module reference (stem, relative path, or dotted name) to a discovered module."""
+    if name in all_modules:
+        return name
+    prefixed = name if name.startswith("tests.") else f"tests.{name}"
+    if prefixed in all_modules:
+        return prefixed
+    s = name.replace("/", ".").replace("\\", ".")
+    if s.endswith(".py"):
+        s = s[:-3]
+    stem = s.rsplit(".", 1)[-1]
+    matches = [m for m in all_modules if _stem(m) == stem]
+    if matches:
+        return matches[0]
+    return prefixed
+
+
+def find_changed_modules(all_modules: list[str]) -> list[str]:
+    """Identify test modules affected by recent working tree or git diff changes."""
+    import subprocess
+
+    changed_stems: set[str] = set()
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            path_str = parts[-1]
+            p = Path(path_str)
+            if p.suffix == ".py":
+                stem = p.stem
+                changed_stems.add(stem)
+                if stem.startswith("test_"):
+                    changed_stems.add(stem[5:])
+                else:
+                    changed_stems.add(f"test_{stem}")
+    except Exception:
+        return []
+    matched = [m for m in all_modules if any(s == _stem(m) or s in _stem(m) for s in changed_stems)]
+    return matched
+
+
 def build_suite(modules: list[str]) -> unittest.TestSuite:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for name in modules:
-        suite.addTests(loader.loadTestsFromName(name))
+        mod_suite = loader.loadTestsFromName(name)
+        if mod_suite.countTestCases() == 0:
+            print(f"[warning] Test module '{name}' discovered 0 tests under unittest.TestLoader", file=sys.stderr)
+        suite.addTests(mod_suite)
     return suite
 
 
-#: Slow/smoke membership is keyed by module stem (top-level test files).
+#: Smoke references and CLI shorthand can be resolved by module stem.
 def _stem(module: str) -> str:
     return module.rsplit(".", 1)[-1]
 
@@ -230,6 +288,14 @@ def main(argv: list[str]) -> int:
     args = [a for a in args if a != "--smoke"]
     no_lock = "--no-lock" in args
     args = [a for a in args if a != "--no-lock"]
+    unit_only = "--unit" in args
+    args = [a for a in args if a != "--unit"]
+    integration_only = "--integration" in args
+    args = [a for a in args if a != "--integration"]
+    e2e_only = "--e2e" in args
+    args = [a for a in args if a != "--e2e"]
+    changed_only = "--changed" in args
+    args = [a for a in args if a != "--changed"]
 
     if "--list-slow" in args:
         for name in SLOW_MODULES:
@@ -250,33 +316,47 @@ def main(argv: list[str]) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 3
 
+    all_modules = discover_modules()
+
     if args:
         # Accept "test_x", "tests.test_x", "tests/test_x.py",
         # or nested paths like "tests/subpkg/test_y.py" / "tests.subpkg.test_y".
-        modules = []
-        for a in args:
-            s = a.replace("/", ".")
-            if s.endswith(".py"):
-                s = s[: -len(".py")]
-            if not s.startswith("tests."):
-                s = f"tests.{s}"
-            modules.append(s)
+        modules = [resolve_module_name(a, all_modules) for a in args]
+    elif changed_only:
+        modules = find_changed_modules(all_modules)
+        if not modules:
+            print("No changed test modules detected via git status. Falling back to --smoke.")
+            modules = [resolve_module_name(m, all_modules) for m in SMOKE_MODULES]
     elif smoke:
-        modules = [f"tests.{m}" for m in SMOKE_MODULES]
+        modules = [resolve_module_name(m, all_modules) for m in SMOKE_MODULES]
+    elif unit_only:
+        modules = [m for m in all_modules if m.startswith("tests.unit.") or "unit" in m.split(".")]
+    elif integration_only:
+        modules = [m for m in all_modules if m.startswith("tests.integration.") or "integration" in m.split(".")]
+    elif e2e_only:
+        modules = [m for m in all_modules if m.startswith("tests.e2e.") or "e2e" in m.split(".")]
     else:
-        modules = discover_modules()
+        modules = all_modules
         if fast:
-            modules = [m for m in modules if _stem(m) not in SLOW_MODULES]
+            modules = [m for m in modules if m not in SLOW_MODULES and not m.startswith("tests.e2e.")]
 
     if smoke and not args:
         label = "smoke tier (<10s invariants)"
+    elif changed_only and not args:
+        label = "changed modules"
+    elif unit_only and not args:
+        label = "unit tier (<5s pure in-memory)"
+    elif integration_only and not args:
+        label = "integration tier (~25s)"
+    elif e2e_only and not args:
+        label = "e2e tier (heavy subprocesses)"
     elif fast and not args:
         label = "fast tier"
     elif not args:
         label = "full suite"
     else:
         label = "selected modules"
-    excluded = f" ({len(SLOW_MODULES)} slow excluded)" if fast and not smoke and not args else ""
+    excluded = f" ({len(SLOW_MODULES)} slow excluded)" if fast and not smoke and not args and not unit_only and not integration_only and not e2e_only else ""
     print(f"Running {label}: {len(modules)} test modules{excluded}")
 
     t0 = time.time()

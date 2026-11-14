@@ -15,6 +15,26 @@ index below — before committing. Newer at the top.
 
 | Date | Change | PR | File |
 |------|--------|----|------|
+| 2026-11-14 | Stacking regression continuity, pipeline stage identity/traversal guards, and task spec fail-closed parsing | #137 | [stacking-pipeline-and-spec-hardening](stacking-pipeline-and-spec-hardening.md) |
+| 2026-11-14 | Truthful inspection metrics, Python 3.10 hashing fallback, and declarative submission contracts | #137 | [truthful-observations-and-compatibility](truthful-observations-and-compatibility.md) |
+| 2026-11-14 | Explicit counter merges, atomic provider observations, journal/cancellation integrity, cleanup, and read-only context | #137 | [deep-module-hardening](deep-module-hardening.md) |
+| 2026-11-14 | Fail-closed state/configuration, prediction and validation scope contracts, atomic publication, and bounded context HUD | #137 | [boundary-consolidation](boundary-consolidation.md) |
+| 2026-11-13 | Fix twelve adversarial audit findings in contracts, evidence, dispatch, bridge inputs, discovery, and hygiene | #137 | [harness-invariants-audit-hardening](harness-invariants-audit-hardening.md) |
+| 2026-11-12 | Agent ergonomics, backend switching CLI (`set-backend`), PowerShell flat flags, and hygiene allow-list aliases | Working tree | [agent-ergonomics-backend-switching](2026-11-12-agent-ergonomics-backend-switching.md) |
+| 2026-11-10 | Test suite 3-tier consolidation into 38 canonical domain modules, fast tiering, and smoke shims | Working tree | [test-suite-consolidation](2026-11-10-test-suite-3tier-consolidation.md) |
+| 2026-11-09 | Preserve lightweight script diagnostics in Modal bundles | Working tree | [script diagnostics](2026-11-09-script-diagnostic-export.md) |
+| 2026-11-09 | Honor declarative fold selection in full script validation | Working tree | [declarative folds](2026-11-09-declarative-fold-selection.md) |
+| 2026-11-09 | Preserve ragged interactive episode payloads in prediction validation | Working tree | [interactive predictions](2026-11-09-interactive-ragged-predictions.md) |
+| 2026-11-03 | Native model asset CLI, typed Agent Bridge actions, rebuildable HUD summary, and local verification (Phase 5) | Working tree | [native-model-assets-phase5](native-model-assets-phase5.md) |
+| 2026-11-03 | Candidate model closure, aggregate policy checks, preflight receipt v3, and SubmissionGate subject binding (Phase 4) | Working tree | [native-model-assets-phase4](native-model-assets-phase4.md) |
+| 2026-11-03 | Backend model resource plans, offline integrity verification, and Kaggle/Modal governance preservation (Phase 3) | Working tree | [native-model-assets-phase3](native-model-assets-phase3.md) |
+| 2026-11-03 | Shared model execution plan, pre-run admission across local/cloud/kernel paths, logical-total accounting, and Kaggle dry-run safety (Phase 2) | Working tree | [native-model-assets-phase2](native-model-assets-phase2.md) |
+| 2026-11-03 | Native model asset types, bounded content-addressed store, and competition policy evaluation (Phase 1) | Working tree | [native-model-assets-phase1](native-model-assets-phase1.md) |
+| 2026-11-02 | Strengthen managed AGENTS.md directives and mirror rules for coding agents | Working tree | [managed-agents-md-directives-and-rules-mirror](managed-agents-md-directives-and-rules-mirror.md) |
+| 2026-11-02 | Retire /ai-harness alias, align skill producers, and safe alias migration | Working tree | [retire-ai-harness-alias-and-lean-skills](retire-ai-harness-alias-and-lean-skills.md) |
+| 2026-11-01 | Skills bridge, submission preservation, flat action ergonomics, and custom scorer notice | Working tree | [skills-bridge-and-submission-preservation](skills-bridge-and-submission-preservation.md) |
+| 2026-11-01 | Modal fast uv image building, dynamic task runtime requirements, and job ID normalization | Working tree | [modal-uv-and-dynamic-runtime-requirements](modal-uv-and-dynamic-runtime-requirements.md) |
+| 2026-11-01 | Modal attached live-stream and cloud detached modes with volume persistence and recovery | Working tree | [modal-attached-and-cloud-detached-modes](modal-attached-and-cloud-detached-modes.md) |
 | 2026-10-31 | Add task-aware research skill, preserve intent across skills, and render task validation accurately | [#134](https://github.com/taitran501/ai-harness/pull/134) | [skill-intent-continuity](skill-intent-continuity.md) |
 | 2026-10-31 | Competition research remains open through official close; Antigravity skill and repeated HUD/action reminders carry the directive across sessions and results | Working tree | [competition-research-drive-and-endgame-freeze](competition-research-drive-and-endgame-freeze.md) |
 | 2026-10-31 | Lean slash command skills (/harness, /debate, /submit), simplified names and human-friendly descriptions | Working tree | [lean-slash-command-skills](lean-slash-command-skills.md) |

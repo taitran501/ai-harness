@@ -273,3 +273,16 @@ python -m unittest discover -s tests -p "test_*.py"
 Run repository-wide integration tests in a disposable workspace because some
 tests mutate configs/artifacts. Live verification still requires an authorized
 account, consented data and a bounded remote smoke run.
+
+## Atomic output import and retries
+
+Downloads remain private transport staging until one unambiguous manifest has
+been selected and the shared `publish_run_artifacts` validator accepts its identity,
+metrics, scope, predictions and full file/hash inventory. The publisher copies to
+private staging on the destination filesystem and atomically publishes without
+replacement. An exact retry returns `already_present`; a different or empty
+existing destination is a preserved conflict. A failed download, verification or
+publication never deletes a pre-existing final directory. `force_import` cannot
+override hashes, task/run identity, scope or destination conflicts. Provider calls
+remain outside publication; local regression mocks do not establish live cloud
+execution quality.

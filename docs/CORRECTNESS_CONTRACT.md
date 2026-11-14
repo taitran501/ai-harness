@@ -45,14 +45,14 @@ This document specifies the invariants, evidence contracts, and verification gat
 - Full validation runs claim `.ai-harness/artifacts/<task-id>/<exp_id>` exclusively.
 - Re-running an experiment under an existing full-run ID is prohibited; new runs require a unique sequential experiment ID.
 - The `--force` flag does not overwrite completed run evidence.
-- Debug probes, single-fold checks, and sample probes write exclusively to `probes/<exp_id>/<run_id>` and never enter the official solution tree or candidate pool.
+- Debug, sample and partial-fold runs write exclusively to `probes/<exp_id>/<run_id>` and never enter the official solution tree or candidate pool. A single fold is complete only when the task explicitly declares it as the complete protocol and no sampling/debug restriction applies.
 
 ### Manifest v2 Specification
 Every full run generates a cryptographic manifest recording:
 - **Run Identity**: Experiment ID, run kind (`full` vs. `probe`), and terminal status.
 - **Task Identity**: Task name, platform, and scorer specification.
 - **Input Hashes**: SHA-256 hashes of the resolved configuration, training dataset, and validation split file.
-- **Estimator Details**: Actual resolved estimator hyperparameters and feature pipeline settings.
+- **Estimator Details**: Actual resolved estimator hyperparameters and feature pipeline settings. Nonfinite metadata parameters use explicit JSON objects such as `{"nonfinite_float": "NaN"}`; numeric scores and predictions remain finite.
 - **Artifact Hashes**: SHA-256 hashes of generated artifacts (`metrics.json`, `oof_predictions.csv`, evaluation truth, and resolved config).
 
 Consumers (such as the candidate pool and dashboard) reject artifacts with missing or mismatched manifest hashes. Historical artifacts lacking Schema v2 manifests remain visible as `LEGACY_UNVERIFIED` and cannot establish a baseline anchor or be promoted to candidate status.
@@ -133,7 +133,7 @@ Consumers (such as the candidate pool and dashboard) reject artifacts with missi
 
 ## 9. Candidate Provenance and Dispatch Script Guard
 
-- Full runs record `provenance_version: 1` and a provenance classification. Imported prediction values are always `external_prediction`, even when their score and file integrity are verified; they are not submission eligible and cannot be candidate constituents.
+- Runs record `provenance_version: 1` and a provenance classification. Imported prediction values use `run_kind="external"` and `provenance="external_prediction"`, even when their score and file integrity are checked; they cannot establish verified full validation, enter submission candidates or become candidate constituents.
 - Candidate recipes bind source IDs, source manifest hashes, and OOF/test prediction hashes through `recipe_binding_sha256`. Candidate construction and blend optimization revalidate provenance before reading predictions.
 - `verified` describes artifact integrity and scoring. `submission_eligible` is a separate derived decision; `eligible` is only its compatibility mirror. Test predictions and a supported promotion decision are required before dispatch.
 - `ai-harness audit-scripts` scans root Python files and `scratch/` for raw Kaggle submission and kernel push calls. Unacknowledged blocking findings lock submission dispatch with `DISPATCH_BACKDOOR_DETECTED`.
@@ -148,3 +148,51 @@ Consumers (such as the candidate pool and dashboard) reject artifacts with missi
 - Demonstrated local gain still requires the harness's machine-evaluated decision-rule receipt over comparable local evidence. Citation receipts do not replace promotion, diversity, backend-lock, stagnation, approval, or quota gates.
 - Citation dependencies are revalidated at research, direct-run, candidate-pitch, submission-permit, and remote-dispatch boundaries. Subjects without external citation dependencies receive `not_applicable`.
 - Source snapshots and audit receipts are stored outside immutable experiment directories. Receipts detect stale or edited evidence, but do not cryptographically authenticate an actor who can rewrite the complete workspace.
+
+## Boundary consolidation
+
+Explicit framework configuration and authoritative persistent state fail closed.
+`StateIntegrityError` reports `STATE_JSON_INVALID`, `STATE_ENCODING_INVALID`,
+`STATE_UNREADABLE`, `STATE_SCHEMA_INVALID`, or `STATE_VERSION_UNSUPPORTED` with the
+path and field when available. Only absent files may initialize. Transactions
+validate fresh disk state before mutation and the resulting state before writing;
+a stale snapshot cannot overwrite newly corrupt state. Duplicate JSON keys and
+nonstandard NaN/Infinity constants are invalid. Legacy session `id` and supported
+research scope-history representations migrate explicitly.
+
+Prediction transports retain row IDs. In-memory IDs must match dataset order
+exactly; persisted rows may be shuffled but must have an exact unique, non-null ID
+set before a one-to-one alignment. Test and candidate predictions receive payload
+validation without labels. Supplied probabilities must be finite, in range, and
+carry the declared class/label order; single-label rows sum to one, while multilabel
+probabilities are independent. Positional legacy estimator outputs bind IDs once
+at the model-call boundary. Custom metric hooks receive validated payloads.
+
+The task's complete validation protocol is separate from execution selection.
+`validation.complete_folds`, when present in the task contract, declares its full
+protocol. `data.folds`, CLI folds, debug and sampling cannot redefine completeness.
+Runs seal required/selected partitions and observed coverage in
+`validation_partitions.json` and `artifact_manifest.json.validation_scope`.
+Partial evaluations are probes, excluded from full-run admission and comparison
+reservations. Legacy artifacts without independently verifiable sealed scope
+remain inspectable but fail admission with `VALIDATION_SCOPE_UNVERIFIED`.
+
+All covered local, Modal and Kaggle finishing/import paths use
+`publish_run_artifacts`. It validates a complete declared file inventory and fresh
+hashes, privately copies to the destination filesystem, revalidates, then performs
+an atomic no-replace rename under an external publication lock. Unsafe paths,
+links/reparse points, special files and undeclared regular files are invalid.
+Exact byte-identical inventories including manifest bytes return `already_present`;
+all differing existing destinations (including empty directories) raise
+`ARTIFACT_PUBLICATION_CONFLICT` and remain unchanged. Windows uses non-replacing
+directory rename; Linux uses `renameat2(RENAME_NOREPLACE)`; unsupported platforms
+fail explicitly. `force_import` cannot bypass these contracts. Local training uses
+private staging and an external execution reservation; import idempotency does not
+permit retraining an existing experiment. A post-publication indexing failure
+retains the completed immutable run.
+
+External prediction imports use an inspectable `external` run kind. Their unknown
+training/fold provenance cannot establish full validation, populate the verified
+research frontier, or satisfy full-run decision rules. Final publication copies
+are independent of mutable canonical/staging sources; hardlink inode identity is
+not part of the immutable artifact contract.

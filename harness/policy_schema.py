@@ -15,7 +15,8 @@ def validate_document(name, value, *, version=1):
     """Validate a policy document using an explicitly selected schema version.
 
     Version 1 remains the compatibility default for existing callers. New
-    citation-aware receipts must ask for version 2 explicitly.
+    versioned receipts select their schema explicitly (including citation and
+    model-lineage receipt versions).
     """
     if type(version) is not int or version < 1:
         raise ValueError("Schema version must be a positive integer")

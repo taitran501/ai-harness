@@ -7,7 +7,7 @@ Enables zero-touch task onboarding:
 3. Synthesizes task specification from docs/TASK.md or heuristics
 4. Generates configs/task.yaml conforming to UniversalTaskSpec
 5. Generates leakage-proof validation folds in splits/fold_assignments.tsv
-6. Synchronizes the AI Agent skill in .agents/skills/ai-harness/SKILL.md
+6. Synchronizes the AI Agent skill in .agents/skills/harness/SKILL.md
 """
 
 from __future__ import annotations
@@ -204,6 +204,9 @@ def analyze_dataset_schema(df: pd.DataFrame, context: Dict[str, Any]) -> Dict[st
             classes = [str(x) for x in sorted(y_valid.unique().tolist())]
         else:
             task_type = "regression"
+
+    if task_type in {"binary_classification", "multiclass_classification"} and not classes:
+        classes = [str(x) for x in sorted(df[target_col].dropna().unique().tolist())]
 
     # 6. Resolve Primary Metric
     metric = context.get("primary_metric")
@@ -515,7 +518,7 @@ def bootstrap_competition_task(
     )
 
     # 8. Inject AI Agent Skill
-    skill_output = root / ".agents" / "skills" / "ai-harness" / "SKILL.md"
+    skill_output = root / ".agents" / "skills" / "harness" / "SKILL.md"
     injected_skill = inject_skill_file(config_path=cfg_path, output_path=skill_output)
 
     try:
@@ -536,7 +539,7 @@ def bootstrap_competition_task(
     try:
         skill_rel = str(injected_skill.resolve().relative_to(root)).replace("\\", "/")
     except ValueError:
-        skill_rel = f".agents/skills/ai-harness/{injected_skill.name}"
+        skill_rel = f".agents/skills/harness/{injected_skill.name}"
 
     report = {
         "status": "SUCCESS",

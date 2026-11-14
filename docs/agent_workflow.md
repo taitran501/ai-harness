@@ -7,7 +7,7 @@ This guide describes how AI coding assistants (such as Antigravity, Claude Code,
 ## 1. Core Operating Principles
 
 1. **Context Economy**:
-   Never dump raw datasets, large CSV tables, or multi-thousand-line logs into your context window. Always query task status and leaderboard standings using the Agent Bridge (`ai-harness-agent context`), which delivers a compressed Heads-Up Display (~1,000 tokens).
+   Never dump raw datasets, large CSV tables, or multi-thousand-line logs into your context window. Always query task status and leaderboard standings using the Agent Bridge (`ai-harness-agent context`), which delivers a compressed Heads-Up Display (at most 4,000 characters; approximately 1,000 tokens).
 
 2. **Atomic Interventions**:
    Modify exactly one variable between parent and child experiments (such as a feature pipeline, a loss function, or a model architecture). Shotgun iterations that change multiple components simultaneously make performance deltas impossible to attribute.
@@ -280,3 +280,18 @@ The audit checks:
 - Exact row ID alignment with zero null or duplicate keys.
 - Proper probability range constraints $[0, 1]$ or class label validity.
 - Complete absence of evaluation labels or leakages.
+
+## Bounded default HUD and detailed inspection
+
+Default Markdown context is capped at exactly 4,000 characters, including headings,
+separators and the final newline. It reserves space in this order: objective and
+session/task state; blockers and locks; machine-verified incumbent metrics; latest
+probe/unresolved result; compact permitted actions. Large diagnostics and lists
+show omission counts and a truncation marker. Unverified notes and external
+leaderboard feedback remain labeled separately from verified local evidence.
+
+Use `ai-harness-agent context --format json`, `inspect_experiment`,
+`inspect_diagnostics`, research inspection actions and `RESEARCH_PROGRESS.md` for
+details. The compact renderer does not mutate context or state, suppress fatal
+state corruption, or relax approval/backend policy. Character count is exact;
+"about 1,000 tokens" remains a tokenizer-dependent target.

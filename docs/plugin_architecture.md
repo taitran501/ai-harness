@@ -1,4 +1,4 @@
-﻿# Task Plugins and Workspace Integration
+# Task Plugins and Workspace Integration
 
 AI-Harness is distributed as an installable Python package. Task-specific competition adapters are separate distributions discovered via Python entry points under the `ai_harness.task_plugins` group.
 
@@ -36,7 +36,7 @@ ai-harness attach --project-root /path/to/competition --task-config configs/task
 
 The `attach` command creates:
 - A local attachment manifest: `.ai-harness/project.yaml`.
-- An agent skill file tailored to the task: `.agents/skills/ai-harness/SKILL.md`.
+- An agent skill file tailored to the task: `.agents/skills/harness/SKILL.md`.
 - Isolated experiment state and artifact directories: `.ai-harness/artifacts/<task-id>/`.
 
 The competition's own `configs/task.yaml` is preserved and not rewritten.
@@ -119,3 +119,16 @@ competition-workspace/
 |   `-- artifacts/<task-id>/      # Isolated run artifacts, manifests, and logs
 `-- .agents/skills/               # Generated assistant skills
 ```
+
+## Prediction transport boundaries
+
+Plugins and persisted prediction files must preserve explicit row IDs. A
+`PredictionBatch` or mapping carrying `ids` must match input order exactly.
+Persisted frames may be shuffled only when their unique, non-null IDs exactly
+match the declared split; the shared validator then aligns them. Positional legacy
+estimators bind IDs at the immediate model-call boundary. Normalization and routing
+must retain identity. OOF, test, candidate and blend sources share payload checks,
+including exact target coverage, finite numeric predictions and declared
+class/label order. Single-label probabilities are normalized; multilabel columns
+are independent. Missing test partitions and malformed existing test files are
+errors, never implicit zero filling or an OOF-only fallback.

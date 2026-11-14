@@ -1,0 +1,554 @@
+"""Research memory unit tests for schemas, sync cache, and action contracts."""
+from __future__ import annotations
+
+import copy
+import json
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+from unittest.mock import patch
+
+import numpy as np
+import yaml
+
+import harness.research_memory as research_memory
+from harness.agent_bridge import AgentBridge
+from harness.artifacts import sha256, validate_run
+from harness.decision_rules import (
+    DecisionRuleNotSatisfied,
+    DecisionRuleV1,
+    evaluate_decision_rule,
+    paired_metric_bootstrap,
+    register_decision_rule,
+    reserve_comparison_slot,
+    resolve_research_policy,
+)
+from harness.project import HarnessProject, attach_project
+from harness.research_memory import ResearchMemory, render_markdown_progress
+from harness.skill_injector import generate_skill_content
+from harness.stagnation import StagnationController
+from harness.task_spec import UniversalTaskSpec, load_active_task_spec
+from tests.evidence_fixtures import seal_fixture
+from tests.fixtures import (
+    config,
+    make_submission_evidence,
+    text_task_document,
+    workspace_with_verified_pair,
+)
+
+
+class ResearchProgressRenderingTests(unittest.TestCase):
+    def test_checkpoint_is_labeled_unverified_and_cannot_change_verified_facts(self):
+        checkpoint = {
+            "id": "checkpoint-1",
+            "kind": "checkpoint",
+            "timestamp": 10,
+            "conclusion": "Verified Slot 1 completed at score 9.99",
+            "next_action": "Submit the claimed result",
+            "open_questions": ["Was the run actually completed?"],
+            "evidence_status": "declared_checkpoint",
+        }
+        run = {
+            "exp_id": "exp001",
+            "timestamp": 20,
+            "score": 0.75,
+            "utility": 0.75,
+            "comparison_group": "comparison-a",
+            "evidence_status": "verified_full",
+        }
+        verified_decision = {
+            "verification_status": "machine_evaluated",
+            "evaluation_id": "evaluation-1",
+            "outcome": "supported",
+        }
+        text = render_markdown_progress(
+            "test-scope",
+            [checkpoint],
+            verified_runs=[run],
+            verified_decisions=[verified_decision, {"verification_status": "legacy_unverified"}],
+        )
+
+        self.assertIn("### Unverified Agent Notes [UNVERIFIED AGENT NOTE - HYPOTHESIS ONLY]", text)
+        self.assertIn("> [!NOTE] [UNVERIFIED AGENT NOTE - HYPOTHESIS ONLY]", text)
+        self.assertIn("Checkpoint narrative quarantined", text)
+        self.assertIn("Next action", text)
+        self.assertIn("— note [unverified] `checkpoint-1`", text)
+        self.assertIn("Verified completed full runs: 1", text)
+        self.assertIn("Best verified CV: `exp001` (0.75", text)
+        self.assertIn("Machine-verified decisions: 1", text)
+        self.assertNotIn("9.99", text)
+        self.assertNotIn("Verified Slot 1", text)
+
+    def test_unverified_insight_title_and_checkpoint_are_quarantined(self):
+        entries = [
+            {"id": "i1", "kind": "insight", "title": "Fantasy architecture", "observation": "Score: 0.99"},
+            {"id": "c1", "kind": "checkpoint", "conclusion": "DAY 18 FINAL COMPLETION MILESTONE", "next_action": "Inspect evidence"},
+        ]
+        text = render_markdown_progress("scope", entries, verified_runs=[])
+        self.assertIn("EPISTEMIC DISCONNECT WARNING", text)
+        self.assertNotIn("Fantasy architecture", text)
+        self.assertNotIn("DAY 18 FINAL", text)
+        self.assertIn("1 ungrounded insight(s) quarantined from active status table", text)
+
+    def test_registered_probe_plan_keeps_insight_in_active_table(self):
+        entries = [
+            {"id": "i1", "kind": "insight", "title": "Planned mechanism", "observation": "Possible effect"},
+            {"id": "p1", "kind": "probe_plan", "insight_id": "i1", "verification_status": "preregistered"},
+        ]
+        text = render_markdown_progress("scope", entries, verified_runs=[])
+        self.assertIn("Planned mechanism", text.split("## Insight status", 1)[1])
+
+    def test_incumbent_is_only_shown_when_validated_state_is_supplied(self):
+        unknown = render_markdown_progress("scope", [], verified_runs=[])
+        self.assertIn("Validated incumbent: unknown", unknown)
+
+        validated = render_markdown_progress(
+            "scope",
+            [],
+            verified_runs=[],
+            validated_incumbent={
+                "evidence_ref": {"id": "candidate-2", "kind": "full_run"},
+                "evaluation_id": "evaluation-123",
+                "score": 0.82,
+            },
+        )
+        self.assertIn("Validated incumbent: `candidate-2` (0.82)", validated)
+
+
+def rule_document(family="fixture-family", effect=.05):
+    return dict(schema_version=1, kind="superiority", metric=dict(scope="primary", subtask_id=None, name="accuracy"),
+        direction="maximize", control=dict(kind="full_run", id="control", partition="oof"),
+        minimum_effect=dict(value=effect, scale="absolute"), comparator="gte", score_target=None,
+        evidence_requirements=dict(partition="oof", same_data=True, same_splits=True, same_scorer=True, same_coverage=True),
+        uncertainty=dict(method="paired_bootstrap", unit="row", unit_column=None, stratify_column="label",
+                         confidence_level=.95, resamples=1000, seed=42),
+        multiplicity=dict(family_id=family, method="bonferroni_fixed_horizon", max_comparisons=1))
+
+
+class ResearchInvariantTests(unittest.TestCase):
+    def setUp(self):
+        self.root, config_path = workspace_with_verified_pair()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.project = HarnessProject.discover(self.root)
+        self.spec = load_active_task_spec(config_path)
+        self.memory = ResearchMemory(self.root, self.project.artifacts_dir, self.spec)
+
+    def evaluate(self, labels=None, *, name="candidate", register=True, family="fixture-family"):
+        rule = rule_document(family)
+        registration = register_decision_rule(rule, project=self.project, task_spec=self.spec)
+        cfg = {"experiment": {"id": name}, "validation": {"partition": "oof"},
+               "research": {"decision_rule_id": registration["rule_id"], "probe_plan_id": "probe-fixture"}}
+        if register:
+            reserve_comparison_slot(self.project, self.spec, cfg)
+        make_submission_evidence(self.root, name, labels=labels, cfg=cfg)
+        result = evaluate_decision_rule(rule, dict(kind="full_run", id=name, partition="oof"), project=self.project,
+                                        task_spec=self.spec, registration=registration)
+        return result, registration
+
+    def test_no_self_awarded_support_for_text_plan_or_missing_evidence(self):
+        before = len(self.memory.entries())
+        with self.assertRaises(DecisionRuleNotSatisfied):
+            self.memory.record_decision(outcome="supported", conclusion="Agent says it improved")
+        self.assertEqual(len(self.memory.entries()), before)
+
+    def test_audit_classifies_legacy_claims_hypotheses_and_external_notes(self):
+        self.memory.record_insight(title="Hypothesis", observation="Rare tokens may matter", mechanism="Representation", next_action="Probe")
+        self.memory.record_insight(title="External score claim", observation="Discussion score: 0.98", mechanism="External report", next_action="Review", source_refs=["discussion:42"])
+        self.memory._append("checkpoint", conclusion="Trained model achieved score 0.98", next_action="Promote")
+        audit = self.memory.audit_research_memory()
+        classes = [item["classification"] for item in audit["entries"]]
+        self.assertIn("hypothesis", classes)
+        self.assertIn("external_discussion", classes)
+        self.assertIn("unsupported_legacy_assertion", classes)
+        self.assertEqual(audit["summary"]["verified_run_count"], 1)
+        self.assertEqual(audit["summary"]["quarantined_insight_count"], 2)
+
+    def test_all_versioned_schemas_are_valid_draft_2020_12(self):
+        from jsonschema import Draft202012Validator
+        directory = Path(__file__).resolve().parents[2] / "harness/schemas"
+        schemas = list(directory.glob("*.v*.schema.json"))
+        self.assertGreaterEqual(len(schemas), 11)
+        for path in schemas:
+            schema = json.loads(path.read_text())
+            Draft202012Validator.check_schema(schema)
+            self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
+            version = int(path.name.split(".v", 1)[1].split(".", 1)[0])
+            if "schema_version" in schema.get("properties", {}):
+                self.assertEqual(schema["properties"]["schema_version"]["const"], version)
+
+    def test_receipt_conforms_to_independent_schema_validator(self):
+        from jsonschema import Draft202012Validator
+        result, _ = self.evaluate()
+        path = Path(__file__).resolve().parents[2] / "harness/schemas/decision_evaluation.v1.schema.json"
+        Draft202012Validator(json.loads(path.read_text())).validate(result)
+
+    def test_legacy_text_plan_remains_readable(self):
+        insight = self.memory.record_insight(title="t", observation="o", mechanism="m", next_action="n")
+        plan = self.memory.plan_probe(insight_id=insight["id"], control="control", intervention="one mechanism",
+            expected_observation="improvement", alternative_explanation="noise", decision_rule="Score improves",
+            budget="one run", stop_rule="one run")
+        self.assertEqual(plan["verification_status"], "legacy_unstructured")
+
+    def test_zero_gain_rejected_and_sealed_control_unchanged(self):
+        path = self.project.artifacts_dir / "control/artifact_manifest.json"
+        before = sha256(path)
+        result, _ = self.evaluate(labels=[0] * 40)
+        self.assertEqual(result["gain"], 0)
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertIn("ZERO_GAIN", result["reason_codes"])
+        self.assertEqual(sha256(path), before)
+
+    def test_real_paired_gain_is_supported_and_repeat_is_idempotent(self):
+        result, registration = self.evaluate()
+        self.assertEqual(result["outcome"], "supported", result)
+        self.assertGreater(result["uncertainty"]["lower_bound"], 0)
+        repeated = evaluate_decision_rule(registration["rule"], result["candidate"], project=self.project,
+            task_spec=self.spec, registration=registration)
+        self.assertEqual(result["evaluation_id"], repeated["evaluation_id"])
+
+    def test_retrospective_improvement_cannot_claim_support(self):
+        result, _ = self.evaluate(register=False)
+        self.assertEqual(result["outcome"], "inconclusive")
+        self.assertIn("NOT_PREREGISTERED", result["reason_codes"])
+
+    def test_score_target_is_enforced_without_rounding(self):
+        rule = rule_document()
+        rule["score_target"] = dict(operator="gt", value=1)
+        registration = register_decision_rule(rule, project=self.project, task_spec=self.spec)
+        make_submission_evidence(self.root, "candidate")
+        result = evaluate_decision_rule(rule, dict(kind="full_run", id="candidate", partition="oof"), project=self.project,
+            task_spec=self.spec, registration=registration)
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertIn("SCORE_TARGET_FAILED", result["reason_codes"])
+
+    def test_invalid_rule_and_nonfinite_effect_rejected(self):
+        for effect in (0, -1, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                DecisionRuleV1.from_dict(rule_document(effect=effect))
+        rule = rule_document()
+        rule["unexpected"] = True
+        with self.assertRaises((ValueError, TypeError)):
+            DecisionRuleV1.from_dict(rule)
+
+    def test_direction_mismatch_rejected(self):
+        rule = rule_document()
+        rule["direction"] = "minimize"
+        with self.assertRaises(DecisionRuleNotSatisfied):
+            register_decision_rule(rule, project=self.project, task_spec=self.spec)
+
+    def test_unknown_metric_has_no_unitless_default(self):
+        spec = copy.deepcopy(self.spec)
+        spec.metadata["primary_metric"] = "rmse"
+        (self.root / ".ai-harness/policies/research_policy.json").unlink()
+        self.assertIsNone(resolve_research_policy(self.project, spec).minimum_effect)
+
+    def test_comparison_budget_survives_session_restart(self):
+        _, reg = self.evaluate()
+        cfg = dict(experiment=dict(id="another"), research=dict(decision_rule_id=reg["rule_id"]))
+        with self.assertRaisesRegex(DecisionRuleNotSatisfied, "COMPARISON_BUDGET_EXHAUSTED"):
+            reserve_comparison_slot(self.project, self.spec, cfg)
+
+    def test_three_failed_results_latch_and_replay_once(self):
+        for i in range(3):
+            self.evaluate(labels=[0] * 40, name=f"candidate{i}", family=f"family{i}")
+        controller = StagnationController(self.project)
+        first = controller.check_action("dispatch")
+        self.assertEqual(first["code"], "STAGNATION_PAUSE")
+        self.assertEqual(first["states"][0]["consecutive_failures"], 3)
+        self.assertEqual(controller.check_action("dispatch")["states"][0]["consecutive_failures"], 3)
+        self.assertIsNone(controller.check_action("run_smoke_test"))
+        # Editing the projection cannot clear canonical evidence.
+        (self.project.artifacts_dir / "stagnation_state.json").write_text(json.dumps({"state": "active"}))
+        self.assertIsNotNone(StagnationController(self.project).check_action("run_full_validation"))
+        policy_path = self.root / ".ai-harness/policies/research_policy.json"
+        policy = json.loads(policy_path.read_text())
+        policy["stagnation_patience"] = 100
+        policy_path.write_text(json.dumps(policy))
+        self.assertIsNotNone(StagnationController(self.project).check_action("dispatch"))
+
+    def test_paired_bootstrap_uses_actual_metric_and_fixed_seed(self):
+        truth = np.arange(10)
+        def score(y, p, idx):
+            return float(np.mean((y[idx] - p[idx]) ** 2))
+        a = paired_metric_bootstrap(truth, truth, truth + 1, score, direction="minimize", resamples=1000)
+        b = paired_metric_bootstrap(truth, truth, truth + 1, score, direction="minimize", resamples=1000)
+        self.assertEqual(a, b)
+        self.assertEqual(a["lower_bound"], 1)
+
+    def test_only_registered_bounded_supported_recovery_resumes(self):
+        for i in range(3):
+            self.evaluate(labels=[0] * 40, name=f"failed{i}", family=f"failure{i}")
+        controller = StagnationController(self.project)
+        state = controller.check_action("dispatch")["states"][0]
+        rule = rule_document("recovery-family")
+        registration = register_decision_rule(rule, project=self.project, task_spec=self.spec)
+        probe = controller.register_recovery_probe(comparison_identity_sha256=state["comparison_identity_sha256"],
+            rule_id=registration["rule_id"], diagnosis="systematic errors", mechanism="orthogonal mechanism", stop_rule="one result")
+        self.assertIsNone(controller.check_action("run_full_validation", recovery_probe_id=probe["id"], candidate_id="recovery"))
+        self.assertIsNotNone(controller.check_action("run_full_validation", recovery_probe_id=probe["id"], candidate_id="extra"))
+        cfg = dict(experiment=dict(id="recovery"), validation=dict(partition="oof"),
+            research=dict(decision_rule_id=registration["rule_id"], recovery_probe_id=probe["id"]))
+        reserve_comparison_slot(self.project, self.spec, cfg)
+        make_submission_evidence(self.root, "recovery", cfg=cfg)
+        result = evaluate_decision_rule(rule, dict(kind="full_run", id="recovery", partition="oof"),
+            project=self.project, task_spec=self.spec, registration=registration)
+        self.assertEqual(result["outcome"], "supported")
+        self.assertIsNone(StagnationController(self.project).check_action("dispatch"))
+
+    def test_remote_capsule_binds_source_and_imported_preregistration(self):
+        from harness.decision_rules import prepare_remote_research, validate_remote_research_capsule
+        registration = register_decision_rule(rule_document(), project=self.project, task_spec=self.spec)
+        cfg = dict(experiment=dict(id="remote"), validation=dict(partition="oof"),
+                   research=dict(decision_rule_id=registration["rule_id"]))
+        config_path = self.root / "configs/remote.yaml"
+        # The decision rule is inherited from the resolved base configuration.
+        config_path.write_text(yaml.safe_dump({"experiment": {"id": "remote"}}))
+        capsule = prepare_remote_research(self.project, "configs/remote.yaml", effective_config=cfg)
+        self.assertTrue(capsule.is_file())
+        with mock.patch.dict("os.environ", {"AI_HARNESS_REMOTE_KERNEL": "1"}):
+            self.assertTrue(validate_remote_research_capsule(self.project, config_path, cfg))
+            with self.assertRaisesRegex(ValueError, "binding mismatch"):
+                validate_remote_research_capsule(self.project, config_path, {**cfg, "research": {**cfg["research"], "unexpected": True}})
+        # Remote runtime fields differ from the source config. The importer's
+        # verified original-config hash, not a supplied numeric score, binds it.
+        remote_cfg = {**cfg, "resolved_runtime": {"python": "remote"}}
+        directory = make_submission_evidence(self.root, "remote", cfg=remote_cfg)
+        path = directory / "artifact_manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["config_sha256"] = sha256(config_path)
+        path.write_text(json.dumps(manifest))
+        result = evaluate_decision_rule(registration["rule"], dict(kind="full_run", id="remote", partition="oof"),
+            project=self.project, task_spec=self.spec, registration=registration)
+        self.assertTrue(result["preregistered"])
+        self.assertEqual(result["outcome"], "supported")
+
+
+class ResearchActionContractTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="aih-research-contract-")
+        self.root = Path(self.temp.name)
+        (self.root / "configs").mkdir()
+        (self.root / "configs/task.yaml").write_text(yaml.safe_dump(text_task_document()))
+        self.spec = UniversalTaskSpec.from_dict(text_task_document())
+        self.artifacts = self.root / "artifacts"
+        self.artifacts.mkdir()
+        self.memory = ResearchMemory(self.root, self.artifacts, self.spec)
+        attach_project(self.root, self.root / "configs/task.yaml")
+        self.bridge = AgentBridge(self.root)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _insight(self):
+        _, obs = self.bridge.execute_action("record_research_insight", params={
+            "title": "Minority recall",
+            "observation": "Minority errors persist",
+            "mechanism": "Loss weighting could help",
+            "next_action": "Compare a fixed control",
+        })
+        assert obs.status == "SUCCESS", obs.summary
+        return obs.data
+
+    def _verified_run(self, exp_id="exp001"):
+        folder = self.artifacts / exp_id
+        folder.mkdir()
+        (folder / "run_config.yaml").write_text(yaml.safe_dump(config(exp_id)))
+        seal_fixture(folder, self.spec, 0.7)
+        return folder
+
+    def test_decision_revisit_when_null_uses_auto_default(self):
+        insight = self._insight()
+        _, obs = self.bridge.execute_action("record_research_decision", params={
+            "insight_id": insight["id"],
+            "outcome": "rejected",
+            "conclusion": "Hard 50/50 partition degraded accuracy.",
+            "lesson": "Do not hard-partition small batches.",
+            "next_action": "Try soft weighting.",
+            "revisit_when": None,
+        })
+        self.assertEqual(obs.status, "SUCCESS", obs.summary)
+        entry = self.bridge._research_memory().entries()[-1]
+        self.assertTrue(entry["revisit_when"].strip())
+        self.assertIn("different mechanism", entry["revisit_when"])
+
+    def test_decision_null_optional_fields_all_tolerated(self):
+        _, obs = self.bridge.execute_action("record_research_decision", params={
+            "outcome": "inconclusive",
+            "conclusion": "V6 verified at 0.71 on Codabench.",
+            "next_action": None,
+            "lesson": None,
+            "revisit_when": None,
+            "evidence": None,
+        })
+        self.assertEqual(obs.status, "SUCCESS", obs.summary)
+
+    def test_decision_prose_outcome_raises_with_hint(self):
+        with self.assertRaises(ValueError) as ctx:
+            self.memory.record_decision(
+                outcome="Peak Codabench Benchmark Confirmed at 0.71 (10/14)",
+                conclusion="V6 verified at 0.71.",
+            )
+        message = str(ctx.exception)
+        self.assertIn("outcome must be supported, rejected, inconclusive, or deferred", message)
+        self.assertIn("looks like prose", message)
+        self.assertIn("conclusion", message)
+
+    def test_decision_bad_enum_short_value_no_prose_hint(self):
+        with self.assertRaises(ValueError) as ctx:
+            self.memory.record_decision(outcome="meh", conclusion="c")
+        self.assertNotIn("looks like prose", str(ctx.exception))
+
+    def test_insight_evidence_single_id_string(self):
+        self._verified_run("exp001")
+        insight = self.memory.record_insight(
+            title="Slice", observation="Recall gap", mechanism="Weighting may help",
+            next_action="Plan a probe", evidence="exp001",
+        )
+        self.assertEqual(insight["evidence"], ["exp001"])
+
+    def test_insight_evidence_comma_separated_string(self):
+        self._verified_run("exp001")
+        self._verified_run("exp002")
+        insight = self.memory.record_insight(
+            title="Slice", observation="Recall gap", mechanism="Weighting may help",
+            next_action="Plan a probe", evidence="exp001, exp002",
+        )
+        self.assertEqual(insight["evidence"], ["exp001", "exp002"])
+
+    def test_insight_evidence_unknown_id_still_rejected(self):
+        self._verified_run("exp001")
+        with self.assertRaises(ValueError):
+            self.memory.record_insight(
+                title="Slice", observation="Recall gap", mechanism="Weighting may help",
+                next_action="Plan a probe", evidence="exp999",
+            )
+
+    def test_checkpoint_missing_summary_friendly_error(self):
+        _, obs = self.bridge.execute_action("record_research_checkpoint", params={
+            "conclusion": "V7 regression diagnosed.",
+            "next_action": "Implement V8.",
+        })
+        self.assertEqual(obs.status, "FAILED")
+        self.assertIn("'summary'", obs.summary)
+        self.assertNotIn("KeyError", obs.summary)
+        self.assertIn("requires", obs.summary)
+        self.assertIn("not 'conclusion'", obs.summary)
+
+    def test_checkpoint_with_summary_succeeds(self):
+        _, obs = self.bridge.execute_action("record_research_checkpoint", params={
+            "summary": "V7 regression diagnosed.",
+            "next_action": "Implement V8.",
+        })
+        self.assertEqual(obs.status, "SUCCESS", obs.summary)
+
+    def test_skill_documents_research_action_contracts(self):
+        content = generate_skill_content(text_task_document(), artifact_path="artifacts")
+        self.assertIn("record_research_decision", content)
+        self.assertIn("supported | rejected | inconclusive | deferred", content)
+        self.assertIn("the field is `summary`, not `conclusion`", content)
+
+
+def _sync_cache_task_document(name: str = "sync-cache-text") -> dict:
+    return {
+        "task": {
+            "name": name,
+            "modality": "text",
+            "primary_metric": "accuracy",
+            "direction": "maximize",
+            "data": {
+                "id_column": "id",
+                "train_path": "dataset/train.csv",
+                "fold_column": "fold",
+            },
+            "validation": {"strategy": "kfold", "num_folds": 2},
+            "inputs": [
+                {"name": "text", "type": "text", "source_columns": ["text"]}
+            ],
+            "subtasks": [
+                {
+                    "id": "sentiment",
+                    "column": "target",
+                    "task_type": "binary_classification",
+                    "classes": [0, 1],
+                    "primary_metric": "accuracy",
+                }
+            ],
+        }
+    }
+
+
+class ResearchSyncCacheTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / "configs").mkdir()
+        (self.root / "configs/task.yaml").write_text(
+            yaml.safe_dump(_sync_cache_task_document())
+        )
+        self.spec = UniversalTaskSpec.from_dict(_sync_cache_task_document())
+        self.artifacts = self.root / "artifacts"
+        self.artifacts.mkdir()
+        self.memory = ResearchMemory(self.root, self.artifacts, self.spec)
+        self.folder = self.artifacts / "exp001"
+        seal_fixture(self.folder, self.spec, score=0.81)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_tampered_oof_not_served_from_stale_cache(self) -> None:
+        first = self.memory.sync()
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0]["evidence_status"], "verified_full")
+
+        oof = self.folder / "oof_predictions.csv"
+        oof.write_text(oof.read_text(encoding="utf-8") + "3,1\n", encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            validate_run(self.folder, task_spec=self.spec)
+        second = self.memory.sync()
+        self.assertNotIn(
+            "exp001", [r["exp_id"] for r in second],
+            "sync() served a stale verified_full record for a tampered run",
+        )
+
+    def test_second_contract_cannot_reuse_first_cache(self) -> None:
+        self.memory.sync()
+        self.assertEqual(len(self.memory.sync()), 1)
+
+        other_doc = json.loads(json.dumps(_sync_cache_task_document()))
+        other_doc["task"]["name"] = "a-different-contract"
+        other_spec = UniversalTaskSpec.from_dict(other_doc)
+        other = ResearchMemory(self.root, self.artifacts, other_spec)
+
+        with self.assertRaises(ValueError):
+            validate_run(self.folder, task_spec=other_spec)
+        records = other.sync()
+        self.assertEqual(records, [], "stale cross-spec cache record served")
+
+    def test_cache_hit_when_unchanged(self) -> None:
+        with patch.object(research_memory, "validate_run", wraps=research_memory.validate_run) as spy:
+            self.memory.sync()
+            self.assertEqual(len(self.memory.sync()), 1)
+        self.assertEqual(
+            spy.call_count, 1,
+            "sync() revalidated an unchanged run; cache hit is gone",
+        )
+
+    def test_repaired_file_invalidation(self) -> None:
+        self.memory.sync()
+        metrics = self.folder / "metrics.json"
+        data = json.loads(metrics.read_text(encoding="utf-8"))
+        data["primary_score"] = 0.99
+        metrics.write_text(json.dumps(data), encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            validate_run(self.folder, task_spec=self.spec)
+        self.assertEqual(self.memory.sync(), [])
+
+
+
+
+if __name__ == "__main__":
+    unittest.main()

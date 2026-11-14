@@ -1,0 +1,5 @@
+# Route bounded attached Modal probes without full-run promotion
+
+The CLI now accepts only bounded attached Modal probes with explicit fold and effective sample limit. Kaggle probes and unbounded selections remain blocked. The controller forwards normalized selection, uses probes/experiment/job output paths, verifies downloaded probe manifests/coverage and skips full-run research synchronization/leaderboard promotion. Existing full artifacts no longer prevent a separate probe. Cleanup uses the recorded dispatch identity and probe verifier before deleting the owned volume.
+
+Task runtime can bound the Modal function timeout with modal_timeout_seconds (integer1..14400); default full-run timeout stays unchanged. Template probe support was verified separately. Thirty focused Track1 checks, twenty-nine framework backend/Modal tests and Ruff passed before the timeout declaration was added. A real eight-sample Track1 run was first blocked before upload by missing fingerprint consent; consent was then registered for the user-authorized task/provider and a retry started. No successful inference is claimed by these tests or by consent.

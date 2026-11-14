@@ -21,7 +21,21 @@ import yaml
 
 from harness.artifacts import contract_identity, digest, validate_run
 from harness.io_utils import atomic_write_text
-from harness.state_store import transaction, workspace_lock
+from harness.state_store import transaction, workspace_lock, read_json_state, StateIntegrityError
+
+
+def validate_research_state(value):
+    if type(value.get("schema_version", 1)) is not int or value.get("schema_version", 1) != 1:
+        raise StateIntegrityError("STATE_VERSION_UNSUPPORTED", "research_memory.json")
+    if not isinstance(value.get("entries"), list):
+        raise ValueError("entries must be a list")
+    for entry in value["entries"]:
+        if not isinstance(entry, dict) or any(not isinstance(entry.get(k), str) for k in ("id", "scope", "kind")):
+            raise ValueError("entries require string id, scope, kind")
+    history = value.get("scope_history", {})
+    buckets = history.values() if isinstance(history, dict) else [history]
+    if any(not isinstance(bucket, list) or any(not isinstance(x, str) for x in bucket) for bucket in buckets):
+        raise ValueError("scope_history must contain lists of scope strings")
 
 _SYNC_CACHE: dict = {}
 # Key: (absolute folder path, sync identity digest, per-file (name, mtime_ns,
@@ -401,6 +415,8 @@ class ResearchMemory:
                     from harness.task_spec import load_task_spec
 
                     task_spec = load_task_spec(task_path)
+                except StateIntegrityError:
+                    raise
                 except Exception:
                     task_spec = {}
             else:
@@ -458,9 +474,7 @@ class ResearchMemory:
         return cls(project_root, artifacts_dir=artifacts_dir, task_spec=task_spec, plugin=plugin)
 
     def _read(self):
-        if not self.path.exists():
-            return {"entries": []}
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        return read_json_state(self.path, default_factory=lambda: {"entries": []}, validate=validate_research_state)
 
     def _valid_scopes(self, data) -> set:
         """Current scope plus scopes this task's memory file has known.
@@ -513,7 +527,7 @@ class ResearchMemory:
         entry = {"id": uuid.uuid4().hex, "scope": self.scope, "kind": kind,
                  "timestamp": time.time(), **fields}
         with workspace_lock(self.path.parent):
-            with transaction(self.path, {"schema_version": 1, "entries": []}) as state:
+            with transaction(self.path, {"schema_version": 1, "entries": []}, validate=validate_research_state) as state:
                 history = state.get("scope_history")
                 if history is None:
                     # Migrate the legacy file: attribute every scope present
@@ -534,10 +548,6 @@ class ResearchMemory:
             self._publish_progress(self.sync())
         return entry
 
-    @staticmethod
-    def _markdown(value):
-        text = html.escape(str(value), quote=False)
-        return re.sub(r"([\\`*_{}\[\]()#+!|])", r"\\\1", text)
 
     def _validated_progress_decisions(self, entries):
         """Return only decisions backed by indexed, intact evaluation receipts."""
@@ -548,6 +558,8 @@ class ResearchMemory:
         index_path = directory / "evaluations.json"
         try:
             indexed = set(json.loads(index_path.read_text(encoding="utf-8")).get("evaluations", {}).values())
+        except StateIntegrityError:
+            raise
         except (OSError, ValueError, TypeError):
             return []
 
@@ -560,6 +572,8 @@ class ResearchMemory:
                 continue
             try:
                 receipt = read_decision_evaluation(directory / f"{evaluation_id}.json")
+            except StateIntegrityError:
+                raise
             except (OSError, ValueError, KeyError, TypeError):
                 continue
             if (receipt.get("outcome") != entry.get("outcome")
@@ -662,15 +676,16 @@ class ResearchMemory:
         ))
         return metric_claim or execution_claim or bool(entry.get("score") is not None and entry.get("kind") != "insight")
 
-    def _validated_progress_incumbent(self):
-        """Read the current incumbent only from replayed machine evaluation state."""
+    def _validated_progress_incumbent(self, *, read_only=True):
+        """Read the machine-evaluated incumbent and check its live evidence."""
         try:
             from harness.decision_rules import policy_directory, read_decision_evaluation
             from harness.project import HarnessProject
             from harness.stagnation import StagnationController
 
             project = HarnessProject.discover(self.root)
-            states = StagnationController(project).reconcile_results()
+            controller = StagnationController(project)
+            states = controller.read_snapshot() if read_only else controller.reconcile_results()
             candidates = [
                 state for state in states.values()
                 if state.get("incumbent_evaluation_id") and state.get("incumbent_evidence_ref")
@@ -684,11 +699,21 @@ class ResearchMemory:
             if (receipt.get("outcome") != "supported"
                     or receipt.get("candidate") != state["incumbent_evidence_ref"]):
                 return None
+            # Receipt integrity alone cannot validate artifacts that changed later.
+            current = {run["exp_id"]: run for run in self.sync(evaluate_decisions=False)}
+            for role in ("candidate", "control"):
+                ref = receipt.get(role) or {}
+                run = current.get(ref.get("id"))
+                if (ref.get("kind") != "full_run" or run is None
+                        or run["evidence_sha256"] != receipt.get("evidence_sha256", {}).get(role)):
+                    return None
             return {
                 "evidence_ref": dict(state["incumbent_evidence_ref"]),
                 "evaluation_id": evaluation_id,
                 "score": receipt.get("candidate_score"),
             }
+        except StateIntegrityError:
+            raise
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
@@ -701,23 +726,7 @@ class ResearchMemory:
                 if previous is not None and not previous.startswith(marker):
                     return {"progress_path": None,
                             "progress_warning": "RESEARCH_PROGRESS.md is user-owned; it was preserved."}
-                # Re-read under the lock so a concurrent decision is not erased
-                # by publishing an older ledger snapshot.
-                entries = self.entries()
-                verified_runs = [run for run in runs if run.get("evidence_status") == "verified_full"]
-                render_entries = []
-                for entry in entries:
-                    rendered = dict(entry)
-                    if entry.get("kind") == "insight":
-                        rendered["progress_state"] = self._trace_state(entry, entries, verified_runs)
-                    render_entries.append(rendered)
-                content = render_markdown_progress(
-                    self.scope,
-                    render_entries,
-                    verified_runs=verified_runs,
-                    verified_decisions=self._validated_progress_decisions(entries),
-                    validated_incumbent=self._validated_progress_incumbent(),
-                )
+                content = self._render_progress(runs, read_only=False)
                 if content != previous:
                     atomic_write_text(self.progress_path, content)
                 return {"progress_path": str(self.progress_path), "progress_warning": None}
@@ -725,6 +734,36 @@ class ResearchMemory:
             # Report failures must not turn a committed note into a failed action
             # that the assistant retries, duplicating the canonical event.
             return {"progress_path": None, "progress_warning": f"Could not refresh Markdown progress: {exc}"}
+
+    def _render_progress(self, runs, *, read_only=True):
+        entries = self.entries()
+        verified_runs = [run for run in runs if run.get("evidence_status") == "verified_full"]
+        render_entries = []
+        for entry in entries:
+            rendered = dict(entry)
+            if entry.get("kind") == "insight":
+                rendered["progress_state"] = self._trace_state(entry, entries, verified_runs)
+            render_entries.append(rendered)
+        return render_markdown_progress(
+            self.scope,
+            render_entries,
+            verified_runs=verified_runs,
+            verified_decisions=self._validated_progress_decisions(entries),
+            validated_incumbent=self._validated_progress_incumbent(read_only=read_only),
+        )
+
+    def _progress_status(self, runs):
+        try:
+            previous = self.progress_path.read_text(encoding="utf-8")
+            if not previous.startswith("<!-- ai-harness:research-progress:v1 -->"):
+                return {"progress_path": None, "progress_status": "user_owned",
+                        "progress_warning": "RESEARCH_PROGRESS.md is user-owned; it was preserved."}
+            stale = previous != self._render_progress(runs)
+            return {"progress_path": str(self.progress_path), "progress_status": "stale" if stale else "current",
+                    "progress_warning": "Progress requires refresh-context." if stale else None}
+        except (OSError, UnicodeError):
+            return {"progress_path": None, "progress_status": "unavailable",
+                    "progress_warning": "Progress unavailable; run refresh-context."}
 
     def fingerprint(self, cfg):
         """Compare resolved declared execution, ignoring names and narrative metadata.
@@ -774,7 +813,7 @@ class ResearchMemory:
                 ("hypothesis", "intervention", "problem_addressed")}
 
     def _folder_file_key(self, folder: Path):
-        """Per-file (name, mtime_ns, size) over every top-level artifact file.
+        """Per-file (relative path, mtime_ns, size) over every artifact file.
 
         The previous cache key covered only manifest/config/metrics mtimes, so
         tampering any other sealed artifact (e.g. OOF predictions) between two
@@ -786,12 +825,12 @@ class ResearchMemory:
         propagates to the per-folder handler (the run is skipped, not cached).
         """
         return tuple(
-            (p.name, p.stat().st_mtime_ns, p.stat().st_size)
-            for p in sorted(folder.iterdir())
+            (p.relative_to(folder).as_posix(), p.stat().st_mtime_ns, p.stat().st_size)
+            for p in sorted(folder.rglob("*"))
             if p.is_file()
         )
 
-    def sync(self):
+    def sync(self, *, evaluate_decisions=True):
         """Revalidate artifacts on every read; a cached claim never verifies evidence.
 
         A cached record is reused only when the run folder's entire file
@@ -816,9 +855,14 @@ class ResearchMemory:
                     runs.append(_SYNC_CACHE[cache_key])
                     continue
 
-                manifest = validate_run(folder, task_spec=self.spec, plugin=self.plugin)
+                manifest = validate_run(folder, task_spec=self.spec, plugin=self.plugin, project_root=self.root)
                 cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
                 metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+                if not isinstance(cfg, dict) or not isinstance(metrics, dict):
+                    raise ValueError("Run configuration and metrics must be mappings")
+                for section in ("experiment", "model", "research", "runtime", "paths", "validation"):
+                    if not isinstance(cfg.get(section, {}), dict):
+                        raise ValueError(f"Run configuration {section} must be a mapping")
                 score = float(metrics["primary_score"])
                 value = score if metrics["direction"] == "maximize" else -score
                 if not math.isfinite(value):
@@ -826,6 +870,8 @@ class ResearchMemory:
                 diag = {}
                 if "diagnostics.json" in manifest["files"]:
                     diag = json.loads((folder / "diagnostics.json").read_text(encoding="utf-8"))
+                    if not isinstance(diag, dict):
+                        raise ValueError("Diagnostics must be a mapping")
                 record = {
                     "exp_id": manifest["exp_id"],
                     "path": str(folder),
@@ -836,7 +882,7 @@ class ResearchMemory:
                     "score": score,
                     "utility": value,
                     "comparison_group": digest({
-                        key: manifest.get(key)
+                        key: self.identity["task_sha256"] if key == "task_sha256" else manifest.get(key)
                         for key in (
                             "task_sha256",
                             "scorer_sha256",
@@ -852,20 +898,23 @@ class ResearchMemory:
                 }
                 _SYNC_CACHE[cache_key] = record
                 runs.append(record)
+            except StateIntegrityError:
+                raise
             except (ValueError, KeyError, OSError, TypeError, yaml.YAMLError):
                 continue
         # Imported/remote completions are evaluated on the canonical workspace,
         # where their preregistration and fixed control remain available.
-        for run in runs:
-            cfg_path = Path(run["path"]) / "run_config.yaml"
-            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-            rule_id = cfg.get("research", {}).get("decision_rule_id")
-            if rule_id:
-                from harness.decision_rules import evaluate_decision_rule, load_registration
-                registration = load_registration(self.root, rule_id)
-                evaluate_decision_rule(registration["rule"],
-                    {"kind": "full_run", "id": run["exp_id"], "partition": cfg.get("validation", {}).get("partition", "oof")},
-                    project=self.root, task_spec=self.spec, plugin=self.plugin, registration=registration)
+        if evaluate_decisions:
+            for run in runs:
+                cfg_path = Path(run["path"]) / "run_config.yaml"
+                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+                rule_id = cfg.get("research", {}).get("decision_rule_id")
+                if rule_id:
+                    from harness.decision_rules import evaluate_decision_rule, load_registration
+                    registration = load_registration(self.root, rule_id)
+                    evaluate_decision_rule(registration["rule"],
+                        {"kind": "full_run", "id": run["exp_id"], "partition": cfg.get("validation", {}).get("partition", "oof")},
+                        project=self.root, task_spec=self.spec, plugin=self.plugin, registration=registration)
         return sorted(runs, key=lambda r: (r["timestamp"], r["exp_id"]))
 
     @staticmethod
@@ -939,6 +988,8 @@ class ResearchMemory:
                     policy_directory(self.root) / f"{decision_evaluation_id}.json") if decision_evaluation_id else None
                 if not evaluation or evaluation.get("evaluation_id") != decision_evaluation_id or evaluation.get("outcome") != "supported":
                     raise ValueError("MACHINE_EVALUATED_GAIN_RECEIPT_REQUIRED")
+            except StateIntegrityError:
+                raise
             except (OSError, ValueError, KeyError, TypeError):
                 empirical_status = "hypothesis"
                 citation_admission = {"status": "blocked", "admission": "blocked",
@@ -1254,8 +1305,8 @@ class ResearchMemory:
             exp_id=exp_id, session_id=session_id, insight_id=insight_id,
             evidence_status="execution_observation_only")
 
-    def context(self, min_improvement=0.0, patience=3):
-        entries, runs = self.entries(), self.sync()
+    def context(self, min_improvement=0.0, patience=3, *, read_only=True):
+        entries, runs = self.entries(), self.sync(evaluate_decisions=not read_only)
         decisions = [e for e in entries if e["kind"] == "decision"]
         checkpoints = [e for e in entries if e["kind"] == "checkpoint"]
         # Compare within each data/split/scorer identity, across sessions. Failed
@@ -1299,11 +1350,14 @@ class ResearchMemory:
         for state in compact_frontier:
             for field in ("observation", "mechanism"):
                 state[field] = state[field][:160]
-        progress = self._publish_progress(runs)
+        progress = self._progress_status(runs) if read_only else self._publish_progress(runs)
         from harness.decision_rules import _project
         from harness.stagnation import StagnationController, is_competition_task
         project = _project(self.root)
-        states = StagnationController(project).reconcile_results() if project.artifacts_dir.resolve() == self.artifacts.resolve() else {}
+        states = {}
+        if project.artifacts_dir.resolve() == self.artifacts.resolve():
+            controller = StagnationController(project)
+            states = controller.read_snapshot() if read_only else controller.reconcile_results()
         paused = [state for state in states.values() if state["state"] == "paused_for_stagnation"]
         competition_task = is_competition_task(self.spec)
         from harness.macro_research import compute_macro_hypothesis_map, retrospective_status

@@ -12,6 +12,7 @@ plus the modules used at handler scope.
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from dataclasses import asdict
@@ -24,8 +25,123 @@ from harness.bridge_common import ActionObservation, TypedActionName
 from harness.grounding_gate import GroundingGate
 
 
+def parse_boolean(value):
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes"}:
+        return True
+    if text in {"false", "0", "no"}:
+        return False
+    raise ValueError(f"Expected a boolean, got {value!r}")
+
+
+def normalize_action_params(params):
+    """Normalize inputs before guards and handlers consume them."""
+    bool_fields = {"locked", "force", "auto_audit", "detach"}
+    list_fields = {"open_questions", "insight_ids", "source_refs", "citation_audit_refs",
+                   "citation_dependencies", "citation_claims", "pinned_candidates"}
+    numeric_fields = {"alpha", "timeout_seconds", "poll_interval", "_deadline_seconds",
+                      "maxiter", "num_thresholds", "limit", "offset", "weight", "score"}
+
+    def normalize(value, key=""):
+        if isinstance(value, dict):
+            return {k: normalize(v, k) for k, v in value.items()}
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(f"{key} must be finite")
+        if key in bool_fields and value is not None:
+            return parse_boolean(value)
+        if key in list_fields and isinstance(value, str):
+            return [value]
+        if key in numeric_fields and isinstance(value, str):
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError(f"{key} must be finite")
+        if isinstance(value, list):
+            return [normalize(v) for v in value]
+        return value
+
+    return normalize(params)
+
+
 class ActionHandlerMixin:
     """The 30 typed action handlers, moved verbatim from ``AgentBridge``."""
+
+    def _handle_model_assets_group(
+        self,
+        call,
+        session,
+        journal,
+        sub_mgr,
+        act,
+        params,
+        t0,
+    ) -> ActionObservation:
+        """Route the local model registry actions through its shared service API."""
+        from harness.model_assets.cli import (
+            inspect_model_asset,
+            list_model_assets,
+            register_model_asset,
+            validate_model_plan,
+        )
+
+        task_config = self.project.task_config_path
+        if act == TypedActionName.LIST_MODEL_ASSETS.value:
+            result = list_model_assets(
+                self.project_root,
+                limit=params.get("limit", 20),
+                offset=params.get("offset", 0),
+                task_config=task_config,
+            )
+        elif act == TypedActionName.INSPECT_MODEL_ASSET.value:
+            model_ref = params.get("model_ref") or params.get("model_id") or params.get("digest")
+            if not model_ref:
+                raise ValueError("model_ref is required (model ID or immutable definition digest)")
+            result = inspect_model_asset(
+                self.project_root,
+                str(model_ref),
+                task_config=task_config,
+            )
+        elif act == TypedActionName.REGISTER_MODEL_ASSET.value:
+            file_path = params.get("file") or params.get("path")
+            if not file_path:
+                raise ValueError("file is required for register_model_asset")
+            result = register_model_asset(
+                self.project_root,
+                file_path,
+                task_config=task_config,
+            )
+        elif act == TypedActionName.VALIDATE_MODEL_PLAN.value:
+            config_path = params.get("config_path") or params.get("config")
+            if not config_path:
+                raise ValueError("config_path is required for validate_model_plan")
+            result = validate_model_plan(
+                self.project_root,
+                config_path,
+                task_config=task_config,
+            )
+        else:
+            raise ValueError(f"Unsupported model registry action: {act}")
+
+        blockers = result.get("blockers", [])
+        failed = result.get("status") in {"blocked", "error"}
+        summary = (
+            f"Model {result.get('operation', act)} {result.get('status', 'completed')}."
+            if not failed
+            else f"Model {result.get('operation', act)} blocked: "
+            + "; ".join(str(item) for item in blockers[:3])
+        )
+        artifact_refs = result.get("artifact_refs") or []
+        return ActionObservation(
+            step_index=call.step_index,
+            action=act,
+            status="FAILED" if failed else "SUCCESS",
+            summary=summary[:600],
+            new_blockers=[str(item)[:300] for item in blockers[:5]],
+            artifact_path=artifact_refs[0] if len(artifact_refs) == 1 else None,
+            data=result,
+            elapsed_seconds=round(time.time() - t0, 3),
+        )
 
     def _handle_research_memory_group(
         self,
@@ -68,6 +184,7 @@ class ActionHandlerMixin:
                 id_col=params.get("id_col"),
                 pred_col=params.get("pred_col"),
                 citation_dependencies=params.get("citation_dependencies"),
+                source_exp_id=params.get("source_exp_id"),
             )
         elif act == "validate_candidate_pitch":
             from harness.candidate_preflight import validate_candidate_pitch
@@ -396,13 +513,36 @@ class ActionHandlerMixin:
         from harness.io_utils import atomic_write_text
         from harness.task_spec import UniversalTaskSpec
 
-        document = params["task"]
+        task_path = self.project.task_config_path
+        existing_raw = task_path.read_text(encoding="utf-8") if task_path.is_file() else ""
+        existing_doc = yaml.safe_load(existing_raw) or {}
+        if not isinstance(existing_doc, dict) or not isinstance(existing_doc.get("task", existing_doc), dict):
+            raise ValueError("Task YAML must contain a mapping")
+        has_task_wrapper = isinstance(existing_doc, dict) and "task" in existing_doc
+        task_dict = existing_doc.get("task", existing_doc) if isinstance(existing_doc, dict) else {}
+
+        if "task" in params and params["task"]:
+            document = params["task"]
+        else:
+            exec_patch = dict(params.get("execution") or {})
+            if "backend" in params and params["backend"]:
+                exec_patch["backend"] = params["backend"]
+            if "locked" in params and params["locked"] is not None:
+                exec_patch["locked"] = parse_boolean(params["locked"])
+            if "locked" in exec_patch:
+                exec_patch["locked"] = parse_boolean(exec_patch["locked"])
+            task_dict.setdefault("execution", {}).update(exec_patch)
+            document = task_dict
+
         UniversalTaskSpec.from_dict({"task": document})
+        if has_task_wrapper:
+            existing_doc["task"] = document
+            write_doc = existing_doc
+        else:
+            write_doc = document
         atomic_write_text(
-            self.project.task_config_path,
-            yaml.safe_dump(
-                {"task": document}, sort_keys=False, allow_unicode=True
-            ),
+            task_path,
+            yaml.safe_dump(write_doc, sort_keys=False, allow_unicode=True),
         )
         self._refresh_task_context()
         return ActionObservation(
@@ -632,7 +772,7 @@ class ActionHandlerMixin:
             raise ValueError(
                 "Review and confirm the task specification before confirming data risks."
             )
-        report = self.comp_state.get_data_readiness_report()
+        report = self.comp_state.get_data_readiness_report(refresh=True)
         if report.get("status") == "BLOCKED":
             raise ValueError(
                 "The latest data readiness report is BLOCKED; fix its critical checks first."
@@ -738,21 +878,33 @@ class ActionHandlerMixin:
         exp_id = params.get("exp_id", default_exp_id)
         cand = next(
             (c for c in pool["all_candidates"] if c["id"] == exp_id), None
-        ) or (pool["overall_best"] if pool["overall_best"] else {})
-        cand_score = float(
-            cand.get("composite_score")
-            or cand.get("score")
-            or self.comp_state.spec.get("primary_metric_baseline")
-            or 0.0
         )
+        if cand is None and "exp_id" in params:
+            return ActionObservation(
+                step_index=call.step_index,
+                action=act,
+                status="FAILED",
+                summary=f"Experiment '{exp_id}' not found in candidate pool.",
+                data={"requested_id": exp_id},
+                elapsed_seconds=round(time.time() - t0, 3),
+            )
+        if cand is None:
+            cand = pool.get("overall_best") or {}
+        raw_score = cand.get("composite_score")
+        if raw_score is None:
+            raw_score = cand.get("score")
+        if raw_score is None:
+            raw_score = self.comp_state.spec.get("primary_metric_baseline")
+        cand_score = float(raw_score) if raw_score is not None else None
+        score_label = f"{cand_score:.4f}" if cand_score is not None else "unavailable"
         return ActionObservation(
             step_index=call.step_index,
             action=act,
             status="SUCCESS",
-            summary=f"Inspected '{cand.get('id', exp_id)}': score={cand_score:.4f}, std={cand.get('fold_std', 0.015)}.",
+            summary=f"Inspected '{cand.get('id', exp_id)}': score={score_label}, std={cand.get('fold_std')}.",
             composite_score=cand_score,
-            metric_delta=cand.get("delta_vs_baseline", 0.0),
-            fold_variance=cand.get("fold_std", 0.015),
+            metric_delta=cand.get("delta_vs_baseline"),
+            fold_variance=cand.get("fold_std"),
             data=cand,
             elapsed_seconds=round(time.time() - t0, 3),
         )
@@ -1036,7 +1188,18 @@ class ActionHandlerMixin:
                 ),
             },
             "data": {
-                "folds": params.get("folds", [0, 1, 2, 3, 4]),
+                "folds": params.get(
+                    "folds",
+                    list(range(self.task_spec.validation.get("num_folds")))
+                    if isinstance(getattr(self.task_spec, "validation", None), dict)
+                    and isinstance(self.task_spec.validation.get("num_folds"), int)
+                    and self.task_spec.validation.get("num_folds") > 0
+                    else list(range(getattr(self.task_spec.validation, "num_folds")))
+                    if hasattr(getattr(self.task_spec, "validation", None), "num_folds")
+                    and isinstance(getattr(self.task_spec.validation, "num_folds"), int)
+                    and getattr(self.task_spec.validation, "num_folds") > 0
+                    else [0, 1, 2, 3, 4]
+                ),
                 "input_variants": input_variants,
                 "selection_variant": params.get("selection_variant", input_variants[0]),
             },
@@ -1271,7 +1434,7 @@ class ActionHandlerMixin:
         self._validate_config_path(cfg_path)
 
         backend = str(params.get("backend", "local")).lower()
-        force = bool(params.get("force", False))
+        force = parse_boolean(params.get("force", False))
 
         full_cfg_file = self.project_root / cfg_path
         raw_cfg = (
@@ -1296,9 +1459,10 @@ class ActionHandlerMixin:
                 backend=backend,
                 config_path=cfg_path,
                 gpu=str(params.get("gpu", "A10")),
-                auto_audit=bool(params.get("auto_audit", True)),
+                auto_audit=parse_boolean(params.get("auto_audit", True)),
                 auto_sync=True,
                 baseline_csv=params.get("baseline_csv"),
+                detach=parse_boolean(params.get("detach", False)),
             )
             session.compute_usage["experiments_used"] = (
                 int(session.compute_usage.get("experiments_used", 0)) + 1
@@ -1529,6 +1693,33 @@ class ActionHandlerMixin:
                     ),
                     summary=f"Cloud kernel `{slug}` is {status}.",
                     data={"job": {"job_id": slug, "kernel_slug": slug, "provider": "kaggle", "status": status, **k_res}},
+                    elapsed_seconds=round(time.time() - t0, 3),
+                )
+            elif str(job_id).startswith("ap-"):
+                from harness.templates.modal_template import ModalAppManager
+
+                app_id = str(job_id)
+                effective_timeout = wait_seconds if wait_seconds > 0 else 3600.0
+                if act == TypedActionName.WAIT_CLOUD_JOB.value:
+                    m_res = ModalAppManager.wait_for_app(
+                        app_id=app_id,
+                        poll_interval=poll_seconds,
+                        timeout_seconds=effective_timeout,
+                    )
+                else:
+                    m_res = ModalAppManager.get_app_status(app_id=app_id)
+
+                status = m_res.get("status", "UNKNOWN")
+                return ActionObservation(
+                    step_index=call.step_index,
+                    action=act,
+                    status=(
+                        "SUCCESS"
+                        if status not in {"FAILED", "CANCELLED", "ERROR", "TIMEOUT"}
+                        else "FAILED"
+                    ),
+                    summary=f"Modal App `{app_id}` is {status}.",
+                    data={"job": {"job_id": app_id, "app_id": app_id, "provider": "modal", "status": status, **m_res}},
                     elapsed_seconds=round(time.time() - t0, 3),
                 )
             raise ValueError(
@@ -1945,6 +2136,7 @@ class ActionHandlerMixin:
             cand_path,
             task_spec=self.task_spec,
             plugin=self.task_plugin,
+            project_root=self.project_root,
         )
         # Anti-bypass submission guards: dedup, MMES, significance. The
         # agent drives submission through this bridge action; the standalone
@@ -1974,6 +2166,46 @@ class ActionHandlerMixin:
             summary=f"Built and validated task submission '{entry.id}' with plugin '{plugin_label}'.",
             artifact_path=entry.archive_path,
             data={**asdict(entry), "submission_guards": guard_evidence},
+            elapsed_seconds=round(time.time() - t0, 3),
+        )
+
+    def _handle_preserve_submission(
+        self,
+        call,
+        session,
+        journal,
+        sub_mgr,
+        act,
+        params,
+        t0,
+    ) -> ActionObservation:
+        file_param = params.get("file")
+        if not file_param:
+            raise ValueError("Action 'preserve_submission' requires 'file' parameter.")
+        notes = params.get("notes", "")
+        reported_score = params.get("score")
+        reported_partition = params.get("partition")
+
+        entry = sub_mgr.preserve_file_submission(
+            file_path=file_param,
+            notes=notes,
+            reported_score=reported_score,
+            reported_partition=reported_partition,
+        )
+        return ActionObservation(
+            step_index=call.step_index,
+            action=act,
+            status="SUCCESS",
+            summary=f"Preserved submission artifact '{entry.id}' (unverified safekeeping only).",
+            artifact_path=entry.archive_path,
+            data={
+                "submission_id": entry.id,
+                "archive_path": entry.archive_path,
+                "sha256": entry.payload_sha256,
+                "receipt_path": entry.receipt_path,
+                "dispatch_authorized": False,
+                "status": entry.status,
+            },
             elapsed_seconds=round(time.time() - t0, 3),
         )
 

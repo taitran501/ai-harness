@@ -60,22 +60,9 @@ def find_framework_repo(
     > conventional workspace subdirectories (`ai-harness/`, `ai_harness/`)
     that contain a git repo with a `harness/` package.
     """
-    if framework_dir:
-        p = Path(framework_dir).expanduser()
-        if not p.is_absolute():
-            p = (Path(project_root).expanduser() / p).resolve()
-        return p if p.is_dir() else None
-    env_dir = os.environ.get("HARNESS_FRAMEWORK_DIR")
-    if env_dir:
-        p = Path(env_dir).expanduser().resolve()
-        if p.is_dir():
-            return p
-    root = Path(project_root).expanduser()
-    for name in CANDIDATE_DIR_NAMES:
-        p = root / name
-        if p.is_dir() and (p / ".git").exists() and (p / "harness").is_dir():
-            return p
-    return None
+    from harness.toolchain import resolve_framework_dir
+
+    return resolve_framework_dir(project_root, explicit_dir=framework_dir, require_git=True)
 
 
 def _is_canonical(repo: Path, project_root: Path) -> bool:

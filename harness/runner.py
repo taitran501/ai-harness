@@ -25,7 +25,6 @@ from harness.diagnostics import DiagnosticEngine
 from harness.grounding_gate import GroundingGate
 from harness.io_utils import (
     get_git_commit_hash,
-    load_yaml_config,
     save_json,
     set_seed,
 )
@@ -61,22 +60,42 @@ from harness.artifacts import (
     frame_hash,
     mirror_csv,
     seal_file_map,
+    publish_run_artifacts,
     sha256,
 )
 from harness.models import call_model
+from harness.model_assets.resolution import (
+    enforce_model_admission,
+    prepare_or_validate_model_plan,
+    resolve_effective_config,
+)
+from harness.model_assets.store import ModelStore
 from harness.oof_revalidation import build_variant_predictions, score_predictions
+from harness.evaluation import PredictionBatch, PredictionContractError, validate_prediction_batch
 
 
 class UniversalRunner(RunDataMixin, RunPipelineMixin):
     """One execution contract for local and packaged remote runs."""
 
     def __init__(self, cfg, config_path, args):
-        self.cfg, self.config_path, self.args = cfg, config_path, args
         self.project = HarnessProject.discover(
             getattr(args, "project_root", None), getattr(args, "task_config", None)
         )
         self.project_root = self.project.root
         self.task_spec = load_active_task_spec(self.project.task_config_path)
+        for backend in (getattr(args, "backend", None), self.task_spec.execution_backend):
+            if backend is not None and (not isinstance(backend, str) or backend.strip().lower() not in {"local", "modal", "kaggle"}):
+                raise ValueError(f"Unknown execution backend: {backend!r}")
+        self.cfg = resolve_effective_config(self.project, cfg, args)
+        self.config_path, self.args = config_path, args
+        self.model_plan = prepare_or_validate_model_plan(
+            self.task_spec,
+            self.cfg,
+            ModelStore(),
+            project=self.project,
+        )
+        enforce_model_admission(self.model_plan)
+        cfg = self.cfg
         self.exp_id = str(cfg.get("experiment", {}).get("id", Path(config_path).stem))
         if (
             Path(self.exp_id).name != self.exp_id
@@ -87,21 +106,8 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             raise ValueError("Experiment ID must be a simple directory name")
         self.artifacts_dir = self.project.artifacts_dir
         self.run_id = getattr(args, "job_id", None) or uuid.uuid4().hex
-        self.run_kind = (
-            "probe"
-            if (
-                getattr(args, "debug", False)
-                or getattr(args, "probe_samples", None)
-                or getattr(args, "fold", None) is not None
-                or cfg.get("validation", {}).get("sample_limit") is not None
-            )
-            else "full"
-        )
-        self.exp_dir = (
-            self.artifacts_dir / self.exp_id
-            if self.run_kind == "full"
-            else self.artifacts_dir / "probes" / self.exp_id / self.run_id
-        )
+        scope_config = {**cfg, "validation": {**self.task_spec.metadata.get("validation", {}), **cfg.get("validation", {})}}
+        self.run_kind = "probe" if is_local_only_run(args, scope_config) else "full"
         self.plugin_context = TaskPluginContext(
             self.project_root,
             self.project.task_config_path,
@@ -110,37 +116,41 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             cfg,
         )
         self.task_plugin = load_task_plugin(self.project.plugin_id, self.plugin_context)
-        self.exp_dir.parent.mkdir(parents=True, exist_ok=True)
-        from harness.state_store import workspace_lock
-
-        with workspace_lock(self.artifacts_dir):
-            state_path = self.artifacts_dir / "competition_state.json"
-            if state_path.is_file() and json.loads(state_path.read_text()).get(
-                "gates", {}
-            ).get("freeze_locked"):
-                raise ValueError(
-                    "Competition is frozen; mutation requires an approved unfreeze"
-                )
-        try:
-            self.exp_dir.mkdir(exist_ok=False)
-        except FileExistsError:
-            raise ValueError(
-                "Refusing to overwrite an existing run; use a new experiment ID. --force cannot overwrite artifacts"
-            )
+        self.seed = self.task_spec.resolve_seed(cfg.get("runtime", {}).get("seed", 42))
+        self.manifest = {}
+        self.expected_validation_ids = set()
+        self.final_exp_dir = (self.artifacts_dir / self.exp_id if self.run_kind == "full"
+                              else self.artifacts_dir / "probes" / self.exp_id / self.run_id)
+        if self.final_exp_dir.exists():
+            raise ValueError("Refusing to overwrite an existing run; use a new experiment ID. --force cannot overwrite artifacts")
+        self.exp_dir = self.artifacts_dir / ".running" / self.run_id / self.exp_id
+        self.exp_dir.mkdir(parents=True, exist_ok=False)
+        from harness.state_store import read_json_state
+        from harness.competition_state import validate_competition_state
+        state = read_json_state(self.artifacts_dir / "competition_state.json", default_factory=dict,
+                                validate=validate_competition_state)
+        if state.get("gates", {}).get("freeze_locked"):
+            raise ValueError("Competition is frozen; mutation requires an approved unfreeze")
         # Initialize eagerly so any code path (script adapters, independent
         # validation checks) can reference it before split resolution runs.
-        self.expected_validation_ids: set = set()
+        resolved_split_sha256 = None
         self.manifest = {
             "schema_version": 2,
             "provenance_version": 1,
             "provenance": "local_run",
             "run_id": self.run_id,
             "run_kind": self.run_kind,
+            "split_sha256": resolved_split_sha256,
             "exp_id": self.exp_id,
             "status": "RUNNING",
             "plugin_id": self.project.plugin_id or "default",
             **contract_identity(self.task_spec, self.task_plugin),
         }
+        save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
+        save_json(self.exp_dir / "model_lock.json", self.model_plan.to_lock_dict())
+        save_json(self.exp_dir / "model_policy_receipt.json", self.model_plan.to_receipt_dict())
+        self.manifest["model_lock_digest"] = self.model_plan.lock_digest
+        self.manifest["model_policy_status"] = self.model_plan.status
         save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
         self.logger = __import__("logging").getLogger("ai-harness.runner")
         (self.exp_dir / "run.log").write_text("Starting run\n", encoding="utf-8")
@@ -212,23 +222,33 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 f"{_mismatch}; {_unsupported_msg}" if _mismatch else _unsupported_msg
             )
         self._skip_generic_base_eval = False
+        hook = cfg.get("paths", {}).get("metrics_evaluator")
+        if hook:
+            print(
+                f"[ai-harness] INFO: Custom metric scorer active: "
+                f"{self.task_spec.primary_metric} via {hook}"
+            )
         if _mismatch:
             _generic_scoring = not self.task_plugin.capabilities().get(
                 "custom_metrics"
             )
-            if cfg.get("paths", {}).get("metrics_evaluator") or not _generic_scoring:
+            if hook or not _generic_scoring:
                 # The generic aggregate provably cannot score this spec: its
                 # pair gate raises before any metric is computed, so a custom
                 # metrics_evaluator is the authoritative scorer. Skip the base
                 # evaluation instead of warning "official evaluation failed"
                 # on every fold.
-                self._skip_generic_base_eval = bool(
-                    cfg.get("paths", {}).get("metrics_evaluator")
-                )
-                print(
-                    f"[ai-harness] WARNING: {_mismatch}; the official score "
-                    "will come from the configured custom scorer"
-                )
+                self._skip_generic_base_eval = bool(hook)
+                if hook:
+                    print(
+                        f"[ai-harness] INFO: Generic aggregate scorer skipped: "
+                        f"{_mismatch}; the configured custom scorer is authoritative"
+                    )
+                else:
+                    print(
+                        f"[ai-harness] WARNING: {_mismatch}; the official score "
+                        "will come from the configured custom scorer"
+                    )
             else:
                 raise ValueError(
                     f"{_mismatch} — align the subtask metric with the spec's "
@@ -237,16 +257,11 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 )
         self.seed = self.task_spec.resolve_seed(cfg.get("runtime", {}).get("seed", 42))
         self.estimator_metadata = []
-        hook = cfg.get("paths", {}).get("metrics_evaluator")
         if hook:
-            if str(self.project_root) not in sys.path:
-                sys.path.insert(0, str(self.project_root))
-            from harness.hook_ref import resolve_metrics_hook
+            from harness.hook_ref import isolated_metrics_hook
 
-            module, name = resolve_metrics_hook(hook)
-            self.manifest["custom_scorer_sha256"] = digest(
-                inspect.getsource(getattr(importlib.import_module(module), name))
-            )
+            with isolated_metrics_hook(hook, self.project_root) as scorer:
+                self.manifest["custom_scorer_sha256"] = digest(inspect.getsource(scorer))
 
     def _probe_sample_limit(self):
         """Effective subsample size for probe runs (None = full data).
@@ -275,7 +290,22 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 print(f"[ai-harness] WARNING: {warning}")
         return result
 
+    def _model_predictions(self, model, frame, variant):
+        """Bind positional estimator output once, then validate before normalization."""
+        raw = call_model(model, "predict", frame, variant)
+        ids = frame[self.task_spec.id_column].tolist()
+        if isinstance(raw, PredictionBatch):
+            raw = raw.to_mapping()
+        elif isinstance(raw, dict):
+            raw = {"ids": ids, **raw}
+        validate_prediction_batch(self.task_spec, raw, expected_ids=ids, purpose="test")
+        normalized = self.task_plugin.normalize_predictions(self.plugin_context, raw)
+        normalized = self.task_spec.apply_routing(normalized, len(frame))
+        validate_prediction_batch(self.task_spec, normalized, expected_ids=ids, purpose="test")
+        return normalized
+
     def run(self):
+        self._reservation = None
         try:
             return self._execute_run()
         except Exception as error:
@@ -283,8 +313,30 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 self.manifest.update(status="FAILED", error=str(error))
                 save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
             raise
+        finally:
+            if self._reservation is not None:
+                self._reservation.unlink(missing_ok=True)
 
     def _execute_run(self):
+        self.data_frame = self._load_training_data()
+        strategy = self.cfg.get("validation", {}).get("strategy", self.task_spec.validation.strategy)
+        selected = self._resolve_validation_splits(self.data_frame, strategy)
+        partial = {str(p[0]) for p in selected} != {str(p[0]) for p in self._required_validation_splits}
+        self.run_kind = "probe" if partial or self._probe_sample_limit() else "full"
+        self.manifest["run_kind"] = self.run_kind
+        self.final_exp_dir = (self.artifacts_dir / self.exp_id if self.run_kind == "full"
+                              else self.artifacts_dir / "probes" / self.exp_id / self.run_id)
+        reservations = self.artifacts_dir / ".run-reservations"
+        reservations.mkdir(parents=True, exist_ok=True)
+        reservation = reservations / (digest(str(self.final_exp_dir)) + ".lock")
+        try:
+            with reservation.open("x", encoding="utf-8") as stream:
+                stream.write(self.run_id)
+        except FileExistsError as exc:
+            raise ValueError("Run already reserved; use a new experiment ID") from exc
+        self._reservation = reservation
+        if self.final_exp_dir.exists():
+            raise ValueError("Refusing to overwrite an existing run; use a new experiment ID")
         is_remote_container = os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1"
         remote_capsule = None
         if is_remote_container:
@@ -327,11 +379,12 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                     decision_rule_id=research.get("decision_rule_id"))
                 if blocker:
                     raise ValueError("STAGNATION_PAUSE: " + blocker["message"])
-                reserve_comparison_slot(self.project, self.task_spec, self.cfg, plugin=self.task_plugin)
+                reserve_comparison_slot(self.project, self.task_spec, self.cfg, plugin=self.task_plugin,
+                                        resolved_scope={"resolved": True, "complete_selection": True})
         (self.exp_dir / "run_config.yaml").write_text(
             yaml.safe_dump(self.cfg, sort_keys=False), encoding="utf-8"
         )
-        frame = self._load_training_data()
+        frame = self.data_frame
         approach = self.cfg.get("experiment", {}).get("approach", "ml_classical")
         execution_mode = self.cfg.get("execution", {}).get("mode") or ("script" if approach in {"script", "custom_script"} else "built_in")
         if execution_mode == "pipeline":
@@ -419,6 +472,8 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 "input_variant": variant,
             }
             for key, value in predictions.items():
+                if key == "ids":
+                    continue
                 if key.startswith("classes_"):
                     record[key] = json.dumps(list(value), default=str)
                 else:
@@ -523,16 +578,18 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             raise RuntimeError(f"Custom script execution failed:\n{err_msg}")
 
         # 4. Verify output artifacts
+        from harness.evaluation import read_prediction_frame
+
         oof_path = self.exp_dir / "oof_predictions.csv"
         if not oof_path.exists():
             pred_fallback = self.exp_dir / "predictions.csv"
             if pred_fallback.exists():
-                oof_df = pd.read_csv(pred_fallback)
+                oof_df = read_prediction_frame(pred_fallback, expected_ids=truth[id_col], id_column=id_col)
                 oof_df.to_csv(oof_path, index=False)
             else:
                 raise FileNotFoundError(f"Custom script must generate '{oof_path.name}' in target experiment dir")
 
-        oof_df = pd.read_csv(oof_path)
+        oof_df = read_prediction_frame(oof_path, expected_ids=truth[id_col], id_column=id_col)
         if id_col not in oof_df.columns:
             raise ValueError(f"OOF predictions file missing ID column '{id_col}'")
 
@@ -578,7 +635,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         fold_test_preds = []
         test_pred_path = self.exp_dir / "test_predictions.csv"
         if test_pred_path.exists() and test_df is not None:
-            t_df = pd.read_csv(test_pred_path)
+            t_df = read_prediction_frame(test_pred_path, expected_ids=test_df[id_col], id_column=id_col)
             from harness.script_predictions import extract_test_predictions
 
             cand_test = extract_test_predictions(t_df, self.task_spec, expected_ids=test_df[id_col])
@@ -668,27 +725,13 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                         model.seed = self.seed
                     start = time.monotonic()
                     call_model(model, "fit", tr, variant)
-                    ExperimentValidator.assert_parameter_limit(
+                    ExperimentValidator.assert_trainable_parameter_limit(
                         model,
                         max_params=self.cfg.get("constraints", {}).get(
                             "max_params_limit"
                         ),
                     )
-                    pred = call_model(model, "predict", dv, variant)
-                    from harness.evaluation import PredictionBatch
-
-                    if isinstance(pred, PredictionBatch):
-                        if pred.ids != dv[self.task_spec.id_column].tolist():
-                            raise ValueError("Prediction IDs mismatch")
-                        pred = {
-                            **pred.labels,
-                            **{"proba_" + k: v for k, v in pred.probabilities.items()},
-                            **{"classes_" + k: v for k, v in pred.class_order.items()},
-                        }
-                    pred = self.task_plugin.normalize_predictions(
-                        self.plugin_context, pred
-                    )
-                    pred = self.task_spec.apply_routing(pred, len(dv))
+                    pred = self._model_predictions(model, dv, variant)
 
                     if test_df is not None and variant == self.selection_variant:
                         if part == "all":
@@ -699,23 +742,11 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                             t_df_part = None
 
                         if t_df_part is not None and not t_df_part.empty:
-                            t_pred = call_model(model, "predict", t_df_part, variant)
-                            if isinstance(t_pred, PredictionBatch):
-                                if t_pred.ids != t_df_part[self.task_spec.id_column].tolist():
-                                    raise ValueError("Test prediction IDs mismatch")
-                                t_pred = {
-                                    **t_pred.labels,
-                                    **{"proba_" + k: v for k, v in t_pred.probabilities.items()},
-                                    **{"classes_" + k: v for k, v in t_pred.class_order.items()},
-                                }
-                            t_pred = self.task_plugin.normalize_predictions(
-                                self.plugin_context, t_pred
-                            )
-                            t_pred = self.task_spec.apply_routing(t_pred, len(t_df_part))
+                            t_pred = self._model_predictions(model, t_df_part, variant)
                             if part == "all":
                                 fold_test_preds.append(t_pred)
                             else:
-                                fold_partition_test_preds.append((part, t_df_part.index, t_pred))
+                                fold_partition_test_preds.append((part, t_df_part[self.task_spec.id_column].tolist(), t_pred))
 
                     evaluation = self._evaluate(dv, pred)
                     part_id = int(part) if isinstance(part, (int, np.integer)) else part
@@ -753,7 +784,10 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                         )
                     )
             if fold_partition_test_preds and test_df is not None:
-                combined_fold_test = {}
+                covered = [item for _, ids, _ in fold_partition_test_preds for item in ids]
+                if len(covered) != len(set(covered)) or set(covered) != set(test_df[self.task_spec.id_column]):
+                    raise PredictionContractError("Test partitions overlap or leave uncovered IDs")
+                combined_fold_test = {"ids": test_df[self.task_spec.id_column].tolist()}
                 for target, st in self.task_spec.subtasks.items():
                     if any("proba_" + target in p[2] for p in fold_partition_test_preds):
                         sample_proba = next(p[2]["proba_" + target] for p in fold_partition_test_preds if "proba_" + target in p[2])
@@ -761,7 +795,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                         full_proba = np.zeros((len(test_df), n_cls), dtype=float)
                         for _, idxs, p_dict in fold_partition_test_preds:
                             if "proba_" + target in p_dict:
-                                locs = test_df.index.get_indexer(idxs)
+                                locs = pd.Index(test_df[self.task_spec.id_column]).get_indexer(idxs)
                                 full_proba[locs] = p_dict["proba_" + target]
                         combined_fold_test["proba_" + target] = full_proba
                     if any("classes_" + target in p[2] for p in fold_partition_test_preds):
@@ -771,10 +805,12 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                     for _, idxs, p_dict in fold_partition_test_preds:
                         sub_preds = p_dict.get("pred_" + target, p_dict.get(target))
                         if sub_preds is not None:
-                            locs = test_df.index.get_indexer(idxs)
+                            locs = pd.Index(test_df[self.task_spec.id_column]).get_indexer(idxs)
                             for loc, val in zip(locs, sub_preds):
                                 full_preds[loc] = val
                     combined_fold_test["pred_" + target] = full_preds
+                validate_prediction_batch(self.task_spec, combined_fold_test,
+                    expected_ids=test_df[self.task_spec.id_column], purpose="test")
                 fold_test_preds.append(combined_fold_test)
         truth = pd.concat(truths).drop_duplicates(self.task_spec.id_column)
         return self._save_and_finalize(
@@ -877,6 +913,20 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
 
     def _save_and_finalize(self, truth, details, rows, records, git_hash, test_df=None, fold_test_preds=None):
         oof = pd.DataFrame(records)
+        from harness.validation_scope import scope_record
+        key = self.task_spec.id_column
+        limit = self._probe_sample_limit()
+        partitions = [{"fold": f, "train_ids": t[key].tolist(), "validation_ids": v[key].tolist()}
+                      for f, t, v in self._required_validation_splits]
+        selected_partitions = [{"fold": f, "train_ids": t[key].tolist(), "validation_ids": v.head(limit)[key].tolist() if limit else v[key].tolist()}
+                               for f, t, v in self._resolved_validation_splits]
+        save_json(self.exp_dir / "validation_partitions.json", {"schema_version": 1, "id_column": key, "run_kind": self.run_kind,
+            "sample_limit": limit, "required_partitions": partitions, "partitions": selected_partitions})
+        observed = oof[oof.input_variant == self.selection_variant]
+        self.manifest["validation_scope"] = scope_record(partitions, [p["fold"] for p in selected_partitions],
+            observed[key].tolist(), observed["fold"].unique().tolist(), sampled=bool(limit))
+        if self.run_kind == "full" and not self.manifest["validation_scope"]["complete"]:
+            raise ValueError("Full validation protocol is incomplete")
         variants = {}
         for variant in oof.input_variant.unique():
             selected = oof[oof.input_variant == variant].copy()
@@ -920,6 +970,10 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
             "fold_metrics": details,
         }
         save_json(self.exp_dir / "metrics.json", result)
+        if rows:
+            for r in rows:
+                if r.get("dev_fold") == "all" and r.get("input_variant") in variants:
+                    r["primary_score"] = variants[r["input_variant"]]["primary_score"]
         summary = pd.DataFrame(
             rows
             or [
@@ -955,7 +1009,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
 
         if test_df is not None and fold_test_preds:
             id_col = self.task_spec.id_column
-            final_test_pred = {}
+            for batch in fold_test_preds:
+                validate_prediction_batch(self.task_spec, batch, expected_ids=test_df[id_col], purpose="test")
+            final_test_pred = {"ids": test_df[id_col].tolist()}
             for target, st in self.task_spec.subtasks.items():
                 class_order = None
                 orders = [
@@ -964,10 +1020,9 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                     if "classes_" + target in f
                 ]
                 if orders:
+                    if any(order != orders[0] for order in orders):
+                        raise PredictionContractError("Class order changed across test folds")
                     class_order = orders[0]
-                    final_test_pred["classes_" + target] = class_order
-                elif st.classes:
-                    class_order = list(st.classes)
                     final_test_pred["classes_" + target] = class_order
 
                 all_have_proba = all("proba_" + target in f for f in fold_test_preds)
@@ -1014,6 +1069,7 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                                 voted.append(Counter(s_preds).most_common(1)[0][0])
                         final_test_pred["pred_" + target] = voted
 
+            validate_prediction_batch(self.task_spec, final_test_pred, expected_ids=test_df[id_col], purpose="test")
             test_out = pd.DataFrame({id_col: test_df[id_col].values})
             for target, st in self.task_spec.subtasks.items():
                 if "proba_" + target in final_test_pred:
@@ -1065,15 +1121,27 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
         save_json(self.exp_dir / "metrics.json", result)
         # Seal the full recursive file surface (nested run logs included):
         # bare names for top-level files, POSIX relpaths for nested ones.
+        from harness.io_utils import json_default_serializer
+        estimator = json.loads(json.dumps(self.estimator_metadata, default=json_default_serializer),
+                               parse_constant=lambda value: {"nonfinite_float": value})
         self.manifest.update(
             status="COMPLETED",
             submission_eligible=False,
             eligible=True,
             submission_reason_codes=["PROMOTION_EVALUATION_REQUIRED"],
-            estimator=self.estimator_metadata,
+            estimator=estimator,
             files=seal_file_map(self.exp_dir),
         )
         save_json(self.exp_dir / "artifact_manifest.json", self.manifest)
+        publication = publish_run_artifacts(self.exp_dir, self.final_exp_dir,
+            task_spec=self.task_spec, plugin=self.task_plugin, expected={"exp_id": self.exp_id, "run_id": self.run_id},
+            project_root=self.project_root, run_kind=self.run_kind)
+        self.publication_disposition = publication.disposition
+        staging_dir = self.exp_dir
+        self.exp_dir = publication.destination
+        import shutil
+        staging_dir.resolve().relative_to((self.artifacts_dir / ".running").resolve())
+        shutil.rmtree(staging_dir)
         if self.run_kind == "full":
             journal = TreeJournal(
                 journal_path=self.artifacts_dir / "journal.json",
@@ -1081,7 +1149,10 @@ class UniversalRunner(RunDataMixin, RunPipelineMixin):
                 task_spec=self.task_spec,
                 task_plugin=self.task_plugin,
             )
-            journal.sync_from_artifacts()
+            try:
+                journal.sync_from_artifacts()
+            except Exception as error:
+                raise RuntimeError(f"POST_PUBLICATION_INDEXING_FAILED: completed run retained at {self.exp_dir}") from error
             research = self.cfg.get("research", {})
             if research.get("decision_rule_id") and not getattr(self, "remote_research_execution", False):
                 from harness.decision_rules import evaluate_decision_rule, load_registration
@@ -1167,6 +1238,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="(cloud backends only) Build and print the dispatch plan without pushing or consuming cloud quota",
     )
+    parser.add_argument(
+        "--detach",
+        action="store_true",
+        help="Run remote cloud job in detached mode (e.g. Modal) and return immediately without keeping the local process alive",
+    )
+    parser.add_argument(
+        "--gpu",
+        type=str,
+        default="A10",
+        help="Target GPU type for cloud backends (e.g. Modal: A10, A100, H100, T4, L4)",
+    )
     return parser
 
 
@@ -1179,10 +1261,15 @@ def resolve_cli_backend(
     """Resolve the effective execution backend for the runner CLI.
 
     Explicit ``--backend`` wins; otherwise the task contract's declared
-    backend applies; otherwise local. Smoke tests and bounded probes always
-    run locally. A locked contract rejects a different backend for FULL runs
+    backend applies; otherwise local. Implicit smoke/probe runs default to local;
+    the CLI separately rejects explicit cloud sample probes before dispatch.
+    A locked contract rejects a different backend for FULL runs
     (raises ValueError; the CLI translates that into a parser error).
     """
+    for backend in (requested, contract_backend):
+        if backend is not None and (not isinstance(backend, str) or backend.strip().lower() not in {"local", "modal", "kaggle"}):
+            raise ValueError(f"Unknown execution backend: {backend!r}")
+    contract_backend = contract_backend.strip().lower() if contract_backend is not None else None
     if requested is None:
         if is_smoke_run:
             return "local"
@@ -1197,8 +1284,9 @@ def resolve_cli_backend(
         raise ValueError(
             f"Backend lock violation: the task contract locks the execution "
             f"backend to '{contract_backend}' (execution.locked: true) but "
-            f"'{requested}' was requested. Drop the --backend flag "
-            f"(the contract default applies) or change the contract."
+            f"'{requested}' was requested. Run 'ai-harness set-backend {requested} --unlock' "
+            f"to update the contract backend, or drop the --backend flag "
+            f"(the contract default applies)."
         )
     return requested
 
@@ -1212,15 +1300,44 @@ def is_local_only_run(args, cfg_doc: Optional[Dict[str, Any]] = None) -> bool:
     enter the official solution tree or candidate pool) and AGENTS.md §2.4
     (smoke/probes always run locally) — regardless of the contract backend lock.
     """
-    if bool(getattr(args, "debug", False)) or getattr(args, "fold", None) is not None:
+    if bool(getattr(args, "debug", False)):
         return True
+    fold = getattr(args, "fold", None)
+    if fold is not None:
+        complete = ((cfg_doc or {}).get("validation") or {}).get("complete_folds")
+        if complete is None or set(map(str, complete)) != {str(fold)}:
+            return True
     if getattr(args, "probe_samples", None):
         return True
     if cfg_doc:
         limit = (cfg_doc.get("validation") or {}).get("sample_limit")
         if limit:
             return True
+        folds = (cfg_doc.get("data") or {}).get("folds")
+        if folds is not None:
+            validation = cfg_doc.get("validation") or {}
+            required = validation.get("complete_folds")
+            if required is None:
+                required = list(range(int(validation.get("num_folds", 5))))
+            if set(map(str, folds)) != set(map(str, required)):
+                return True
     return False
+
+
+def validate_cloud_probe_boundary(args, cfg_doc):
+    """Only attached bounded Modal probes have selection-aware artifact import."""
+    if (getattr(args, 'backend', None) in {'modal', 'kaggle'}
+            and is_local_only_run(args, cfg_doc)):
+        if getattr(args, 'backend', None) == 'kaggle':
+            if not getattr(args, 'dry_run', False):
+                raise ValueError('Cloud sample probes are not supported for Kaggle')
+            return None
+        if getattr(args, 'detach', False):
+            raise ValueError('Remote probes require attached execution')
+        from harness.cloud_probe import probe_selection
+        return probe_selection(debug=getattr(args, 'debug', False), fold=getattr(args, 'fold', None),
+                               probe_samples=getattr(args, 'probe_samples', None), config=cfg_doc)
+    return None
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1252,52 +1369,45 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not config_path.is_file():
         parser.error(f"Experiment config does not exist: {config_path}")
 
+    # Resolve and admit one effective model plan before choosing local or cloud
+    # execution. Cloud dispatch receives this same merged mapping.
+    effective_cfg = resolve_effective_config(project, config_path, args)
+    task_spec = load_active_task_spec(project.task_config_path)
+    model_plan = prepare_or_validate_model_plan(
+        task_spec,
+        effective_cfg,
+        ModelStore(),
+        project=project,
+    )
+    enforce_model_admission(model_plan)
+
     # Execution-backend contract: the task spec may declare a default backend
     # (task.execution.backend) and lock it (task.execution.locked). Enforcing
     # here — not only in the agent bridge — stops silent local training when
     # the runner CLI is invoked directly (agent terminal calls, scripts).
-    contract_backend = None
-    backend_locked = False
-    try:
-        from harness.task_spec import load_active_task_spec
-
-        _spec = load_active_task_spec(project.task_config_path)
-        contract_backend = getattr(_spec, "execution_backend", None)
-        backend_locked = bool(getattr(_spec, "execution_locked", False))
-    except Exception:
-        pass  # spec load failure surfaces in UniversalRunner with full context
+    contract_backend = getattr(task_spec, "execution_backend", None)
+    backend_locked = bool(getattr(task_spec, "execution_locked", False))
     requested_backend = args.backend
-    # Probe detection must see validation.sample_limit, which lives in the
-    # experiment config; load it here (UniversalRunner re-validates it).
-    cfg_doc: Optional[Dict[str, Any]] = None
-    try:
-        cfg_doc = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-        if not isinstance(cfg_doc, dict):
-            cfg_doc = None
-    except Exception:
-        cfg_doc = None  # config errors surface in UniversalRunner with context
-    is_smoke_run = is_local_only_run(args, cfg_doc)
+    # Probe detection must see inherited validation.sample_limit too.
+    cfg_doc: Optional[Dict[str, Any]] = effective_cfg
+    scope_config = {**cfg_doc, "validation": {**task_spec.metadata.get("validation", {}), **cfg_doc.get("validation", {})}}
+    is_smoke_run = is_local_only_run(args, scope_config)
     # Re-entrancy guard: when this process was started by a dispatched remote
     # kernel (Kaggle/Modal template sets AI_HARNESS_REMOTE_KERNEL=1), we ARE
     # the training environment. The task contract's cloud backend must not be
     # re-applied here — it would dispatch a nested kernel from inside the
     # kernel (and fail the upload-consent check, which only exists locally).
     inside_remote_kernel = os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1"
-    if inside_remote_kernel:
-        requested_backend = None
-        contract_backend = None
-        backend_locked = False
-        print(
-            "[ai-harness] inside a dispatched remote kernel "
-            "(AI_HARNESS_REMOTE_KERNEL=1); executing locally instead of "
-            "re-dispatching to the contract backend."
-        )
     try:
         args.backend = resolve_cli_backend(
             requested_backend, contract_backend, backend_locked, is_smoke_run
         )
     except ValueError as exc:
         parser.error(str(exc))
+    if inside_remote_kernel:
+        # Resolve and enforce the lock first. This flag only prevents recursion.
+        args.backend = "local"
+        print("[ai-harness] inside a dispatched remote kernel; executing without re-dispatch")
     if requested_backend is None and contract_backend and not is_smoke_run:
         print(
             f"[ai-harness] backend from task contract: {args.backend}"
@@ -1309,6 +1419,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"(contract backend: {contract_backend})"
         )
 
+    try:
+        remote_probe_spec = validate_cloud_probe_boundary(args, effective_cfg)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     # If backend is modal or kaggle, delegate to cloud runner
     if args.backend == "modal":
         from harness.cloud_runner import run_via_modal
@@ -1317,6 +1432,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             config_path=str(config_path),
             project_root=project.root,
             job_id=getattr(args, "job_id", None),
+            gpu=getattr(args, "gpu", "A10"),
+            detach=getattr(args, "detach", False),
+            dry_run=getattr(args, "dry_run", False),
+            effective_config=effective_cfg,
+            base_config=getattr(args, "base_config", None),
+            probe_spec=remote_probe_spec,
         )
         return 0
     elif args.backend == "kaggle":
@@ -1328,20 +1449,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             job_id=getattr(args, "job_id", None),
             force_import=getattr(args, "force_import", False),
             dry_run=getattr(args, "dry_run", False),
+            effective_config=effective_cfg,
+            base_config=getattr(args, "base_config", None),
         )
         return 0
 
-    # Local execution
-    package_base = Path(__file__).resolve().parent / "defaults" / "base.yaml"
-    workspace_base = project.root / "configs" / "base.yaml"
-    base_path = (
-        resolve_project_path(args.base_config)
-        if args.base_config
-        else (workspace_base if workspace_base.is_file() else package_base)
-    )
-    base_cfg = load_yaml_config(base_path) if base_path.exists() else {}
-    exp_cfg = load_yaml_config(config_path)
-    cfg = merge_configs(base_cfg, exp_cfg)
+    # Local execution consumes the same config already admitted above.
+    cfg = effective_cfg
 
     exp_id = cfg.get("experiment", {}).get("id", config_path.stem)
     args.project_root = str(project.root)

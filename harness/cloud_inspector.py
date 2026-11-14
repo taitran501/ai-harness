@@ -21,7 +21,10 @@ class CloudPreflightInspector:
     """Validates codebase integrity and data readiness before cloud dispatch."""
 
     @staticmethod
-    def inspect_config(config_path: Path | str) -> Tuple[bool, List[str], Dict[str, Any]]:
+    def inspect_config(
+        config_path: Path | str,
+        effective_config: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, List[str], Dict[str, Any]]:
         """Validate config file exists and contains essential schema fields."""
         p = Path(config_path)
         errors = []
@@ -32,9 +35,13 @@ class CloudPreflightInspector:
 
         try:
             with open(p, "r", encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
+                parsed = yaml.safe_load(f) or {}
         except Exception as e:
             return False, [f"Invalid YAML syntax in {p}: {e}"], {}
+
+        cfg = effective_config if effective_config is not None else parsed
+        if not isinstance(cfg, dict):
+            return False, ["Effective experiment config must be a YAML mapping."], {}
 
         exp_info = cfg.get("experiment", {})
         if not exp_info.get("id"):
@@ -85,6 +92,7 @@ class CloudPreflightInspector:
         config_path: Path | str,
         project_root: Optional[Path | str] = None,
         full_data_check: bool = True,
+        effective_config: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, List[str], Dict[str, Any]]:
         """Run all pre-flight checks and return consolidated verdict.
 
@@ -107,7 +115,7 @@ class CloudPreflightInspector:
             cfg_path = root / cfg_path
 
         # 1. Config Check
-        c_ok, c_errs, cfg = cls.inspect_config(cfg_path)
+        c_ok, c_errs, cfg = cls.inspect_config(cfg_path, effective_config=effective_config)
         all_errors.extend(c_errs)
 
         # 2. Resolve data using task declarative path or the installed task adapter.

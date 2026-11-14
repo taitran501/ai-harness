@@ -16,7 +16,7 @@ argv preserved so relative paths keep their meaning). The re-exec is
 announced on stderr so it is never invisible.
 
 Invariants (same doctrine as the host hooks):
-- fail-open: any error in this module lets the current process continue;
+- optional routing failures are fail-open; explicit configuration errors are fatal;
 - escape hatch: ``AI_HARNESS_TOOLCHAIN_NO_PIN=1`` disables the re-exec.
 """
 
@@ -62,6 +62,46 @@ def find_workspace_clone(project_root: Optional[Path | str]) -> Optional[Path]:
     return None
 
 
+class FrameworkConfigurationError(ValueError):
+    """An explicitly selected framework cannot be used."""
+
+
+def resolve_framework_dir(project_root=None, *, explicit_dir=None, require_git=False):
+    """Resolve CLI > environment > conventional clone, failing closed on configuration."""
+    source = None
+    value = None
+    if explicit_dir is not None:
+        source, value = "--framework-dir", explicit_dir
+    elif FRAMEWORK_DIR_ENV in os.environ:
+        source, value = FRAMEWORK_DIR_ENV, os.environ[FRAMEWORK_DIR_ENV]
+    base = Path(project_root).expanduser() if project_root is not None else Path.cwd()
+    if source is not None:
+        candidate = None
+        try:
+            if not str(value).strip() or "\x00" in str(value):
+                raise ValueError("empty, whitespace-only, or invalid path")
+            candidate = Path(value).expanduser()
+            if not candidate.is_absolute():
+                candidate = base / candidate
+            candidate = candidate.resolve(strict=True)
+            if not candidate.is_dir() or not (candidate / "harness" / "__init__.py").is_file():
+                raise ValueError("expected a directory containing harness/__init__.py")
+            if require_git and not (candidate / ".git").exists():
+                raise ValueError("expected a Git checkout (.git directory or worktree file)")
+            return candidate
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise FrameworkConfigurationError(
+                f"INVALID_FRAMEWORK_DIR: {source}={value!r} resolved to {str(candidate)!r}; "
+                f"{exc}. Correct or unset {source}."
+            ) from exc
+    for name in CLONE_DIR_NAMES:
+        candidate = base / name
+        if (candidate / "harness" / "__init__.py").is_file():
+            if not require_git or (candidate / ".git").exists():
+                return candidate.resolve()
+    return None
+
+
 def find_framework_root(project_root: Optional[Path | str]) -> Optional[Path]:
     """Return the authoritative framework root for this invocation.
 
@@ -77,16 +117,7 @@ def find_framework_root(project_root: Optional[Path | str]) -> Optional[Path]:
     Returns the directory that directly contains the ``harness`` package, or
     ``None`` when no framework checkout can be found.
     """
-    env_dir = os.environ.get(FRAMEWORK_DIR_ENV)
-    if env_dir:
-        candidate = Path(env_dir).expanduser()
-        if not candidate.is_absolute():
-            base = Path(project_root).expanduser() if project_root is not None else Path.cwd()
-            candidate = base / candidate
-        candidate = candidate.resolve()
-        if (candidate / "harness" / "__init__.py").is_file():
-            return candidate
-    return find_workspace_clone(project_root)
+    return resolve_framework_dir(project_root)
 
 
 def current_origin() -> Optional[Path]:
@@ -123,11 +154,13 @@ def ensure_pinned_toolchain(
     CompletedProcess of the pinned child; the caller must exit with that
     child's return code.
     """
-    if os.environ.get(PIN_DISABLE_ENV) == "1":
-        return None
     try:
         needs, origin, _expected = _needs_pin(project_root)
+    except FrameworkConfigurationError:
+        raise
     except Exception:
+        return None
+    if os.environ.get(PIN_DISABLE_ENV) == "1":
         return None
     if not needs:
         return None

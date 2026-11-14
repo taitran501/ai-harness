@@ -15,8 +15,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-import pandas as pd
-
 from harness.io_utils import save_json
 
 
@@ -41,7 +39,7 @@ class RunPipelineMixin:
             for i, stage in enumerate(pipeline):
                 if isinstance(stage, str):
                     entrypoint = stage
-                    name = Path(stage).stem or f"stage_{i}"
+                    raw_name = Path(stage).stem or f"stage_{i}"
                     args: List[Any] = []
                 elif isinstance(stage, dict):
                     entrypoint = stage.get("entrypoint")
@@ -49,14 +47,22 @@ class RunPipelineMixin:
                         raise ValueError(
                             f"Pipeline stage at index {i} is missing 'entrypoint'"
                         )
-                    name = stage.get("name") or Path(entrypoint).stem or f"stage_{i}"
+                    raw_name = stage.get("name") or Path(entrypoint).stem or f"stage_{i}"
                     args = list(stage.get("args") or [])
                 else:
                     raise ValueError(
                         f"Pipeline stage at index {i} must be a string or a dict with 'entrypoint'"
                     )
-                if name in seen:
-                    name = f"{name}_{i}"
+                name = str(raw_name).strip()
+                if not name or ".." in name or "/" in name or "\\" in name:
+                    raise ValueError(
+                        f"Invalid pipeline stage name '{raw_name}': stage names cannot contain path separators or '..'"
+                    )
+                base_name = name
+                counter = i
+                while name in seen:
+                    name = f"{base_name}_{counter}"
+                    counter += 1
                 seen.add(name)
                 stages.append({
                     "name": name,
@@ -75,9 +81,17 @@ class RunPipelineMixin:
             for i, entrypoint in enumerate(entrypoints):
                 if not isinstance(entrypoint, str):
                     raise ValueError(f"Pipeline entrypoint at index {i} must be a string")
-                name = Path(entrypoint).stem or f"stage_{i}"
-                if name in seen:
-                    name = f"{name}_{i}"
+                raw_name = Path(entrypoint).stem or f"stage_{i}"
+                name = str(raw_name).strip()
+                if not name or ".." in name or "/" in name or "\\" in name:
+                    raise ValueError(
+                        f"Invalid pipeline stage name '{raw_name}': stage names cannot contain path separators or '..'"
+                    )
+                base_name = name
+                counter = i
+                while name in seen:
+                    name = f"{base_name}_{counter}"
+                    counter += 1
                 seen.add(name)
                 stages.append({"name": name, "entrypoint": entrypoint, "args": []})
             return stages
@@ -208,18 +222,20 @@ class RunPipelineMixin:
         self._verify_pipeline_manifest(len(stages))
 
         # 6. Verify output artifacts (mirrors _run_custom_script)
+        from harness.evaluation import read_prediction_frame
+
         oof_path = self.exp_dir / "oof_predictions.csv"
         if not oof_path.exists():
             pred_fallback = self.exp_dir / "predictions.csv"
             if pred_fallback.exists():
-                oof_df = pd.read_csv(pred_fallback)
+                oof_df = read_prediction_frame(pred_fallback, expected_ids=truth[id_col], id_column=id_col)
                 oof_df.to_csv(oof_path, index=False)
             else:
                 raise FileNotFoundError(
                     f"Pipeline must generate '{oof_path.name}' in target experiment dir"
                 )
 
-        oof_df = pd.read_csv(oof_path)
+        oof_df = read_prediction_frame(oof_path, expected_ids=truth[id_col], id_column=id_col)
         if id_col not in oof_df.columns:
             raise ValueError(f"OOF predictions file missing ID column '{id_col}'")
 
@@ -264,7 +280,7 @@ class RunPipelineMixin:
         fold_test_preds = []
         test_pred_path = self.exp_dir / "test_predictions.csv"
         if test_pred_path.exists() and test_df is not None:
-            t_df = pd.read_csv(test_pred_path)
+            t_df = read_prediction_frame(test_pred_path, expected_ids=test_df[id_col], id_column=id_col)
             from harness.script_predictions import extract_test_predictions
 
             cand_test = extract_test_predictions(t_df, self.task_spec, expected_ids=test_df[id_col])

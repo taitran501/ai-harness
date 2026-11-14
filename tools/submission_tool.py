@@ -30,19 +30,19 @@ def main() -> None:
     reg_parser = subparsers.add_parser("register", help="Register and audit a new submission")
     reg_parser.add_argument("--exp-id", required=True, help="Experiment ID that generated the predictions")
     reg_parser.add_argument("--candidate", "-c", required=True, help="Path to candidate prediction CSV")
-    reg_parser.add_argument("--baseline", "-b", default=None, help="Path to parent baseline prediction CSV")
+    reg_parser.add_argument("--baseline", "-b", default=None, help="Deprecated, ignored; does not enforce submission gates")
     reg_parser.add_argument(
         "--ensemble-components",
         nargs="*",
         default=None,
-        help="Constituent prediction CSVs if candidate is an ensemble",
+        help="Deprecated, ignored; does not enforce submission gates",
     )
     reg_parser.add_argument("--notes", default="", help="Descriptive notes or hypothesis context")
     reg_parser.add_argument(
         "--min-diff-pct",
         type=float,
-        default=2.0,
-        help="Minimum required prediction change percentage (MMES, default: 2.0%%)",
+        default=None,
+        help="Deprecated, ignored; does not enforce submission gates",
     )
 
     # 2. List Action
@@ -70,13 +70,14 @@ def main() -> None:
         print(f"📦 REGISTERING SUBMISSION FOR EXPERIMENT: {args.exp_id}")
         print("===========================================================")
         try:
+            legacy = {key: value for key, value in (
+                ("baseline_csv", args.baseline), ("ensemble_components", args.ensemble_components),
+                ("min_diff_pct", args.min_diff_pct)) if value is not None}
             entry = mgr.register_submission(
                 exp_id=args.exp_id,
                 candidate_csv=args.candidate,
-                baseline_csv=args.baseline,
-                ensemble_components=args.ensemble_components,
                 notes=args.notes,
-                min_diff_pct=args.min_diff_pct,
+                **legacy,
             )
             print(f"✔ Submission ID     : {entry.id}")
             print(f"✔ Status            : {entry.status}")

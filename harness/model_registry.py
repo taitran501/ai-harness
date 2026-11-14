@@ -9,6 +9,9 @@ This module serves the name list from a disk cache validated against
 ``models.py``'s mtime; only a genuine code change pays for the real
 import. The name *logic* itself is never duplicated here — a cache miss
 delegates to ``harness.models.available_model_names``.
+
+Asset-level model definitions and competition governance live in
+``harness.model_assets``; this lightweight registry remains name-only.
 """
 
 from __future__ import annotations

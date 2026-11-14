@@ -69,6 +69,7 @@ class TypedActionName(str, Enum):
     OPTIMIZE_THRESHOLD = "optimize_threshold"
     GENERATE_MICRODOSE_PROBE = "generate_microdose_probe"
     PREPARE_SUBMISSION = "prepare_submission"
+    PRESERVE_SUBMISSION = "preserve_submission"
     RECORD_EXTERNAL_SCORE = "record_external_score"
     FREEZE_CANDIDATE = "freeze_candidate"
     EMERGENCY_UNFREEZE = "emergency_unfreeze"
@@ -78,6 +79,10 @@ class TypedActionName(str, Enum):
     VALIDATE_CANDIDATE_PITCH = "validate_candidate_pitch"
     RECONCILE_SUBMISSIONS = "reconcile_submissions"
     ACKNOWLEDGE_EXTERNAL_SUBMISSIONS = "acknowledge_external_submissions" 
+    LIST_MODEL_ASSETS = "list_model_assets"
+    INSPECT_MODEL_ASSET = "inspect_model_asset"
+    REGISTER_MODEL_ASSET = "register_model_asset"
+    VALIDATE_MODEL_PLAN = "validate_model_plan"
 
 
 # Session history caps: keep `sessions_dir/*.json` bounded for long
@@ -91,6 +96,10 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     "candidate_preflight": ApprovalTier.AUTO.value,
     "validate_candidate_pitch": ApprovalTier.AUTO.value,
     "reconcile_submissions": ApprovalTier.AUTO.value,
+    TypedActionName.LIST_MODEL_ASSETS.value: ApprovalTier.AUTO.value,
+    TypedActionName.INSPECT_MODEL_ASSET.value: ApprovalTier.AUTO.value,
+    TypedActionName.REGISTER_MODEL_ASSET.value: ApprovalTier.AUTO.value,
+    TypedActionName.VALIDATE_MODEL_PLAN.value: ApprovalTier.AUTO.value,
     "acknowledge_external_submissions": ApprovalTier.USER_APPROVAL.value,
     "record_macro_review": ApprovalTier.AUTO.value,
     "get_macro_hypothesis_map": ApprovalTier.AUTO.value,
@@ -128,6 +137,7 @@ DEFAULT_ACTION_APPROVAL_TIERS: Dict[str, str] = {
     TypedActionName.OPTIMIZE_THRESHOLD.value: ApprovalTier.AUTO.value,
     TypedActionName.GENERATE_MICRODOSE_PROBE.value: ApprovalTier.AUTO_WITH_LIMIT.value,
     TypedActionName.PREPARE_SUBMISSION.value: ApprovalTier.USER_APPROVAL.value,
+    TypedActionName.PRESERVE_SUBMISSION.value: ApprovalTier.AUTO.value,
     TypedActionName.RECORD_EXTERNAL_SCORE.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.FREEZE_CANDIDATE.value: ApprovalTier.USER_APPROVAL.value,
     TypedActionName.EMERGENCY_UNFREEZE.value: ApprovalTier.USER_APPROVAL.value,
@@ -228,6 +238,46 @@ class BridgeSession:
     stop_reason: Optional[str] = None
 
 
+def migrate_session(value):
+    """Only the documented legacy `id` alias and optional fields may migrate."""
+    if isinstance(value, dict) and "session_id" not in value and "id" in value:
+        value = {**value, "session_id": value["id"]}
+    return value
+
+
+def validate_session(value):
+    if "schema_version" in value and (type(value["schema_version"]) is not int or value["schema_version"] != 1):
+        from harness.state_store import StateIntegrityError
+        raise StateIntegrityError("STATE_VERSION_UNSUPPORTED", "session.json", field="schema_version")
+    for key in ("session_id", "goal", "status", "created_at", "updated_at"):
+        if not isinstance(value.get(key), str):
+            raise ValueError(f"{key} must be a string")
+    if value["status"] not in {"ACTIVE", "PAUSED_FOR_APPROVAL", "BUDGET_REACHED", "STOPPED", "COMPLETED"}:
+        raise ValueError("unsupported session status")
+    for key in ("budget", "compute_usage", "approval_policy", "starting_state"):
+        if key in value and not isinstance(value[key], dict):
+            raise ValueError(f"{key} must be an object")
+    for key in ("actions", "observations", "experiments_run"):
+        if key in value and not isinstance(value[key], list):
+            raise ValueError(f"{key} must be a list")
+    for key in ("active", "reassess_recommended"):
+        if key in value and type(value[key]) is not bool:
+            raise ValueError(f"{key} must be boolean")
+    for key in ("final_state", "pending_approval_action"):
+        if value.get(key) is not None and not isinstance(value[key], dict):
+            raise ValueError(f"{key} must be an object or null")
+    for key in ("actions", "observations"):
+        if any(not isinstance(item, dict) for item in value.get(key, [])):
+            raise ValueError(f"{key} entries must be objects")
+    for key in ("budget", "compute_usage"):
+        for field_name, number in value.get(key, {}).items():
+            if field_name == "hard_stop_on_consecutive_rejections":
+                if type(number) is not bool:
+                    raise ValueError(f"{key}.{field_name} must be boolean")
+            elif number is not None and (isinstance(number, bool) or not isinstance(number, (int, float)) or number < 0):
+                raise ValueError(f"{key}.{field_name} must be a nonnegative number")
+
+
 ACTION_ALIASES: Dict[str, str] = {
     # Checkpoint aliases
     "checkpoint": "record_research_checkpoint",
@@ -272,6 +322,34 @@ _TYPED_ACTION_NAMES = frozenset(item.value for item in TypedActionName) | frozen
 
 
 TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "list_model_assets": {
+        "summary": "List a bounded page of model definitions registered in the active task workspace.",
+        "required": [],
+        "optional": {"limit": 20, "offset": 0},
+        "parameter_types": {"limit": "int", "offset": "int"},
+        "description": "Reads the local content-addressed registry only; it does not discover or hash model weights.",
+    },
+    "inspect_model_asset": {
+        "summary": "Inspect one registered model definition by ID or immutable digest.",
+        "required": ["model_ref"],
+        "optional": {},
+        "parameter_types": {"model_ref": "string"},
+        "description": "Returns declared facts, artifact verification status, and task-scoped backend mappings.",
+    },
+    "register_model_asset": {
+        "summary": "Validate and register one bounded model definition.",
+        "required": ["file"],
+        "optional": {},
+        "parameter_types": {"file": "path"},
+        "description": "Accepts a strict YAML/JSON declaration up to 16 KiB. Registration does not verify artifacts or establish competition eligibility.",
+    },
+    "validate_model_plan": {
+        "summary": "Preflight an experiment's selected model closure against task policy.",
+        "required": ["config_path"],
+        "optional": {},
+        "parameter_types": {"config_path": "path"},
+        "description": "Resolves inherited config locally and returns the policy receipt and immutable model lock without dispatch.",
+    },
     "record_macro_review": {
         "summary": "Record an evidence-linked macro retrospective and advance its milestone.",
         "required": ["map_digest", "changes_since_last_review", "supported_mechanisms", "rejected_mechanisms",
@@ -306,7 +384,17 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "required": ["title", "observation", "mechanism", "next_action"],
         "optional": {"evidence": None, "parent_insight_id": None, "family_id": "unclassified", "source_refs": None,
                       "citation_claims": None, "citation_audit_refs": None, "empirical_status": "hypothesis",
-                      "decision_evaluation_id": None},
+                      "decision_evaluation_id": None, "summary": None, "note": None},
+        "parameter_types": {
+            "title": "string",
+            "summary": "string",
+            "observation": "string",
+            "mechanism": "string",
+            "next_action": "string",
+            "family_id": "string",
+            "parent_insight_id": "string",
+            "note": "string",
+        },
         "description": "Registers a hypothesis or reviewed claim with separate source provenance and local-run evidence status.",
     },
     "plan_research_probe": {
@@ -334,13 +422,32 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "summary": "Record an evidence-based decision (keep/discard/pivot) after an experiment.",
         "required": ["conclusion"],
         "optional": {"outcome": None, "rule_id": None, "candidate_evidence": None, "claimed_outcome": None,
-                     "evidence": None, "next_action": "", "insight_id": None, "lesson": "", "revisit_when": ""},
+                     "evidence": None, "next_action": "", "insight_id": None, "lesson": "", "revisit_when": "",
+                     "decision": None, "summary": None, "note": None},
+        "parameter_types": {
+            "conclusion": "string",
+            "decision": "string",
+            "outcome": "string",
+            "lesson": "string",
+            "summary": "string",
+            "next_action": "string",
+            "insight_id": "string",
+            "revisit_when": "string",
+            "note": "string",
+        },
         "description": "Documents an empirical decision outcome with takeaway lesson and next step.",
     },
     "record_research_checkpoint": {
         "summary": "Record a research checkpoint with current summary, next action, and open questions.",
         "required": ["summary", "next_action"],
-        "optional": {"open_questions": [], "insight_ids": None},
+        "optional": {"open_questions": [], "insight_ids": None, "title": None, "conclusion": None, "note": None},
+        "parameter_types": {
+            "summary": "string",
+            "next_action": "string",
+            "title": "string",
+            "conclusion": "string",
+            "note": "string",
+        },
         "description": "Saves state to research_frontier for seamless resumption after context compaction or restart.",
     },
     "review_hypothesis": {
@@ -431,6 +538,18 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "optional": {"exp_id": None, "candidate_csv": None, "notes": ""},
         "description": "Validates format, columns, and row counts against submission requirements.",
     },
+    "preserve_submission": {
+        "summary": "Copy and fingerprint a submission artifact for safekeeping.",
+        "required": ["file"],
+        "optional": {"notes": "", "score": None, "partition": None},
+        "parameter_types": {
+            "file": "path",
+            "notes": "string",
+            "score": "finite_float",
+            "partition": "string",
+        },
+        "description": "Preserves an artifact only; does not validate or dispatch it.",
+    },
     "inspect_cloud_job": {
         "summary": "Query status and logs of a remote cloud execution job.",
         "required": ["job_id"],
@@ -468,10 +587,10 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "description": "Executes standard exploratory data analysis on target dataset.",
     },
     "update_task_contract": {
-        "summary": "Update task contract fields.",
-        "required": ["task"],
-        "optional": {},
-        "description": "Modifies task contract specification.",
+        "summary": "Update task contract fields or execution backend/lock settings.",
+        "required": [],
+        "optional": {"task": None, "execution": None, "backend": None, "locked": None},
+        "description": "Modifies task contract specification safely. Accepts either full task dictionary or an execution patch (backend, locked).",
     },
     "update_workspace_settings": {
         "summary": "Update workspace settings and feature flags.",
@@ -554,7 +673,7 @@ TYPED_ACTION_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "candidate_preflight": {
         "summary": "Preflight verification of candidate predictions against incumbent baseline.",
         "required": ["candidate_path"],
-        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None, "citation_dependencies": []},
+        "optional": {"incumbent_path": None, "id_col": None, "pred_col": None, "citation_dependencies": [], "source_exp_id": None},
         "description": "Computes Spearman rho, rank swaps, and delta distributions. Flags rho >= 0.995; rank similarity alone does not establish score cause.",
     },
     "validate_candidate_pitch": {

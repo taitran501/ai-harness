@@ -13,6 +13,7 @@ Features:
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -36,6 +37,13 @@ from harness.cloud_policy import (
 )
 from harness.data_bundle import declared_data_roots
 from harness.job_state import update_worker_state
+from harness.model_assets.resolution import (
+    enforce_model_admission,
+    prepare_or_validate_model_plan,
+    resolve_effective_config,
+)
+from harness.model_assets.resolver import ModelResolver
+from harness.model_assets.store import ModelStore
 from harness.project import HarnessProject
 from harness.remote_runtime import resolve_remote_runtime
 from harness.templates.kaggle_template import KaggleKernelManager
@@ -102,17 +110,45 @@ def _warn_if_framework_checkout_dirty() -> None:
         )
 
 
-def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[str | Path] = None) -> Dict[str, Any]:
+def validate_cloud_recipe(config, backend):
+    """Honor explicit draft locks before any cloud preparation/provider checks."""
+    offline = config.get('offline')
+    if isinstance(offline, dict) and 'ready_for_execution' in offline:
+        if offline['ready_for_execution'] is not True:
+            raise ValueError('Offline recipe is a draft; cloud upload/dispatch is blocked')
+        if offline.get('backend') != backend:
+            raise ValueError('Offline recipe backend differs from requested cloud backend')
+
+
+def _discover_dispatch_project(project_root):
+    """Honor a task override only when it belongs to the selected workspace."""
+    project = HarnessProject.discover(project_root)
+    override = os.environ.get("HARNESS_TASK_CONFIG")
+    if override:
+        path = Path(override).expanduser()
+        path = (path if path.is_absolute() else project.root / path).resolve()
+        if path.is_relative_to(project.root) and path.is_file():
+            return HarnessProject.discover(project.root, path)
+    return project
+
+
+def _prepare_remote_run(
+    config_path: str,
+    backend: str,
+    project_root: Optional[str | Path] = None,
+    *,
+    effective_config: Optional[Dict[str, Any]] = None,
+    model_plan: Any = None,
+    base_config: Optional[str | Path] = None,
+    probe_spec: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     if os.environ.get("AI_HARNESS_REMOTE_KERNEL") == "1":
         raise RuntimeError(
             "Refusing to prepare a remote dispatch: this process is already "
             "inside a dispatched remote kernel (AI_HARNESS_REMOTE_KERNEL=1). "
             "Run the experiment locally with the runner CLI instead."
         )
-    project = HarnessProject.discover(project_root)
-    _warn_if_framework_checkout_dirty()
-    os.environ["HARNESS_PROJECT_ROOT"] = str(project.root)
-    os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
+    project = _discover_dispatch_project(project_root)
     config = Path(config_path).expanduser()
     if not config.is_absolute():
         config = project.root / config
@@ -121,7 +157,68 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
         config.relative_to(project.root)
     except ValueError as exc:
         raise ValueError("Experiment config must be inside the attached task workspace.") from exc
-    passed, errors, cfg = CloudPreflightInspector.run_full_preflight_check(config, project_root=project.root, full_data_check=False)
+
+    if effective_config is None:
+        effective_config = resolve_effective_config(
+            project,
+            config,
+            {"base_config": base_config} if base_config is not None else None,
+        )
+    elif not isinstance(effective_config, dict):
+        raise ValueError("Effective experiment config must be a mapping")
+    validate_cloud_recipe(effective_config, backend)
+    from harness.task_spec import load_active_task_spec
+
+    task_spec = load_active_task_spec(project.task_config_path)
+    contract_backend = getattr(task_spec, "execution_backend", None)
+    if (
+        bool(getattr(task_spec, "execution_locked", False))
+        and contract_backend
+        and backend != contract_backend
+    ):
+        raise ValueError(
+            f"Backend lock violation: the task contract locks execution to "
+            f"'{contract_backend}' (execution.locked: true) but '{backend}' was requested. "
+            f"Run 'ai-harness set-backend {backend} --unlock' to switch the contract backend."
+        )
+    if probe_spec is None:
+        from harness.run_data import resolve_execution_scope
+        validation_scope = resolve_execution_scope(project, effective_config, task_spec=task_spec)
+        if not validation_scope["complete_selection"]:
+            raise ValueError("VALIDATION_SCOPE_INCOMPLETE: partial validation cannot dispatch as a full run")
+    resolved_plan = prepare_or_validate_model_plan(
+        task_spec, effective_config, ModelStore(), project=project
+    )
+    if model_plan is not None and model_plan.lock_digest != resolved_plan.lock_digest:
+        from harness.model_assets.resolution import ModelAdmissionError
+
+        raise ModelAdmissionError(
+            "MODEL_PLAN_INVALID",
+            "Supplied model plan does not match the effective config and active task policy.",
+        )
+    model_plan = resolved_plan
+    enforce_model_admission(model_plan)
+
+    base_config_rel = None
+    if base_config is not None:
+        base_path = Path(base_config).expanduser()
+        if not base_path.is_absolute():
+            base_path = project.root / base_path
+        base_path = base_path.resolve()
+        try:
+            base_config_rel = base_path.relative_to(project.root).as_posix()
+        except ValueError as exc:
+            raise ValueError("Cloud base config must be inside the attached task workspace.") from exc
+        if not base_path.is_file():
+            raise FileNotFoundError(f"Base config does not exist: {base_path}")
+
+    _warn_if_framework_checkout_dirty()
+    passed, errors, cfg = CloudPreflightInspector.run_full_preflight_check(
+        config,
+        project_root=project.root,
+        full_data_check=False,
+        effective_config=effective_config,
+    )
     if not passed:
         raise ValueError("Preflight failed: " + "; ".join(errors))
     from harness.citation_audit import enforce_citation_admission
@@ -149,12 +246,29 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
                 f"Split file `{split_value}` is outside the task data upload fingerprint. Declare it under `data_config.split_path` in the task config and grant consent again."
             )
     artifacts_dir = project.artifacts_dir / exp_id
-    if artifacts_dir.exists() and any(artifacts_dir.iterdir()):
+    if probe_spec is None and artifacts_dir.exists() and any(artifacts_dir.iterdir()):
         raise ValueError(f"Experiment artifacts already exist at `{artifacts_dir}`; use a new experiment ID.")
     runtime = resolve_remote_runtime(project)
     task_doc = __import__("yaml").safe_load(project.task_config_path.read_text(encoding="utf-8")) or {}
     task = task_doc.get("task", task_doc)
     data_config = task.get("data_config") or task.get("data") or {}
+    task_runtime = task.get("runtime") or {}
+    resource_scope = {
+        "root": project.root,
+        "task": task,
+        "runtime": task_runtime,
+        "offline": not bool(task_runtime.get("enable_internet", False)),
+        "model_locations": cfg.get("model_locations") or task.get("model_locations") or (task.get("model_governance") or {}).get("model_locations") or {},
+        "model_asset_paths": cfg.get("model_asset_paths") or task.get("model_asset_paths") or {},
+        "model_manifests": cfg.get("model_manifests") or task.get("model_manifests") or {},
+        "model_sources": cfg.get("model_sources") or task.get("model_sources") or [],
+        "model_volume_name": cfg.get("model_volume_name") or task.get("model_volume_name"),
+        "hf_cache_dir": cfg.get("hf_cache_dir") or task.get("hf_cache_dir"),
+        "hf_hub_cache_dir": cfg.get("hf_hub_cache_dir") or task.get("hf_hub_cache_dir"),
+    }
+    model_resource_plan = ModelResolver().plan_backend_resources(
+        model_plan, backend, resource_scope
+    )
     fingerprint = dataset_fingerprint(project)
     consent_store = UploadConsentStore(project)
     external_kaggle_dataset = data_config.get("kaggle_dataset_slug") if backend == "kaggle" else None
@@ -175,6 +289,12 @@ def _prepare_remote_run(config_path: str, backend: str, project_root: Optional[s
         "data_config": data_config,
         "runtime": runtime,
         "config_sha256": config_sha256,
+        "effective_config_sha256": hashlib.sha256(
+            json.dumps(cfg, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest(),
+        "base_config_rel": base_config_rel,
+        "model_plan": model_plan,
+        "model_resource_plan": model_resource_plan,
         "task_id": project.manifest.get("task_id") or project.plugin_id or "task",
         "job_id": None,
         "fingerprint": fingerprint,
@@ -228,6 +348,30 @@ def _sync_completed_run(project: HarnessProject, exp_id: str) -> Dict[str, Any]:
     }
 
 
+def _stage_modal_model_resources(context, receipt_path, *, detach=False):
+    """Stage selected models in a new owned volume; retain a recovery receipt."""
+    resource_plan = context.get('model_resource_plan')
+    if not resource_plan or not resource_plan.required_sources:
+        return None
+    task = context['task']
+    environment_name = (task.get('runtime') or {}).get('modal_environment')
+    if not isinstance(environment_name, str) or not environment_name.strip():
+        raise ValueError('Declare task.runtime.modal_environment before staging model resources')
+    if detach:
+        raise ValueError('Owned-model staging requires attached mode until detached cleanup is supported')
+    from harness.model_assets.transfer import plan_model_transfers
+    from harness.model_assets.modal_staging import stage_modal_models
+    scope = {**task, **(task.get('model_governance') or {}), 'root': context['project'].root}
+    local = ModelResolver().plan_backend_resources(context['model_plan'], 'local', scope)
+    transfer = plan_model_transfers(local, resource_plan)
+    receipt = stage_modal_models(transfer, receipt_path, exp_id=context['exp_id'],
+                                 environment_name=environment_name)
+    dispatched = copy.deepcopy(resource_plan.to_dict())
+    for source in dispatched['required_sources']:
+        source['volume_name'] = receipt['volume_name']
+    return dispatched
+
+
 def run_via_modal(
     config_path: str,
     gpu: str = "A10",
@@ -237,19 +381,87 @@ def run_via_modal(
     project_root: Optional[str | Path] = None,
     job_id: Optional[str] = None,
     keep_staging: bool = False,
+    detach: bool = False,
+    dry_run: bool = False,
+    effective_config: Optional[Dict[str, Any]] = None,
+    base_config: Optional[str | Path] = None,
+    probe_spec: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Upload consented task data, dispatch Modal, verify returned artifact identity, and sync the journal."""
+    if probe_spec is not None:
+        from harness.cloud_probe import probe_selection as normalize_probe
+        probe_spec = normalize_probe(fold=probe_spec['fold'], probe_samples=probe_spec['sample_limit'])
+        if detach:
+            raise ValueError('Remote probes require attached execution')
+    if dry_run:
+        # Plan before account checks, consent, upload, job state or provider imports.
+        from harness.task_spec import load_active_task_spec
+        project = _discover_dispatch_project(project_root)
+        config = Path(config_path).expanduser()
+        config = (config if config.is_absolute() else project.root / config).resolve()
+        config.relative_to(project.root)
+        cfg = effective_config if effective_config is not None else resolve_effective_config(
+            project, config, {"base_config": base_config} if base_config is not None else None
+        )
+        task_spec = load_active_task_spec(project.task_config_path)
+        model_plan = prepare_or_validate_model_plan(task_spec, cfg, ModelStore(), project=project)
+        enforce_model_admission(model_plan)
+        scope = {**(getattr(task_spec, "metadata", {}) or {}),
+                 **(getattr(task_spec, "model_governance_config", {}) or {}), "root": project.root}
+        resources = ModelResolver().plan_backend_resources(model_plan, "modal", scope)
+        from harness.model_assets.transfer import plan_model_transfers
+        local_resources = ModelResolver().plan_backend_resources(model_plan, "local", scope)
+        transfer_plan = plan_model_transfers(local_resources, resources)
+        task_doc = __import__('yaml').safe_load(project.task_config_path.read_text(encoding='utf-8')) or {}
+        task = task_doc.get('task', task_doc)
+        execution_blockers = []
+        if resources.required_sources and not (task.get('runtime') or {}).get('modal_environment'):
+            execution_blockers.append('Declare task.runtime.modal_environment for owned model staging')
+        if resources.required_sources and detach:
+            execution_blockers.append('Owned model staging currently requires attached execution')
+        offline_recipe = cfg.get('offline')
+        if isinstance(offline_recipe, dict):
+            if offline_recipe.get('ready_for_execution') is not True:
+                execution_blockers.append('Offline recipe remains a draft')
+            if offline_recipe.get('backend') != 'modal':
+                execution_blockers.append('Offline recipe must select modal backend before remote execution')
+            if any(not value for value in (offline_recipe.get('runtime_versions') or {}).values()):
+                execution_blockers.append('Offline runtime dependency versions are not fully pinned')
+        plan = {
+            "backend": "modal", "gpu": gpu,
+            "exp_id": cfg.get("experiment", {}).get("id", config.stem),
+            "config": config.relative_to(project.root).as_posix(),
+            "model_resource_plan": resources.to_dict(),
+            "model_transfer_plan": transfer_plan,
+            "blockers": [error for source in resources.required_sources
+                         for error in source.get("missing_prerequisites", [])],
+            "provider_dispatch": "not performed",
+            "execution_blockers": execution_blockers,
+            "probe_selection": probe_spec,
+            "limitations": "Static plan only; account, uploads, volume contents, runtime and model inference not verified.",
+        }
+        result = {"dry_run": True, "plan": plan}
+        print(json.dumps(result, indent=2, default=str))
+        return result
     print("===========================================================")
     print(f"🚀 MODAL.COM CLOUD DISPATCH: {config_path}")
     print("===========================================================")
 
-    context = _prepare_remote_run(config_path, "modal", project_root)
+    context = _prepare_remote_run(
+        config_path,
+        "modal",
+        project_root,
+        effective_config=effective_config,
+        base_config=base_config,
+        probe_spec=probe_spec,
+    )
     project = context["project"]
     exp_id = context["exp_id"]
     managed_job_id = job_id
     from harness.decision_rules import prepare_remote_research
-    prepare_remote_research(project, context["config_rel"])
-    job_id = job_id or f"modal_{exp_id}"
+    if probe_spec is None:
+        prepare_remote_research(project, context["config_rel"], effective_config=context["cfg"])
+    job_id = job_id or f"modal_{exp_id}_{uuid.uuid4().hex[:12]}"
     if managed_job_id:
         update_worker_state(
             project.root, managed_job_id, status="RUNNING", provider_status="PREPARING",
@@ -268,16 +480,27 @@ def run_via_modal(
     # A cloud upload is explicit and scoped to the current dataset fingerprint.
     resources = private_upload_resource_names(project, fingerprint_data=context["fingerprint"])
     volume_name = resources["modal_volume_name"]
-    upload = push_dataset_to_modal(volume_name=volume_name, project_root=project.root)
-    if not upload.get("success"):
-        raise RuntimeError(f"Modal dataset upload failed: {upload.get('error') or upload.get('logs')}")
-
     # Generate code in a unique temporary directory; never replace an older job bundle.
     stage_dir = Path(tempfile.mkdtemp(prefix="aih-modal-job_"))
+    model_receipt_path = project.root / '.ai-harness' / 'cloud-model-staging' / f'{uuid.uuid4().hex}.json'
     try:
         (stage_dir / STAGING_MARKER).write_text(str(os.getpid()), encoding="ascii")
         stage_dir.mkdir(parents=True, exist_ok=True)
         modal_script_path = stage_dir / f"app_{exp_id}.py"
+        dispatch_models = _stage_modal_model_resources(context, model_receipt_path, detach=detach)
+        if probe_spec is not None and not dispatch_models:
+            raise ValueError('Remote probe currently requires governed owned-model storage')
+        model_environment = (context['task'].get('runtime') or {}).get('modal_environment') if dispatch_models else None
+        if dispatch_models:
+            from harness.model_assets.modal_staging import upload_owned_task_data
+            receipt = upload_owned_task_data(project, model_receipt_path, context['fingerprint']['fingerprint'])
+            volume_name = receipt['volume_name']
+            upload = {'success': True}
+        else:
+            upload = push_dataset_to_modal(volume_name=volume_name, project_root=project.root,
+                                           environment_name=model_environment)
+        if not upload.get('success'):
+            raise RuntimeError(f"Modal dataset upload failed: {upload.get('error') or upload.get('logs')}")
 
         code_content = generate_modal_script(
             context["config_rel"], gpu=gpu, exp_id=exp_id, volume_name=volume_name,
@@ -285,24 +508,84 @@ def run_via_modal(
             task_id=context["task_id"], job_id=job_id,
             runtime_manifest=context["runtime"], config_sha256=context["config_sha256"],
             artifacts_rel=project.artifacts_dir.relative_to(project.root).as_posix(),
+            base_config_path=context.get("base_config_rel"),
+            model_resource_plan=dispatch_models,
+            owned_job_volume=bool(dispatch_models),
+            probe_selection=probe_spec,
         )
         modal_script_path.write_text(code_content, encoding="utf-8")
 
         # 3. Execute Modal Run
-        cmd = ["modal", "run", str(modal_script_path)]
-        print(f"Executing: {' '.join(cmd)}")
+        cmd = ["modal", "run"]
+        if detach:
+            cmd.append("--detach")
+        cmd.append(str(modal_script_path))
+        print(f"Executing: {' '.join(cmd)}", flush=True)
         if managed_job_id:
             update_worker_state(
                 project.root, managed_job_id, status="RUNNING", provider_status="RUNNING",
                 exp_id=exp_id, config_sha256=context["config_sha256"],
             )
-        ret = subprocess.run(cmd, cwd=str(project.root))
 
+        provider_env = {**os.environ, 'MODAL_ENVIRONMENT': model_environment} if model_environment else None
+        if model_receipt_path.is_file():
+            from harness.model_assets.modal_staging import mark_modal_dispatch_started
+            from harness.templates.modal_template import modal_app_name
+            mark_modal_dispatch_started(model_receipt_path,
+                identity={'exp_id': exp_id, 'task_id': context['task_id'], 'job_id': job_id,
+                          'config_sha256': context['config_sha256']},
+                app_name=modal_app_name(context['task_id'], exp_id, job_id))
+            if probe_spec is not None:
+                from harness.io_utils import atomic_write_text
+                receipt = json.loads(model_receipt_path.read_text(encoding='utf-8'))
+                receipt['probe_selection'] = probe_spec
+                atomic_write_text(model_receipt_path, json.dumps(receipt, indent=2))
+        ret = subprocess.run(cmd, cwd=str(project.root), env=provider_env)
         if ret.returncode != 0:
             raise RuntimeError(f"Modal execution failed with code {ret.returncode}")
 
+        if detach:
+            detected_app_id = None
+            try:
+                list_proc = subprocess.run(["modal", "app", "list", "--json"], capture_output=True, text=True, timeout=15)
+                if list_proc.returncode == 0:
+                    apps = json.loads(list_proc.stdout)
+                    for a in apps:
+                        desc = a.get("description", "")
+                        if exp_id in desc or (managed_job_id and managed_job_id in desc):
+                            detected_app_id = a.get("app_id")
+                            break
+            except Exception:
+                pass
+
+            print("\n✔ Modal app successfully dispatched in detached cloud mode.")
+            if detected_app_id:
+                print(f"  App ID: {detected_app_id}")
+                print(f"  Live logs: modal app logs -f {detected_app_id}")
+                print(f"  Inspect: ai-harness-agent act --action inspect_cloud_job --job-id {managed_job_id or detected_app_id}")
+            result = {
+                "backend": "modal",
+                "job_id": job_id,
+                "remote_id": detected_app_id,
+                "status": "RUNNING",
+                "detached": True,
+                "exp_id": exp_id,
+                "upload_fingerprint": context["fingerprint"]["fingerprint"],
+            }
+            if managed_job_id:
+                update_worker_state(
+                    project.root, managed_job_id, status="RUNNING", provider_status="RUNNING",
+                    remote_id=detected_app_id, exp_id=exp_id, config_sha256=context["config_sha256"],
+                )
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return result
+
         print("\n✔ Modal remote execution finished successfully.")
-        artifact_dir = project.artifacts_dir / exp_id
+        if probe_spec is not None:
+            from harness.cloud_probe import probe_relative_path
+            artifact_dir = project.artifacts_dir / probe_relative_path(exp_id, job_id)
+        else:
+            artifact_dir = project.artifacts_dir / exp_id
         manifest_path = artifact_dir / "artifact_manifest.json"
         if not manifest_path.is_file():
             raise RuntimeError("Modal returned without artifact_manifest.json; result is not accepted.")
@@ -311,8 +594,17 @@ def run_via_modal(
         mismatch = {key: {"expected": val, "actual": manifest.get(key)} for key, val in expected.items() if val is not None and manifest.get(key) != val}
         if mismatch:
             raise RuntimeError(f"Modal artifact identity mismatch: {mismatch}")
-        result = _sync_completed_run(project, exp_id)
+        if probe_spec is not None:
+            from harness.cloud_probe import verify_probe_artifacts
+            result = verify_probe_artifacts(artifact_dir,
+                expected={**expected, 'run_id': job_id}, selection=probe_spec)
+        else:
+            result = _sync_completed_run(project, exp_id)
         result.update({"backend": "modal", "job_id": job_id, "status": "COMPLETED", "identity_verified": True, "upload_fingerprint": context["fingerprint"]["fingerprint"]})
+        if model_receipt_path.is_file():
+            from harness.model_assets.modal_staging import cleanup_modal_models
+            cleaned = cleanup_modal_models(model_receipt_path, artifact_dir)
+            result['model_cleanup'] = {'status': cleaned['status'], 'receipt_path': str(model_receipt_path)}
         if managed_job_id:
             update_worker_state(
                 project.root, managed_job_id, status="COMPLETED", provider_status="COMPLETED",
@@ -321,6 +613,28 @@ def run_via_modal(
             )
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return result
+    except BaseException as exc:
+        if model_receipt_path.is_file():
+            print(f'Model staging recovery receipt retained: {model_receipt_path}', file=sys.stderr)
+            from harness.io_utils import atomic_write_text
+            failure_path = model_receipt_path.with_suffix('.failure.json')
+            atomic_write_text(failure_path, json.dumps({'exp_id': exp_id, 'error_type': type(exc).__name__,
+                'model_receipt': str(model_receipt_path)}, indent=2))
+            receipt = json.loads(model_receipt_path.read_text(encoding='utf-8'))
+            if receipt.get('created') is True and receipt.get('dispatch_started') is False:
+                from harness.model_assets.modal_staging import cleanup_undispatched_models
+                try:
+                    cleanup_undispatched_models(model_receipt_path)
+                except Exception as cleanup_error:
+                    print(f'Model cleanup incomplete: {type(cleanup_error).__name__}; receipt retained', file=sys.stderr)
+            elif receipt.get('created') is True and receipt.get('dispatch_started') is True and receipt.get('status') not in {'cleaned', 'cleaned_after_failure'}:
+                from harness.model_assets.modal_staging import recover_failed_modal_models
+                try:
+                    recover_failed_modal_models(model_receipt_path,
+                        model_receipt_path.with_suffix('') / uuid.uuid4().hex)
+                except Exception as recovery_error:
+                    print(f'Remote recovery incomplete: {type(recovery_error).__name__}; receipt retained', file=sys.stderr)
+        raise
     finally:
         _release_staging(stage_dir, keep_staging)
 
@@ -350,6 +664,14 @@ def _kaggle_dry_run_plan(
         "dataset_slug": dataset_slug,
         "config_rel": context.get("config_rel"),
         "config_sha256": context.get("config_sha256"),
+        "effective_config_sha256": context.get("effective_config_sha256"),
+        "model_lock_digest": getattr(context.get("model_plan"), "lock_digest", None),
+        "model_policy_status": getattr(context.get("model_plan"), "status", None),
+        "model_resource_plan": (
+            context["model_resource_plan"].to_dict()
+            if context.get("model_resource_plan") is not None
+            else None
+        ),
         "runtime": runtime,
         "enable_internet": bool((context.get("task", {}).get("runtime") or {}).get("enable_internet", False)),
         "requirement_check": (context.get("task", {}).get("runtime") or {}).get("requirement_check", "strict"),
@@ -377,6 +699,8 @@ def run_via_kaggle(
     timeout_seconds: float = 24 * 60 * 60,
     force_import: bool = False,
     dry_run: bool = False,
+    effective_config: Optional[Dict[str, Any]] = None,
+    base_config: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
     """Push, poll through a terminal Kaggle state, pull identity-checked artifacts, and sync the journal.
 
@@ -388,23 +712,30 @@ def run_via_kaggle(
     print(f"🚀 KAGGLE KERNELS API DISPATCH: {config_path}")
     print("===========================================================")
 
-    context = _prepare_remote_run(config_path, "kaggle", project_root)
+    context = _prepare_remote_run(
+        config_path,
+        "kaggle",
+        project_root,
+        effective_config=effective_config,
+        base_config=base_config,
+    )
     project = context["project"]
     exp_id = context["exp_id"]
     if not dry_run:
         from harness.decision_rules import prepare_remote_research
-        prepare_remote_research(project, context["config_rel"])
+        prepare_remote_research(project, context["config_rel"], effective_config=context["cfg"])
     # Fail fast on a missing/broken kaggle CLI before any upload or push.
     KaggleKernelManager.ensure_cli_ready()
     managed_job_id = job_id
     job_id = job_id or f"kaggle_{exp_id}_{uuid.uuid4().hex[:10]}"
-    if managed_job_id:
+    if managed_job_id and not dry_run:
         update_worker_state(
             project.root, managed_job_id, status="RUNNING", provider_status="PREPARING",
             exp_id=exp_id, config_sha256=context["config_sha256"],
         )
 
-    # Upload task data only after the task/provider/fingerprint consent check.
+    # Determine the dataset source before staging. Dry-run may resolve a slug,
+    # but must return before uploading any dataset or dispatching any kernel.
     dataset_slug = context["external_kaggle_dataset"]
     if dataset_slug and str(dataset_slug).lower() == "none":
         dataset_slug = None
@@ -418,14 +749,15 @@ def run_via_kaggle(
             raise RuntimeError("Could not determine the authenticated Kaggle username. Run `kaggle auth login` and retry.")
         data_cfg = context["data_config"]
         license_name = data_cfg.get("license") or data_cfg.get("dataset_license")
-        uploaded = KaggleKernelManager.push_dataset_to_kaggle(
-            dataset_slug=dataset_slug,
-            license_name=license_name,
-            project_root=project.root,
-        )
-        if not uploaded.get("success"):
-            raise RuntimeError(f"Kaggle private dataset upload failed: {uploaded.get('error') or uploaded.get('logs')}")
-        KaggleKernelManager.wait_for_dataset(dataset_slug)
+        if not dry_run:
+            uploaded = KaggleKernelManager.push_dataset_to_kaggle(
+                dataset_slug=dataset_slug,
+                license_name=license_name,
+                project_root=project.root,
+            )
+            if not uploaded.get("success"):
+                raise RuntimeError(f"Kaggle private dataset upload failed: {uploaded.get('error') or uploaded.get('logs')}")
+            KaggleKernelManager.wait_for_dataset(dataset_slug)
 
     # 2. Package exact core/adapter runtime and task code without credentials or dataset bytes.
     stage_dir = Path(tempfile.mkdtemp(prefix="aih-kaggle-job_"))
@@ -433,6 +765,16 @@ def run_via_kaggle(
         (stage_dir / STAGING_MARKER).write_text(str(os.getpid()), encoding="ascii")
         runtime = dict(context["runtime"])
         runtime["core"]["version"] = runtime["core"].get("version", "0.2.0")
+        model_resource_plan = context.get("model_resource_plan")
+        if model_resource_plan and model_resource_plan.required_sources:
+            runtime["model_resource_plan"] = model_resource_plan.to_dict()
+        else:
+            runtime.pop("model_resource_plan", None)
+        model_sources = [
+            item["dataset_slug"]
+            for item in (model_resource_plan.required_sources if model_resource_plan else [])
+            if item.get("dataset_slug")
+        ]
         KaggleKernelManager.setup_kernel_package(
             stage_dir, context["config_rel"], exp_id, dataset_slug,
             project_root=project.root, task_config_path=project.task_config_path,
@@ -440,6 +782,8 @@ def run_via_kaggle(
             enable_internet=bool((context["task"].get("runtime") or {}).get("enable_internet", False)),
             bundle_mode=(context["task"].get("runtime") or {}).get("kaggle_bundle_mode", "dataset"),
             requirement_check=(context["task"].get("runtime") or {}).get("requirement_check", "strict"),
+            base_config_path=context.get("base_config_rel"),
+            model_sources=model_sources,
         )
 
         print("Preparing private Kaggle code bundle input...")
@@ -529,6 +873,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="AI-Harness Cloud GPU Dispatcher")
     parser.add_argument("--backend", choices=["modal", "kaggle"], default="modal")
     parser.add_argument("--config", required=True, help="Path to experiment config YAML")
+    parser.add_argument("--base-config", default=None, help="Optional base config inherited by the experiment")
     parser.add_argument("--project-root", default=None, help="Attached task workspace")
     parser.add_argument("--task-config", default=None, help="Task YAML path inside the workspace")
     parser.add_argument("--job-id", default=None, help="Stable local/cloud job identity")
@@ -536,6 +881,7 @@ def main() -> None:
     parser.add_argument("--timeout-seconds", type=float, default=86400.0, help="Maximum Kaggle kernel wait")
     parser.add_argument("--keep-staging", action="store_true", help="Retain staging for debugging")
     parser.add_argument("--gpu", default="A10", help="Modal GPU type (A10, A100, H100, T4, L4)")
+    parser.add_argument("--detach", action="store_true", help="Run Modal job in detached cloud mode without blocking local terminal")
     parser.add_argument(
         "--auto-submit",
         action="store_true",
@@ -555,14 +901,24 @@ def main() -> None:
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     try:
         if args.job_id:
+            if not args.job_id.startswith("job_"):
+                args.job_id = f"job_{args.job_id}"
             update_worker_state(project.root, args.job_id, status="RUNNING", provider_status="STARTING")
         if args.backend == "modal":
-            run_via_modal(args.config, gpu=args.gpu, project_root=project.root, job_id=args.job_id, keep_staging=args.keep_staging)
+            run_via_modal(
+                args.config,
+                gpu=args.gpu,
+                project_root=project.root,
+                job_id=args.job_id,
+                keep_staging=args.keep_staging,
+                detach=args.detach,
+                base_config=args.base_config,
+            )
         else:
             run_via_kaggle(
                 args.config, project_root=project.root, job_id=args.job_id,
                 poll_interval=args.poll_interval, timeout_seconds=args.timeout_seconds,
-                keep_staging=args.keep_staging,
+                keep_staging=args.keep_staging, base_config=args.base_config,
             )
     except Exception as exc:
         if args.job_id:

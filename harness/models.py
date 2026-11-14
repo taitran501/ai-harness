@@ -26,6 +26,39 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
+def _predict_fitted_pipelines(df, fitted_models, label_encoders):
+    """Predict without changing serialized pipeline layout or estimator class order."""
+    result = {}
+    for key, (pipe, inp, features) in fitted_models.items():
+        x = inp.compose_text(df) if inp.type in {"text", "text_template"} else df[features]
+        labels = np.asarray(pipe.predict(x)).ravel()
+        encoder = label_encoders.get(key)
+
+        def decode(values):
+            if encoder is None:
+                return np.asarray(values)
+            raw = np.asarray(values)
+            indices = raw.astype(int)
+            if not np.array_equal(raw, indices):
+                raise ValueError(f"Invalid encoded classes for {key}")
+            return encoder.inverse_transform(indices)
+
+        result[key] = decode(labels)
+        if hasattr(pipe, "predict_proba"):
+            probabilities = np.asarray(pipe.predict_proba(x))
+            clf = pipe.named_steps.get("clf")
+            classes = getattr(clf, "classes_", None)
+            if classes is None or np.asarray(classes).ndim != 1:
+                raise ValueError(f"Missing probability class order for {key}")
+            classes = decode(classes).tolist()
+            if (probabilities.ndim != 2 or probabilities.shape != (len(labels), len(classes))
+                    or len(set(classes)) != len(classes) or not classes):
+                raise ValueError(f"Inconsistent probability class order for {key}")
+            result[f"proba_{key}"] = probabilities
+            result[f"classes_{key}"] = classes
+    return result
+
+
 def _library_present(name: str) -> bool:
     try:
         return importlib.util.find_spec(name) is not None
@@ -729,31 +762,7 @@ class CatBoostModel:
         return self
 
     def predict(self, df, variant=None):
-        result = {}
-        for key, (pipe, inp, features) in self.fitted_models.items():
-            x = (
-                inp.compose_text(df)
-                if inp.type in {"text", "text_template"}
-                else df[features]
-            )
-            raw_pred = pipe.predict(x)
-            if key in self.label_encoders:
-                pred_labels = np.asarray(raw_pred).ravel()
-                try:
-                    result[key] = self.label_encoders[key].inverse_transform(pred_labels.astype(int))
-                except Exception:
-                    result[key] = pred_labels
-                if hasattr(pipe, "predict_proba"):
-                    result[f"proba_{key}"] = pipe.predict_proba(x)
-                    result[f"classes_{key}"] = list(self.label_encoders[key].classes_)
-            else:
-                result[key] = np.asarray(raw_pred).ravel()
-                if hasattr(pipe, "predict_proba"):
-                    result[f"proba_{key}"] = pipe.predict_proba(x)
-                    clf = pipe.named_steps.get("clf")
-                    if hasattr(clf, "classes_"):
-                        result[f"classes_{key}"] = list(clf.classes_)
-        return result
+        return _predict_fitted_pipelines(df, self.fitted_models, self.label_encoders)
 
     def num_parameters(self):
         total = 0
@@ -876,31 +885,7 @@ class RandomForestModel:
         return self
 
     def predict(self, df, variant=None):
-        result = {}
-        for key, (pipe, inp, features) in self.fitted_models.items():
-            x = (
-                inp.compose_text(df)
-                if inp.type in {"text", "text_template"}
-                else df[features]
-            )
-            raw_pred = pipe.predict(x)
-            if key in self.label_encoders:
-                pred_labels = np.asarray(raw_pred).ravel()
-                try:
-                    result[key] = self.label_encoders[key].inverse_transform(pred_labels.astype(int))
-                except Exception:
-                    result[key] = pred_labels
-                if hasattr(pipe, "predict_proba"):
-                    result[f"proba_{key}"] = pipe.predict_proba(x)
-                    result[f"classes_{key}"] = list(self.label_encoders[key].classes_)
-            else:
-                result[key] = np.asarray(raw_pred).ravel()
-                if hasattr(pipe, "predict_proba"):
-                    result[f"proba_{key}"] = pipe.predict_proba(x)
-                    clf = pipe.named_steps.get("clf")
-                    if hasattr(clf, "classes_"):
-                        result[f"classes_{key}"] = list(clf.classes_)
-        return result
+        return _predict_fitted_pipelines(df, self.fitted_models, self.label_encoders)
 
     def num_parameters(self):
         total = 0

@@ -47,6 +47,36 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("plugins", help="List installed task plugins")
 
+    model = subparsers.add_parser("model", help="Inspect and govern task-scoped model assets")
+    model_commands = model.add_subparsers(dest="model_command", required=True)
+    model_list = model_commands.add_parser("list", help="List registered models in this task workspace")
+    model_list.add_argument("--project-root", default=".")
+    model_list.add_argument("--task-config", default=None)
+    model_list.add_argument("--limit", type=int, default=20)
+    model_list.add_argument("--offset", type=int, default=0)
+    model_inspect = model_commands.add_parser("inspect", help="Inspect a registered model definition")
+    model_inspect.add_argument("model_ref", help="Model ID or immutable SHA-256 definition digest")
+    model_inspect.add_argument("--project-root", default=".")
+    model_inspect.add_argument("--task-config", default=None)
+    model_register = model_commands.add_parser("register", help="Register a bounded model declaration")
+    model_register.add_argument("--file", required=True, help="YAML or JSON model definition")
+    model_register.add_argument("--project-root", default=".")
+    model_register.add_argument("--task-config", default=None)
+    model_verify = model_commands.add_parser("verify", help="Check local model artifacts and SHA-256 hashes")
+    model_verify.add_argument("model_ref", help="Model ID or immutable SHA-256 definition digest")
+    model_verify.add_argument("--project-root", default=".")
+    model_verify.add_argument("--task-config", default=None)
+    model_validate = model_commands.add_parser("validate-config", help="Check a config against task model policy")
+    model_validate.add_argument("--config", required=True, help="Experiment config path")
+    model_validate.add_argument("--project-root", default=".")
+    model_validate.add_argument("--task-config", default=None)
+    model_resolve = model_commands.add_parser("resolve", help="Plan backend model mount paths without dispatch")
+    model_resolve.add_argument("--config", required=True, help="Experiment config path")
+    model_resolve.add_argument("--backend", required=True, choices=("local", "kaggle", "modal"))
+    model_resolve.add_argument("--dry-run", action="store_true", help="Plan only; never dispatch or mutate provider state")
+    model_resolve.add_argument("--project-root", default=".")
+    model_resolve.add_argument("--task-config", default=None)
+
     install_skills = subparsers.add_parser(
         "install-skills",
         help="Install or update modular slash-command skills globally (~/.gemini/config/skills) and/or in workspace (.agents/skills)",
@@ -141,6 +171,31 @@ def build_parser() -> argparse.ArgumentParser:
     adoption_scan.add_argument("--root", default=None, help="Parent directory containing workspaces (default: parent of current dir)")
     adoption_scan.add_argument("--include", default=None, help="Comma-separated workspace dir names to include; default: every dir with .ai-harness")
 
+    set_backend_cmd = subparsers.add_parser(
+        "set-backend",
+        help="Safely update task contract execution backend and lock state in task.yaml",
+    )
+    set_backend_cmd.add_argument(
+        "backend",
+        choices=["local", "modal", "kaggle"],
+        help="Target execution backend (local, modal, kaggle)",
+    )
+    set_backend_cmd.add_argument(
+        "--project-root",
+        default=".",
+        help="Attached task workspace root (default: current dir)",
+    )
+    set_backend_cmd.add_argument(
+        "--unlock",
+        action="store_true",
+        help="Unlock the execution backend (sets execution.locked: false)",
+    )
+    set_backend_cmd.add_argument(
+        "--lock",
+        action="store_true",
+        help="Lock the execution backend (sets execution.locked: true)",
+    )
+
     validate_task_cmd = subparsers.add_parser(
         "validate-task",
         help="Static task.yaml validation (schema, data files, column cross-checks, fold sanity) without running anything",
@@ -209,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--incumbent", default=None, help="Incumbent baseline predictions CSV file (auto-resolved if omitted)")
     preflight.add_argument("--id-col", default=None, help="Explicit ID column name")
     preflight.add_argument("--pred-col", default=None, help="Explicit prediction column name")
+    preflight.add_argument("--source-exp-id", default=None, help="Bind the receipt to a validated source run or candidate")
     preflight.add_argument("--pitch", action="store_true", help="Validate candidate pitch governance (reject near-duplicate without paired gain)")
     preflight.add_argument("--claim-kind", default="submission_candidate", choices=("blend", "temperature_tuning", "submission_candidate", "candidate"))
     preflight.add_argument("--candidate-exp-id", default=None)
@@ -419,6 +475,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(json.dumps(list_task_plugins(), indent=2, ensure_ascii=False))
         return 0
 
+    if args.command == "model":
+        from harness.model_assets.cli import run_model_command
+
+        return run_model_command(args)
+
     if args.command == "audit-scripts":
         from harness.audit_gate import scan_dispatch_scripts
         report = scan_dispatch_scripts(args.project_root)
@@ -462,6 +523,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.strict:
             return 0 if report.get("strict_pass") else 1
         return 1 if blocking else 0
+
+    if args.command == "set-backend":
+        return _set_backend_command(args)
 
     if args.command == "status":
         from harness.status_report import collect_status, render_markdown
@@ -695,6 +759,7 @@ def _run_preflight(args) -> int:
             incumbent_path=args.incumbent,
             id_col=args.id_col,
             pred_col=args.pred_col,
+            source_exp_id=args.source_exp_id,
         )
     except Exception as exc:
         if args.json:
@@ -749,6 +814,71 @@ def _run_preflight(args) -> int:
         print(f"\nRecommendation:  {receipt['recommendation']}")
 
     return 0 if receipt["verdict"] == "PASS" else (1 if receipt["verdict"] == "FLAGGED_NEAR_DUPLICATE" else 2)
+
+
+def _set_backend_command(args) -> int:
+    import yaml
+    from harness.project import HarnessProject
+    from harness.io_utils import atomic_write_text
+    from harness.task_spec import UniversalTaskSpec
+
+    try:
+        project = HarnessProject.discover(Path(args.project_root))
+        cfg_path = project.task_config_path
+    except Exception as exc:
+        print(f"Error resolving task configuration: {exc}", file=sys.stderr)
+        return 1
+
+    if not cfg_path.is_file():
+        print(f"Task configuration file not found: {cfg_path}", file=sys.stderr)
+        return 1
+
+    try:
+        raw_text = cfg_path.read_text(encoding="utf-8")
+        doc = yaml.safe_load(raw_text) or {}
+    except Exception as exc:
+        print(f"Failed to read task YAML: {exc}", file=sys.stderr)
+        return 1
+
+    if not isinstance(doc, dict) or not isinstance(doc.get("task", doc), dict):
+        print("Task YAML must contain a mapping", file=sys.stderr)
+        return 1
+    task = doc.get("task", doc)
+
+    exec_cfg = task.setdefault("execution", {})
+    if not isinstance(exec_cfg, dict):
+        exec_cfg = {}
+        task["execution"] = exec_cfg
+
+    old_backend = exec_cfg.get("backend", "local")
+    old_locked = bool(exec_cfg.get("locked", False))
+
+    exec_cfg["backend"] = args.backend
+    if args.unlock:
+        exec_cfg["locked"] = False
+    elif args.lock:
+        exec_cfg["locked"] = True
+
+    new_backend = exec_cfg["backend"]
+    new_locked = bool(exec_cfg.get("locked", False))
+
+    try:
+        UniversalTaskSpec.from_dict({"task": task})
+    except Exception as exc:
+        print(f"Validation error on updated task contract: {exc}", file=sys.stderr)
+        return 1
+
+    write_doc = doc
+    atomic_write_text(
+        cfg_path,
+        yaml.safe_dump(write_doc, sort_keys=False, allow_unicode=True),
+    )
+    lock_str = "locked" if new_locked else "unlocked"
+    print(
+        f"[ai-harness] Updated task execution backend: {old_backend} (locked={old_locked}) "
+        f"-> {new_backend} ({lock_str}) at {cfg_path}"
+    )
+    return 0
 
 
 if __name__ == "__main__":
