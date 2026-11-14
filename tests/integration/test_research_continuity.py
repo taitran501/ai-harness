@@ -506,7 +506,10 @@ class ResearchTraceTests(unittest.TestCase):
         self.assertEqual(self.memory.path.read_bytes(), original)
         self.assertEqual(self.memory.progress_path.read_text(encoding="utf-8"), report)
         (run / "metrics.json").write_text("{}")
-        self.memory.context()
+        ctx = self.memory.context()
+        self.assertEqual(ctx["progress_status"], "stale")
+        self.assertEqual(self.memory.progress_path.read_text(encoding="utf-8"), report)
+        self.memory.context(read_only=False)
         invalid = self.memory.progress_path.read_text(encoding="utf-8")
         self.assertIn("needs\\_evidence\\_review", invalid)
         self.assertIn("evidence currently verified=false", invalid)
@@ -520,11 +523,11 @@ class ResearchTraceTests(unittest.TestCase):
         self.memory.progress_path.unlink()
         with patch("harness.research_memory.atomic_write_text", side_effect=OSError("File locked")):
             self.insight()
-            ctx = self.memory.context()
+            ctx = self.memory.context(read_only=False)
             self.assertIsNone(ctx["progress_path"])
             self.assertIn("File locked", ctx["progress_warning"])
         self.assertEqual(len(self.memory.entries()), 2)
-        self.assertIsNotNone(self.memory.context()["progress_path"])
+        self.assertIsNotNone(self.memory.context(read_only=False)["progress_path"])
 
     def test_concurrent_research_notes_all_appear_in_generated_journal(self):
         with ThreadPoolExecutor(3) as pool:

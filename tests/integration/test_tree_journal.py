@@ -735,3 +735,113 @@ class TreeJournalAntiDegenerationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JournalHardeningTests(unittest.TestCase):
+    def setUp(self):
+        from tests.fixtures import make_workspace
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root, _ = make_workspace(root_path=Path(self.tmp.name))
+        self.spec, self.plugin = _spec_and_plugin(self.root)
+        self.artifacts = HarnessProject.discover(self.root).artifacts_dir
+        self.artifacts.mkdir(parents=True, exist_ok=True)
+        self.path = self.artifacts / "journal.json"
+        self.kwargs = dict(storage_path=self.path, artifacts_dir=self.artifacts,
+                           task_spec=self.spec, task_plugin=self.plugin)
+
+    def test_sparse_legacy_records_can_persist_demotions(self):
+        atomic_write_json(self.path, {"nodes": [{"id": "legacy", "verified": True, "eligible": True}]})
+        journal = TreeJournal(**self.kwargs)
+        journal.save()
+        loaded = TreeJournal(**self.kwargs)
+        self.assertFalse(loaded.nodes["legacy"].verified)
+        self.assertFalse(loaded.nodes["legacy"].eligible)
+
+    def test_sync_rebases_new_sibling_records_and_preserves_local_notes(self):
+        first = TreeJournal(**self.kwargs)
+        first.append(Node(id="notes", notes="initial"))
+        first.nodes["notes"].notes = "local change"
+        other = TreeJournal(**self.kwargs)
+        other.append(Node(id="sibling", branch="external"))
+        first.sync_from_artifacts()
+        loaded = TreeJournal(**self.kwargs)
+        self.assertEqual(loaded.nodes["notes"].notes, "local change")
+        self.assertEqual(loaded.nodes["sibling"].branch, "external")
+
+    def test_corrupt_siblings_are_isolated_and_demoted(self):
+        from dataclasses import asdict
+        sealed = self.artifacts / "valid"
+        seal_fixture(sealed, self.spec)
+        corruptions = [("json", "metrics.json", "{"), ("yaml", "run_config.yaml", "x: ["),
+            ("null", "run_config.yaml", "null"), ("list", "run_config.yaml", "[]"),
+            ("nested", "run_config.yaml", "model: []"),
+            ("diagnostics", "diagnostics.json", "{"), ("diagnostics_list", "diagnostics.json", "[]")]
+        nodes = []
+        for name, filename, contents in corruptions:
+            folder = self.artifacts / name
+            seal_fixture(folder, self.spec)
+            (folder / filename).write_text(contents)
+            nodes.append(asdict(Node(id=name, artifact_dir=str(folder), verified=True, eligible=True)))
+        atomic_write_json(self.path, {"nodes": nodes})
+        journal = TreeJournal(**self.kwargs)
+        self.assertEqual(journal.sync_from_artifacts(), 1)
+        self.assertEqual(journal.corrupt_run_count, len(corruptions))
+        self.assertEqual(len(journal.sync_diagnostics), len(corruptions))
+        self.assertTrue(journal.nodes["valid"].verified)
+        reloaded = TreeJournal(**self.kwargs)
+        for name, _, _ in corruptions:
+            self.assertFalse(reloaded.nodes[name].verified)
+            self.assertFalse(reloaded.nodes[name].eligible)
+
+    def test_demotions_only_and_disappearing_files_persist(self):
+        from dataclasses import asdict
+        folder = self.artifacts / "gone"
+        seal_fixture(folder, self.spec)
+        atomic_write_json(self.path, {"nodes": [asdict(Node(id="gone", artifact_dir=str(folder), verified=True, eligible=True))]})
+        journal = TreeJournal(**self.kwargs)
+        (folder / "metrics.json").unlink()
+        self.assertEqual(journal.sync_from_artifacts(), 0)
+        self.assertEqual(journal.corrupt_run_count, 1)
+        self.assertFalse(json.loads(self.path.read_text())["nodes"][0]["verified"])
+
+    def test_all_loading_paths_are_read_only_validate_once_and_replace_mapping(self):
+        import os
+        from dataclasses import asdict
+        from harness.artifacts import validate_run
+        valid = self.artifacts / "valid"
+        seal_fixture(valid, self.spec)
+        tampered = self.artifacts / "tampered"
+        seal_fixture(tampered, self.spec)
+        (tampered / "metrics.json").write_text("{}")
+        rows = [asdict(Node(id=name, artifact_dir=directory, verified=True, eligible=True)) for name, directory in
+                (("valid", str(valid)), ("tampered", str(tampered)), ("orphan", str(self.artifacts / "missing")), ("no_path", None))]
+        for shape in (rows, {"nodes": rows}, {"nodes": {r["id"]: r for r in rows}}):
+            atomic_write_json(self.path, shape)
+            original = self.path.read_bytes(), self.path.stat().st_mtime_ns
+            with patch.dict(os.environ, {"HARNESS_PROJECT_ROOT": str(self.root)}):
+                for loader in (lambda: TreeJournal(**self.kwargs),
+                        lambda: TreeJournal.load_from_file(self.path, task_spec=self.spec, task_plugin=self.plugin),
+                        lambda: TreeJournal.load(self.path),
+                        lambda: TreeJournal(**{**self.kwargs, "storage_path": self.artifacts / "absent"}).load(self.path)):
+                    with patch("harness.artifacts.validate_run", wraps=validate_run) as validator:
+                        journal = loader()
+                    self.assertEqual(validator.call_count, 3)
+                    self.assertTrue(journal.nodes["valid"].verified)
+                    for name in ("tampered", "orphan", "no_path"):
+                        self.assertFalse(journal.nodes[name].verified)
+                        self.assertFalse(journal.nodes[name].eligible)
+                    self.assertEqual(original, (self.path.read_bytes(), self.path.stat().st_mtime_ns))
+            journal = TreeJournal(**self.kwargs)
+            journal.save()
+            self.assertFalse(TreeJournal(**self.kwargs).nodes["orphan"].verified)
+            atomic_write_json(self.path, {"nodes": []})
+            journal.load()
+            self.assertEqual(journal.nodes, {})
+
+    def test_malformed_authoritative_journal_fails_visibly(self):
+        from harness.state_store import StateIntegrityError
+        for shape in (None, {"nodes": [{"id": "x"}, {}]}, {"nodes": "bad"}):
+            self.path.write_text(json.dumps(shape))
+            with self.assertRaises(StateIntegrityError):
+                TreeJournal(**self.kwargs)

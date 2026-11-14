@@ -1659,3 +1659,42 @@ class TestHarnessProjectAutoResolution(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CleanupCompatibilityTests(unittest.TestCase):
+    def test_legacy_skill_cleanup_is_equivalent_locally_and_globally(self):
+        from harness.skill_injector import LEGACY_SKILL_NAMES, install_global_skills, install_workspace_skills
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            global_dir = root / "global"
+            local_dir = root / ".agents/skills"
+            for target in (global_dir, local_dir):
+                for name in (*LEGACY_SKILL_NAMES, "user-owned"):
+                    path = target / name / "SKILL.md"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("custom")
+            config = {"name": "Fixture"}
+            install_global_skills(target_dir=global_dir, task_config=config)
+            install_workspace_skills(project_root=root, task_config=config)
+            for target in (global_dir, local_dir):
+                self.assertTrue((target / "user-owned/SKILL.md").exists())
+                for name in LEGACY_SKILL_NAMES:
+                    self.assertFalse((target / name).exists())
+
+    def test_timing_discovers_nested_paths_and_duplicate_basenames(self):
+        from tools.timing._measure_modules import discover_modules
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(ValueError, "No test modules"):
+                discover_modules(root)
+            for name in ("tests/unit/test_same.py", "tests/integration/test_same.py"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("")
+            self.assertEqual(discover_modules(root), ["tests/integration/test_same.py", "tests/unit/test_same.py"])
+
+    def test_agent_package_forwarding_survives_module_removal(self):
+        from harness.agent import AgentBridge as CompatBridge
+        from harness.agent.cli import main
+        self.assertIs(CompatBridge, AgentBridge)
+        self.assertTrue(callable(main))

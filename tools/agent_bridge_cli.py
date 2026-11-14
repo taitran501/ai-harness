@@ -275,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         default="markdown",
         help="Output format (default: markdown)",
     )
+    subparsers.add_parser("refresh-context", help="Explicitly refresh journal, audits, research and progress snapshots")
 
     # 2. start-session
     start_p = subparsers.add_parser("start-session", help="Start a stateful BridgeSession with optional budgets")
@@ -388,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["HARNESS_TASK_CONFIG"] = str(project.task_config_path)
     if str(project.root) not in sys.path:
         sys.path.insert(0, str(project.root))
-    bridge = AgentBridge(project.root, task_spec_path=project.task_config_path)
+    bridge = AgentBridge(project.root, task_spec_path=project.task_config_path, read_only=args.command == "context")
 
     if args.command == "context":
         if args.format == "json":
@@ -396,6 +397,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(pkt, indent=2, ensure_ascii=False, default=_json_serial))
         else:
             print(bridge.render_context_markdown(session_id=args.session_id))
+
+    elif args.command == "refresh-context":
+        result = bridge.refresh_context_state()
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=_json_serial))
+        return 0 if result["success"] else 1
 
     elif args.command == "start-session":
         budget = {

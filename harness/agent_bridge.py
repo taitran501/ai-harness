@@ -28,8 +28,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
-import pandas as pd
 import yaml
 
 from harness.competition_state import CompetitionStateMachine
@@ -61,6 +59,12 @@ typed_actions = [a.value for a in TypedActionName]
 HANDLERS = typed_actions
 _ACTION_REGISTRY = typed_actions
 HUD_MAX_CHARS = 4000
+SESSION_ADDITIVE_PATHS = frozenset(
+    ("compute_usage", name) for name in (
+        "experiments_used", "submissions_used", "local_runs", "cloud_runs",
+        "smoke_runs", "wall_seconds_used",
+    )
+) | {("consecutive_rejections",)}
 
 
 def _render_compact_context(packet, *, max_chars=HUD_MAX_CHARS):
@@ -151,6 +155,8 @@ def _render_compact_context(packet, *, max_chars=HUD_MAX_CHARS):
     if not frozen and not active and not pending:
         action = hud.get("what_should_i_do_next") or {}
         permitted.append("Gate-checked next: " + clip(action, 130))
+    if packet.get("refresh_required"):
+        permitted.append("Derived state needs refresh: ai-harness-agent --project-root . refresh-context")
     permitted.append("Approval requirements remain in force. Details: context --format json; RESEARCH_PROGRESS.md.")
     sections = [("Objective and state", "\n".join(objective), 700),
                 ("Active Blockers", "\n".join(blockers) or "No active blockers reported.", 1200),
@@ -322,22 +328,6 @@ def _research_continuity_hud_lines(memory: Dict[str, Any]) -> List[str]:
             raise
         except Exception:
             pass
-    return lines
-
-
-def _reconciliation_hud_lines(report: Optional[Dict[str, Any]]) -> List[str]:
-    """Render cached provider reconciliation without treating unknown as clean."""
-    if not report:
-        return []
-    status = str(report.get("status") or "UNKNOWN")
-    reason = report.get("reason_code")
-    display_status = f"{status} / {reason}" if status == "UNKNOWN" and reason else status
-    lines = ["", "## Remote provider reconciliation", f"- Status: `{display_status}`"]
-    checked_at = report.get("checked_at") or "unknown"
-    lines.append(f"- Last checked: `{checked_at}`")
-    count = report.get("provider_submissions_count")
-    if isinstance(count, int) and not isinstance(count, bool):
-        lines.append(f"- Provider submissions: `{count}`")
     return lines
 
 
@@ -620,6 +610,8 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         self,
         project_root: Path | str = ".",
         task_spec_path: Optional[str | Path] = None,
+        *,
+        read_only: bool = False,
     ):
         from harness.plugins import TaskPluginContext, load_task_plugin
         from harness.project import HarnessProject
@@ -630,10 +622,12 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         self.artifacts_dir = self.project.artifacts_dir
         self.sessions_dir = self.artifacts_dir / "agent_sessions"
         self.legacy_runs_dir = self.artifacts_dir / "agent_runs"
-        self.sessions_dir.mkdir(parents=True, exist_ok=True)
-        self.legacy_runs_dir.mkdir(parents=True, exist_ok=True)
+        self.read_only = read_only
+        if not read_only:
+            self.sessions_dir.mkdir(parents=True, exist_ok=True)
+            self.legacy_runs_dir.mkdir(parents=True, exist_ok=True)
         self.comp_state = CompetitionStateMachine(
-            self.project_root, self.project.task_config_path
+            self.project_root, self.project.task_config_path, read_only=read_only
         )
         self.task_spec = load_active_task_spec(self.project.task_config_path)
         self.plugin_context = TaskPluginContext(
@@ -659,12 +653,13 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             task_plugin=self.task_plugin,
         )
 
-    def _new_submission_manager(self) -> SubmissionManager:
+    def _new_submission_manager(self, *, read_only=False) -> SubmissionManager:
         return SubmissionManager(
             self.artifacts_dir / "submissions",
             artifacts_dir=self.artifacts_dir,
             project_root=self.project_root,
             task_config_path=self.project.task_config_path,
+            read_only=read_only,
         )
 
     def _research_memory(self):
@@ -868,86 +863,6 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             raise ValueError("SEMANTIC_DUPLICATE: submission dedup failed")
         return dict(scope="validation", diversity=diversity, checks={"integrity": "PASS"})
 
-    @staticmethod
-    def _significance_test(
-        cand_oof: Path, base_oof: Path, truth_path: Path, key: str
-    ) -> str:
-        """Paired error test (regression) or McNemar (classification); reject p >= 0.05."""
-        from scipy.stats import chi2, ttest_rel
-
-        cand = pd.read_csv(cand_oof).set_index(key)
-        base = pd.read_csv(base_oof).set_index(key)
-        truth = pd.read_csv(truth_path).set_index(key)
-
-        pred_col = next((c for c in cand.columns if c.startswith("pred_")), None)
-        if pred_col is None or pred_col not in base.columns or truth.index.intersection(cand.index).empty:
-            return "SKIPPED_NO_ALIGNED_COL"
-
-        idx = cand.index.intersection(base.index).intersection(truth.index)
-        if len(idx) < 2:
-            return "SKIPPED_TOO_FEW_ROWS"
-        y = truth.loc[idx, pred_col] if pred_col in truth.columns else None
-        if y is None:
-            # Fall back to the first truth column
-            ycol = truth.columns[0]
-            y = truth.loc[idx, ycol]
-        cand_v = cand.loc[idx, pred_col]
-        base_v = base.loc[idx, pred_col]
-
-        try:
-            y_num = pd.to_numeric(y, errors="raise")
-            c_num = pd.to_numeric(cand_v, errors="raise")
-            b_num = pd.to_numeric(base_v, errors="raise")
-            continuous = (
-                pd.api.types.is_float_dtype(y_num)
-                or pd.api.types.is_float_dtype(c_num)
-                or pd.api.types.is_float_dtype(b_num)
-            )
-        except StateIntegrityError:
-            raise
-        except (ValueError, TypeError):
-            continuous = False
-
-        import warnings
-
-        # Determine whether the candidate is genuinely *better* than the baseline;
-        # a statistically-significant *worse* result is still rejected.
-        if continuous:
-            y = y_num.to_numpy(dtype=float)
-            c = c_num.to_numpy(dtype=float)
-            b = b_num.to_numpy(dtype=float)
-            c_err = (c - y) ** 2
-            b_err = (b - y) ** 2
-            better = float(np.mean(c_err) < np.mean(b_err))
-            if np.allclose(c_err, b_err, atol=0.0, rtol=1e-7):
-                return "FAIL (p=1.0, no improvement)"
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                res = ttest_rel(c_err, b_err)
-            p = float(res.pvalue) if np.isfinite(res.pvalue) else 1.0
-            test = "paired_ttest"
-        else:
-            y = y.astype(object)
-            c = cand_v.astype(object)
-            b = base_v.astype(object)
-            c_ok = c == y
-            b_ok = b == y
-            disc = int((c_ok & ~b_ok).sum() + (~c_ok & b_ok).sum())
-            if disc == 0:
-                return "FAIL (p=1.0, no discordant pairs)"
-            b_win = int((c_ok & ~b_ok).sum())  # candidate correct, baseline wrong
-            c_win = int((~c_ok & b_ok).sum())  # baseline correct, candidate wrong
-            better = b_win > c_win
-            stat = ((abs(b_win - c_win) - 1.0) ** 2) / disc
-            p = float(1.0 - chi2.cdf(stat, df=1))
-            test = "mcnemar"
-
-        if p < 0.05 and better:
-            return f"PASS ({test}, p={p:.4f})"
-        if p < 0.05 and not better:
-            return f"FAIL ({test}, p={p:.4f}, candidate not better than baseline)"
-        return f"FAIL ({test}, p={p:.4f})"
-
 
     def _suggest_next_interventions(self, limit: int = 5) -> Dict[str, Any]:
         """Deterministic brainstorm aid to counter agent stagnation.
@@ -1129,12 +1044,28 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         import copy
 
         from harness.io_utils import atomic_write_json
-        from harness.state_store import save_snapshot
+        from harness.state_store import save_snapshot, workspace_lock
 
-        payload = save_snapshot(
-            path, self._session_snapshots.get(session.session_id, {}), payload,
-            validate=validate_session, migrate=migrate_session,
-        )
+        with workspace_lock(path.parent):
+            latest = read_json_state(path, default_factory=lambda: payload,
+                                     validate=validate_session, migrate=migrate_session)
+            before = copy.deepcopy(self._session_snapshots.get(session.session_id, {}))
+            derived = self._reconcile_session_usage(session)
+            payload["compute_usage"] = copy.deepcopy(session.compute_usage)
+            # These are fresh absolute ledger totals, never event deltas.
+            if before:
+                for name in derived:
+                    if name in latest.get("compute_usage", {}):
+                        before.setdefault("compute_usage", {})[name] = latest["compute_usage"][name]
+                    else:
+                        before.setdefault("compute_usage", {}).pop(name, None)
+            # Session timestamps use explicit latest-writer assignment semantics.
+            if before:
+                before["updated_at"] = latest.get("updated_at")
+            payload = save_snapshot(
+                path, before, payload, validate=validate_session, migrate=migrate_session,
+                additive_paths=SESSION_ADDITIVE_PATHS - {("compute_usage", name) for name in derived},
+            )
         self._session_snapshots[session.session_id] = copy.deepcopy(payload)
         for key, value in payload.items():
             if key in BridgeSession.__dataclass_fields__:
@@ -1213,9 +1144,10 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         latest = {e["intent_id"]: e for e in events}
         session.compute_usage["submissions_used"] = sum(e["event"] in {"submitted", "reconciled"} for e in latest.values())
         session.compute_usage["submissions_reserved"] = sum(e["event"] in {"prepared", "sending", "unknown"} for e in latest.values())
+        derived = {"submissions_used", "submissions_reserved"}
         path = self.artifacts_dir / "resource_ledger.json"
         if not path.is_file():
-            return
+            return derived
         ledger = json.loads(path.read_text(encoding="utf-8"))
         rows = [
             r
@@ -1223,7 +1155,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             if r["session_id"] == session.session_id
         ]
         if not rows:
-            return
+            return derived
         # Terminal statuses only — a RESERVED row whose job never reached a
         # terminal state (e.g. the process crashed) should not count as used
         # budget, and a FAILED run that the agent is allowed to retry should not
@@ -1239,13 +1171,13 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             smoke_runs=sum(r["category"] == "probe" for r in terminal_rows),
             cloud_runs=sum(r["backend"] != "local" for r in terminal_rows),
             candidate_operations=sum(r["category"] == "candidate" for r in terminal_rows),
-            wall_seconds_used=round(
-                sum(float(r.get("wall_seconds") or 0) for r in terminal_rows), 3
-            ),
+            wall_seconds_used=sum(float(r.get("wall_seconds") or 0) for r in terminal_rows),
             gpu_hours_used=(
                 round(sum(gpu_hours), 6) if gpu_hours else 0.0
             ),
         )
+        return derived | {"experiments_used", "smoke_runs", "cloud_runs", "candidate_operations",
+                          "wall_seconds_used", "gpu_hours_used"}
 
     # Auto-checkpoint interval: every N executed actions we record a
     # lightweight checkpoint into research memory so that long sessions
@@ -1450,34 +1382,40 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
 
     def _sync_to_dashboard_state(self, session: BridgeSession) -> None:
         """Synchronize live BridgeSession telemetry into competition_state.json for the Dashboard UI."""
-        merged_budget = {
-            **session.budget,
-            **session.compute_usage,
-        }
-        self.comp_state.state["agent_copilot"] = {
-            "last_run_id": session.session_id,
-            "session_id": session.session_id,
-            "last_run_at": session.updated_at,
-            "goal": session.goal,
-            "status": session.status,
-            "stop_reason": session.stop_reason,
-            "reassess_recommended": session.reassess_recommended,
-            "experiments_run": session.experiments_run,
-            "compute_usage": session.compute_usage,
-            "consecutive_rejections": session.consecutive_rejections,
-            "budget": merged_budget,
-            "pending_approval_action": session.pending_approval_action,
-            "steps": [
-                {
-                    "step": f"[{o['action']}] {o['summary']}",
-                    "status": o["status"].lower(),
-                }
-                for o in session.observations
-            ],
-            "actions": session.actions,
-            "observations": session.observations,
-        }
-        self.comp_state.save()
+        from harness.state_store import workspace_lock
+        with workspace_lock(self.artifacts_dir):
+            from harness.state_store import merge_changed
+            latest = CompetitionStateMachine(self.project_root, self.project.task_config_path)
+            self.comp_state.state = merge_changed(latest.state, self.comp_state._state_snapshot, self.comp_state.state)
+            self.comp_state._state_snapshot = latest._state_snapshot
+            merged_budget = {
+                **session.budget,
+                **session.compute_usage,
+            }
+            self.comp_state.state["agent_copilot"] = {
+                "last_run_id": session.session_id,
+                "session_id": session.session_id,
+                "last_run_at": session.updated_at,
+                "goal": session.goal,
+                "status": session.status,
+                "stop_reason": session.stop_reason,
+                "reassess_recommended": session.reassess_recommended,
+                "experiments_run": session.experiments_run,
+                "compute_usage": session.compute_usage,
+                "consecutive_rejections": session.consecutive_rejections,
+                "budget": merged_budget,
+                "pending_approval_action": session.pending_approval_action,
+                "steps": [
+                    {
+                        "step": f"[{o['action']}] {o['summary']}",
+                        "status": o["status"].lower(),
+                    }
+                    for o in session.observations
+                ],
+                "actions": session.actions,
+                "observations": session.observations,
+            }
+            self.comp_state.save()
 
     # =========================================================================
     # 2. CONTEXT BRIDGE (STRUCTURED CONTEXT PACKET FOR ANTIGRAVITY IN IDE)
@@ -1524,14 +1462,13 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build a compressed, high-density Context Packet for Antigravity in the IDE."""
-        from harness.competition_state import validate_competition_state
-        read_json_state(self.comp_state.state_file, validate=validate_competition_state)
+        comp_state = CompetitionStateMachine(self.project_root, self.project.task_config_path, read_only=True)
         self._research_memory()._read()
         requested_session = asdict(self.load_session(session_id)) if session_id else None
         session_rows = self.list_sessions(limit=1)
-        journal = self._new_journal(auto_sync=True)
-        sub_mgr = self._new_submission_manager()
-        snap = self.comp_state.evaluate_journey_snapshot(journal, sub_mgr)
+        journal = self._new_journal(auto_sync=False)
+        sub_mgr = self._new_submission_manager(read_only=True)
+        snap = comp_state.evaluate_journey_snapshot(journal, sub_mgr)
         current_best_id = (
             snap["hud"]["what_is_current_best"]["cv_best"].get("id")
             or snap["hud"]["what_is_current_best"]["baseline"].get("id")
@@ -1543,7 +1480,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             getattr(self.task_spec, "competition_rules", {}) or {},
             self.artifacts_dir,
         )
-        max_p = self.comp_state.spec.get("competition_rules", {}).get(
+        max_p = comp_state.spec.get("competition_rules", {}).get(
             "max_params_limit"
         )
         ucb_rec = journal.recommend_next_branch(max_params=max_p)
@@ -1594,7 +1531,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
                     },
                     "official": {
                         k: (round(float(v), 4) if v is not None else None)
-                        for k, v in list(entry.official_scores.items())[:4]
+                        for k, v in list(entry.official_scores.items())[:4] if k != "split_type"
                     },
                 }
                 if entry.archive_path:
@@ -1623,6 +1560,7 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             workspace_hygiene = {"clean": True, "findings": [], "summary": "unreadable"}
 
         packet = {
+            "refresh_required": [],
             "bridge_version": "1.1_antigravity_bridge",
             "project_root": str(self.project_root),
             "task_config": str(
@@ -1670,7 +1608,69 @@ class AgentBridge(ActionHandlerMixin, metaclass=_AgentBridgeMeta):
             raise
         except Exception as exc:
             packet["phase_workflow"] = {"status": "not_configured", "detail": str(exc)}
+        refresh = packet["refresh_required"]
+        def require(component, reason):
+            refresh.append({"component": component, "reason": reason,
+                "command": "ai-harness-agent --project-root . refresh-context"})
+        if not journal.storage_path.exists():
+            require("journal", "missing_snapshot")
+        elif any((directory / "metrics.json").is_file() and directory.name not in journal.nodes
+                 for directory in self.artifacts_dir.glob("*") if directory.is_dir()):
+            require("journal", "unindexed_artifacts")
+        elif any(asdict(node) not in journal._decoded_snapshot for node in journal.nodes.values()):
+            require("journal", "invalid_or_orphan_nodes")
+        if comp_state.get_data_readiness_report().get("status") == "UNAVAILABLE":
+            require("data_readiness", "missing_or_corrupt_report")
+        progress_status = packet["research_memory"].get("progress_status")
+        if progress_status in {"unavailable", "stale"}:
+            require("progress", progress_status)
+        from harness.decision_rules import policy_directory, read_decision_evaluation
+        directory = policy_directory(self.project)
+        indexed = read_json_state(directory / "evaluations.json", default_factory=lambda: {"evaluations": {}})
+        evaluated = set()
+        for evaluation_id in indexed.get("evaluations", {}).values():
+            receipt = read_decision_evaluation(directory / (evaluation_id + ".json"))
+            evaluated.add((receipt["candidate"]["id"], receipt["rule_id"]))
+        for run in self._research_memory().sync(evaluate_decisions=False):
+            cfg = yaml.safe_load((Path(run["path"]) / "run_config.yaml").read_text(encoding="utf-8")) or {}
+            rule_id = (cfg.get("research") or {}).get("decision_rule_id")
+            if rule_id and (run["exp_id"], rule_id) not in evaluated:
+                require("research", "pending_decision_evaluation")
+                break
+        if indexed.get("evaluations"):
+            snapshots = list((directory / "stagnation").glob("*.json"))
+            if not snapshots:
+                require("stagnation", "missing_snapshot")
+            elif max(path.stat().st_mtime_ns for path in snapshots) < (directory / "evaluations.json").stat().st_mtime_ns:
+                require("stagnation", "stale_snapshot")
         return packet
+
+    def refresh_context_state(self) -> Dict[str, Any]:
+        """Explicit synchronous refresh; report each component's outcome independently."""
+        from harness.stagnation import StagnationController
+        if self.read_only:
+            raise ValueError("AgentBridge is read-only")
+        self.comp_state = CompetitionStateMachine(self.project_root, self.project.task_config_path)
+        memory = self._research_memory()
+        results = {}
+        def refresh(name, action):
+            try:
+                results[name] = {"success": True, "result": action()}
+            except Exception as exc:
+                results[name] = {"success": False, "error": str(exc)[:500]}
+        def sync_journal():
+            journal = self._new_journal(auto_sync=False)
+            count = journal.sync_from_artifacts()
+            if not journal.storage_path.exists():
+                journal.save()
+            return {"materialized_runs": count, "corrupt_runs": journal.corrupt_run_count,
+                    "diagnostics": journal.sync_diagnostics}
+        refresh("journal", sync_journal)
+        refresh("data_readiness", lambda: self.comp_state.get_data_readiness_report(refresh=True))
+        refresh("research", lambda: {"verified_runs": len(memory.sync(evaluate_decisions=True))})
+        refresh("stagnation", lambda: StagnationController(self.project).reconcile_results())
+        refresh("progress", lambda: memory._publish_progress(memory.sync(evaluate_decisions=False)))
+        return {"success": all(row["success"] for row in results.values()), "components": results}
 
     def _latest_probe_summary(self):
         """Expose the latest completed probe without promoting it to full evidence."""

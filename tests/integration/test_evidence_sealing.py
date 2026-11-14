@@ -659,6 +659,35 @@ class ThresholdEvidenceTests(unittest.TestCase):
             register_external_prediction(root, "A", source)
         return bridge
 
+    def test_lexical_ids_align_without_mutating_sealed_evidence(self):
+        from harness.threshold_data import load_binary_threshold_data
+        for ids in (["01", "1", "9007199254740993", "9007199254740994"],):
+            bridge = self.make_bridge(variants=True)
+            folder = bridge.artifacts_dir / "lexical"
+            folder.mkdir()
+            pd.DataFrame({"id": ids, "target": [0, 0, 1, 1]}).to_csv(folder / "evaluation_truth.csv", index=False)
+            frame = pd.DataFrame({"id": ids, "fold": [0] * 4, "input_variant": ["features"] * 4,
+                "pred_target": [0, 0, 1, 1],
+                "proba_target": [json.dumps([v, 1-v]) for v in [.1, .2, .8, .9]],
+                "classes_target": [json.dumps([1, 0])] * 4})
+            frame.iloc[::-1].to_csv(folder / "oof_predictions.csv", index=False)
+            # Reversed estimator order is explicitly declared in this synthetic contract.
+            bridge.task_spec.subtasks["target"].classes = [1, 0]
+            seal_fixture(folder, bridge.task_spec, string_ids=True)
+            original = {p.name: p.read_bytes() for p in folder.iterdir()}
+            labels, probabilities, _ = load_binary_threshold_data(bridge.project, bridge.task_spec, bridge.task_plugin, "lexical")
+            np.testing.assert_array_equal(labels, [1, 1, 0, 0])
+            np.testing.assert_allclose(probabilities, [.9, .8, .2, .1])
+            self.assertEqual(original, {p.name: p.read_bytes() for p in folder.iterdir()})
+            for broken_ids in (["01", "01", ids[2], ids[3]], ["missing", *ids[1:]]):
+                broken = folder.parent / ("broken" + str(len(list(folder.parent.iterdir()))))
+                broken.mkdir()
+                pd.DataFrame({"id": ids, "target": [0, 0, 1, 1]}).to_csv(broken / "evaluation_truth.csv", index=False)
+                frame.assign(id=broken_ids).to_csv(broken / "oof_predictions.csv", index=False)
+                with self.assertRaises(ValueError):
+                    seal_fixture(broken, bridge.task_spec, string_ids=True)
+                    load_binary_threshold_data(bridge.project, bridge.task_spec, bridge.task_plugin, broken.name)
+
     def optimize(self, bridge, **params):
         return bridge.execute_action("optimize_threshold", {"exp_id": "A", "metric": "accuracy", **params})[1]
 

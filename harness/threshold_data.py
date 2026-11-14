@@ -8,7 +8,7 @@ import pandas as pd
 
 from harness.artifacts import validate_run
 from harness.candidates import predictions
-from harness.evaluation import _normalize_class_value, validate_prediction_batch
+from harness.evaluation import _normalize_class_value, validate_prediction_batch, read_prediction_frame
 from harness.script_predictions import align_prediction_ids
 
 
@@ -33,12 +33,13 @@ def load_binary_threshold_data(project, task_spec, plugin, exp_id):
     kind = "external" if record.get("provenance") == "external_prediction" else "full"
     validate_run(folder, task_spec=task_spec, plugin=plugin, expected={"exp_id": exp_id}, _run_kind=kind)
     metrics = json.loads((folder / "metrics.json").read_text(encoding="utf-8"))
-    oof = pd.read_csv(folder / "oof_predictions.csv")
+    truth = pd.read_csv(folder / "evaluation_truth.csv", dtype={task_spec.id_column: str})
+    oof = read_prediction_frame(folder / "oof_predictions.csv",
+                                expected_ids=truth[task_spec.id_column], id_column=task_spec.id_column)
     selection = metrics.get("selection_variant")
     if not selection or "input_variant" not in oof:
         raise ValueError("Threshold source must declare its selected input variant")
     selected = oof[oof.input_variant == selection]
-    truth = pd.read_csv(folder / "evaluation_truth.csv")
     selected = align_prediction_ids(selected, truth[task_spec.id_column], task_spec.id_column, kind="OOF")
     column = subtask.column or target
     if column not in truth or truth[column].isna().any():

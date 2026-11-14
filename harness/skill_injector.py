@@ -538,294 +538,6 @@ def generate_skill_content(
     return "\n".join(lines)
 
 
-
-
-def generate_resume_skill_content(
-    task: Dict[str, Any],
-    artifact_path: str = ".ai-harness/artifacts/<task-id>",
-    skill_name: str = "ai-harness-resume",
-) -> str:
-    """Generate Markdown content for the resume slash command skill."""
-    task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
-    platform = (task.get("platform") or "generic").capitalize()
-    primary_metric = task.get("primary_metric") or "Score (CV)"
-    direction = task.get("direction") or "maximize"
-
-    return f"""---
-name: {skill_name}
-description: Safely resumes an active competition session without hallucination. Reads machine-verified state from Context HUD and RESEARCH_PROGRESS.md, checks baseline anchor, verifies active probes, quarantines legacy unverified narratives, and blocks ungrounded architecture claims.
----
-
-# Safe Session Resumption Protocol — {task_name}
-
-> **Active Benchmark**: **{task_name}** ({platform}) | **Metric**: `{primary_metric}` ({direction})
-> **Trigger**: Activate this skill (`/{skill_name}`) whenever the operator asks to "resume", "tiếp tục ngày mới", "tiếp tục loop", "check current state", or when starting a fresh chat in an ongoing competition workspace.
-
----
-
-## 1. Mandatory Grounding Gate (Anti-Hallucination)
-
-> [!CAUTION]
-> **Anti-Hallucination Quarantine Rule**:
-> NEVER infer model architectures, hyper-parameters, local CV scores, or leaderboard standings from conversational prose, unverified agent notes, or chat memory. An LLM agent resuming a session tends to hallucinate imaginary previous results or claim models that were never run.
-
-Before taking ANY action or responding with hypotheses:
-1. **Query the Active Context HUD**:
-   ```powershell
-   ai-harness-agent context
-   ```
-2. **Read the Verified State in `RESEARCH_PROGRESS.md`**:
-   - Inspect the `Resume here` section.
-   - Look out for `⚠️ EPISTEMIC DISCONNECT WARNING` or `[QUARANTINED NOTE]`.
-   - Any quarantined note is treated strictly as an **unverified hypothesis**; never present it as historical fact or validated progress.
-3. **Verify Evidence on Disk**:
-   - Only runs with valid `.ai-harness/artifacts/<task_id>/<exp_id>/run_manifest.json` count as verified evidence.
-   - Run memory classification audit if unsure:
-     ```powershell
-     ai-harness audit-memory
-     ```
-4. **Enforce Workspace Confinement**:
-   - Strictly DO NOT inspect or dredge other chat directories in `<appDataDir>\\brain\\<other-conversation-id>`.
-   - All state must come from the local workspace files and `ai-harness-agent context`.
-
----
-
-## 2. Baseline Anchor & Stagnation Protocol Check
-
-1. **Verify Incumbent Anchor**:
-   - Identify the current baseline experiment ID (`expXXX`) and its verified metric value from the Context HUD.
-2. **Check Consecutive Rejections**:
-   - If `consecutive_rejections >= 3`:
-     > [!WARNING]
-     > **Stagnation Promotion Pause Active**: Do not repeat or promote the stalled line. In active competition tasks, a distinct preregistered full validation remains allowed; generic tasks use the configured recovery gate.
-     > Permitted actions:
-     > - Error diagnostics (`inspect_diagnostics`)
-     > - Community discussion mining (`ai-harness discussion list <comp>`)
-     > - Distinct full validation in competition tasks, or a bounded recovery probe where required
-     > - Candidate dispatch only after a verified, machine-evaluated supported result clears the latch
-3. **Check Retrospective Cadence**:
-   - If `RETROSPECTIVE_REQUIRED` is flagged:
-     - Run `get_macro_hypothesis_map` and record retrospective via `record_macro_review` before proceeding.
-
----
-
-## 3. In-Flight & Probe Verification
-
-1. **Check Active Cloud Jobs**:
-   - If running on Kaggle/remote backends, inspect in-flight kernels before dispatching new ones:
-     ```powershell
-     ai-harness kaggle status --exp <exp_id>
-     ai-harness-agent act --action inspect_cloud_job
-     ```
-2. **Review Active Probe Plans**:
-   - Check if an experiment was planned (`research.probe_plan_id`) but not yet executed or evaluated.
-
----
-
-## 4. Synthesize Resumption Summary for Operator
-
-Provide a concise, grounded status summary (under 20 lines):
-1. **Current Lifecycle Phase**: (e.g. Phase 4 Iteration Track / Phase 5 Candidate Management)
-2. **Verified Incumbent Anchor**: Exp ID + verified metric score.
-3. **Evidence Status**: Count of verified full runs vs quarantined legacy entries.
-4. **Stagnation / Latch Status**: Clean / Paused (with consecutive rejection count).
-5. **Immediate Recommended Next Action**: Single bounded next step.
-6. **Competition objective**: Latest user target/correction, official deadline, current rank/leaderboard, quota, and highest-priority untested mechanism. Keep candidates provisional until official close.
-"""
-
-
-def generate_explore_skill_content(
-    task: Dict[str, Any],
-    artifact_path: str = ".ai-harness/artifacts/<task-id>",
-    skill_name: str = "ai-harness-explore",
-) -> str:
-    """Generate Markdown content for the exploration slash command skill."""
-    task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
-    platform = (task.get("platform") or "generic").capitalize()
-    primary_metric = task.get("primary_metric") or "Score (CV)"
-    direction = task.get("direction") or "maximize"
-    comp_id = task.get("competition_id") or task.get("kaggle_id") or "<competition_id>"
-
-    return f"""---
-name: {skill_name}
-description: Guides grounded research, discussion mining, and hypothesis formulation. Enforces proactive discussion retrieval, bounded probe preregistration with DecisionRuleV1, and redirects stalled competition work toward distinct mechanisms.
----
-
-# Grounded Exploration & Hypothesis Mining — {task_name}
-
-> **Active Benchmark**: **{task_name}** ({platform}) | **Metric**: `{primary_metric}` ({direction})
-> **Trigger**: Activate this skill (`/{skill_name}`) whenever the operator asks to "brainstorm", "tìm hướng mới", "explore features", "check discussions", or when stuck on a score plateau.
-
-For claim and evidence review, follow `/ai-harness-debate`. The debate skill defines what citation audits establish and how independent review is recorded.
-
-Before proposing a direction, carry forward the latest user correction and compare
-the idea with verified runs, prior candidate recipes, submissions, and the macro
-hypothesis map. A nearby coefficient or rank nudge is a variant, not an orthogonal
-mechanism. When the user asks for a new direction, prioritize an untested mechanism
-and execute a bounded preregistered probe; do not agree and then repeat the prior
-blend family. Keep local CV, public leaderboard, and private leaderboard evidence
-separate, and do not call a result a breakthrough until its decision rule supports it.
-
----
-
-## 1. Proactive Community Discussion Mining
-
-> [!IMPORTANT]
-> Do NOT guess in the dark or fabricate complex pipelines without competitor intelligence. Mine top discussions first!
-
-Retrieve community insights using native harness commands:
-```powershell
-ai-harness discussion list {comp_id} --sort-by hotness --page-size 15
-ai-harness discussion view <topic_id>
-```
-Look for:
-- Data leakage warnings and temporal splits.
-- Feature engineering techniques specific to the dataset.
-- Tokenization or text preprocessing nuances (special tokens, sequence lengths).
-- Model backbone families that work best on this benchmark.
-- Post-processing, calibration, and optimal metric thresholding tips.
-
----
-
-## 2. Formulate Orthogonal Scientific Hypotheses
-
-1. **Single-Mechanism Principle**:
-   - Change ONE scientific mechanism against a fixed comparable control.
-   - Predeclare the mechanism, expected confounders, and ablation path.
-2. **Anti-Pseudo-Ensembling Rule**:
-   - DO NOT blend models of the same family (e.g. 3 DeBERTa models with slightly different learning rates).
-   - Require architectural diversity: e.g., Transformer + GBDT, DeBERTa-v3 + ModernBERT, or distinct feature representations.
-3. **Record Grounded Research Insight**:
-   ```powershell
-   ai-harness-agent act --action record_research_insight --title "<Short Title>" --observation "<What discussion/diagnostic revealed>" --mechanism "<Why this works>" --next-action "<Concrete probe>" --family-id "<model_backbone|feature_engineering|post_processing|...>"
-   ```
-
----
-
-## 3. Bounded Discriminating Probe Preregistration
-
-Before committing expensive multi-fold compute:
-1. **Preregister Probe Plan**:
-   - Define a structured `DecisionRuleV1` with threshold and stop condition.
-   - Run `plan_research_probe` linking the `insight_id`.
-2. **Bind Config**:
-   - Reference `research.insight_id` and `research.probe_plan_id` in `configs/exp<NNN>.yaml`.
-   - Validate grounding schema:
-     ```powershell
-     python harness/grounding_gate.py --config configs/exp<NNN>.yaml
-     ```
-
----
-
-## 4. Fast Single-Fold Smoke Probe First
-
-> [!TIP]
-> Never dispatch full cross-validation without a smoke probe!
-
-Run a single-fold probe locally:
-```powershell
-ai-harness-run --config configs/exp<NNN>.yaml --debug --fold 0
-```
-Verify:
-- Loss converges properly.
-- Predictions contain valid probabilities/scores (no NaNs or infinite values).
-- Prediction format matches the submission specification.
-
-Once the smoke probe passes, proceed to full validation:
-```powershell
-ai-harness-agent act --action run_full_validation --config-path configs/exp<NNN>.yaml
-```
-"""
-
-
-def generate_submit_skill_content(
-    task: Dict[str, Any],
-    artifact_path: str = ".ai-harness/artifacts/<task-id>",
-    skill_name: str = "submit",
-) -> str:
-    """Generate Markdown content for the submission slash command skill."""
-    task_name = task.get("task_name") or task.get("name") or "ML/DL Benchmark"
-    platform = (task.get("platform") or "generic").capitalize()
-    primary_metric = task.get("primary_metric") or "Score (CV)"
-    direction = task.get("direction") or "maximize"
-    comp_id = task.get("competition_id") or task.get("kaggle_id") or "<competition_id>"
-
-    return f"""---
-name: {skill_name}
-description: Verify prediction diversity, audit out-of-fold gains, and export safe competition submissions.
----
-
-# Submission Governance & Provenance Gate — {task_name}
-
-> **Active Benchmark**: **{task_name}** ({platform}) | **Metric**: `{primary_metric}` ({direction})
-> **Trigger**: Activate this skill (`/{skill_name}`) whenever the operator asks to "làm sub", "submit candidate", "tiến hành submit", or use competition daily submission quota.
-
----
-
-## 1. Registered Promotion Evidence and Competition Quota
-
-> [!CAUTION]
-> After the initial baseline, candidate dispatch must satisfy the active task's registered machine-evaluated promotion rule against the current comparable incumbent, diversity gate, and operator approval. A public-LB score alone cannot replace local promotion evidence; the initial dispatch follows the task's explicit baseline route.
-
-Available quota is room to evaluate distinct eligible candidates, not a reason to protect a high-scoring incumbent or submit unverified guesses. A public leaderboard observation can guide the next hypothesis; record it separately from local CV and private-LB evidence.
-
----
-
-## 2. Prediction Provenance & Recipe Binding
-
-1. **Valid Provenance Types**:
-   - `local_run`: Trained and evaluated locally or via verified harness cloud runner.
-   - `reproduced_external_code`: Public notebook code fully reproduced and cross-validated locally.
-2. **Prohibited Submissions**:
-   - `external_prediction`: CSV predictions downloaded directly from public Kaggle kernels or external competitors. These are flagged `submission_eligible: False`.
-   - Any blend or ensemble containing an unverified external CSV will be rejected by `build_candidate`.
-3. **Recipe Binding**:
-   - Candidates must bind exact recipe sha256 (`recipe_binding_sha256`) to ensure reproducibility.
-
----
-
-## 3. Candidate Preflight & Diversity Governance
-
-Before promoting or proposing a candidate:
-1. **Run Candidate Preflight**:
-   ```powershell
-   ai-harness preflight <candidate_predictions.csv> --incumbent <incumbent_predictions.csv> --pitch
-   ```
-2. **Spearman Diversity Gate**:
-   - If Spearman $\\rho \\ge 0.995$ against the incumbent, the candidate is a **near-duplicate**.
-   - Near-duplicates CANNOT be submitted to the leaderboard without verified paired out-of-fold gain.
-
----
-
-## 4. Backdoor Script Prohibition
-
-> [!WARNING]
-> Direct Kaggle CLI calls (`kaggle competitions submit`, `kaggle kernels push`) or ad-hoc Python scripts importing `kaggle.api` bypass the audit trail and will trigger `UNEXPLAINED_EXTERNAL_DISPATCH` locking the workspace!
-
-Run security script audit:
-```powershell
-ai-harness audit-scripts
-```
-Ensure no unmonitored scripts exist in `scratch/` or workspace root.
-
----
-
-## 5. Exact-Payload Operator Approval & Dispatch
-
-All leaderboard dispatches must use the official harness dispatch:
-```powershell
-ai-harness submission dispatch {comp_id} <submission.csv> -m "Exp NNN: <brief description>" --project-root . --exp-id <exp_id> --user-approved
-```
-
-**Information to present to the user before asking for confirmation**:
-1. Incumbent and candidate results under the registered metric and comparison rule; state whether the rule is supported.
-2. Preflight verification ID and Spearman $\\rho$.
-3. Constituent models and provenance.
-4. Current daily quota usage and remaining submissions.
-"""
-
-
-
 def generate_debate_skill_content(
     task: Dict[str, Any],
     artifact_path: str = ".ai-harness/artifacts/<task-id>",
@@ -1014,6 +726,20 @@ def _retire_generated_alias(skills_dir: Path) -> None:
         alias_dir.rmdir()
 
 
+LEGACY_SKILL_NAMES = (
+    "ml-harness", "ml-experiment-harness", "ai-experiment-harness",
+    "ai-harness-resume", "ai-harness-explore", "ai-harness-submit", "ai-harness-debate", "submit",
+)
+
+
+def _purge_legacy_skills(skills_dir: Path) -> None:
+    import shutil
+    for name in LEGACY_SKILL_NAMES:
+        directory = skills_dir / name
+        if directory.is_dir():
+            shutil.rmtree(directory, ignore_errors=True)
+
+
 def install_global_skills(
     target_dir: Optional[Path] = None,
     task_config: Optional[Dict[str, Any]] = None,
@@ -1029,7 +755,6 @@ def install_global_skills(
         "primary_metric": "Score (CV)",
         "direction": "maximize",
     }
-    import shutil
 
     modular = generate_modular_skills(cfg)
     written: List[Path] = []
@@ -1041,21 +766,7 @@ def install_global_skills(
 
     _retire_generated_alias(skills_dir)
 
-    # Purge bloated/legacy skills from global directory so slash command menu stays lean
-    legacy_purge = (
-        "ml-harness",
-        "ml-experiment-harness",
-        "ai-experiment-harness",
-        "ai-harness-resume",
-        "ai-harness-explore",
-        "ai-harness-submit",
-        "ai-harness-debate",
-        "submit",
-    )
-    for legacy_name in legacy_purge:
-        legacy_dir = skills_dir / legacy_name
-        if legacy_dir.is_dir():
-            shutil.rmtree(legacy_dir, ignore_errors=True)
+    _purge_legacy_skills(skills_dir)
     return written
 
 
@@ -1065,7 +776,6 @@ def install_workspace_skills(
     config_path: Optional[Path] = None,
 ) -> List[Path]:
     """Install or update modular slash skills in a workspace's .agents/skills/ directory."""
-    import shutil
 
     if project_root is not None:
         root = Path(project_root).expanduser().resolve()
@@ -1103,21 +813,7 @@ def install_workspace_skills(
 
     _retire_generated_alias(skills_dir)
 
-    # Purge legacy/bloated skills so workspace stays clean
-    legacy_purge = (
-        "ml-harness",
-        "ml-experiment-harness",
-        "ai-experiment-harness",
-        "ai-harness-resume",
-        "ai-harness-explore",
-        "ai-harness-submit",
-        "ai-harness-debate",
-        "submit",
-    )
-    for legacy_name in legacy_purge:
-        legacy_dir = skills_dir / legacy_name
-        if legacy_dir.is_dir():
-            shutil.rmtree(legacy_dir, ignore_errors=True)
+    _purge_legacy_skills(skills_dir)
 
     return written
 

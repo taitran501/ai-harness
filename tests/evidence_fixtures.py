@@ -7,13 +7,13 @@ from harness.artifacts import contract_identity, digest, sha256
 from harness.evaluation import utility
 
 
-def seal_scope_fixture(folder, spec):
+def seal_scope_fixture(folder, spec, *, string_ids=False):
     """Declare synthetic partition evidence explicitly, never repair real runs."""
     import pandas as pd
     from harness.validation_scope import scope_record
     from harness.artifacts import seal_file_map
 
-    frame = pd.read_csv(folder / "oof_predictions.csv")
+    frame = pd.read_csv(folder / "oof_predictions.csv", dtype={spec.id_column: str} if string_ids else None)
     if "input_variant" in frame:
         variant = json.loads((folder / "metrics.json").read_text())["selection_variant"]
         selected = frame[frame.input_variant == variant].copy()
@@ -41,7 +41,7 @@ def seal_scope_fixture(folder, spec):
 
 
 
-def seal_fixture(folder, spec, score=0.75, **identity):
+def seal_fixture(folder, spec, score=0.75, *, string_ids=False, **identity):
     folder.mkdir(parents=True, exist_ok=True)
     metrics = {
         "schema_version": 2,
@@ -84,7 +84,7 @@ def seal_fixture(folder, spec, score=0.75, **identity):
         **identity,
     }
     (folder / "artifact_manifest.json").write_text(json.dumps(manifest))
-    seal_scope_fixture(folder, spec)
+    seal_scope_fixture(folder, spec, string_ids=string_ids)
     return metrics
 
 

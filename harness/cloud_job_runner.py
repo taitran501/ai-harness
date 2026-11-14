@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
@@ -94,6 +95,7 @@ class CloudJobManager:
         self.artifacts_dir = self.project.artifacts_dir
         self._jobs: Dict[str, CloudJob] = {}
         self._processes: Dict[str, subprocess.Popen] = {}
+        self._finalization_locks = {}
         self._jobs_dir = self.artifacts_dir / "jobs"
         self._jobs_dir.mkdir(parents=True, exist_ok=True)
         self._load_saved_jobs()
@@ -158,45 +160,59 @@ class CloudJobManager:
             except Exception:
                 continue
 
+    @contextmanager
+    def _finalization_lock(self, job_id):
+        from harness.state_store import workspace_lock
+        with self._finalization_locks.setdefault(job_id, threading.RLock()):
+            with workspace_lock(self._jobs_dir / ".finalization" / job_id):
+                yield
+
+    def _read_terminal_state(self, job):
+        from harness.state_store import read_json_state
+        saved = read_json_state(self._job_path(job.job_id), default_factory=dict)
+        if saved.get("status") in {"COMPLETED", "FAILED", "CANCELLED"}:
+            for name in CloudJob.__dataclass_fields__:
+                if name in saved:
+                    setattr(job, name, saved[name])
+
     @staticmethod
-    def _pid_running(pid: Optional[int]) -> bool:
+    def _probe_pid(pid: Optional[int]) -> Optional[bool]:
+        """True=alive, False=confirmed absent, None=inspection unavailable."""
         if not pid:
             return False
-        pid = int(pid)
-        if sys.platform == "win32":
-            # CRITICAL: on Windows `os.kill(pid, 0)` is NOT a no-op liveness
-            # probe — CPython maps every signal to TerminateProcess(handle,
-            # sig), so even signal 0 KILLS the process (verified empirically:
-            # a live sleep process died with exit 3221225794 after
-            # os.kill(pid, 0)). Status polling would silently terminate the
-            # worker under inspection. Use OpenProcess + GetExitCodeProcess.
-            import ctypes
-
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            STILL_ACTIVE = 259
-            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-            handle = kernel32.OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-            )
-            if not handle:
-                return False
-            try:
-                code = ctypes.c_ulong()
-                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                    return False
-                return code.value == STILL_ACTIVE
-            finally:
-                kernel32.CloseHandle(handle)
         try:
+            pid = int(pid)
+            if pid <= 0:
+                return None
+            if sys.platform == "win32":
+                import ctypes
+                from ctypes import wintypes
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+                kernel32.OpenProcess.restype = wintypes.HANDLE
+                kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+                kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+                handle = kernel32.OpenProcess(0x1000, False, pid)
+                if not handle:
+                    return False if ctypes.get_last_error() == 87 else None
+                try:
+                    code = wintypes.DWORD()
+                    if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                        return None
+                    return code.value == 259
+                finally:
+                    kernel32.CloseHandle(handle)
             os.kill(pid, 0)
             return True
         except ProcessLookupError:
             return False
-        except PermissionError:
-            # Exists but owned by another user; treat as running.
-            return True
         except (OSError, ValueError):
-            return False
+            return None
+
+    @staticmethod
+    def _pid_running(pid: Optional[int]) -> bool:
+        # Unknown liveness must never be mistaken for proof of termination.
+        return CloudJobManager._probe_pid(pid) is not False
 
     def _refresh_saved_job(self, job: CloudJob) -> CloudJob:
         worker_state_path = self._jobs_dir / f"{job.job_id}.worker.json"
@@ -770,8 +786,11 @@ class CloudJobManager:
         """Background thread monitoring process termination and running post-processing."""
         try:
             retcode = proc.wait()
-        except Exception:
-            retcode = -1
+        except Exception as exc:
+            job = self._jobs.get(job_id)
+            if job:
+                job.error_message = f"Process exit could not be confirmed: {exc}"
+            return
         finally:
             try:
                 log_handle.flush()
@@ -779,45 +798,47 @@ class CloudJobManager:
             except Exception:
                 pass
 
-        job = self._jobs.get(job_id)
-        if not job:
-            return
+        with self._finalization_lock(job_id):
+            job = self._jobs.get(job_id)
+            if not job:
+                return
 
-        job.ended_at = time.time()
-        job.return_code = retcode
+            self._read_terminal_state(job)
+            if job.status in {"CANCELLED", "COMPLETED", "FAILED"}:
+                self._processes.pop(job_id, None)
+                return
+            job.ended_at = time.time()
+            job.return_code = retcode
 
-        if job.status == "CANCELLED":
-            # Was manually stopped
-            pass
-        elif retcode == 0:
-            try:
-                if job.backend in {"modal", "kaggle"}:
-                    self._verify_remote_artifacts(job)
-                job.status = "COMPLETED"
-                job.provider_status = "COMPLETED"
-                self._handle_post_run(job)
-            except Exception as exc:
+            if retcode == 0:
+                try:
+                    if job.backend in {"modal", "kaggle"}:
+                        self._verify_remote_artifacts(job)
+                    job.status = "COMPLETED"
+                    job.provider_status = "COMPLETED"
+                    self._handle_post_run(job)
+                except Exception as exc:
+                    job.status = "FAILED"
+                    job.error_message = f"Post-run verification failed: {exc}"
+            else:
                 job.status = "FAILED"
-                job.error_message = f"Post-run verification failed: {exc}"
-        else:
-            job.status = "FAILED"
-            worker_path = self._jobs_dir / f"{job.job_id}.worker.json"
-            try:
-                worker_state = json.loads(worker_path.read_text(encoding="utf-8"))
-                job.provider_status = (
-                    worker_state.get("provider_status") or job.provider_status
-                )
-                job.remote_id = worker_state.get("remote_id") or job.remote_id
-                job.error_message = (
-                    worker_state.get("error_message")
-                    or f"Process exited with non-zero exit code: {retcode}"
-                )
-            except (OSError, json.JSONDecodeError):
-                job.error_message = f"Process exited with non-zero exit code: {retcode}"
-        self._persist_job(job)
+                worker_path = self._jobs_dir / f"{job.job_id}.worker.json"
+                try:
+                    worker_state = json.loads(worker_path.read_text(encoding="utf-8"))
+                    job.provider_status = (
+                        worker_state.get("provider_status") or job.provider_status
+                    )
+                    job.remote_id = worker_state.get("remote_id") or job.remote_id
+                    job.error_message = (
+                        worker_state.get("error_message")
+                        or f"Process exited with non-zero exit code: {retcode}"
+                    )
+                except (OSError, json.JSONDecodeError):
+                    job.error_message = f"Process exited with non-zero exit code: {retcode}"
+            self._persist_job(job)
 
-        # Clean up process handle
-        self._processes.pop(job_id, None)
+            # Clean up process handle
+            self._processes.pop(job_id, None)
 
     def _verify_remote_artifacts(self, job: CloudJob) -> None:
         artifact_dir = self.project_root / job.artifact_dir
@@ -990,55 +1011,97 @@ class CloudJobManager:
                 "=================================================================\n"
             )
 
-    def stop_job(self, job_id: str) -> Dict[str, Any]:
-        """Terminate a running job."""
-        job = self._jobs.get(job_id)
-        if not job:
-            return {"success": False, "error": f"Job '{job_id}' not found."}
+    def _terminate_local_process(self, job, proc, *, terminate_timeout=5.0, kill_timeout=5.0):
+        pid = proc.pid if proc else job.pid
+        if type(pid) is not int or pid <= 0:
+            return False
 
-        proc = self._processes.get(job_id)
-        process_running = bool(proc and proc.poll() is None) or self._pid_running(
-            job.pid
-        )
-        if process_running:
+        def exited(timeout):
+            if proc is not None:
+                try:
+                    proc.wait(timeout=timeout)
+                    return proc.poll() is not None
+                except subprocess.TimeoutExpired:
+                    return False
+            deadline = time.monotonic() + timeout
+            while True:
+                running = self._probe_pid(pid)
+                if running is None:
+                    raise OSError("Process liveness unavailable")
+                if not running:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(min(.05, max(0, deadline - time.monotonic())))
+
+        try:
+            running = proc.poll() is None if proc else self._probe_pid(pid)
+            if running is None:
+                return False
+            if not running:
+                return True
+            for force, timeout in ((False, terminate_timeout), (True, kill_timeout)):
+                if sys.platform == "win32":
+                    command = ["taskkill", "/T", "/PID", str(pid)]
+                    if force:
+                        command.append("/F")
+                    try:
+                        result = subprocess.run(command, capture_output=True, timeout=max(timeout, .1), check=False)
+                    except subprocess.TimeoutExpired:
+                        if force:
+                            return False
+                        continue
+                    if result.returncode != 0:
+                        if exited(0):
+                            return True
+                        if force:
+                            return False
+                        continue
+                else:
+                    try:
+                        os.killpg(int(pid), signal.SIGKILL if force else signal.SIGTERM)
+                    except ProcessLookupError:
+                        return exited(0)
+                if exited(timeout):
+                    return True
+            return False
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return False
+
+    def stop_job(self, job_id: str) -> Dict[str, Any]:
+        """Commit cancellation only after the local process has confirmed exit."""
+        with self._finalization_lock(job_id):
+            job = self._jobs.get(job_id)
+            if not job:
+                return {"success": False, "error": f"Job '{job_id}' not found."}
+            self._read_terminal_state(job)
+            if job.status in {"COMPLETED", "FAILED", "CANCELLED"}:
+                return {"success": False, "error": "Job is not running.", "status": job.status}
             if job.backend in {"kaggle", "modal"}:
-                return {
-                    "success": False,
-                    "error": (
-                        "The monitor cannot prove remote cancellation. The harness is still monitoring it; "
-                        "stop it in Kaggle if the provider offers that control."
-                    ),
-                    "job_id": job_id,
-                    "status": job.status,
-                }
+                return {"success": False, "error": "The monitor cannot prove remote cancellation. Stop it at the provider.",
+                        "job_id": job_id, "status": job.status}
+            proc = self._processes.get(job_id)
+            try:
+                running = proc.poll() is None if proc else self._probe_pid(job.pid)
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                return {"success": False, "error": f"Process liveness unavailable: {exc}", "status": job.status}
+            if running is not True:
+                return {"success": False, "error": "Job is not running or liveness is unavailable.", "status": job.status}
+            if not self._terminate_local_process(job, proc):
+                return {"success": False, "error": "Process termination could not be confirmed.",
+                        "job_id": job_id, "status": job.status}
             job.status = "CANCELLED"
             job.ended_at = time.time()
             job.provider_status = "CANCELLED"
             job.error_message = None
-            try:
-                pid = proc.pid if proc else job.pid
-                if sys.platform == "win32" and pid:
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(pid)], check=False
-                    )
-                else:
-                    os.killpg(int(pid), signal.SIGTERM)
-            except Exception:
-                pass
+            if proc:
+                job.return_code = proc.returncode
             from harness.job_state import update_worker_state
-
-            update_worker_state(
-                self.project_root,
-                job_id,
-                status="CANCELLED",
-                provider_status=job.provider_status,
-                remote_id=job.remote_id,
-                error_message=job.error_message,
-            )
+            update_worker_state(self.project_root, job_id, status="CANCELLED",
+                provider_status=job.provider_status, remote_id=job.remote_id, error_message=None)
             self._persist_job(job)
+            self._processes.pop(job_id, None)
             return {"success": True, "job_id": job_id, "status": "CANCELLED"}
-
-        return {"success": False, "error": "Job is not running."}
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         job = self._jobs.get(job_id)

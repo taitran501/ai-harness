@@ -548,10 +548,6 @@ class ResearchMemory:
             self._publish_progress(self.sync())
         return entry
 
-    @staticmethod
-    def _markdown(value):
-        text = html.escape(str(value), quote=False)
-        return re.sub(r"([\\`*_{}\[\]()#+!|])", r"\\\1", text)
 
     def _validated_progress_decisions(self, entries):
         """Return only decisions backed by indexed, intact evaluation receipts."""
@@ -680,15 +676,16 @@ class ResearchMemory:
         ))
         return metric_claim or execution_claim or bool(entry.get("score") is not None and entry.get("kind") != "insight")
 
-    def _validated_progress_incumbent(self):
-        """Read the current incumbent only from replayed machine evaluation state."""
+    def _validated_progress_incumbent(self, *, read_only=True):
+        """Read the machine-evaluated incumbent and check its live evidence."""
         try:
             from harness.decision_rules import policy_directory, read_decision_evaluation
             from harness.project import HarnessProject
             from harness.stagnation import StagnationController
 
             project = HarnessProject.discover(self.root)
-            states = StagnationController(project).reconcile_results()
+            controller = StagnationController(project)
+            states = controller.read_snapshot() if read_only else controller.reconcile_results()
             candidates = [
                 state for state in states.values()
                 if state.get("incumbent_evaluation_id") and state.get("incumbent_evidence_ref")
@@ -702,6 +699,14 @@ class ResearchMemory:
             if (receipt.get("outcome") != "supported"
                     or receipt.get("candidate") != state["incumbent_evidence_ref"]):
                 return None
+            # Receipt integrity alone cannot validate artifacts that changed later.
+            current = {run["exp_id"]: run for run in self.sync(evaluate_decisions=False)}
+            for role in ("candidate", "control"):
+                ref = receipt.get(role) or {}
+                run = current.get(ref.get("id"))
+                if (ref.get("kind") != "full_run" or run is None
+                        or run["evidence_sha256"] != receipt.get("evidence_sha256", {}).get(role)):
+                    return None
             return {
                 "evidence_ref": dict(state["incumbent_evidence_ref"]),
                 "evaluation_id": evaluation_id,
@@ -721,23 +726,7 @@ class ResearchMemory:
                 if previous is not None and not previous.startswith(marker):
                     return {"progress_path": None,
                             "progress_warning": "RESEARCH_PROGRESS.md is user-owned; it was preserved."}
-                # Re-read under the lock so a concurrent decision is not erased
-                # by publishing an older ledger snapshot.
-                entries = self.entries()
-                verified_runs = [run for run in runs if run.get("evidence_status") == "verified_full"]
-                render_entries = []
-                for entry in entries:
-                    rendered = dict(entry)
-                    if entry.get("kind") == "insight":
-                        rendered["progress_state"] = self._trace_state(entry, entries, verified_runs)
-                    render_entries.append(rendered)
-                content = render_markdown_progress(
-                    self.scope,
-                    render_entries,
-                    verified_runs=verified_runs,
-                    verified_decisions=self._validated_progress_decisions(entries),
-                    validated_incumbent=self._validated_progress_incumbent(),
-                )
+                content = self._render_progress(runs, read_only=False)
                 if content != previous:
                     atomic_write_text(self.progress_path, content)
                 return {"progress_path": str(self.progress_path), "progress_warning": None}
@@ -745,6 +734,36 @@ class ResearchMemory:
             # Report failures must not turn a committed note into a failed action
             # that the assistant retries, duplicating the canonical event.
             return {"progress_path": None, "progress_warning": f"Could not refresh Markdown progress: {exc}"}
+
+    def _render_progress(self, runs, *, read_only=True):
+        entries = self.entries()
+        verified_runs = [run for run in runs if run.get("evidence_status") == "verified_full"]
+        render_entries = []
+        for entry in entries:
+            rendered = dict(entry)
+            if entry.get("kind") == "insight":
+                rendered["progress_state"] = self._trace_state(entry, entries, verified_runs)
+            render_entries.append(rendered)
+        return render_markdown_progress(
+            self.scope,
+            render_entries,
+            verified_runs=verified_runs,
+            verified_decisions=self._validated_progress_decisions(entries),
+            validated_incumbent=self._validated_progress_incumbent(read_only=read_only),
+        )
+
+    def _progress_status(self, runs):
+        try:
+            previous = self.progress_path.read_text(encoding="utf-8")
+            if not previous.startswith("<!-- ai-harness:research-progress:v1 -->"):
+                return {"progress_path": None, "progress_status": "user_owned",
+                        "progress_warning": "RESEARCH_PROGRESS.md is user-owned; it was preserved."}
+            stale = previous != self._render_progress(runs)
+            return {"progress_path": str(self.progress_path), "progress_status": "stale" if stale else "current",
+                    "progress_warning": "Progress requires refresh-context." if stale else None}
+        except (OSError, UnicodeError):
+            return {"progress_path": None, "progress_status": "unavailable",
+                    "progress_warning": "Progress unavailable; run refresh-context."}
 
     def fingerprint(self, cfg):
         """Compare resolved declared execution, ignoring names and narrative metadata.
@@ -811,7 +830,7 @@ class ResearchMemory:
             if p.is_file()
         )
 
-    def sync(self):
+    def sync(self, *, evaluate_decisions=True):
         """Revalidate artifacts on every read; a cached claim never verifies evidence.
 
         A cached record is reused only when the run folder's entire file
@@ -839,6 +858,11 @@ class ResearchMemory:
                 manifest = validate_run(folder, task_spec=self.spec, plugin=self.plugin, project_root=self.root)
                 cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
                 metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+                if not isinstance(cfg, dict) or not isinstance(metrics, dict):
+                    raise ValueError("Run configuration and metrics must be mappings")
+                for section in ("experiment", "model", "research", "runtime", "paths", "validation"):
+                    if not isinstance(cfg.get(section, {}), dict):
+                        raise ValueError(f"Run configuration {section} must be a mapping")
                 score = float(metrics["primary_score"])
                 value = score if metrics["direction"] == "maximize" else -score
                 if not math.isfinite(value):
@@ -846,6 +870,8 @@ class ResearchMemory:
                 diag = {}
                 if "diagnostics.json" in manifest["files"]:
                     diag = json.loads((folder / "diagnostics.json").read_text(encoding="utf-8"))
+                    if not isinstance(diag, dict):
+                        raise ValueError("Diagnostics must be a mapping")
                 record = {
                     "exp_id": manifest["exp_id"],
                     "path": str(folder),
@@ -878,16 +904,17 @@ class ResearchMemory:
                 continue
         # Imported/remote completions are evaluated on the canonical workspace,
         # where their preregistration and fixed control remain available.
-        for run in runs:
-            cfg_path = Path(run["path"]) / "run_config.yaml"
-            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-            rule_id = cfg.get("research", {}).get("decision_rule_id")
-            if rule_id:
-                from harness.decision_rules import evaluate_decision_rule, load_registration
-                registration = load_registration(self.root, rule_id)
-                evaluate_decision_rule(registration["rule"],
-                    {"kind": "full_run", "id": run["exp_id"], "partition": cfg.get("validation", {}).get("partition", "oof")},
-                    project=self.root, task_spec=self.spec, plugin=self.plugin, registration=registration)
+        if evaluate_decisions:
+            for run in runs:
+                cfg_path = Path(run["path"]) / "run_config.yaml"
+                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+                rule_id = cfg.get("research", {}).get("decision_rule_id")
+                if rule_id:
+                    from harness.decision_rules import evaluate_decision_rule, load_registration
+                    registration = load_registration(self.root, rule_id)
+                    evaluate_decision_rule(registration["rule"],
+                        {"kind": "full_run", "id": run["exp_id"], "partition": cfg.get("validation", {}).get("partition", "oof")},
+                        project=self.root, task_spec=self.spec, plugin=self.plugin, registration=registration)
         return sorted(runs, key=lambda r: (r["timestamp"], r["exp_id"]))
 
     @staticmethod
@@ -1278,8 +1305,8 @@ class ResearchMemory:
             exp_id=exp_id, session_id=session_id, insight_id=insight_id,
             evidence_status="execution_observation_only")
 
-    def context(self, min_improvement=0.0, patience=3):
-        entries, runs = self.entries(), self.sync()
+    def context(self, min_improvement=0.0, patience=3, *, read_only=True):
+        entries, runs = self.entries(), self.sync(evaluate_decisions=not read_only)
         decisions = [e for e in entries if e["kind"] == "decision"]
         checkpoints = [e for e in entries if e["kind"] == "checkpoint"]
         # Compare within each data/split/scorer identity, across sessions. Failed
@@ -1323,11 +1350,14 @@ class ResearchMemory:
         for state in compact_frontier:
             for field in ("observation", "mechanism"):
                 state[field] = state[field][:160]
-        progress = self._publish_progress(runs)
+        progress = self._progress_status(runs) if read_only else self._publish_progress(runs)
         from harness.decision_rules import _project
         from harness.stagnation import StagnationController, is_competition_task
         project = _project(self.root)
-        states = StagnationController(project).reconcile_results() if project.artifacts_dir.resolve() == self.artifacts.resolve() else {}
+        states = {}
+        if project.artifacts_dir.resolve() == self.artifacts.resolve():
+            controller = StagnationController(project)
+            states = controller.read_snapshot() if read_only else controller.reconcile_results()
         paused = [state for state in states.values() if state["state"] == "paused_for_stagnation"]
         competition_task = is_competition_task(self.spec)
         from harness.macro_research import compute_macro_hypothesis_map, retrospective_status

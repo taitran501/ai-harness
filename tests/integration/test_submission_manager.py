@@ -184,7 +184,7 @@ class TestSubmissionManagerDirectionAwareDivergence(unittest.TestCase):
             custom_scores={"macro_f1": 0.75},
         )
         self.assertTrue(updated.divergence_warning)
-        self.assertEqual(updated.score_deltas.get("macro_f1"), -0.10)
+        self.assertAlmostEqual(updated.score_deltas.get("macro_f1"), -0.10)
 
     def test_record_official_score_divergence_minimize(self):
         """For minimize direction, LB increase > 0.05 triggers divergence warning."""
@@ -209,7 +209,7 @@ class TestSubmissionManagerDirectionAwareDivergence(unittest.TestCase):
                 custom_scores={"loss": 0.35},
             )
             self.assertTrue(updated.divergence_warning)
-            self.assertEqual(updated.score_deltas.get("loss"), 0.15)
+            self.assertAlmostEqual(updated.score_deltas.get("loss"), 0.15)
 
 
 class TestAgentBridgeDynamicCandidateSlots(unittest.TestCase):
@@ -1298,8 +1298,8 @@ class SubmissionManagerTests(unittest.TestCase):
             split_type="public",
         )
         self.assertEqual(updated.status, "SCORED")
-        self.assertEqual(updated.score_deltas["subtask_a_macro"], 0.0100)
-        self.assertEqual(updated.score_deltas["subtask_b_macro"], -0.0100)
+        self.assertAlmostEqual(updated.score_deltas["subtask_a_macro"], 0.0100)
+        self.assertAlmostEqual(updated.score_deltas["subtask_b_macro"], -0.0100)
         self.assertFalse(updated.divergence_warning)
 
         updated_div = self.mgr.record_official_score(
@@ -1307,7 +1307,7 @@ class SubmissionManagerTests(unittest.TestCase):
             scores={"subtask_a_macro": 0.6200, "subtask_b_macro": 0.5400},
         )
         self.assertTrue(updated_div.divergence_warning)
-        self.assertEqual(updated_div.score_deltas["subtask_a_macro"], -0.0800)
+        self.assertAlmostEqual(updated_div.score_deltas["subtask_a_macro"], -0.0800)
 
     def test_render_submissions_markdown(self):
         entry = SubmissionEntry(
@@ -1830,3 +1830,145 @@ class TestSubmissionUsabilityAudit(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeepSubmissionTransactionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root, _ = make_workspace(root_path=Path(self.tmp.name))
+        self.manager = SubmissionManager(project_root=self.root)
+        self.entry = SubmissionEntry("sub_001", "exp1", "now", "SUBMITTED_PENDING",
+            local_cv_scores={"accuracy": .2}, dispatch_intent_id="intent1",
+            payload_sha256="payload", prediction_sha256="prediction")
+        (self.manager.submissions_dir / self.entry.id).mkdir()
+        (self.root / "submissions" / self.entry.id).mkdir(parents=True, exist_ok=True)
+        self.manager.submissions[self.entry.id] = self.entry
+        self.manager.save()
+        self.observation = dict(intent_id="intent1", provider_ref="ref", partition="public",
+            observation_id="observation1", metric="accuracy", score=.123456789,
+            source="provider_api", payload_sha256="payload", prediction_sha256="prediction")
+
+    def observe(self, **kwargs):
+        return self.manager.record_official_observation(self.entry.id, client=object(), provider_ref="ref", **kwargs)
+
+    def test_observation_commits_once_precision_and_active_identity(self):
+        before = json.loads(self.manager.registry_file.read_text())["revision"]
+        with patch("harness.submission_gate.SubmissionGate.resolve_official_score", return_value=self.observation):
+            result = self.observe()
+        self.assertIs(result, self.entry)
+        self.assertIs(result, self.manager.submissions[result.id])
+        self.assertEqual(json.loads(self.manager.registry_file.read_text())["revision"], before + 1)
+        loaded = SubmissionManager(project_root=self.root).submissions[result.id]
+        self.assertEqual(loaded.official_scores["accuracy"], .123456789)
+        self.assertEqual(loaded.official_observation_id, "observation1")
+        self.assertEqual(loaded.official_score_source, "provider_api")
+        for directory in {self.manager.submissions_dir, self.root / "submissions"}:
+            self.assertEqual(json.loads((directory / "registry.json").read_text())["submissions"][0]["official_scores"]["accuracy"], .123456789)
+            self.assertEqual(json.loads((directory / result.id / "metadata.json").read_text())["official_scores"]["accuracy"], .123456789)
+        result = self.manager.record_official_score(result.id, scores={"accuracy": .14999999})
+        self.assertIsNone(result.official_observation_id)
+        self.assertEqual(result.official_score_source, "declared")
+        self.assertTrue(result.divergence_warning)
+
+    def test_invalid_observation_and_commit_failure_leave_state_unchanged(self):
+        original = self.manager.registry_file.read_bytes()
+        for overrides in ({"intent_id": "other"}, {"partition": "private"}, {"payload_sha256": "other"},
+                          {"metric": ""}, {"metric": " "}, {"metric": 1}, {"observation_id": ""},
+                          {"score": True}, {"score": float("nan")}):
+            with self.subTest(overrides=overrides), patch(
+                    "harness.submission_gate.SubmissionGate.resolve_official_score", return_value={**self.observation, **overrides}):
+                with self.assertRaises(ValueError):
+                    self.observe()
+                self.assertEqual(self.manager.registry_file.read_bytes(), original)
+        with patch("harness.submission_gate.SubmissionGate.resolve_official_score", return_value=self.observation), patch(
+                "harness.state_store.atomic_write_json", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.observe()
+        self.assertEqual(self.manager.registry_file.read_bytes(), original)
+        self.assertEqual(self.entry.official_scores, {})
+
+    def test_pending_provider_call_preserves_unrelated_changes_and_rejects_score_races(self):
+        def unrelated(*args, **kwargs):
+            other = SubmissionManager(project_root=self.root)
+            other.submissions[self.entry.id].notes = "concurrent note"
+            other.submissions["sub_002"] = SubmissionEntry("sub_002", "other", "now", "LOCAL_VERIFIED")
+            other.save()
+            return self.observation
+        with patch("harness.submission_gate.SubmissionGate.resolve_official_score", side_effect=unrelated):
+            self.observe()
+        self.assertEqual(self.entry.notes, "concurrent note")
+        self.assertIn("sub_002", self.manager.submissions)
+        original_id = self.entry.official_observation_id
+        def competing(*args, **kwargs):
+            other = SubmissionManager(project_root=self.root)
+            other.record_official_score(self.entry.id, scores={"accuracy": .3})
+            return {**self.observation, "observation_id": "observation2"}
+        with patch("harness.submission_gate.SubmissionGate.resolve_official_score", side_effect=competing):
+            with self.assertRaisesRegex(ValueError, "Concurrent state conflict"):
+                self.observe()
+        self.assertEqual(self.entry.official_observation_id, original_id)
+        self.assertEqual(SubmissionManager(project_root=self.root).submissions[self.entry.id].official_scores["accuracy"], .3)
+
+    def test_deprecated_arguments_warn_only_for_nondefaults(self):
+        import warnings
+        with patch.object(self.manager, "register_plugin_submission", return_value=self.entry), patch(
+                "harness.plugins.load_task_plugin", return_value=SimpleNamespace(capabilities=lambda: {
+                    "submission_builder": True, "submission_validator": True})):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                self.manager.register_submission("exp1", candidate_csv="pred.csv")
+            self.assertFalse([w for w in caught if issubclass(w.category, DeprecationWarning)])
+            for kwargs in ({"baseline_csv": "base.csv"}, {"ensemble_components": ["a"]}, {"min_diff_pct": 3}):
+                with self.assertWarnsRegex(DeprecationWarning, "does not enforce submission gates"):
+                    self.manager.register_submission("exp1", candidate_csv="pred.csv", **kwargs)
+
+    def test_sparse_registry_entry_can_receive_a_manual_score(self):
+        atomic = {"submissions": [{"id": "legacy", "exp_id": "exp1", "created_at": "now", "status": "LOCAL_VERIFIED"}]}
+        self.manager.registry_file.write_text(json.dumps(atomic))
+        self.manager.load()
+        result = self.manager.record_official_score("legacy", scores={"accuracy": .123456789})
+        self.assertEqual(result.official_scores["accuracy"], .123456789)
+
+    def test_reserved_names_in_both_packaging_paths(self):
+        from harness.submission_manager import RESERVED_SUBMISSION_FILENAMES
+        for name in RESERVED_SUBMISSION_FILENAMES:
+            for variant in (name, name.swapcase()):
+                with self.subTest(name=variant):
+                    source = self.root / variant
+                    source.write_text("payload")
+                    with self.assertRaisesRegex(ValueError, "reserved metadata filename"):
+                        self.manager.preserve_file_submission(file_path=source)
+                    with self.assertRaisesRegex(ValueError, "reserved metadata filename"):
+                        self.manager.register_plugin_submission(exp_id="exp1", candidate_csv=source,
+                            plugin=mock.Mock(), plugin_context=mock.Mock(), file_name=variant)
+        self.assertEqual(len(self.manager.submissions), 1)
+
+    def test_plugin_cannot_return_or_create_reserved_metadata(self):
+        source = self.root / "predictions.csv"
+        source.write_text("id,pred\na,1\n")
+        for side_file in (False, True):
+            def build(context, predictions, target):
+                target.write_text("payload")
+                reserved = target.parent / "Metadata.JSON"
+                reserved.write_text("malicious")
+                return target if side_file else reserved
+            plugin = mock.Mock()
+            plugin.build_submission.side_effect = build
+            with patch("harness.artifacts.validate_test_prediction"), self.assertRaises(ValueError):
+                self.manager.register_plugin_submission(exp_id="exp1", candidate_csv=source,
+                    plugin=plugin, plugin_context=mock.Mock())
+            self.assertEqual(len(self.manager.submissions), 1)
+            self.assertFalse((self.manager.submissions_dir / "sub_002_exp1").exists())
+            self.assertFalse((self.root / "submissions/sub_002_exp1").exists())
+
+    def test_filename_aliases_are_rejected_before_builder_or_copy(self):
+        source = self.root / "payload.csv"
+        source.write_text("payload")
+        for name in ("payload.csv.", "payload.csv ", "../payload.csv", "a/b.csv", "a\\b.csv"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.manager.register_plugin_submission(exp_id="exp1", candidate_csv=source,
+                    plugin=mock.Mock(), plugin_context=mock.Mock(), file_name=name)
+        for suffix in (".", " "):
+            with self.assertRaises(ValueError):
+                self.manager.preserve_file_submission(file_path=str(source) + suffix)

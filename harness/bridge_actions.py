@@ -772,7 +772,7 @@ class ActionHandlerMixin:
             raise ValueError(
                 "Review and confirm the task specification before confirming data risks."
             )
-        report = self.comp_state.get_data_readiness_report()
+        report = self.comp_state.get_data_readiness_report(refresh=True)
         if report.get("status") == "BLOCKED":
             raise ValueError(
                 "The latest data readiness report is BLOCKED; fix its critical checks first."

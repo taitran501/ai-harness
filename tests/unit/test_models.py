@@ -421,3 +421,48 @@ class TestDummyBaselineModel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FittedPredictionContractTests(unittest.TestCase):
+    def test_shared_wrappers_preserve_input_and_actual_class_order(self):
+        from types import SimpleNamespace
+        from sklearn.preprocessing import LabelEncoder
+        from harness.models import CatBoostModel, RandomForestModel
+        class FakePipe:
+            def __init__(self, classes, probabilities=True):
+                self.classes = classes
+                self.named_steps = {"clf": SimpleNamespace(classes_=classes)}
+                if probabilities:
+                    self.predict_proba = lambda x: np.tile([.7, .3], (len(x), 1))
+            def predict(self, x):
+                self.seen = x
+                if self.classes is not None and len(self.classes) == 2:
+                    return np.array([[self.classes[0]], [self.classes[1]]])
+                return np.array([[1], [0]])
+        frame = pd.DataFrame({"a": [2, 1], "b": [4, 3]})
+        for wrapper in (CatBoostModel, RandomForestModel):
+            for text in (False, True):
+                for encoded in (False, True):
+                    model = wrapper.__new__(wrapper)
+                    encoder = LabelEncoder().fit(["a", "b", "missing"])
+                    pipe = FakePipe([1, 0] if encoded else ["b", "a"])
+                    inp = SimpleNamespace(type="text" if text else "tabular", compose_text=lambda df: ["row2", "row1"])
+                    model.fitted_models = {"target": (pipe, inp, ["b", "a"])}
+                    model.label_encoders = {"target": encoder} if encoded else {}
+                    result = model.predict(frame)
+                    self.assertEqual(result["target"].ndim, 1)
+                    self.assertEqual(result["target"].tolist(), ["b", "a"])
+                    self.assertEqual(result["classes_target"], ["b", "a"])
+                    self.assertEqual(result["proba_target"].shape, (2, 2))
+                    if text:
+                        self.assertEqual(pipe.seen, ["row2", "row1"])
+                    else:
+                        pd.testing.assert_frame_equal(pipe.seen, frame[["b", "a"]])
+            model = wrapper.__new__(wrapper)
+            model.fitted_models = {"target": (FakePipe(None, probabilities=False), inp, ["a"])}
+            model.label_encoders = {}
+            self.assertEqual(set(model.predict(frame)), {"target"})
+            for classes in (None, [0], [0, 0], [[0], [1]]):
+                model.fitted_models = {"target": (FakePipe(classes), inp, ["a"])}
+                with self.assertRaises(ValueError):
+                    model.predict(frame)

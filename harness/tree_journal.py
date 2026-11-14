@@ -7,12 +7,32 @@ diagnostic failure analysis.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import yaml
+
+
+class _RunParsingError(ValueError):
+    def __init__(self, filename, reason):
+        self.filename = filename
+        super().__init__(str(reason))
+
+
+def _read_run_mapping(path, *, yaml_format=False):
+    try:
+        text = path.read_text(encoding="utf-8")
+        value = yaml.safe_load(text) if yaml_format else json.loads(text)
+        if not isinstance(value, dict):
+            raise ValueError("Expected a mapping")
+        return value
+    except (ValueError, OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise _RunParsingError(path.name, exc) from exc
 
 
 @dataclass
@@ -112,47 +132,13 @@ class TreeJournal:
         self.task_spec = task_spec
         self.task_plugin=task_plugin
         self.nodes: Dict[str, Node] = {}
-        self.load()
-        # Merge baseline for save(): the state exactly as loaded from disk.
-        # It must be captured BEFORE the validation marking below — otherwise
-        # save_registry() sees the marked records as "unchanged" vs the
-        # baseline and resurrects the stale on-disk values, silently
-        # reviving orphaned nodes as verified on the next save().
-        self._snapshot=[asdict(n) for n in self.nodes.values()]
-        from harness.artifacts import validate_run
+        self.sync_diagnostics = []
+        self.corrupt_run_count = 0
         if auto_sync:
-            # sync_from_artifacts() below re-validates every on-disk run
-            # directory (validate_run) and overwrites its node, so the full
-            # per-node check here is only needed for journal nodes whose
-            # artifact dir is gone from disk (orphans; fails fast on the
-            # missing manifest). This halves the validate_run cost of each
-            # auto-synced construction without weakening the gate: every
-            # on-disk run is still fully validated exactly once.
-            try:
-                on_disk_runs = {
-                    d.name
-                    for d in self.artifacts_dir.iterdir()
-                    if d.is_dir() and (d / "metrics.json").is_file()
-                }
-            except OSError:
-                on_disk_runs = set()
-        else:
-            on_disk_runs = None
-        for node in self.nodes.values():
-            if (
-                node.artifact_dir
-                and on_disk_runs is not None
-                and Path(node.artifact_dir).name in on_disk_runs
-            ):
-                continue
-            if node.artifact_dir:
-                try:
-                    validate_run(node.artifact_dir, task_spec=self.task_spec, plugin=self.task_plugin)
-                except (ValueError,OSError,KeyError):
-                    node.verified=node.eligible=False
-                    node.status="LEGACY_UNVERIFIED"
-        if auto_sync:
+            self._load_records(self.storage_path)
             self.sync_from_artifacts(self.artifacts_dir)
+        else:
+            self.load()
 
     def add_node(
         self,
@@ -188,101 +174,171 @@ class TreeJournal:
     @classmethod
     def load_from_file(cls, path: str | Path, **kwargs) -> "TreeJournal":
         """Load a TreeJournal directly from an explicit file path."""
-        journal = cls(storage_path=path, **kwargs)
-        journal.load()
-        return journal
+        return cls(storage_path=path, **kwargs)
+
+    @staticmethod
+    def _migrate_records(data):
+        if isinstance(data, list):
+            return {"nodes": data}
+        if isinstance(data, dict):
+            data = dict(data)
+            if isinstance(data.get("nodes"), dict):
+                for key, value in data["nodes"].items():
+                    if not isinstance(value, dict) or value.get("id") != key:
+                        raise ValueError("Journal node key/ID mismatch")
+                data["nodes"] = list(data["nodes"].values())
+        return data
+
+    @staticmethod
+    def _validate_records(data):
+        rows = data.get("nodes")
+        if not isinstance(rows, list):
+            raise ValueError("Journal nodes must be a list or mapping")
+        ids = set()
+        for item in rows:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or item["id"] in ids:
+                raise ValueError("Journal nodes require unique string IDs")
+            if not isinstance(item.get("metrics", {}), dict):
+                raise ValueError("Node metrics must be a mapping")
+            for flag in ("verified", "eligible"):
+                if type(item.get(flag, False)) is not bool:
+                    raise ValueError(f"Node {flag} must be boolean")
+            ids.add(item["id"])
+
+    def _load_records(self, path):
+        from harness.state_store import read_json_state
+        data = read_json_state(path, default_factory=lambda: {"nodes": []},
+            migrate=self._migrate_records, validate=self._validate_records)
+        fields = Node.__dataclass_fields__
+        nodes = {item["id"]: Node(**{k: v for k, v in item.items() if k in fields})
+                 for item in data["nodes"]}
+        self.nodes = nodes
+        # Baseline must represent persisted claims before validation demotes them.
+        self._snapshot = copy.deepcopy(data["nodes"])
+        self._decoded_snapshot = [asdict(n) for n in nodes.values()]
+
+    def _validate_loaded_nodes(self, *, skip_ids=frozenset()):
+        from harness.artifacts import validate_run
+        for node in self.nodes.values():
+            if node.id in skip_ids:
+                continue
+            try:
+                if not node.artifact_dir:
+                    raise ValueError("Missing artifact_dir")
+                validate_run(node.artifact_dir, task_spec=self.task_spec, plugin=self.task_plugin,
+                             expected={"exp_id": node.id})
+            except (ValueError, OSError, KeyError, TypeError, UnicodeError, yaml.YAMLError):
+                node.verified = node.eligible = False
+                node.status = "LEGACY_UNVERIFIED"
 
     def load(self, path: Optional[str | Path] = None) -> "TreeJournal":
-        """Load the journal from disk if it exists. Supports both instance and class invocation."""
+        """Read and validate a fresh journal; never persist demotions during loading."""
         if isinstance(self, (str, Path)):
-            # Handle call pattern: TreeJournal.load("path/to/journal.json")
-            instance = TreeJournal(storage_path=self)
-            instance.load()
-            return instance
-
-        target_path = Path(path) if path is not None else self.storage_path
-        if not target_path.exists():
-            return self
-        try:
-            with open(target_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                nodes_list = [item for item in data if isinstance(item, dict) and "id" in item]
-            elif isinstance(data, dict):
-                raw_nodes = data.get("nodes", [])
-                nodes_list = list(raw_nodes.values()) if isinstance(raw_nodes, dict) else raw_nodes
-            else:
-                nodes_list = []
-            node_fields = Node.__dataclass_fields__.keys()
-            for item in nodes_list:
-                if isinstance(item, dict):
-                    filtered = {k: v for k, v in item.items() if k in node_fields}
-                    node = Node(**filtered)
-                    self.nodes[node.id] = node
-        except Exception as e:
-            print(f"[TreeJournal] Warning: Failed to load {target_path}: {e}")
+            return TreeJournal(storage_path=self)
+        target = Path(path) if path is not None else self.storage_path
+        self._load_records(target)
+        self._validate_loaded_nodes()
         return self
 
     def sync_from_artifacts(self, artifacts_dir: Optional[str | Path] = None) -> int:
-        """Scan artifacts/ directory and auto-discover completed experiment runs."""
-        import yaml
-
-        from harness.artifacts import validate_run
+        """Materialize readable runs, isolating corrupt siblings and persisting demotions."""
         art_path = Path(artifacts_dir) if artifacts_dir is not None else self.artifacts_dir
+        # An action may have published journal records through another instance.
+        # Rebase local changes on that registry before refreshing derived fields.
+        from harness.state_store import merge_changed
+        previous = {r["id"]: r for r in self._decoded_snapshot}
+        pending = [asdict(n) for n in self.nodes.values() if asdict(n) != previous.get(n.id)]
+        self._load_records(self.storage_path)
+        for record in pending:
+            node = self.nodes.get(record["id"])
+            merged = merge_changed(asdict(node) if node else {}, previous.get(record["id"], {}), record)
+            self.nodes[record["id"]] = Node(**merged)
+        present = {d.name for d in art_path.glob("*") if d.is_dir() and (d / "metrics.json").is_file()}
+        self._validate_loaded_nodes(skip_ids=present)
+        self.sync_diagnostics = []
+        self.corrupt_run_count = 0
         count = 0
+        changed = any(asdict(n) not in self._snapshot for n in self.nodes.values())
         if not art_path.exists():
+            if changed:
+                self.save()
             return 0
         for directory in art_path.iterdir():
-            if not directory.is_dir() or not (directory / "metrics.json").is_file():
+            if not directory.is_dir():
                 continue
-            metrics = json.loads((directory/"metrics.json").read_text(encoding="utf-8"))
-            cfg = yaml.safe_load((directory/"run_config.yaml").read_text(encoding="utf-8")) if (directory/"run_config.yaml").is_file() else {}
+            if not (directory / "metrics.json").exists() and directory.name not in self.nodes:
+                continue
             try:
-                manifest = validate_run(directory, task_spec=self.task_spec,plugin=self.task_plugin)
-                verified = True
-            except (ValueError, KeyError, OSError):
-                verified = False
-                manifest = {}
-            exp = cfg.get("experiment", {})
-            model_cfg = cfg.get("model", {})
-            task_cfg = cfg.get("task", {})
-            m_name = str(model_cfg.get("name", "") or metrics.get("model", "")).lower()
-            m_fam_raw = (
-                task_cfg.get("model_family")
-                or model_cfg.get("family")
-                or metrics.get("model_family")
-            )
-            if any(k in m_name for k in ["lightgbm", "lgbm", "xgboost", "xgb", "catboost"]):
-                m_fam = "gbdt"
-            elif any(k in m_name for k in ["roberta", "deberta", "bert"]):
-                m_fam = "transformer"
-            elif any(k in m_name for k in ["llm", "llama", "qwen"]):
-                m_fam = "llm"
-            elif m_fam_raw:
-                m_fam = m_fam_raw
-            else:
-                m_fam = "linear"
-            diagnostics = {}
-            if verified and "diagnostics.json" in manifest["files"]:
-                diagnostics = json.loads((directory / "diagnostics.json").read_text(encoding="utf-8"))
-            node = Node(id=directory.name,parent_id=exp.get("parent_id"),branch=exp.get("branch","baseline"),
-                model_family=m_fam,
-                metrics=metrics if isinstance(metrics,dict) else {"legacy_folds":metrics},
-                primary_metric_name=metrics.get("primary_metric","unknown") if isinstance(metrics,dict) else "unknown",
-                direction=metrics.get("direction","maximize") if isinstance(metrics,dict) else "maximize",
-                verified=verified,eligible=bool(verified and manifest.get(
-                    "eligible",
-                    manifest.get("provenance", "local_run") in {"local_run", "reproduced_external_code"},
-                )),status="COMPLETED" if verified else "LEGACY_UNVERIFIED",
-                artifact_dir=str(directory),atomic_hypothesis=exp.get("hypothesis",""),
-                intervention=exp.get("intervention", ""), diagnostics_summary=diagnostics,
-                timestamp=(directory / "artifact_manifest.json").stat().st_mtime
-                    if (directory / "artifact_manifest.json").exists() else directory.stat().st_mtime)
+                node = self._node_from_artifact_directory(directory)
+            except (ValueError, OSError, KeyError, TypeError, UnicodeError, yaml.YAMLError) as exc:
+                self.corrupt_run_count += 1
+                if len(self.sync_diagnostics) < 20:
+                    self.sync_diagnostics.append({"exp_id": directory.name,
+                        "filename": str(getattr(exc, "filename", None) or "metrics.json/run_config.yaml/diagnostics.json"),
+                        "reason": str(exc)[:300]})
+                stale = self.nodes.get(directory.name)
+                if stale:
+                    stale.verified = stale.eligible = False
+                    stale.status = "LEGACY_UNVERIFIED"
+                    changed = True
+                continue
+            changed |= self.nodes.get(node.id) != node
             self.nodes[node.id] = node
             count += 1
-        if count:
+        if changed:
             self.save()
         return count
+
+    def _node_from_artifact_directory(self, directory: Path) -> Node:
+        from harness.artifacts import validate_run
+        metrics = _read_run_mapping(directory / "metrics.json")
+        cfg_path = directory / "run_config.yaml"
+        cfg = _read_run_mapping(cfg_path, yaml_format=True) if cfg_path.is_file() else {}
+        try:
+            manifest = validate_run(directory, task_spec=self.task_spec,plugin=self.task_plugin)
+            verified = True
+        except (ValueError, KeyError, OSError, TypeError, UnicodeError, yaml.YAMLError):
+            verified = False
+            manifest = {}
+        for name in ("experiment", "model", "task"):
+            if not isinstance(cfg.get(name, {}), dict):
+                raise _RunParsingError("run_config.yaml", f"Section {name} must be a mapping")
+        exp = cfg.get("experiment", {})
+        model_cfg = cfg.get("model", {})
+        task_cfg = cfg.get("task", {})
+        m_name = str(model_cfg.get("name", "") or metrics.get("model", "")).lower()
+        m_fam_raw = (
+            task_cfg.get("model_family")
+            or model_cfg.get("family")
+            or metrics.get("model_family")
+        )
+        if any(k in m_name for k in ["lightgbm", "lgbm", "xgboost", "xgb", "catboost"]):
+            m_fam = "gbdt"
+        elif any(k in m_name for k in ["roberta", "deberta", "bert"]):
+            m_fam = "transformer"
+        elif any(k in m_name for k in ["llm", "llama", "qwen"]):
+            m_fam = "llm"
+        elif m_fam_raw:
+            m_fam = m_fam_raw
+        else:
+            m_fam = "linear"
+        diagnostics = {}
+        if (directory / "diagnostics.json").exists():
+            diagnostics = _read_run_mapping(directory / "diagnostics.json")
+        node = Node(id=directory.name,parent_id=exp.get("parent_id"),branch=exp.get("branch","baseline"),
+            model_family=m_fam,
+            metrics=metrics if isinstance(metrics,dict) else {"legacy_folds":metrics},
+            primary_metric_name=metrics.get("primary_metric","unknown") if isinstance(metrics,dict) else "unknown",
+            direction=metrics.get("direction","maximize") if isinstance(metrics,dict) else "maximize",
+            verified=verified,eligible=bool(verified and manifest.get(
+                "eligible",
+                manifest.get("provenance", "local_run") in {"local_run", "reproduced_external_code"},
+            )),status="COMPLETED" if verified else "LEGACY_UNVERIFIED",
+            artifact_dir=str(directory),atomic_hypothesis=exp.get("hypothesis",""),
+            intervention=exp.get("intervention", ""), diagnostics_summary=diagnostics,
+            timestamp=(directory / "artifact_manifest.json").stat().st_mtime
+                if (directory / "artifact_manifest.json").exists() else directory.stat().st_mtime)
+        return node
 
     def save(self) -> None:
         """Save the journal to disk."""
@@ -290,9 +346,11 @@ class TreeJournal:
 
         from harness.state_store import save_registry
         valid_fields = {f.name for f in dataclasses.fields(Node)}
-        records=save_registry(self.storage_path,"nodes",[asdict(n) for n in self.nodes.values()],getattr(self,"_snapshot",[]))
+        records=save_registry(self.storage_path,"nodes",[asdict(n) for n in self.nodes.values()],getattr(self,"_snapshot",[]),
+                              validate=self._validate_records, migrate=self._migrate_records)
         self.nodes={r["id"]:Node(**{k: v for k, v in r.items() if k in valid_fields}) for r in records}
-        self._snapshot=records
+        self._snapshot=copy.deepcopy(records)
+        self._decoded_snapshot=[asdict(n) for n in self.nodes.values()]
 
     def append(self, node: Node) -> None:
         """Register or update a node in the journal."""
